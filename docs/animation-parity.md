@@ -24,7 +24,7 @@ three groups, with its Effect Options. All 48 round-trip through PPTX
 | Duration, advance on click / after time, Apply To All | yes | yes |
 | Transition sounds | yes | **no** (the model has the field; no picker, no playback) |
 | Preview in the editor | yes | yes |
-| Morph: objects move, resize, recolour | yes | yes |
+| Morph: objects move, resize, recolour; a picture's crop morphs | yes | yes (#118) |
 | Morph: Words and Characters | yes | yes (#5) |
 | Morph: geometry (circle to star) | yes | yes (#27) |
 | Morph: `!!` name forcing, pictures, 3-D models, ink | yes | names partly; no 3-D or ink |
@@ -76,4 +76,5 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Morph animates a changed picture crop (#118) |
 | 2026-10-10 | major | Created: 48/48 transitions, 64 of ~190 animation effects, pane and option depth, estimates |
