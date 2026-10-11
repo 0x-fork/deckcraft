@@ -1431,7 +1431,7 @@ fn option_label(o: &str) -> String {
 }
 
 pub fn paint_transition_tile(p: &egui::Painter, r: Rect, (id, label): (&str, &str)) {
-    let t = Tokens::light();
+    let t = Tokens::get(p.ctx());
     let pic = Rect::from_min_size(r.min + vec2(4.0, 2.0), vec2(r.width() - 8.0, r.height() - 18.0));
     let blue = Color32::from_rgb(0x2E, 0x6F, 0xD8);
     let light = Color32::from_rgb(0xBF, 0xD4, 0xF5);
@@ -1676,7 +1676,7 @@ fn animations(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 pub fn paint_anim_tile(p: &egui::Painter, r: Rect, label: &str, class: AnimClass, enabled: bool) {
-    let t = Tokens::light();
+    let t = Tokens::get(p.ctx());
     let icon = match class {
         AnimClass::Entrance => Icon::AnimEntrance,
         AnimClass::Emphasis => Icon::AnimEmphasis,
@@ -2404,4 +2404,38 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
         _ => (0..=40).map(|i| i as f32 / 40.0).map(|u| at(u, 0.5 + 0.35 * (u * 19.0).sin() * (1.0 - u * 0.4))).collect(),
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Paints one transition tile and one animation tile and returns the colour of every label.
+    fn tile_label_colours(dark: bool) -> Vec<Color32> {
+        let ctx = egui::Context::default();
+        ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
+        let r = Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 60.0));
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint_transition_tile(ui.painter(), r, ("fade", "Fade"));
+            paint_anim_tile(ui.painter(), r, "Appear", AnimClass::Entrance, true);
+        });
+        out.textures_delta.clear();
+        out.shapes
+            .iter()
+            .flat_map(|c| match &c.shape {
+                egui::Shape::Text(s) => s.galley.job.sections.iter().map(|x| x.format.color).collect(),
+                _ => Vec::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn ribbon_tile_labels_follow_the_theme() {
+        // #159: the transition and animation tiles were always painted with the light palette,
+        // so their labels were dark grey on the dark ribbon.
+        let dark = tile_label_colours(true);
+        assert_eq!(dark, vec![Tokens::dark().text; 2]);
+        let light = tile_label_colours(false);
+        assert_eq!(light, vec![Tokens::light().text; 2]);
+    }
 }
