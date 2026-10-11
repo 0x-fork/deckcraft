@@ -48,7 +48,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Connector glue and rerouting | yes | yes |
 | Edit points on freeforms | yes | **no** |
 | Crop handles, crop to shape, aspect ratio | yes | partial |
-| Text caret, selection, double/triple click, drag-select | yes | yes; Tab in text boxes ends editing (#78) |
+| Text caret, selection, double/triple click, drag-select | yes | yes |
 | Exact size/position, lock aspect | yes | yes |
 | Rulers with indent markers and tab stops | yes | rulers yes; tab stops partial |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
@@ -87,4 +87,5 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Tab in text boxes keeps editing (#78) |
 | 2026-10-10 | major | Created: shell, panes and dialogs, direct manipulation, shortcuts and visual fidelity against PowerPoint 16.113 |

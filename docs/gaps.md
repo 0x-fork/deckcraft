@@ -138,11 +138,6 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** copy-paste of screenshots is a core workflow.
 - **Estimate:** 2–4 h. **Beta blocker.**
 
-### Tab inside a text box ends text entry (#78)
-- **Evidence:** #78.
-- **Impact:** tab stops and indented lists can't be typed.
-- **Estimate:** 1–2 h.
-
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
@@ -247,5 +242,6 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Removed "Tab inside a text box ends text entry" (#78, fixed) |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |
