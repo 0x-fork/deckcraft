@@ -20,7 +20,7 @@ ready** (estimated), **10–16 h** to parity.
 | Step clock: a click after a long pause plays its step (#11) | yes | yes | |
 | Hidden slides skipped | yes | yes | |
 | Hyperlinks and action settings followed (slides, web, mail, End Show, Last Viewed) | yes | yes | Only `http(s)` and `mailto` open outside the show, by design (`safe_url`) |
-| Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable |
+| Media playback with controls, play across slides, full-screen video, Play/Pause/Stop in the click sequence | yes | yes | WMA/WMV not decodable; click sequence since #116 |
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | |
 | See All Slides grid during the show | yes | no | |
 | Zoom into part of a slide during the show | yes | no | |
@@ -73,4 +73,5 @@ Reading View in a window with navigation: present (checklist row done).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Media effects (Play, Pause, Stop) in the click sequence play with their step (#116) |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |

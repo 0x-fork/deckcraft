@@ -42,6 +42,10 @@ pub struct Show {
     last_viewed: Option<usize>,
     /// Click areas of hyperlinks and shape actions on slide `.0`, in slide points.
     links: Option<(usize, Vec<deckcraft_render::PlacedLink>)>,
+    /// The main step whose media effects are being set off, and how far into it they have been.
+    media_clock: Option<(usize, f64)>,
+    /// Media effects set off and not yet carried out: (shape, effect id).
+    media_cues: Vec<(ShapeId, String)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -95,6 +99,8 @@ impl Show {
             media_slide: None,
             last_viewed: None,
             links: None,
+            media_clock: None,
+            media_cues: vec![],
         }
     }
 
@@ -114,10 +120,17 @@ impl Show {
 
     fn apply(&mut self, a: ShowAction, doc: &Presentation, now: f64) -> bool {
         match a {
-            ShowAction::PlayStep(_) => {
+            ShowAction::PlayStep(k) => {
                 self.step_start = now;
+                self.media_clock = Some((k, f64::NEG_INFINITY));
             }
-            ShowAction::FinishStep(_) | ShowAction::StepBack(_) => {
+            ShowAction::FinishStep(n) => {
+                // A step cut short by a click still sets off the media it holds.
+                self.cue_media(doc, n, f64::INFINITY);
+                self.step_end = now;
+            }
+            ShowAction::StepBack(_) => {
+                self.media_clock = None;
                 self.step_end = now;
             }
             ShowAction::Slide(i) => {
@@ -145,6 +158,7 @@ impl Show {
                 self.slide_start = now;
                 self.step_start = now;
                 self.step_end = now;
+                self.media_clock = None;
                 self.strokes.clear();
                 if self.preview_only {
                     return false;
@@ -168,10 +182,27 @@ impl Show {
         let auto = self.timeline(doc).step_is_auto(0);
         if auto || self.autoplay {
             let a = self.state.next(doc);
-            if matches!(a, ShowAction::PlayStep(_)) {
+            if let ShowAction::PlayStep(k) = a {
                 self.step_start = now;
+                self.media_clock = Some((k, f64::NEG_INFINITY));
             }
         }
+    }
+
+    /// Queue the media effects (Play, Pause, Stop) of main step `step` that the show reached since
+    /// the last call, up to `t` seconds into the step (#116).
+    fn cue_media(&mut self, doc: &Presentation, step: usize, t: f64) {
+        let Some((k, from)) = self.media_clock else { return };
+        if k != step {
+            self.media_clock = None;
+            return;
+        }
+        let slide = self.state.slide;
+        let cues = self.timeline(doc).media_cues(step, from, t);
+        let effects: Vec<(ShapeId, String)> =
+            cues.iter().filter_map(|e| doc.slides.get(slide).and_then(|s| s.animations.get(e.anim)).map(|a| (e.shape, a.effect.clone()))).collect();
+        self.media_cues.extend(effects);
+        self.media_clock = if t.is_finite() { Some((k, t)) } else { None };
     }
 }
 
@@ -352,7 +383,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             keep = false;
         }
     }
+    if show.state.playing {
+        let step = show.state.step;
+        show.cue_media(&doc, step, now - show.step_start);
+    }
     show_media(app, &mut show, &doc);
+    run_media_cues(app, &mut show, &doc);
     // Draw.
     let full = ui.max_rect();
     let painter = ui.painter_at(full);
@@ -670,6 +706,21 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
     }
 }
 
+/// Carry out the media effects the show's steps set off: Play starts from the beginning unless
+/// the clip is already playing, Pause toggles, Stop stops.
+fn run_media_cues(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
+    for (id, effect) in std::mem::take(&mut show.media_cues) {
+        let Some(clip) = crate::media::find_clip(doc, id) else { continue };
+        match effect.as_str() {
+            "pause" => app.media.toggle(doc, id, &clip, crate::media::Owner::Show),
+            "stop" => app.media.stop(id),
+            // Already playing (it also starts automatically): leave it running.
+            _ if app.media.is_playing(id) => {}
+            _ => app.media.play(doc, id, &clip, Some(0.0), crate::media::Owner::Show),
+        }
+    }
+}
+
 /// The media shape under the pointer on the shown slide.
 fn media_hit(ctx: &egui::Context, ui: &Ui, show: &Show, doc: &Presentation) -> Option<(ShapeId, deckcraft_model::MediaClip)> {
     let p = ctx.input(|i| i.pointer.interact_pos())?;
@@ -842,5 +893,50 @@ mod tests {
         assert_eq!(tr.old.as_ref().map(TextureHandle::id), Some(red.id()));
         assert_eq!(tr.from, Some(0));
         assert!(show.tex.is_none(), "the new slide gets a texture of its own instead of overwriting the old one");
+    }
+
+    #[test]
+    fn media_in_the_click_sequence_plays_with_its_step() {
+        // #116: media set to play in the click sequence never started; only a click on it did.
+        let s = deckcraft_engine::Session::with_new();
+        let mut doc = s.active().unwrap().doc.clone();
+        let id = doc.slides[0].shapes[0].id;
+        let play = |delay_ms| deckcraft_model::Animation {
+            shape: id,
+            class: deckcraft_model::AnimClass::Media,
+            effect: "play".into(),
+            duration_ms: 5000,
+            delay_ms,
+            ..Default::default()
+        };
+        std::sync::Arc::make_mut(&mut std::sync::Arc::make_mut(&mut doc).slides[0]).animations = vec![play(0), play(2000)];
+        let mut show = Show::new(&doc, 0, false, false);
+        assert!(show.apply(ShowAction::Slide(0), &doc, 0.0));
+        // Next: the first step plays and sets off its Play once.
+        let a = show.state.next(&doc);
+        assert_eq!(a, ShowAction::PlayStep(0));
+        assert!(show.apply(a, &doc, 1.0));
+        show.cue_media(&doc, 0, 0.0);
+        show.cue_media(&doc, 0, 0.5);
+        assert_eq!(std::mem::take(&mut show.media_cues), [(id, "play".to_string())]);
+        // The step doesn't wait for the video: the step clock ends it at once.
+        assert_eq!(show.timeline(&doc).step_duration(0), 0.0);
+        let a = show.state.step_done(&doc);
+        assert!(show.apply(a, &doc, 1.0));
+        assert!(show.media_cues.is_empty(), "set off once");
+        // Next again, before the second Play's delay: cutting the step short still sets it off.
+        let a = show.state.next(&doc);
+        assert_eq!(a, ShowAction::PlayStep(1));
+        assert!(show.apply(a, &doc, 2.0));
+        show.cue_media(&doc, 1, 0.5);
+        assert!(show.media_cues.is_empty());
+        let a = show.state.step_done(&doc);
+        assert!(show.apply(a, &doc, 2.6));
+        assert_eq!(std::mem::take(&mut show.media_cues), [(id, "play".to_string())]);
+        // Going back doesn't set anything off.
+        let a = show.state.prev(&doc);
+        assert!(show.apply(a, &doc, 3.0));
+        show.cue_media(&doc, 1, 9.0);
+        assert!(show.media_cues.is_empty());
     }
 }
