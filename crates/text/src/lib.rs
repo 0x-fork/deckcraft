@@ -659,7 +659,8 @@ fn shape_item(
     }
 }
 
-fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
+/// The Unicode bullet for a symbol-font bullet character (Wingdings, Symbol), or the character.
+pub fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
     let f = font.unwrap_or("").to_ascii_lowercase();
     let first = c.chars().next().unwrap_or('•');
     if f.contains("wingdings") || f.contains("symbol") || ('\u{f000}'..='\u{f0ff}').contains(&first) {

@@ -543,3 +543,46 @@ fn inserted_hyperlinks_look_like_links() {
     s.execute("format.underline", &json!({})).unwrap();
     assert_eq!(s.execute("format.state", &json!({})).unwrap()["underline"], false);
 }
+
+#[test]
+fn editing_notes_keeps_their_formatting_through_pptx() {
+    use deckcraft_model::text::{Bullet, ParaProps, Paragraph, Run, RunProps, TextBody};
+    // A deck whose notes have a bold heading over indented bullet points, as saved by PowerPoint.
+    let mut p = deckcraft_model::defaults::new_presentation(None);
+    let bullet = ParaProps { margin_left: Some(22.5), indent: Some(-22.5), bullet: Some(Bullet::Char { char: "•".into() }), ..Default::default() };
+    let point = |t: &str| Paragraph { level: 1, props: bullet.clone(), runs: vec![Run::new(t)], ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).notes = TextBody {
+        paragraphs: vec![
+            Paragraph { runs: vec![Run::with("Overview", RunProps { bold: Some(true), ..Default::default() })], ..Default::default() },
+            point("First point"),
+            point("Second point"),
+        ],
+        ..Default::default()
+    };
+    let bytes = deckcraft_pptx::export(&p).unwrap();
+    let mut s = session();
+    s.execute("file.openBytes", &json!({"name": "notes.pptx", "data": crate::cmd::base64_encode(&bytes)})).unwrap();
+    // Type a word into the second bullet, as the notes pane does.
+    s.execute("slide.notes", &json!({"index": 0, "text": "Overview\nFirst point\nSecond main point"})).unwrap();
+    let check = |notes: &TextBody| {
+        assert_eq!(notes.text(), "Overview\nFirst point\nSecond main point");
+        assert_eq!(notes.paragraphs[0].runs[0].props.bold, Some(true));
+        for para in &notes.paragraphs[1..] {
+            assert_eq!(para.level, 1);
+            assert_eq!(para.props.margin_left, Some(22.5));
+            assert_eq!(para.props.indent, Some(-22.5));
+            assert_eq!(para.props.bullet, Some(Bullet::Char { char: "•".into() }));
+        }
+    };
+    check(&s.doc().unwrap().doc.slides[0].notes);
+    let saved = s.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].as_str().unwrap().to_string();
+    let reopened = deckcraft_pptx::import(&crate::cmd::base64_decode(&saved).unwrap()).unwrap();
+    check(&reopened.slides[0].notes);
+    // slide.inspect hands out the formatted notes, and slide.notes {body} takes them back as they are.
+    let body = s.execute("slide.inspect", &json!({"index": 0})).unwrap()["notesBody"].clone();
+    s.execute("slide.notes", &json!({"index": 0, "text": "Plain"})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides[0].notes, TextBody::from_text("Plain"), "new text shares nothing: plain");
+    s.execute("slide.notes", &json!({"index": 0, "body": body})).unwrap();
+    check(&s.doc().unwrap().doc.slides[0].notes);
+    assert!(s.execute("slide.notes", &json!({"index": 0, "body": 7})).is_err());
+}

@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (formatted speaker notes) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -61,7 +61,7 @@ the round trip even though DeckCraft doesn't model it.
 | Presentation, slide size, sections (p14), custom shows | yes | yes | |
 | Slide masters, layouts, placeholders and inheritance | yes | yes | |
 | Themes: colour, font (Latin/EA/CS), effect schemes, background styles | yes | yes | Unknown theme parts kept |
-| Notes slides and notes master | yes | yes | No notes-master editing view |
+| Notes slides and notes master | yes | yes | Notes keep their run and paragraph formatting (bold, italic, underline, size, levels, indents, bullets), shown and kept when edited in the notes pane and Notes Page (`crates/pptx/tests/notes.rs`). PDF notes pages print them as plain text; levels and bullets inherited from a custom notes master aren't shown; no notes-master editing view |
 | Handout master | no | no | |
 | Shapes: preset geometry (~150 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
@@ -99,4 +99,5 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Speaker notes: formatting shown in the notes pane and Notes Page and kept when they are edited |
 | 2026-10-10 | major | Created from PowerPoint 16.113.4's `CFBundleDocumentTypes`, `crates/pptx` reader/writer and tests, and the open round-trip issues |

@@ -132,22 +132,27 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     ui.painter().rect_stroke(srect, CornerRadius::ZERO, Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Outside);
     let notes_rect = Rect::from_min_max(pos2(srect.min.x, srect.max.y + 24.0), pos2(srect.max.x, page.max.y - page_h * 0.06));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
-    let current = st.current_slide().map(|s| s.notes_text()).unwrap_or_default();
     let id = egui::Id::new(("notespage", idx));
-    let mut buf: String = child.data_mut(|d| d.get_temp(id).unwrap_or_else(|| current.clone()));
-    let r = child.add(
-        egui::TextEdit::multiline(&mut buf)
-            .hint_text("Click to add text")
-            .desired_width(notes_rect.width())
-            .desired_rows(12)
-            .frame(egui::Frame::NONE)
-            .text_color(Color32::from_gray(30))
-            .font(theme::font(14.0)),
-    );
-    if r.lost_focus() && buf != current {
-        let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));
+    let edit_id = egui::Id::new(("notespage-edit", idx));
+    let focused = child.ctx().memory(|m| m.has_focus(edit_id));
+    let mut draft: Option<crate::notes::Draft> = child.data_mut(|d| d.get_temp(id));
+    // Save an edited draft once the field has lost focus, before anything reloads it.
+    if !focused && let Some(d) = draft.as_mut().filter(|d| d.edited) {
+        d.edited = false;
+        let _ = app.run("slide.notes", json!({"body": d.body, "index": idx}));
     }
-    child.data_mut(|d| d.insert_temp(id, buf));
+    let notes = app.session.active().and_then(|st| st.doc.slides.get(idx)).map(|s| s.notes.clone()).unwrap_or_default();
+    let mut draft = draft.filter(|d| focused || d.body == notes).unwrap_or_else(|| crate::notes::Draft::new(&notes));
+    let look = crate::notes::Look { size: 14.0, color: Some(Color32::from_gray(30)) };
+    let width = notes_rect.width();
+    let r = crate::notes::editor(&mut child, &mut draft, &look, |e| {
+        e.id(edit_id).hint_text("Click to add text").desired_width(width).desired_rows(12).frame(egui::Frame::NONE)
+    });
+    if r.lost_focus() && draft.edited {
+        draft.edited = false;
+        let _ = app.run("slide.notes", json!({"body": draft.body, "index": idx}));
+    }
+    child.data_mut(|d| d.insert_temp(id, draft));
     let nav = ui.input(|i| (i.key_pressed(egui::Key::PageDown), i.key_pressed(egui::Key::PageUp)));
     if nav.0 {
         let _ = app.run("slide.next", json!({}));
