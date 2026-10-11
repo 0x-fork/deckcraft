@@ -36,6 +36,18 @@ fn series_fill(ctx: &Ctx, c: &Chart, i: usize, s: Option<&deckcraft_model::chart
     }
 }
 
+/// Fill of one bar: a `<c:dPt>` fill wins, and a single-series chart that varies colours by point uses one accent per point
+/// (not waterfalls, which are never read from a `<c:barChart>`).
+fn bar_fill(ctx: &Ctx, c: &Chart, si: usize, pi: usize, s: &deckcraft_model::chart::Series) -> Rgba {
+    if let Some((_, Fill::Solid { color: cc })) = s.point_fills.iter().find(|(k, _)| *k == pi) {
+        return ctx.color(cc, None);
+    }
+    if c.vary_colors && c.series.len() == 1 && s.fill.is_none() && c.kind != ChartType::Waterfall {
+        return series_color(ctx, c, pi);
+    }
+    series_fill(ctx, c, si, Some(s))
+}
+
 fn label(ctx: &mut RenderContext, rctx: &Ctx, m: Affine, text: &str, r: Rect, size: f64, align: Align, anchor: Anchor, col: Rgba, bold: bool) {
     let mut body = TextBody::from_text(text);
     body.body.inset_l = Some(0.0);
@@ -291,7 +303,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                     Rect::new(plot.x0 + start, to_v(b), plot.x0 + start + bar, to_v(a))
                 };
                 ctx.set_transform(m);
-                ctx.set_paint(color(series_fill(rctx, c, si, Some(s)), 1.0));
+                ctx.set_paint(color(bar_fill(rctx, c, si, i, s), 1.0));
                 ctx.fill_rect(&r.abs());
                 if c.data_labels {
                     let t = fmt_num(s.values.get(i).copied().flatten().unwrap_or(0.0));
