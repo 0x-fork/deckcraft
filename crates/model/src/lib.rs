@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod anim;
+pub mod bidi;
 pub mod chart;
 pub mod defaults;
 pub mod edit;
@@ -24,6 +25,7 @@ pub use deckcraft_geom::{Rect, Size, Xfrm};
 use serde::{Deserialize, Serialize};
 
 pub use anim::{AnimClass, AnimStart, Animation, Transition};
+pub use bidi::{first_strong_is_rtl, is_rtl_script};
 pub use chart::Chart;
 pub use style::{ColorBase, ColorRef, Effects, Fill, Line, ShapeStyle};
 pub use table::{Cell, Table};

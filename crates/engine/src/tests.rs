@@ -406,7 +406,7 @@ fn right_to_left_paragraphs() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
     s.execute("text.edit", &json!({"id": title})).unwrap();
-    s.execute("text.insert", &json!({"text": "سنة 2024 (Retrait) فقط"})).unwrap();
+    s.execute("text.insert", &json!({"text": "Year 2024 (Retrait) only"})).unwrap();
     s.execute("format.rtl", &json!({})).unwrap();
     let para = |s: &Session| s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
     assert_eq!(para(&s).rtl, Some(true));
@@ -424,6 +424,51 @@ fn right_to_left_paragraphs() {
     assert_eq!(para(&s).align, Some(deckcraft_model::text::Align::Right));
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(para(&s).rtl, Some(true));
+}
+
+#[test]
+fn typing_kurdish_or_arabic_auto_detects_rtl_and_advances_caret_smoothly() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+
+    let mut first_x = None;
+    let mut last_x = 0.0;
+
+    // Type Kurdish sentence character-by-character: "من ناوم هێڤاره"
+    for ch in ["م", "ن", " ", "ن", "ا", "و", "م", " ", "ه", "ێ", "ڤ", "ا", "ر", "ه"] {
+        s.execute("text.insert", &json!({"text": ch})).unwrap();
+        let st = s.doc().unwrap();
+        let t = st.selection.text.as_ref().unwrap();
+        let l = super::cmd::text::layout_for(st, t).unwrap();
+        let (cx, ..) = l.caret(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 }).unwrap();
+
+        if first_x.is_none() {
+            first_x = Some(cx);
+        }
+        last_x = cx;
+
+        // Caret must remain near the right margin (e.g. > 400.0 pt in title placeholder)
+        // and must NOT jump back to the left margin (e.g. ~7.2 pt).
+        assert!(cx > 400.0, "caret should not jump to left margin: {cx}");
+    }
+
+    // Caret advances leftwards overall as text is appended
+    assert!(last_x < first_x.unwrap(), "caret should advance leftwards: last={last_x} first={:?}", first_x);
+    let para = s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
+    assert_eq!(para.rtl, Some(true), "auto-detected as RTL");
+    assert_eq!(para.align, Some(deckcraft_model::text::Align::Right), "aligned right");
+}
+
+#[test]
+fn explicit_ltr_override_is_preserved_when_typing_rtl() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("format.rtl", &json!({"on": false})).unwrap();
+    s.execute("text.insert", &json!({"text": "مرحبا"})).unwrap();
+    let para = s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
+    assert_eq!(para.rtl, Some(false), "user explicit LTR is preserved");
 }
 
 #[test]
