@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-11 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
 **Weighted breadth parity: 79%** over 191 features.
@@ -9,12 +9,12 @@ The summary between `<!-- SUMMARY -->
 |---|---|---|---|---|---|
 | P0 | 72 | 60 | 12 | 0 | 92% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 13 | 28 | 36% |
+| P2 | 54 | 13 | 14 | 27 | 37% |
 
 | Area | Parity |
 |---|---|
 | Application shell | 71% |
-| Files | 71% |
+| Files | 72% |
 | Slides | 90% |
 | Views | 90% |
 | Masters & themes | 85% |
@@ -65,7 +65,7 @@ Open P0 items: Start screen (new, templates/themes, recent), Contextual tabs (Sh
 | Files | Export to PDF (slides, notes pages, handouts; text layer, links, bookmarks; vector artwork pending) | P0 | P |
 | Files | Export slides as PNG/JPEG | P0 | D |
 | Files | Export outline / RTF | P2 | P |
-| Files | Export video (MP4) / animated GIF | P2 | M |
+| Files | Export video (MP4) / animated GIF (GIF: one frame per slide, no transitions; no video) | P2 | P |
 | Files | Print (slides, handouts, notes, outline) | P1 | M |
 | Files | Password protection | P2 | M |
 | Files | Reuse slides from another file | P1 | M |

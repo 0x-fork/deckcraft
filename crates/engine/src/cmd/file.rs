@@ -15,7 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path, format?}", has_doc, save_as),
         cmd!(noundo "file.saveTemplate", "Save as Template…", ["File"], None, "{path}", has_doc, save_as),
         cmd!(query "file.saveBytes", "Save to Data", [], None, "{format?: deckcraft|pptx} → {data: base64}", has_doc, save_bytes_cmd),
-        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, dpi?, slides?: [index], includeHidden?, textLayer?, frame?}", has_doc, export),
+        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf|gif, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, dpi?, slides?: [index], includeHidden?, textLayer?, frame?; gif: width?: px 16-3840 | small|medium|large|extraLarge, secondsPerSlide?: 0.1-600 (5), loop?: bool (true: forever), slides?: [index], includeHidden?} → {path, bytes} (gif: + frames, width, height, secondsPerSlide)", has_doc, export),
         cmd!(query "file.render", "Render Slide", [], None, "{slide?: index, scale?, edit?: bool} → {png: base64, width, height}", has_doc, render),
         cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{}", has_doc, close),
         cmd!(
@@ -104,12 +104,13 @@ fn open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"document": i}))
 }
 
-/// Encode the presentation in `format` (`deckcraft`, `pptx`, `outline`).
+/// Encode the presentation in `format` (`deckcraft`, `pptx`, `outline`, `pdf`, `gif`).
 pub fn save_bytes(doc: &Presentation, format: &str) -> Result<Vec<u8>> {
     match format {
         "pptx" | "potx" | "ppsx" => deckcraft_pptx::export(doc).map_err(|e| EngineError::Other(e.to_string())),
         "outline" | "txt" => Ok(deckcraft_format::slides_to_outline(doc).into_bytes()),
         "pdf" => deckcraft_pdf::export(doc, &Default::default()).map_err(|e| EngineError::Other(e.to_string())),
+        "gif" => gif_bytes(doc, &Value::Null),
         _ => deckcraft_format::save(doc).map_err(|e| EngineError::Other(e.to_string())),
     }
 }
@@ -136,6 +137,11 @@ pub fn pdf_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
     deckcraft_pdf::export(doc, &pdf_options(p)).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// Animated GIF bytes for `doc` with the options in `p` (see [`crate::gif_export::GifOptions::from_params`]).
+pub fn gif_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
+    Ok(crate::gif_export::encode(doc, &crate::gif_export::GifOptions::from_params(p)?)?.bytes)
+}
+
 pub fn format_for_path(path: &str) -> &'static str {
     let l = path.to_ascii_lowercase();
     if l.ends_with(".pptx") || l.ends_with(".potx") || l.ends_with(".ppsx") {
@@ -146,6 +152,8 @@ pub fn format_for_path(path: &str) -> &'static str {
         "jpeg"
     } else if l.ends_with(".pdf") {
         "pdf"
+    } else if l.ends_with(".gif") {
+        "gif"
     } else if l.ends_with(".txt") || l.ends_with(".md") {
         "outline"
     } else {
@@ -263,6 +271,18 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             let bytes = deckcraft_pdf::export(&st.doc, &pdf_options(p)).map_err(|e| EngineError::Other(e.to_string()))?;
             write_file(&path, &bytes)?;
             Ok(json!({"path": path, "bytes": bytes.len()}))
+        }
+        "gif" => {
+            let out = crate::gif_export::encode(&st.doc, &crate::gif_export::GifOptions::from_params(p)?)?;
+            write_file(&path, &out.bytes)?;
+            Ok(json!({
+                "path": path,
+                "bytes": out.bytes.len(),
+                "frames": out.frames,
+                "width": out.width,
+                "height": out.height,
+                "secondsPerSlide": f64::from(out.delay_cs) / 100.0,
+            }))
         }
         other => {
             let bytes = save_bytes(&st.doc, other)?;

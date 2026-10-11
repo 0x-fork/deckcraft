@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (animated GIF export, #171; previous: major, created; formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -28,7 +28,7 @@ PowerPoint opens and saves; Viewer = opens only).
 | Outline `.rtf` / `.txt` | export (RTF), import (outline) | `.txt`/`.md` outline (`slide.fromOutline`) | `.txt` outline | No RTF | engine tests |
 | PNG / JPEG slide images | export | n/a | yes (`file.export`, `deckcraft-cli render`) | Matches the editor's renderer | render tests |
 | TIFF / BMP / GIF slide images | export | n/a | no | Easy (the `image` crate writes them) | none |
-| Animated GIF of the deck | export | n/a | no | | none |
+| Animated GIF of the deck | export | n/a | yes (`file.export` format `gif`, Export…, `deckcraft-cli`, MCP `export`) | One frame per slide from the slide renderer; size small/medium/large/extra large or 16–3840 px wide, 0.1–600 s per slide, loop forever or play once, slide range, hidden slides skipped; a 256-colour palette per frame (exact, or NeuQuant above 256 colours). Transitions and build animations are not animated | `crates/engine/src/gif_export.rs` tests (decoded frames, size, delay, loop, hidden slides, hostile params), MCP, CLI and export dialog tests |
 | MP4 / MOV video of the deck | export | n/a | no | Needs timeline render + H.264 encode | none |
 | Print | yes | n/a | no | PR #66 (browser) open | none |
 
@@ -99,4 +99,5 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Animated GIF of the deck: export yes (#171) |
 | 2026-10-10 | major | Created from PowerPoint 16.113.4's `CFBundleDocumentTypes`, `crates/pptx` reader/writer and tests, and the open round-trip issues |

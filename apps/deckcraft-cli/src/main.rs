@@ -3,8 +3,8 @@
 //! ```text
 //! deckcraft-cli info FILE                       # slides, titles, layouts (JSON)
 //! deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] OUT.png|OUT_DIR
-//! deckcraft-cli convert IN OUT                  # .deckcraft ⇄ .pptx, outline .txt, .png (first slide)
-//! deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
+//! deckcraft-cli convert IN OUT                  # .deckcraft ⇄ .pptx, outline .txt, .pdf, .png (first slide), .gif (animated)
+//! deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT [--export-params JSON]] [--print]
 //! deckcraft-cli commands [FILTER]               # list commands (JSON)
 //! deckcraft-cli describe ID                     # one command
 //! deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]   # drive the running app
@@ -35,12 +35,17 @@ macro_rules! outln {
 const USAGE: &str = "usage: deckcraft-cli info FILE
        deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] [--edit] OUT
        deckcraft-cli convert IN OUT
-       deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
+       deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT [--export-params JSON]] [--print]
        deckcraft-cli commands [FILTER]
        deckcraft-cli describe COMMAND
        deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]
        deckcraft-cli mcp [--connect PORT] [--sample]
-       deckcraft-cli links | --version";
+       deckcraft-cli links | --version
+
+Export formats follow OUT's extension: .png .jpg .pdf .pptx .txt .deckcraft .gif (animated, one
+frame per slide). --export-params passes file.export options, e.g. for a GIF
+'{\"width\": \"large\", \"secondsPerSlide\": 3, \"loop\": false, \"slides\": [0, 1, 2]}'
+(width: px 16-3840 or small|medium|large|extraLarge; see `deckcraft-cli describe file.export`).";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -168,6 +173,8 @@ fn convert(args: &[String]) -> Result<(), String> {
     let fmt = deckcraft_engine::cmd::file::format_for_path(out);
     let r = if matches!(fmt, "png" | "jpeg") {
         s.execute("file.export", &json!({"path": out, "slide": 0}))
+    } else if fmt == "gif" {
+        s.execute("file.export", &json!({"path": out}))
     } else {
         s.execute("file.saveAs", &json!({"path": out}))
     };
@@ -182,6 +189,7 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut cmds = vec![];
     let mut save = None;
     let mut export = None;
+    let mut export_params = json!({});
     let mut print = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
@@ -191,6 +199,13 @@ fn run(args: &[String]) -> Result<(), String> {
             "--cmd" => cmds.push(it.next().cloned().ok_or("--cmd needs ID[=JSON]")?),
             "--save" => save = Some(it.next().cloned().ok_or("--save needs a path")?),
             "--export" => export = Some(it.next().cloned().ok_or("--export needs a path")?),
+            "--export-params" => {
+                let j = it.next().ok_or("--export-params needs a JSON object")?;
+                export_params = serde_json::from_str::<Value>(j).map_err(|e| format!("--export-params: bad JSON: {e}"))?;
+                if !export_params.is_object() {
+                    return Err("--export-params must be a JSON object".into());
+                }
+            }
             "--print" => print = true,
             other => return Err(format!("unknown option `{other}`")),
         }
@@ -211,7 +226,10 @@ fn run(args: &[String]) -> Result<(), String> {
         s.execute("file.saveAs", &json!({"path": p})).map_err(|e| e.to_string())?;
     }
     if let Some(p) = export {
-        s.execute("file.export", &json!({"path": p})).map_err(|e| e.to_string())?;
+        export_params["path"] = json!(p);
+        s.execute("file.export", &export_params).map_err(|e| e.to_string())?;
+    } else if export_params != json!({}) {
+        return Err("--export-params needs --export OUT".into());
     }
     Ok(())
 }
@@ -277,4 +295,43 @@ fn mcp(args: &[String]) -> Result<(), String> {
     let mut server = Server::new(backend);
     let stdin = std::io::stdin();
     server.serve(stdin.lock(), std::io::stdout()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// `run --export OUT.gif --export-params JSON` and `convert IN OUT.gif` write animated GIFs.
+    #[test]
+    fn exports_an_animated_gif() {
+        let dir = std::env::temp_dir().join(format!("deckcraft-cli-gif-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let gif = dir.join("sample.gif").to_string_lossy().to_string();
+        let deck = dir.join("sample.deckcraft").to_string_lossy().to_string();
+        let params = r#"{"width": "small", "secondsPerSlide": 2, "loop": false, "slides": [0, 1]}"#;
+        run(&args(&["--sample", "--save", &deck, "--export", &gif, "--export-params", params])).unwrap();
+        let bytes = std::fs::read(&gif).unwrap();
+        assert!(bytes.starts_with(b"GIF89a"));
+        assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), 640, "small = 640 px wide");
+        assert!(!bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "play once: no loop block");
+
+        let gif2 = dir.join("converted.gif").to_string_lossy().to_string();
+        convert(&args(&[&deck, &gif2])).unwrap();
+        let bytes = std::fs::read(&gif2).unwrap();
+        assert!(bytes.starts_with(b"GIF89a") && bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "loops forever by default");
+
+        // Bad options are errors, not panics.
+        let bad = dir.join("bad.gif").to_string_lossy().to_string();
+        assert!(run(&args(&["--sample", "--export", &bad, "--export-params", r#"{"width": 1e9}"#])).is_err());
+        assert!(run(&args(&["--sample", "--export", &bad, "--export-params", "[1]"])).is_err());
+        assert!(run(&args(&["--sample", "--export-params", "{}"])).is_ok());
+        assert!(run(&args(&["--sample", "--export-params", r#"{"width": 64}"#])).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

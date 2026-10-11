@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (core-workflow alpha gate added; stage stays alpha; previous: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (animated GIF export landed, #171; the video gap stays; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -115,11 +115,13 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** handouts and speaker notes are printed in many workplaces.
 - **Estimate:** 5–8 h (print through the PDF path and each OS's print dialog). **Beta blocker.**
 
-### No video or animated GIF export
-- **Evidence:** checklist row missing; PowerPoint exports MP4/MOV and animated GIF.
+### No video export; the animated GIF has no transitions or builds
+- **Evidence:** checklist row "Export video (MP4) / animated GIF" is partial: `file.export` writes
+  an animated GIF with one frame per slide (#171), but there is no MP4/MOV export, and the GIF
+  doesn't animate transitions or build animations.
 - **Impact:** sharing a talk as a video is a common request.
-- **Estimate:** 10–16 h (render the timeline frame by frame; an H.264 encoder is the hard part,
-  FilmCraft has one to copy).
+- **Estimate:** 10–16 h (render the timeline frame by frame, which the GIF can then reuse for
+  transitions and builds; an H.264 encoder is the hard part, FilmCraft has one to copy).
 
 ### Embedded fonts aren't read or written
 - **Evidence:** no `p:embeddedFontLst` handling in `crates/pptx`.
@@ -247,5 +249,6 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-11 | minor | Animated GIF export landed (#171); the entry now covers video export and animating transitions in the GIF |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |

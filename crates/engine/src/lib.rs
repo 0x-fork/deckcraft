@@ -9,6 +9,7 @@
 
 pub mod cmd;
 pub mod connect;
+pub mod gif_export;
 pub mod guard;
 pub mod keys;
 pub mod links;
