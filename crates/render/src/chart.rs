@@ -2,7 +2,7 @@
 
 use deckcraft_color::{ColorTransform, Rgba, SchemeSlot};
 use deckcraft_model::Shape;
-use deckcraft_model::chart::{Chart, ChartType, nice_scale};
+use deckcraft_model::chart::{Chart, ChartType};
 use deckcraft_model::resolve::Ctx;
 use deckcraft_model::style::{ColorRef, Fill};
 use deckcraft_model::text::{Align, Anchor, Bullet, TextBody};
@@ -162,8 +162,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         }
         return;
     }
-    let (lo, hi) = c.value_range();
-    let (min, max, step) = nice_scale(lo.min(0.0), hi);
+    let (min, max, step) = c.axis_scale();
     let horiz = c.kind.horizontal();
     // Axis label gutter.
     let gutter = base * 3.0;
@@ -176,7 +175,11 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         crate::paint::fill_path(ctx, rctx, f, None, &plot.to_path(0.1), plot, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
     }
     let span = (max - min).max(1e-9);
-    let to_v = |v: f64| if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() };
+    // Values outside fixed axis limits stop at the plot's edge.
+    let to_v = |v: f64| {
+        let v = v.clamp(min, max);
+        if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() }
+    };
     // Gridlines and value labels.
     let n_steps = ((span / step).round() as i64).clamp(1, 50);
     for k in 0..=n_steps {
