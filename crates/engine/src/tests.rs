@@ -415,6 +415,17 @@ fn table_at(s: &mut Session, cols: &[f64], data: serde_json::Value) -> deckcraft
     id
 }
 
+fn table_of(s: &Session, id: deckcraft_model::ShapeId) -> deckcraft_model::Table {
+    match &s.doc().unwrap().shape(id).unwrap().kind {
+        deckcraft_model::ShapeKind::Table(t) => t.clone(),
+        k => panic!("not a table: {k:?}"),
+    }
+}
+
+fn tev(kind: PointerKind, x: f64, y: f64) -> PointerEvent {
+    PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 }
+}
+
 fn text_sel(s: &Session) -> Option<TextSel> {
     s.doc().unwrap().selection.text.clone()
 }
@@ -452,6 +463,86 @@ fn cell_text_is_laid_out_where_the_cell_draws_it() {
 }
 
 #[test]
+fn double_click_in_a_cell_selects_the_word_clicked() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", "d"]]));
+    // Where "world" is drawn.
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let p = caret_point(&s, 0, 8);
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // As the UI sends it: press, release, press, double-click (on release), then the release.
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    assert!(text_sel(&s).is_none(), "a click on an unselected table selects it");
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 0)), ((0, 6), (0, 11))), "the word under the double-click");
+    // The control channel sends the double-click alone.
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    assert_eq!(text_sel(&s).map(|t| t.ordered()), Some(((0, 6), (0, 11))));
+}
+
+#[test]
+fn clicks_while_editing_a_cell_move_the_caret_between_cells() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "Second cell"], ["c", "d"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1], "at": [0, 0]})).unwrap();
+    let p6 = caret_point(&s, 0, 6);
+    let p11 = caret_point(&s, 0, 11);
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 0]})).unwrap();
+    // A click in another cell of the table moves the caret there, at the click.
+    s.pointer(tev(PointerKind::Down, p6.x, p6.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.shape, t.cell, t.caret, t.anchor), (id, Some((0, 1)), (0, 6), (0, 6)));
+    // Dragging selects within that cell, even past its edge.
+    s.pointer(tev(PointerKind::Drag, p11.x, p11.y)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 600.0, p11.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, 600.0, p11.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 1)), ((0, 6), (0, 11))));
+    // Shift+click in another cell starts a new caret there instead of extending across cells.
+    let shift = Mods { shift: true, ..Default::default() };
+    s.pointer(PointerEvent { mods: shift, ..tev(PointerKind::Down, 150.0, 165.0) }).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 165.0)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.is_range()), (Some((1, 0)), false));
+    // Typing goes into the clicked cell.
+    s.execute("text.insert", &json!({"text": "X"})).unwrap();
+    assert_eq!(table_of(&s, id).cell(1, 0).unwrap().text.text(), "cX");
+    // A click outside the table stops editing.
+    s.pointer(tev(PointerKind::Down, 50.0, 400.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 50.0, 400.0)).unwrap();
+    assert!(text_sel(&s).is_none());
+}
+
+#[test]
+fn a_click_in_a_selected_table_enters_the_clicked_cell() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "Hello world"]]));
+    s.pointer(tev(PointerKind::Down, 350.0, 160.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 350.0, 160.0)).unwrap();
+    assert_eq!((s.doc().unwrap().selection.shapes.clone(), text_sel(&s)), (vec![id], None), "the first click selects the table");
+    let st = s.doc().unwrap();
+    let p = text_point(st, &TextSel { shape: id, cell: Some((1, 1)), ..Default::default() }, 0, 6);
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.caret), (Some((1, 1)), (0, 6)), "caret at the click");
+    // Dragging a selected table still moves it.
+    s.execute("text.exit", &json!({})).unwrap();
+    s.pointer(tev(PointerKind::Down, 150.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 170.0, 130.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 170.0, 130.0)).unwrap();
+    assert!(text_sel(&s).is_none());
+    assert_ne!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().x, 100.0);
+}
+
+#[test]
 fn caret_moves_by_line_in_a_wrapped_cell() {
     let mut s = session();
     let id = table_at(&mut s, &[90.0, 200.0], json!([["one two three four five six seven", "b"]]));
@@ -464,6 +555,18 @@ fn caret_moves_by_line_in_a_wrapped_cell() {
     assert!(end.1 > down.1 && end.1 < 33, "end of the second line: {end:?}");
     s.execute("text.move", &json!({"to": "up"})).unwrap();
     assert!(text_sel(&s).unwrap().caret.1 < down.1);
+}
+
+#[test]
+fn rotated_tables_hit_the_cell_under_the_pointer() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
+    s.execute("shape.rotate", &json!({"ids": [id], "deg": 90})).unwrap();
+    let st = s.doc().unwrap();
+    let f = cmd::table::table_frame(st, st.shape(id).unwrap()).unwrap();
+    let p = f.affine * deckcraft_geom::Point::new(150.0, 60.0);
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    assert_eq!(text_sel(&s).and_then(|t| t.cell), Some((1, 1)));
 }
 
 #[test]

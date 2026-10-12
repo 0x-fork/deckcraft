@@ -89,6 +89,14 @@ pub fn table_frame(st: &DocState, sh: &Shape) -> Option<TableFrame> {
 }
 
 impl TableFrame {
+    pub fn width(&self) -> f64 {
+        self.cols.iter().map(|w| w.max(0.0)).sum()
+    }
+
+    pub fn height(&self) -> f64 {
+        self.heights.iter().map(|h| h.max(0.0)).sum()
+    }
+
     /// Table-local point for slide point `p`.
     pub fn local(&self, p: Point) -> Point {
         self.affine.inverse() * p
@@ -97,6 +105,18 @@ impl TableFrame {
     /// Table-local rect of visible cell (`r`, `c`).
     pub fn cell_rect(&self, r: usize, c: usize) -> Option<Rect> {
         self.cells.iter().find(|(cr, cc, _)| (*cr, *cc) == (r, c)).map(|x| x.2)
+    }
+
+    /// The visible cell at table-local point `p` (points outside the table go to the nearest cell).
+    pub fn cell_at(&self, p: Point) -> Option<(usize, usize)> {
+        let q = Point::new(p.x.clamp(0.0, self.width().max(0.0)), p.y.clamp(0.0, self.height().max(0.0)));
+        let inside = |r: &Rect| q.x >= r.x0 && q.x <= r.x1 && q.y >= r.y0 && q.y <= r.y1;
+        // Edges are shared: prefer the cell the point is strictly inside.
+        self.cells
+            .iter()
+            .find(|(_, _, r)| q.x >= r.x0 && q.x < r.x1 && q.y >= r.y0 && q.y < r.y1)
+            .or_else(|| self.cells.iter().rev().find(|(_, _, r)| inside(r)))
+            .map(|(r, c, _)| (*r, *c))
     }
 }
 

@@ -361,30 +361,10 @@ impl Session {
             }
             ToolKind::Select => {}
         }
-        let st = self.doc()?;
         // Clicking inside the text being edited moves the caret / starts a text selection.
-        if let Some(t) = st.selection.text.clone()
-            && !t.notes
-            && t.cell.is_none()
-            && let Some(sh) = st.shape(t.shape)
-        {
-            let x = xfrm_of(&st.doc, &st.selection, sh);
-            if x.bounds().inflate(tol, tol).contains(p)
-                && !matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. }))
-            {
-                let pos = text_pos(st, sh, p);
-                let shift = mods.shift;
-                self.select(|_, sel| {
-                    if let Some(tt) = sel.text.as_mut() {
-                        tt.caret = pos;
-                        if !shift {
-                            tt.anchor = pos;
-                        }
-                    }
-                })?;
-                self.tool.drag = Some(Drag::TextSelect { shape: t.shape });
-                return Ok(json!({"caret": [pos.0, pos.1]}));
-            }
+        if let Some((shape, pos)) = self.place_caret(p, tol, mods.shift)? {
+            self.tool.drag = Some(Drag::TextSelect { shape });
+            return Ok(json!({"caret": [pos.0, pos.1]}));
         }
         let hit = self.hit_test(p, tol);
         let st = self.doc()?;
@@ -432,8 +412,10 @@ impl Session {
                 let origs: Vec<(ShapeId, Xfrm)> =
                     ids.iter().filter_map(|i| st.shape(*i).filter(|s| !s.locked).map(|s| (*i, xfrm_of(&st.doc, &st.selection, s)))).collect();
                 // A click (no drag) on text puts the caret there; unselected text boxes and
-                // placeholders take the caret straight away like PowerPoint.
-                let enter_text = (text && !toggle && (selected || is_text_first(st, id))).then_some((id, p));
+                // placeholders take the caret straight away like PowerPoint. A click in a selected
+                // table puts the caret in the clicked cell.
+                let table = st.shape(id).is_some_and(|s| matches!(s.kind, ShapeKind::Table(_)));
+                let enter_text = (!toggle && ((text && (selected || is_text_first(st, id))) || (table && selected))).then_some((id, p));
                 let ids2 = ids.clone();
                 self.select(|_, sel| {
                     sel.shapes = ids2;
@@ -630,9 +612,10 @@ impl Session {
                 self.tool.preview = Some(x);
             }
             Drag::TextSelect { shape } => {
+                // The selection stays in the shape or table cell where it started.
                 let st = self.doc()?;
-                if let Some(sh) = st.shape(shape) {
-                    let pos = text_pos(st, sh, p);
+                if let Some(t) = st.selection.text.as_ref().filter(|t| t.shape == shape) {
+                    let pos = cmd::text::text_pos_at(st, t, p);
                     self.select(|_, sel| {
                         if let Some(t) = sel.text.as_mut() {
                             t.caret = pos;
@@ -669,11 +652,8 @@ impl Session {
         let mut out = Value::Null;
         match drag {
             Some(Drag::Move { moved: false, enter_text: Some((id, at)), .. }) => {
-                // Plain click on text: caret at the click.
-                let st = self.doc()?;
-                if let Some(sh) = st.shape(id) {
-                    let pos = text_pos(st, sh, at);
-                    self.execute("text.edit", &json!({"id": id, "at": [pos.0, pos.1]}))?;
+                // Plain click on text: caret at the click (in a table, in the clicked cell).
+                if self.edit_text_at(id, at)? {
                     out = json!({"editing": id});
                 }
             }
@@ -792,8 +772,12 @@ impl Session {
             self.tool.sticky = false;
             return Ok(Value::Null);
         }
-        let st = self.doc()?;
-        if st.selection.text.is_some() {
+        // The double-click's second press started a click (caret on release): this replaces it.
+        if matches!(self.tool.drag, Some(Drag::Move { moved: false, .. })) {
+            self.tool.drag = None;
+        }
+        // In the text being edited: select the word double-clicked.
+        if self.place_caret(p, tol, false)?.is_some() {
             return self.execute("text.selectWord", &json!({}));
         }
         match self.hit_test(p, tol) {
@@ -801,18 +785,12 @@ impl Session {
                 let st = self.doc()?;
                 let Some(sh) = st.shape(id).cloned() else { return Ok(Value::Null) };
                 match &sh.kind {
-                    ShapeKind::Table(_) => {
-                        let x = xfrm_of(&st.doc, &st.selection, &sh);
-                        let local = x.affine().inverse() * p;
-                        if let ShapeKind::Table(t) = &sh.kind {
-                            let cell = deckcraft_render_cell(t, &table_rows(st, t), local);
-                            return self.execute("text.edit", &json!({"id": id, "cell": [cell.0, cell.1]}));
+                    ShapeKind::Table(_) | ShapeKind::Shape | ShapeKind::Connector { .. } if !sh.is_line() => {
+                        // Caret at the double-click (in a table, in the clicked cell), then select
+                        // the word there.
+                        if !self.edit_text_at(id, p)? {
+                            return Ok(Value::Null);
                         }
-                        Ok(Value::Null)
-                    }
-                    ShapeKind::Shape | ShapeKind::Connector { .. } if !sh.is_line() => {
-                        let pos = text_pos(st, &sh, p);
-                        self.execute("text.edit", &json!({"id": id, "at": [pos.0, pos.1]}))?;
                         self.execute("text.selectWord", &json!({}))
                     }
                     ShapeKind::Group { .. } => Ok(Value::Null),
@@ -824,6 +802,62 @@ impl Session {
             }
             _ => Ok(Value::Null),
         }
+    }
+
+    /// A click at `p` inside the text being edited: the caret goes there (`extend`: the selection
+    /// grows to it). In a table being edited, a click in another cell moves the caret into that
+    /// cell. Returns the edited shape and the caret, or `None` when `p` isn't in the edited text
+    /// (or is on a handle or a table border).
+    fn place_caret(&mut self, p: Point, tol: f64, extend: bool) -> Result<Option<(ShapeId, (usize, usize))>> {
+        let st = self.doc()?;
+        let Some(mut t) = st.selection.text.clone().filter(|t| !t.notes) else { return Ok(None) };
+        let Some(sh) = st.shape(t.shape) else { return Ok(None) };
+        let x = xfrm_of(&st.doc, &st.selection, sh);
+        if !x.bounds().inflate(tol, tol).contains(p)
+            || matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. }))
+        {
+            return Ok(None);
+        }
+        let old_cell = t.cell;
+        if old_cell.is_some()
+            && let Some(f) = cmd::table::table_frame(st, sh)
+        {
+            t.cell = f.cell_at(f.local(p)).or(old_cell);
+        }
+        let pos = cmd::text::text_pos_at(st, &t, p);
+        // A selection can't span cells: a click in another cell starts afresh.
+        let extend = extend && t.cell == old_cell;
+        let cell = t.cell;
+        self.select(|_, sel| {
+            if let Some(tt) = sel.text.as_mut() {
+                tt.cell = cell;
+                tt.caret = pos;
+                if !extend {
+                    tt.anchor = pos;
+                }
+            }
+        })?;
+        Ok(Some((t.shape, pos)))
+    }
+
+    /// Start editing shape `id`'s text with the caret at slide point `p`; for a table, in the cell
+    /// at `p`. Returns whether editing started.
+    fn edit_text_at(&mut self, id: ShapeId, p: Point) -> Result<bool> {
+        let st = self.doc()?;
+        let Some(sh) = st.shape(id) else { return Ok(false) };
+        let params = match cmd::table::table_frame(st, sh) {
+            Some(f) => {
+                let Some((r, c)) = f.cell_at(f.local(p)) else { return Ok(false) };
+                let pos = cmd::text::text_pos_at(st, &TextSel { shape: id, cell: Some((r, c)), ..Default::default() }, p);
+                json!({"id": id, "cell": [r, c], "at": [pos.0, pos.1]})
+            }
+            None => {
+                let pos = text_pos(st, sh, p);
+                json!({"id": id, "at": [pos.0, pos.1]})
+            }
+        };
+        self.execute("text.edit", &params)?;
+        Ok(true)
     }
 
     fn is_picture(&self, id: ShapeId) -> bool {
@@ -1279,29 +1313,6 @@ pub fn text_pos(st: &crate::DocState, sh: &Shape, p: Point) -> (usize, usize) {
 /// Row heights of table `t` as drawn: rows grow to fit their text.
 pub fn table_rows(st: &crate::DocState, t: &deckcraft_model::Table) -> Vec<f64> {
     cmd::table_drawn_heights(&st.doc, &st.selection, t)
-}
-
-/// Which table cell contains a table-local point (`heights` from [`table_rows`]).
-fn deckcraft_render_cell(t: &deckcraft_model::Table, heights: &[f64], p: Point) -> (usize, usize) {
-    let mut y = 0.0;
-    let mut row = heights.len().saturating_sub(1);
-    for (i, h) in heights.iter().enumerate() {
-        if p.y < y + h {
-            row = i;
-            break;
-        }
-        y += h;
-    }
-    let mut x = 0.0;
-    let mut col = t.cols.len().saturating_sub(1);
-    for (i, w) in t.cols.iter().enumerate() {
-        if p.x < x + w {
-            col = i;
-            break;
-        }
-        x += w;
-    }
-    (row, col)
 }
 
 #[cfg(test)]

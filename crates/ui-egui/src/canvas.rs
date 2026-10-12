@@ -743,7 +743,7 @@ mod tests {
         }
     }
 
-    /// Double-clicking a table cell edits it with the caret drawn in that cell.
+    /// Double-clicking a table cell edits it with the caret drawn in that cell, where clicked.
     #[test]
     fn double_click_in_a_table_cell_shows_the_caret_there() {
         let (mut harness, id) = app_with_table();
@@ -762,5 +762,14 @@ mod tests {
         for q in [top, bottom] {
             assert!(q.x > 300.0 && q.x < 500.0 && q.y >= 140.0 && q.y <= 180.0, "caret {q:?} outside cell (1, 1)");
         }
+        // A click in another cell moves the caret there.
+        let p = screen(harness.state(), 110.0, 120.0);
+        click(&mut harness, p);
+        harness.run_steps(1);
+        let st = harness.state().session.active().unwrap();
+        let ts = st.selection.text.clone().unwrap();
+        assert_eq!((ts.cell, ts.caret), (Some((0, 0)), (0, 0)));
+        let (top, _) = deckcraft_engine::cmd::text::caret_line(st, &ts).unwrap();
+        assert!(top.x > 100.0 && top.x < 120.0 && top.y >= 100.0 && top.y < 140.0, "caret {top:?} at the start of cell (0, 0)");
     }
 }
