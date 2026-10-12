@@ -21,6 +21,9 @@ pub enum PointerKind {
     Move,
     DoubleClick,
     TripleClick,
+    /// Secondary-button press (right click), before the context menu opens: selects what's under
+    /// the pointer the way PowerPoint does, without editing text or starting a drag.
+    ContextClick,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,6 +302,7 @@ impl Session {
             PointerKind::Drag => self.drag(p, ev.mods, tol),
             PointerKind::Up => self.up(p, ev.mods),
             PointerKind::DoubleClick => self.double_click(p, tol),
+            PointerKind::ContextClick => self.context_click(p, tol),
             PointerKind::TripleClick => {
                 if self.active().is_some_and(|d| d.selection.text.is_some()) {
                     self.execute("text.selectParagraph", &json!({}))
@@ -824,6 +828,45 @@ impl Session {
             }
             _ => Ok(Value::Null),
         }
+    }
+
+    /// Right-button press: the selection the context menu will act on, as in PowerPoint. In the
+    /// box being edited, the caret and text selection stay (the menu then acts on the text). On a
+    /// selected shape (or its handles) the selection stays, multiple selection included; on
+    /// another shape, that shape alone is selected; on empty slide, nothing is. Never edits text,
+    /// starts a drag or adds an undo step.
+    fn context_click(&mut self, p: Point, tol: f64) -> Result<Value> {
+        if !matches!(self.tool.kind, ToolKind::Select) || self.tool.drag.is_some() {
+            return Ok(Value::Null);
+        }
+        let st = self.doc()?;
+        // The same zone in which a left press places the caret (`down`).
+        if let Some(t) = &st.selection.text
+            && !t.notes
+            && t.cell.is_none()
+            && let Some(sh) = st.shape(t.shape)
+            && xfrm_of(&st.doc, &st.selection, sh).bounds().inflate(tol, tol).contains(p)
+        {
+            return Ok(json!({"hit": {"kind": "text", "id": t.shape}, "selected": [t.shape], "editing": true}));
+        }
+        let hit = self.hit_test(p, tol);
+        let id = match &hit {
+            Some(Hit::Shape { id, .. } | Hit::Resize { id, .. } | Hit::Rotate { id } | Hit::Adjust { id, .. } | Hit::LineEnd { id, .. }) => Some(*id),
+            None => None,
+        };
+        if !id.is_some_and(|id| st.selection.shapes.contains(&id)) {
+            self.select(|_, sel| {
+                sel.text = None;
+                sel.cells = None;
+                sel.shapes = id.into_iter().collect();
+            })?;
+        }
+        let st = self.doc()?;
+        Ok(json!({
+            "hit": serde_json::to_value(&hit).unwrap_or_default(),
+            "selected": st.selection.shapes,
+            "editing": st.selection.text.is_some(),
+        }))
     }
 
     fn is_picture(&self, id: ShapeId) -> bool {
