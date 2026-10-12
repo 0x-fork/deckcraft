@@ -120,8 +120,6 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
-
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
-
 | 2026-10-12 | minor | Text editing keys: Ctrl+arrows, Ctrl+Backspace/Delete, Ctrl+Up/Down, Home/End on wrapped lines, Shift+F3, font size keys, as observed in PowerPoint for Windows (#268) |
 | 2026-10-10 | major | Created: shell, panes and dialogs, direct manipulation, shortcuts and visual fidelity against PowerPoint 16.113 |
