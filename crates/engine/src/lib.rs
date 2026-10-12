@@ -9,7 +9,9 @@
 
 pub mod cmd;
 pub mod connect;
+pub mod file_access;
 pub mod guard;
+pub mod io;
 pub mod keys;
 pub mod links;
 pub mod recovery;
