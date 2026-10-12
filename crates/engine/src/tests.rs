@@ -67,6 +67,26 @@ fn text_editing_flow() {
 }
 
 #[test]
+fn editing_text_refits_a_saved_shrink() {
+    use deckcraft_model::text::AutoFit;
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id;
+    s.execute("text.edit", &json!({"id": title.0})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hi"})).unwrap();
+    // As if opened from a file PowerPoint saved shrunk.
+    s.edit(|doc, sel| {
+        let shapes = crate::shapes_mut(doc, sel).unwrap();
+        let sh = deckcraft_model::find_shape_mut(shapes, title).unwrap();
+        sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.5, line_reduction: 0.2 });
+        Ok(())
+    })
+    .unwrap();
+    s.execute("text.insert", &json!({"text": "!"})).unwrap();
+    let sh = s.doc().unwrap().shape(title).cloned().unwrap();
+    assert_eq!(sh.text.unwrap().body.autofit, Some(AutoFit::Shrink { font_scale: 1.0, line_reduction: 0.0 }));
+}
+
+#[test]
 fn smart_quotes_and_autocorrect() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;

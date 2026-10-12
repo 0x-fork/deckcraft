@@ -70,6 +70,10 @@ pub(crate) fn edit_text<T>(s: &mut Session, f: impl FnOnce(&mut TextBody, &mut T
         let mut t = t0.clone();
         let body = body_mut(doc, sel, &t).ok_or_else(|| bad("text", "the text being edited is gone"))?;
         let r = f(body, &mut t);
+        // The saved shrink-on-overflow scale was for the old text: fit the new text afresh.
+        if let Some(AutoFit::Shrink { font_scale, line_reduction }) = &mut body.body.autofit {
+            (*font_scale, *line_reduction) = (1.0, 0.0);
+        }
         sel.text = Some(t);
         Ok(r)
     })?;

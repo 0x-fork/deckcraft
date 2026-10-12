@@ -55,6 +55,27 @@ fn shrink_on_overflow() {
 }
 
 #[test]
+fn saved_shrink_scale_is_drawn() {
+    // A file saved with fontScale 62.5% and lnSpcReduction 20% draws at that scale even though
+    // the text would fit at full size, as PowerPoint draws it.
+    let (p, mut sh) = setup("Short", 600.0, 300.0);
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.625, line_reduction: 0.2 });
+    let l = lay(&p, &sh, 600.0, 300.0);
+    assert_eq!((l.font_scale, l.line_reduction), (0.625, 0.2));
+    // Text that doesn't fit even at the saved scale shrinks further.
+    let text = (0..30).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n");
+    let (p, mut sh) = setup(&text, 600.0, 200.0);
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.9, line_reduction: 0.1 });
+    let l = lay(&p, &sh, 600.0, 200.0);
+    assert!(l.font_scale < 0.9 && l.line_reduction >= 0.1, "{} {}", l.font_scale, l.line_reduction);
+    // Nonsense saved values are ignored.
+    let (p, mut sh) = setup("Short", 600.0, 300.0);
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: f64::NAN, line_reduction: 5.0 });
+    let l = lay(&p, &sh, 600.0, 300.0);
+    assert_eq!((l.font_scale, l.line_reduction), (1.0, 0.2));
+}
+
+#[test]
 fn caret_and_hit_roundtrip() {
     let (p, sh) = setup("Hello world", 600.0, 100.0);
     let l = lay(&p, &sh, 600.0, 100.0);
