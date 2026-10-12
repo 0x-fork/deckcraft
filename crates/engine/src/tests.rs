@@ -835,3 +835,146 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// A blank slide holding one text box being edited, with smart guides and grid snapping off so
+/// drags move by exactly the pointer delta. Returns the session, the box id and its box.
+fn editing_text_box(rot: f64) -> (Session, u64, deckcraft_geom::Xfrm) {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    let id = s.execute("insert.textBox", &json!({"rect": [200.0, 150.0, 240.0, 60.0], "text": "Hello world"})).unwrap()["id"].as_u64().unwrap();
+    if rot != 0.0 {
+        s.execute("shape.rotate", &json!({"ids": [id], "deg": rot})).unwrap();
+    }
+    s.execute("text.edit", &json!({"id": id, "at": [0, 0]})).unwrap();
+    let x = text_box_xfrm(&s, id);
+    (s, id, x)
+}
+
+fn text_box_xfrm(s: &Session, id: u64) -> deckcraft_geom::Xfrm {
+    let st = s.doc().unwrap();
+    cmd::xfrm_of(&st.doc, &st.selection, st.shape(deckcraft_model::ShapeId(id as u32)).unwrap())
+}
+
+/// Slide point for a point in the box's own (rotated) frame.
+fn on_box(x: &deckcraft_geom::Xfrm, lx: f64, ly: f64) -> (f64, f64) {
+    let p = x.affine() * deckcraft_geom::Point::new(lx, ly);
+    (p.x, p.y)
+}
+
+fn drag_gesture(s: &mut Session, from: (f64, f64), to: (f64, f64)) -> serde_json::Value {
+    let ev = |kind, (x, y): (f64, f64)| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let down = s.pointer(ev(PointerKind::Down, from)).unwrap();
+    let mid = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
+    s.pointer(ev(PointerKind::Drag, mid)).unwrap();
+    s.pointer(ev(PointerKind::Drag, to)).unwrap();
+    s.pointer(ev(PointerKind::Up, to)).unwrap();
+    down
+}
+
+#[test]
+fn dragging_the_frame_of_edited_text_moves_the_box() {
+    let (mut s, id, x) = editing_text_box(0.0);
+    assert!(x.h > 12.0, "{x:?}");
+    let sid = deckcraft_model::ShapeId(id as u32);
+    // Hovering the band on either side of the edge says "move"; the inside says "text".
+    for ly in [-2.0, 2.0, x.h + 2.0] {
+        let (px, py) = on_box(&x, x.w / 4.0, ly);
+        s.pointer(PointerEvent { kind: PointerKind::Move, x: px, y: py, mods: Mods::default(), tol: 3.0 }).unwrap();
+        assert_eq!(s.tool.hover, Some(tools::Hit::Frame { id: sid }), "ly {ly}");
+    }
+    let (px, py) = on_box(&x, x.w / 4.0, x.h / 2.0);
+    s.pointer(PointerEvent { kind: PointerKind::Move, x: px, y: py, mods: Mods::default(), tol: 3.0 }).unwrap();
+    assert_eq!(s.tool.hover, Some(tools::Hit::Shape { id: sid, text: true }));
+
+    // Press on the top edge, just outside, and drag: the box moves, text editing ends.
+    let undo_before = s.doc().unwrap().history.undo.len();
+    let from = on_box(&x, x.w / 4.0, -1.0);
+    let down = drag_gesture(&mut s, from, (from.0 + 30.0, from.1 + 20.0));
+    assert_eq!(down["hit"], json!({"kind": "frame", "id": id}));
+    let moved = text_box_xfrm(&s, id);
+    assert!((moved.x - (x.x + 30.0)).abs() < 1e-9 && (moved.y - (x.y + 20.0)).abs() < 1e-9, "{moved:?}");
+    assert_eq!((moved.w, moved.h), (x.w, x.h));
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.is_none());
+    assert_eq!(st.selection.shapes, vec![sid]);
+    // One undo step, which puts the box back.
+    assert_eq!(st.history.undo.len(), undo_before + 1);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(text_box_xfrm(&s, id), x);
+
+    // The inner side of the band works too; a click there without a drag selects the box whole
+    // and changes nothing.
+    s.execute("text.edit", &json!({"id": id, "at": [0, 0]})).unwrap();
+    let undo_before = s.doc().unwrap().history.undo.len();
+    let (px, py) = on_box(&x, x.w * 0.75, x.h - 1.0);
+    let ev = |kind| PointerEvent { kind, x: px, y: py, mods: Mods::default(), tol: 3.0 };
+    s.pointer(ev(PointerKind::Down)).unwrap();
+    s.pointer(ev(PointerKind::Up)).unwrap();
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.is_none());
+    assert_eq!(st.selection.shapes, vec![sid]);
+    assert_eq!(st.history.undo.len(), undo_before);
+    assert_eq!(text_box_xfrm(&s, id), x);
+}
+
+#[test]
+fn dragging_inside_edited_text_selects_text() {
+    let (mut s, id, x) = editing_text_box(0.0);
+    let undo_before = s.doc().unwrap().history.undo.len();
+    let down = drag_gesture(&mut s, on_box(&x, 8.0, x.h / 2.0), on_box(&x, x.w - 8.0, x.h / 2.0));
+    assert!(down.get("caret").is_some(), "{down}");
+    assert_eq!(text_box_xfrm(&s, id), x);
+    let st = s.doc().unwrap();
+    let t = st.selection.text.as_ref().expect("still editing");
+    assert!(t.is_range(), "{t:?}");
+    assert_eq!(t.ordered(), ((0, 0), (0, 11)));
+    assert_eq!(st.history.undo.len(), undo_before);
+}
+
+#[test]
+fn frame_of_rotated_edited_text_follows_the_rotation() {
+    let (mut s, id, x) = editing_text_box(30.0);
+    assert_eq!(x.rot, 30.0);
+    let sid = deckcraft_model::ShapeId(id as u32);
+    // The rotated bottom edge is the frame; dragging it moves the box and keeps its rotation.
+    let from = on_box(&x, x.w / 4.0, x.h + 1.0);
+    assert_eq!(s.hit_test(deckcraft_geom::Point::new(from.0, from.1), 3.0), Some(tools::Hit::Frame { id: sid }));
+    let down = drag_gesture(&mut s, from, (from.0 + 25.0, from.1 - 10.0));
+    assert_eq!(down["hit"]["kind"], "frame");
+    let moved = text_box_xfrm(&s, id);
+    assert!((moved.x - (x.x + 25.0)).abs() < 1e-9 && (moved.y - (x.y - 10.0)).abs() < 1e-9, "{moved:?}");
+    assert_eq!(moved.rot, 30.0);
+    // Inside the rotated box, pressing still places the caret.
+    s.execute("text.edit", &json!({"id": id, "at": [0, 0]})).unwrap();
+    let mx = text_box_xfrm(&s, id);
+    let (px, py) = on_box(&mx, mx.w / 2.0, mx.h / 2.0);
+    let r = s.pointer(PointerEvent { kind: PointerKind::Down, x: px, y: py, mods: Mods::default(), tol: 3.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Up, x: px, y: py, mods: Mods::default(), tol: 3.0 }).unwrap();
+    assert!(r.get("caret").is_some(), "{r}");
+    assert_eq!(text_box_xfrm(&s, id), mx);
+    // Inside the axis-aligned bounds but off the rotated box: neither text nor frame, so a press
+    // there leaves editing instead of moving the caret.
+    let off = on_box(&mx, mx.w / 2.0, -mx.h);
+    let off_pt = deckcraft_geom::Point::new(off.0, off.1);
+    assert!(mx.bounds().contains(off_pt));
+    assert_ne!(s.hit_test(off_pt, 3.0), Some(tools::Hit::Frame { id: sid }));
+    let r = s.pointer(PointerEvent { kind: PointerKind::Down, x: off.0, y: off.1, mods: Mods::default(), tol: 3.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Up, x: off.0, y: off.1, mods: Mods::default(), tol: 3.0 }).unwrap();
+    assert!(r.get("caret").is_none(), "{r}");
+    assert!(s.doc().unwrap().selection.text.is_none());
+    assert_eq!(text_box_xfrm(&s, id), mx);
+}
+
+#[test]
+fn resize_handles_beat_the_frame_of_edited_text() {
+    let (mut s, id, x) = editing_text_box(0.0);
+    // The SE corner lies in the frame band, but its handle wins.
+    let from = on_box(&x, x.w, x.h);
+    let down = drag_gesture(&mut s, from, (from.0 + 40.0, from.1));
+    assert_eq!(down["hit"]["kind"], "resize");
+    let sized = text_box_xfrm(&s, id);
+    assert!((sized.w - (x.w + 40.0)).abs() < 1e-9, "{sized:?}");
+    assert_eq!((sized.x, sized.y), (x.x, x.y));
+}
