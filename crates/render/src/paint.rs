@@ -37,6 +37,41 @@ pub fn fill_path(
             }
             let stops: Vec<(f64, Rgba)> = g.stops.iter().map(|s| (s.pos, shade(rctx.color(&s.color, ph), mode))).collect();
             ctx.set_paint(gradient(&g.shape, stops, bounds, alpha));
+
+            let mut stops: Vec<(f64, Rgba)> = g.stops.iter().map(|s| (s.pos.clamp(0.0, 1.0), shade(rctx.color(&s.color, ph), mode))).collect();
+            stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+            // Rectangle and outline paths: rasterised (see `pathgrad`).
+            if let GradientShape::Path { path: kind, focus } = &g.shape
+                && matches!(kind.as_str(), "rect" | "shape")
+            {
+                crate::pathgrad::fill(ctx, kind, *focus, &crate::ramp::expand(&stops), bounds, path, m, alpha);
+                return;
+            }
+            // PowerPoint's ramp between stops (linear light, S-shaped), see `ramp`.
+            let stops: Vec<peniko::ColorStop> =
+                crate::ramp::expand(&stops).into_iter().map(|(o, c)| peniko::ColorStop { offset: o as f32, color: color(c, alpha).into() }).collect();
+            let grad = match &g.shape {
+                GradientShape::Linear { angle, .. } => {
+                    // Angle measured clockwise from left→right; span the bounds along that direction.
+                    let a = angle.to_radians();
+                    let (dx, dy) = (a.cos(), a.sin());
+                    let c = bounds.center();
+                    let half = (bounds.width() * dx.abs() + bounds.height() * dy.abs()) / 2.0;
+                    peniko::Gradient::new_linear(Point::new(c.x - dx * half, c.y - dy * half), Point::new(c.x + dx * half, c.y + dy * half))
+                        .with_stops(stops.as_slice())
+                }
+                GradientShape::Path { focus, .. } => {
+                    let fx = bounds.x0 + bounds.width() * (focus[0] + (1.0 - focus[2])) / 2.0;
+                    let fy = bounds.y0 + bounds.height() * (focus[1] + (1.0 - focus[3])) / 2.0;
+                    // Reach the farthest corner, so a gradient from a corner covers the whole box.
+                    let r = [(bounds.x0, bounds.y0), (bounds.x1, bounds.y0), (bounds.x0, bounds.y1), (bounds.x1, bounds.y1)]
+                        .iter()
+                        .map(|(x, y)| ((x - fx).powi(2) + (y - fy).powi(2)).sqrt())
+                        .fold(1e-6, f64::max);
+                    peniko::Gradient::new_radial(Point::new(fx, fy), r as f32).with_stops(stops.as_slice())
+                }
+            };
+            ctx.set_paint(grad);
             ctx.fill_path(path);
         }
         Fill::Picture(pf) => {

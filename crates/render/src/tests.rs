@@ -820,3 +820,29 @@ fn compound_lines_draw_their_bands() {
     let tri = runs(Compound::Triple);
     assert!(close(tri.clone(), &[4.0, 8.0, 4.0]), "{tri:?}");
 }
+
+#[test]
+fn rect_path_gradients_draw_x_shaped_contours() {
+    // path="rect" from the centre, black to grey to white (linear): PowerPoint's colour position is
+    // the larger axis share, so 20 pt right of centre in a 280x200 box is 1/7 and 20 pt down 1/5.
+    use deckcraft_model::style::{Fill, Gradient, GradientShape, GradientStop};
+    let stop = |pos, v| GradientStop { pos, color: ColorRef::rgb(deckcraft_color::Rgba::rgb(v, v, v)) };
+    let sh = Shape {
+        id: ShapeId(770),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 280.0, 200.0)),
+        fill: Some(Fill::Gradient(Gradient {
+            stops: vec![stop(0.0, 0), stop(0.5, 128), stop(1.0, 255)],
+            shape: GradientShape::Path { path: "rect".into(), focus: [0.5, 0.5, 0.5, 0.5] },
+            rotate_with_shape: true,
+        })),
+        line: Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let v = |x: u32, y: u32| img.pixel(x, y)[0] as f64;
+    assert!((v(160, 100) - 255.0 / 7.0).abs() < 6.0, "{}", v(160, 100));
+    assert!((v(140, 120) - 51.0).abs() < 6.0, "{}", v(140, 120));
+    // Along the diagonal to a corner the colour follows the vertical share.
+    assert!((v(168, 120) - 51.0).abs() < 6.0, "{}", v(168, 120));
+}
