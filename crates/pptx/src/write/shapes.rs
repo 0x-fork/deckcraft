@@ -380,7 +380,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             }
             w.close("p:grpSp");
         }
-        ShapeKind::Opaque { xml, preview, label } => opaque(w, x, o, cx, s, xml, *preview, label),
+        ShapeKind::Opaque { xml, preview, label, parts } => opaque(w, x, o, cx, s, xml, *preview, label, parts),
     }
 }
 
@@ -612,13 +612,31 @@ fn media(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, m: &deckcraft_
 }
 
 #[allow(clippy::too_many_arguments)]
-fn opaque(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, xml: &str, preview: Option<deckcraft_model::MediaId>, label: &str) {
-    // Kept XML that references no relationships can be written back as it was.
+fn opaque(
+    w: &mut W,
+    x: &mut Exp,
+    o: &mut Out,
+    cx: &mut Ctx,
+    s: &Shape,
+    xml: &str,
+    preview: Option<deckcraft_model::MediaId>,
+    label: &str,
+    parts: &[(String, String, deckcraft_model::MediaId)],
+) {
+    // Kept XML is written back as it was when every part it references was kept too, with those
+    // parts re-added under this slide's relationship ids.
     if let Ok(doc) = crate::xml::parse(xml.as_bytes())
-        && !crate::read::has_rel_refs(&doc.root)
         && matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
+        && let Some(ids) = crate::read::rel_refs(&doc.root)
+            .iter()
+            .map(|r| {
+                let (_, kind, m) = parts.iter().find(|(id, ..)| id == r)?;
+                Some((r.clone(), x.media_rel(o, *m, kind)?))
+            })
+            .collect::<Option<std::collections::HashMap<_, _>>>()
     {
         let mut root = doc.root;
+        set_rel_ids(&mut root, &ids, 0);
         let id = cx.id_for(s);
         set_cnvpr_id(&mut root, id);
         w.raw(&root.to_xml());
@@ -665,6 +683,22 @@ fn shape_with_id(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, i
         w.close("p:pic");
     } else {
         shape(w, x, o, cx, s, 0);
+    }
+}
+
+fn set_rel_ids(e: &mut crate::xml::El, ids: &std::collections::HashMap<String, String>, depth: usize) {
+    if depth > crate::xml::MAX_DEPTH {
+        return;
+    }
+    for (k, v) in &mut e.attrs {
+        if crate::read::is_rel_attr(k, v)
+            && let Some(new) = ids.get(v.as_str())
+        {
+            v.clone_from(new);
+        }
+    }
+    for c in e.elements_mut() {
+        set_rel_ids(c, ids, depth + 1);
     }
 }
 
