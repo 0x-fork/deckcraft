@@ -432,6 +432,8 @@ pub fn ppr(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, level: Option<u8>, p:
         .o("defTabSz", p.default_tab.map(|v| emu(v).max(0)))
         .b("rtl", p.rtl)
         .b("eaLnBrk", p.east_asian_line_break)
+        .b("latinLnBrk", p.latin_line_break)
+        .b("hangingPunct", p.hanging_punct)
         .o("fontAlgn", p.font_align.as_deref().filter(|f| matches!(*f, "auto" | "t" | "ctr" | "base" | "b")));
     let has_kids = p.line_spacing.is_some()
         || p.space_before.is_some()

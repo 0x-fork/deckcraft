@@ -345,6 +345,8 @@ pub fn ppr(imp: &mut Imp, part: &Part, p: &El) -> (Option<u8>, ParaProps, Option
         rtl: p.bool("rtl"),
         font_align: p.attr("fontAlgn").map(String::from),
         east_asian_line_break: p.bool("eaLnBrk"),
+        latin_line_break: p.bool("latinLnBrk"),
+        hanging_punct: p.bool("hangingPunct"),
         default_tab: pt(p, "defTabSz"),
         ..Default::default()
     };

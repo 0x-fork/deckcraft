@@ -766,3 +766,17 @@ fn a_picture_duotone_round_trips() {
     assert!(matches!(d.base, deckcraft_model::ColorBase::Scheme { slot: SchemeSlot::Accent1 }));
     assert!(matches!(l.base, deckcraft_model::ColorBase::Rgb { rgb } if rgb == Rgba::rgb(250, 240, 200)));
 }
+
+#[test]
+fn line_break_options_round_trip() {
+    let mut p = defaults::new_presentation(None);
+    let first = p.slides[0].id;
+    let s = p.slide_mut(first).expect("slide");
+    let t = s.shapes[0].text.insert(TextBody::from_text("x"));
+    t.paragraphs[0].props.latin_line_break = Some(true);
+    t.paragraphs[0].props.hanging_punct = Some(false);
+    let q = round(&p);
+    let props = &q.slides[0].shapes[0].text.as_ref().expect("text").paragraphs[0].props;
+    assert_eq!(props.latin_line_break, Some(true));
+    assert_eq!(props.hanging_punct, Some(false));
+}

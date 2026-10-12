@@ -223,6 +223,10 @@ pub struct ParaProps {
     pub rtl: Option<bool>,
     pub font_align: Option<String>,
     pub east_asian_line_break: Option<bool>,
+    /// `latinLnBrk`: Latin words may break inside (after `/`, `\`); off by default.
+    pub latin_line_break: Option<bool>,
+    /// `hangingPunct`: closing East Asian punctuation may hang past the end of a line.
+    pub hanging_punct: Option<bool>,
 }
 
 impl ParaProps {
@@ -253,6 +257,8 @@ impl ParaProps {
             self.font_align.clone_from(&p.font_align);
         }
         self.east_asian_line_break = self.east_asian_line_break.or(p.east_asian_line_break);
+        self.latin_line_break = self.latin_line_break.or(p.latin_line_break);
+        self.hanging_punct = self.hanging_punct.or(p.hanging_punct);
     }
 }
 

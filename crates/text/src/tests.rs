@@ -520,3 +520,66 @@ fn single_spaced_lines_are_1_2_times_the_size_apart_whatever_the_font() {
         assert!((first.baseline - first.top - size * LINE_PITCH * face.line_split).abs() < 1e-6);
     }
 }
+
+/// The lines of `text` in an Arial-free (whatever face resolves) box `w` wide, as strings.
+fn wrapped(text: &str, w: f64, set: impl Fn(&mut ParaProps)) -> Vec<String> {
+    let (p, mut sh) = bidi_setup(vec![Run::new(text)], w, false, Align::Left);
+    let t = sh.text.as_mut().unwrap();
+    t.body.inset_l = Some(0.0);
+    t.body.inset_r = Some(0.0);
+    set(&mut t.paragraphs[0].props);
+    let l = lay(&p, &sh, w, 600.0);
+    let chars: Vec<char> = text.chars().collect();
+    l.lines.iter().map(|li| chars[li.start..li.end].iter().collect()).collect()
+}
+
+/// Width of `text` on one line.
+fn one_line(text: &str) -> f64 {
+    let (p, sh) = bidi_setup(vec![Run::new(text)], 5000.0, false, Align::Left);
+    let l = lay(&p, &sh, 5000.0, 300.0);
+    l.lines[0].caret_x.last().unwrap() - l.lines[0].caret_x[0]
+}
+
+#[test]
+fn a_word_does_not_break_after_a_slash_or_backslash() {
+    // PowerPoint (latinLnBrk off, its default) keeps "alpha/beta/gamma" whole and only breaks it
+    // where it no longer fits; Unicode line breaking would allow a break after each slash.
+    for sep in ["/", "\\"] {
+        let text = ["alpha", "beta", "gamma", "delta", "epsilon"].join(sep);
+        let w = one_line(&text) * 0.6;
+        let lines = wrapped(&text, w, |_| {});
+        assert!(lines.len() >= 2, "{lines:?}");
+        assert!(lines[0].chars().count() > "alpha/beta".len(), "filled to the edge, not cut at a separator: {lines:?}");
+    }
+    // latinLnBrk on: Unicode's break after a slash is allowed again.
+    let text = "alpha/beta/gamma/delta/epsilon";
+    let lines = wrapped(text, one_line(text) * 0.6, |p| p.latin_line_break = Some(true));
+    assert!(lines[0].ends_with('/'), "{lines:?}");
+    // A slash followed by a space still breaks, and hyphens still break.
+    let lines = wrapped("alpha-beta-gamma-delta-epsilon", one_line("alpha-beta-gamma-") + 1.0, |_| {});
+    assert_eq!(lines[0], "alpha-beta-gamma-");
+}
+
+#[test]
+fn korean_wraps_between_words() {
+    let text = "한국어 안녕하세요 반갑습니다 감사합니다";
+    let w = one_line("한국어 안녕하세요 반") + 0.5;
+    let lines = wrapped(text, w, |_| {});
+    assert_eq!(lines.iter().map(|l| l.trim_end()).collect::<Vec<_>>(), ["한국어 안녕하세요", "반갑습니다", "감사합니다"], "{lines:?}");
+    // Japanese and Chinese still break between characters.
+    let lines = wrapped("日本語の文章は空白なしで続きます", one_line("日本語の文章") + 0.5, |_| {});
+    assert_eq!(lines[0], "日本語の文章");
+}
+
+#[test]
+fn closing_punctuation_hangs_past_the_end_with_hanging_punct() {
+    // PowerPoint (hangingPunct on, as its default text styles set it) lets "。" hang past the
+    // edge instead of pulling the character before it onto the next line.
+    let text = "白なしで続きます。句読点も含めて。";
+    let w = one_line("白なしで続きます") + 0.5;
+    let lines = wrapped(text, w, |p| p.hanging_punct = Some(true));
+    assert_eq!(lines[0], "白なしで続きます。", "{lines:?}");
+    // Without it, "。" can't start a line, so "す。" moves down together.
+    let lines = wrapped(text, w, |p| p.hanging_punct = Some(false));
+    assert_eq!(lines[0], "白なしで続きま", "{lines:?}");
+}

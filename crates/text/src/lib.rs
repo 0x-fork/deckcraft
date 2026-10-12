@@ -718,8 +718,44 @@ fn line_metrics(face: &FontFace, size: f64) -> (f64, f64) {
     (h * face.line_split, h * (1.0 - face.line_split))
 }
 
-/// Break opportunities: allowed[i] = a line may start at char i.
-fn break_opportunities(text: &str) -> (Vec<bool>, Vec<bool>) {
+/// Hangul syllables and jamo: PowerPoint wraps Korean at word boundaries (spaces), not between
+/// syllables.
+fn is_hangul(c: char) -> bool {
+    matches!(c, '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}' | '\u{A960}'..='\u{A97F}' | '\u{AC00}'..='\u{D7FF}')
+}
+
+/// Closing East Asian punctuation that may hang past the end of a line (`hangingPunct`).
+fn is_hanging_punct(c: char) -> bool {
+    matches!(
+        c,
+        '、' | '。'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '！'
+            | '？'
+            | '）'
+            | '」'
+            | '』'
+            | '】'
+            | '〕'
+            | '〉'
+            | '》'
+            | '〙'
+            | '〛'
+            | '｝'
+            | '］'
+            | '｣'
+            | '､'
+            | '｡'
+    )
+}
+
+/// Break opportunities: allowed[i] = a line may start at char i. Unicode line breaking, then
+/// PowerPoint's differences: without `latinLnBrk` a word doesn't break after `/` or `\`, and
+/// Korean breaks only between words.
+fn break_opportunities(text: &str, latin_break: bool) -> (Vec<bool>, Vec<bool>) {
     let n = text.chars().count();
     let mut allowed = vec![false; n + 1];
     let mut mandatory = vec![false; n + 1];
@@ -738,6 +774,17 @@ fn break_opportunities(text: &str) -> (Vec<bool>, Vec<bool>) {
             {
                 *m = true;
             }
+        }
+    }
+    let chars: Vec<char> = text.chars().collect();
+    for (i, w) in chars.windows(2).enumerate() {
+        let (prev, next) = (w[0], w[1]);
+        let keep = if is_hangul(prev) && is_hangul(next) { false } else { latin_break || !matches!(prev, '/' | '\\') || next.is_whitespace() };
+        if !keep
+            && !mandatory.get(i + 1).copied().unwrap_or(false)
+            && let Some(a) = allowed.get_mut(i + 1)
+        {
+            *a = false;
         }
     }
     (allowed, mandatory)
@@ -761,7 +808,8 @@ fn break_lines(
     x0_rest: f64,
 ) -> Vec<RawLine> {
     let text: String = p.cells.iter().map(|c| c.ch).collect();
-    let (allowed, _) = break_opportunities(&text);
+    let (allowed, _) = break_opportunities(&text, p.props.latin_line_break.unwrap_or(false));
+    let hang = p.props.hanging_punct.unwrap_or(false);
     let n = p.cells.len();
     let mut lines = vec![];
     let mut start = 0;
@@ -787,6 +835,13 @@ fn break_lines(
             let breakable = |j: usize| p.cells.get(j).is_none_or(|c| c.breakable(j));
             if i > start && allowed.get(i).copied().unwrap_or(false) && breakable(i) {
                 last_break = Some(i);
+            }
+            // Closing East Asian punctuation hangs past the end instead of wrapping
+            // (`hangingPunct`); the line breaks after it.
+            if wrap && hang && x + adv > avail + 0.01 && x <= avail + 0.01 && is_hanging_punct(c) && i > start {
+                end = i + 1;
+                next = i + 1;
+                break;
             }
             if wrap && x + adv > avail + 0.01 && !c.is_whitespace() && i > start {
                 // Break at the last opportunity, or force mid-word (between clusters).
