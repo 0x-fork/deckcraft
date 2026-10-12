@@ -793,11 +793,14 @@ impl Renderer {
             ctx.push_clip_layer(&outline);
             let c = rctx.color(&sh.color, fx_ph);
             let d = Vec2::new(sh.dir.to_radians().cos(), sh.dir.to_radians().sin()) * sh.dist;
-            ctx.push_layer(None, None, None, None, Some(blur(sh.blur * 0.5 * scale_of(m))));
+            // As PowerPoint draws it (measured on its export): the shadow falls inside along the
+            // edges it points to (45 degrees: the bottom and right), blurred by a third of the
+            // blur radius.
+            ctx.push_layer(None, None, None, None, Some(blur(sh.blur / 3.0 * scale_of(m))));
             ctx.set_paint(color(c, 1.0));
             let mut ring = Rect::new(0.0, 0.0, w, h).inflate(w.max(h), w.max(h)).to_path(0.1);
             let mut hole = outline.clone();
-            hole.apply_affine(Affine::translate(d));
+            hole.apply_affine(Affine::translate(-d));
             ring.extend(hole.iter());
             ctx.set_fill_rule(peniko::Fill::EvenOdd);
             ctx.fill_path(&ring);
@@ -868,7 +871,8 @@ impl Renderer {
             // Shadow offset is in slide space (doesn't rotate with the shape unless asked).
             let sm = if sh.rotate_with_shape { m * Affine::translate(d) * local } else { pre_translate(m, d * k) * local };
             ctx.set_transform(Affine::IDENTITY);
-            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur * 0.5 * k)));
+            // Blurred by a third of the blur radius, as PowerPoint's export shows.
+            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur / 3.0 * k)));
             ctx.set_transform(sm);
             ctx.set_paint(color(c.with_alpha(255), 1.0));
             ctx.fill_path(&silhouette);
@@ -877,10 +881,12 @@ impl Renderer {
         if let Some(g) = &e.glow {
             let c = rctx.color(&g.color, ph);
             ctx.set_transform(Affine::IDENTITY);
-            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(g.radius * 0.35 * k)));
+            // Measured on PowerPoint's export: a glow of radius r is half strength about half of r
+            // out from the outline and gone by r.
+            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(g.radius * 0.17 * k)));
             ctx.set_transform(m);
             ctx.set_paint(color(c.with_alpha(255), 1.0));
-            ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 1.2).with_join(kurbo::Join::Round));
+            ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 0.95).with_join(kurbo::Join::Round));
             ctx.stroke_path(&silhouette);
             ctx.fill_path(&silhouette);
             ctx.pop_layer();

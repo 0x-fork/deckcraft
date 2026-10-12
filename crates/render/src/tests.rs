@@ -119,9 +119,10 @@ fn effects_tables_charts_render() {
     all.extend(charts);
     let p = deck_with(all);
     let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
-    // Shadow darkens below-right of the shape.
-    let px = img.pixel(258, 156);
-    assert!(px[0] < 250, "{px:?}");
+    // Shadow darkens below-right of the shape (grey, past the glow), blurred by a third of its
+    // 8 pt blur radius.
+    let px = img.pixel(255, 155);
+    assert!(px[0] < 240 && px[0] == px[2], "{px:?}");
 }
 
 #[test]
@@ -930,4 +931,66 @@ fn a_table_fill_shows_behind_cells_without_their_own() {
     let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
     assert_eq!(img.pixel(150, 160)[..3], [0, 112, 192]);
     assert_eq!(img.pixel(50, 50)[..3], [255, 255, 255]);
+}
+
+/// A white 280x200 pt rectangle at (20, 20) with `effects`, rendered at 1 px/pt.
+fn effect_box(effects: deckcraft_model::Effects) -> Image {
+    use deckcraft_model::style::{Fill, Line};
+    let sh = Shape {
+        id: ShapeId(800),
+        xfrm: Some(Xfrm::new(20.0, 20.0, 280.0, 200.0)),
+        fill: Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255)))),
+        line: Some(Line { fill: Some(Fill::None), ..Default::default() }),
+        effects: Some(effects),
+        ..Default::default()
+    };
+    render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+}
+
+fn shadow(blur: f64, dist: f64, dir: f64) -> deckcraft_model::style::Shadow {
+    deckcraft_model::style::Shadow {
+        color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0)),
+        blur,
+        dist,
+        dir,
+        inner: false,
+        sx: 1.0,
+        sy: 1.0,
+        kx: 0.0,
+        ky: 0.0,
+        align: String::new(),
+        rotate_with_shape: false,
+    }
+}
+
+#[test]
+fn shadows_and_glows_spread_like_powerpoints() {
+    let red = |img: &Image, x: u32, y: u32| img.pixel(x, y)[0] as i32;
+    // Outer shadow, 9 pt blur, no offset: PowerPoint's export reads 144, 204, 238 at 1, 3 and 5
+    // px outside the left edge.
+    let img = effect_box(deckcraft_model::Effects { outer_shadow: Some(shadow(9.0, 0.0, 0.0)), ..Default::default() });
+    for (d, want) in [(1, 144), (3, 204), (5, 238)] {
+        assert!((red(&img, 20 - d, 120) - want).abs() <= 6, "outer {d}: {}", red(&img, 20 - d, 120));
+    }
+    // Inner shadow pointing down-right (45 degrees): it falls inside along the bottom and right
+    // edges, not the top and left.
+    let mut sh = shadow(0.0, 10.0, 45.0);
+    sh.inner = true;
+    let img = effect_box(deckcraft_model::Effects { inner_shadow: Some(sh), ..Default::default() });
+    assert!(red(&img, 296, 120) < 20, "right edge {}", red(&img, 296, 120));
+    assert!(red(&img, 160, 216) < 20, "bottom edge {}", red(&img, 160, 216));
+    assert!(red(&img, 24, 120) > 250 && red(&img, 160, 24) > 250, "top and left stay clear");
+    // Inner shadow with a 9 pt blur and no offset: the same profile as the outer one, inside.
+    let mut sh = shadow(9.0, 0.0, 0.0);
+    sh.inner = true;
+    let img = effect_box(deckcraft_model::Effects { inner_shadow: Some(sh), ..Default::default() });
+    for (d, want) in [(0, 144), (2, 204), (4, 238)] {
+        assert!((red(&img, 20 + d, 120) - want).abs() <= 6, "inner {d}: {}", red(&img, 20 + d, 120));
+    }
+    // Glow of radius 10 pt: nearly solid 1 px out, about half strength 5 px out, gone by 10.
+    let glow = deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0)), radius: 10.0 };
+    let img = effect_box(deckcraft_model::Effects { glow: Some(glow), ..Default::default() });
+    assert!(red(&img, 19, 120) < 20);
+    assert!((60..170).contains(&red(&img, 15, 120)), "{}", red(&img, 15, 120));
+    assert!(red(&img, 10, 120) > 245);
 }
