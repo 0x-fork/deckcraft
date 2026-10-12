@@ -245,7 +245,14 @@ fn make_style(ctx: &Ctx, r: &RunProps, scale: f64, prompt: Option<Rgba>) -> Styl
     let size = (r.size.unwrap_or(18.0) * scale).clamp(0.5, 4000.0);
     let (mut color, alpha, gradient) = match &r.fill {
         Some(Fill::Solid { color }) => (ctx.color(color, None), color.alpha(), None),
-        Some(Fill::Gradient(g)) => (g.stops.first().map(|s| ctx.color(&s.color, None)).unwrap_or(Rgba::BLACK), 1.0, Some(g.clone())),
+        Some(Fill::Gradient(g)) => {
+            // Colours resolved here (theme, colour map), so the renderer needs no colour scheme.
+            let mut g = g.clone();
+            for s in &mut g.stops {
+                s.color = deckcraft_model::ColorRef::rgb(ctx.color(&s.color, None));
+            }
+            (g.stops.first().map(|s| ctx.color(&s.color, None)).unwrap_or(Rgba::BLACK), 1.0, Some(g))
+        }
         Some(Fill::None) => (Rgba::TRANSPARENT, 0.0, None),
         _ => (resolve::text_color(ctx, r), 1.0, None),
     };

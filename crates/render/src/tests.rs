@@ -658,3 +658,46 @@ fn colour_glyphs_paint_their_layers() {
     // The text-colour glyph is as big as the other square.
     assert!((green as f64 / (red + blue) as f64 - 1.0).abs() < 0.1, "green {green} vs {}", red + blue);
 }
+
+#[test]
+fn a_text_gradient_starts_over_on_every_line() {
+    // PowerPoint fills each line of gradient text with the whole gradient, spanning that line
+    // (black at the top of every line to white at its bottom), not the text box.
+    use deckcraft_model::style::{Fill, Gradient, GradientShape, GradientStop};
+    let stop = |pos, v| GradientStop { pos, color: ColorRef::rgb(deckcraft_color::Rgba::rgb(v, v, v)) };
+    let mut sh = Shape { id: ShapeId(730), xfrm: Some(Xfrm::new(0.0, 0.0, 600.0, 500.0)), text_box: true, ..Default::default() };
+    let mut t = TextBody::from_text("HHHH\nHHHH");
+    for p in &mut t.paragraphs {
+        let props = &mut p.runs[0].props;
+        props.size = Some(80.0);
+        props.fill = Some(Fill::Gradient(Gradient {
+            stops: vec![stop(0.0, 0), stop(1.0, 255)],
+            shape: GradientShape::Linear { angle: 90.0, scaled: false },
+            rotate_with_shape: true,
+        }));
+    }
+    sh.text = Some(t);
+    let p = deck_with(vec![sh]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    // Ink rows (any pixel not white), grouped into the two lines.
+    let ink = |y: u32| (0..600).any(|x| img.pixel(x, y)[0] < 250);
+    let mut bands: Vec<(u32, u32)> = vec![];
+    for y in 0..500 {
+        if ink(y) {
+            match bands.last_mut() {
+                Some(b) if b.1 + 1 == y => b.1 = y,
+                _ => bands.push((y, y)),
+            }
+        }
+    }
+    assert_eq!(bands.len(), 2, "{bands:?}");
+    // The darkest ink in the first rows of each line.
+    let top = |b: (u32, u32)| (b.0..b.0 + 6).flat_map(|y| (0..600).map(move |x| (x, y))).map(|(x, y)| img.pixel(x, y)[0]).min().unwrap();
+    let (a, b) = (top(bands[0]), top(bands[1]));
+    assert!(a < 140 && (a as i32 - b as i32).abs() < 25, "line tops {a} and {b}: the second line starts dark again");
+    // ...and each line ends light.
+    let bottom = |b: (u32, u32)| (b.1 - 5..=b.1).flat_map(|y| (0..600).map(move |x| (x, y))).map(|(x, y)| img.pixel(x, y)[0]).min().unwrap();
+    for band in bands {
+        assert!(bottom(band) > 150, "line {band:?} ends at {}", bottom(band));
+    }
+}

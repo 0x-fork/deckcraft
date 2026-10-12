@@ -1133,8 +1133,24 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
             continue;
         }
         let m = m * Affine::translate(ps.offset);
+        // A gradient fill starts over on every line and spans that line's text (from its top to
+        // its bottom, from its first to its last character), as in PowerPoint.
+        let mut grads: Vec<(usize, peniko::Gradient)> = Vec::new();
         for (gid, x, y) in &run.glyphs {
-            draw_glyph(ctx, run, *gid, m * Affine::translate((*x, *y)), ps.opacity);
+            let at = m * Affine::translate((*x, *y));
+            let Some(g) = run.gradient.as_ref().filter(|g| !g.stops.is_empty()) else {
+                draw_glyph(ctx, run, *gid, at, ps.opacity);
+                continue;
+            };
+            let li = line_at(l, run.para, *y);
+            if !grads.iter().any(|(i, _)| *i == li) {
+                let scheme = deckcraft_color::ColorScheme { name: String::new(), colors: [Rgba::BLACK; 12] };
+                let stops = g.stops.iter().map(|s| (s.pos, s.color.resolve(&scheme, None))).collect();
+                let bounds = l.lines.get(li).and_then(line_bounds).unwrap_or(tr);
+                grads.push((li, paint::gradient(&g.shape, stops, bounds, run.alpha * ps.opacity)));
+            }
+            let fill = grads.iter().find(|(i, _)| *i == li).map(|(_, g)| (g, Affine::translate((-*x, -*y))));
+            draw_glyph_with(ctx, run, *gid, at, ps.opacity, fill);
         }
     }
     for d in l.decos.iter().filter(|d| !d.behind) {
@@ -1142,8 +1158,39 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
     }
 }
 
+/// The line of paragraph `para` holding a glyph on baseline `y` (the nearest baseline).
+fn line_at(l: &deckcraft_text::TextLayout, para: usize, y: f64) -> usize {
+    l.lines
+        .iter()
+        .enumerate()
+        .filter(|(_, li)| li.para == para)
+        .min_by(|a, b| (a.1.baseline - y).abs().total_cmp(&(b.1.baseline - y).abs()))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+/// The box a line's text covers: its top and bottom, its first and last caret.
+fn line_bounds(li: &deckcraft_text::LineInfo) -> Option<Rect> {
+    let (x0, x1) = li.caret_x.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(*x), b.max(*x)));
+    let r = Rect::new(x0, li.top, x1, li.bottom);
+    (r.is_finite() && r.width() > 0.0 && r.height() > 0.0).then_some(r)
+}
+
 /// Draw glyph `gid` of `run` with its origin (on the baseline) mapped by `at`, faded by `opacity`.
 pub(crate) fn draw_glyph(ctx: &mut RenderContext, run: &deckcraft_text::GlyphRun, gid: u32, at: Affine, opacity: f64) {
+    draw_glyph_with(ctx, run, gid, at, opacity, None);
+}
+
+/// [`draw_glyph`], filled with `fill` (a gradient laid out in the text's space, and the map from
+/// the glyph's origin to that space) instead of the run's colour.
+fn draw_glyph_with(
+    ctx: &mut RenderContext,
+    run: &deckcraft_text::GlyphRun,
+    gid: u32,
+    at: Affine,
+    opacity: f64,
+    fill: Option<(&peniko::Gradient, Affine)>,
+) {
     let alpha = run.alpha * opacity;
     if (alpha <= 0.0 || run.color.a == 0) && run.outline.is_none() {
         return;
@@ -1160,7 +1207,14 @@ pub(crate) fn draw_glyph(ctx: &mut RenderContext, run: &deckcraft_text::GlyphRun
     }
     let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
     ctx.set_transform(at * skew * Affine::scale(k));
-    if alpha > 0.0 && run.color.a > 0 {
+    if let Some((g, to_text)) = fill
+        && alpha > 0.0
+    {
+        ctx.set_paint(g.clone());
+        ctx.set_paint_transform((skew * Affine::scale(k)).inverse() * to_text);
+        ctx.fill_path(&path);
+        ctx.reset_paint_transform();
+    } else if alpha > 0.0 && run.color.a > 0 {
         ctx.set_paint(color(run.color, alpha));
         ctx.fill_path(&path);
         if run.fake_bold {
