@@ -209,6 +209,8 @@ pub struct SlideApp {
     pub(crate) notes_buf: (u64, usize, String),
     /// Thumbnail pane drag (slide index, current drop index).
     pub(crate) thumb_drag: Option<(usize, usize)>,
+    /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
+    pub(crate) slides_focused: bool,
 }
 
 impl SlideApp {
@@ -244,6 +246,7 @@ impl SlideApp {
             quit_confirmed: false,
             notes_buf: (0, usize::MAX, String::new()),
             thumb_drag: None,
+            slides_focused: false,
         }
     }
 
@@ -363,6 +366,12 @@ impl SlideApp {
             _ => return Err(format!("unknown UI command `{id}`")),
         }
         Ok(Value::Null)
+    }
+
+    /// Whether ⌘A should act on the slide list: always in the sorter, in Normal view once the
+    /// thumbnail pane has been clicked.
+    pub(crate) fn slides_list_focused(&self) -> bool {
+        self.ui.view == ViewMode::Sorter || (self.ui.view == ViewMode::Normal && self.slides_focused)
     }
 
     pub fn start_show(&mut self, from: usize, reading: bool) {
@@ -937,5 +946,47 @@ mod tests {
         let mut app = SlideApp::new(Session::new(), Services::default());
         app.run("app.home", json!({})).unwrap();
         assert!(!app.home_open() && app.home.is_none(), "with nothing open the start screen shows anyway");
+    }
+
+    /// #188: Ctrl/Cmd+A with the slide thumbnail pane focused selects every slide; with the
+    /// canvas focused it still selects shapes.
+    #[test]
+    fn select_all_follows_the_focused_pane() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        for _ in 0..2 {
+            harness.state_mut().run("slide.new", json!({})).unwrap();
+        }
+        harness.state_mut().run("slide.go", json!({"index": 0})).unwrap();
+        harness.run_steps(3);
+        let click = |h: &mut egui_kittest::Harness<'_, SlideApp>, pos: egui::Pos2| {
+            h.event(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            }
+            h.run_steps(2);
+        };
+        // Press in the thumbnail pane, then Cmd+A.
+        let w = harness.state().ui.thumbs_width;
+        click(&mut harness, egui::pos2(w / 2.0, 300.0));
+        assert!(harness.state().slides_focused);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_steps(2);
+        let st = harness.state().session.active().unwrap();
+        assert_eq!(st.selection.slides.len(), 3, "every slide is selected");
+
+        // A press on the canvas moves focus away: Cmd+A selects shapes again.
+        click(&mut harness, egui::pos2(700.0, 400.0));
+        assert!(!harness.state().slides_focused);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        harness.run_steps(2);
+        let st = harness.state().session.active().unwrap();
+        assert!(!st.selection.shapes.is_empty(), "canvas select all picks the shapes");
     }
 }
