@@ -55,6 +55,37 @@ fn shrink_on_overflow() {
 }
 
 #[test]
+fn line_spacing_reduction_comes_off_the_percentage() {
+    // 90 % line spacing and 10 pt before paragraphs, shrunk with a 20 % line spacing reduction:
+    // PowerPoint draws 70 % lines and keeps the 10 pt.
+    let (p, mut sh) = setup("One\nTwo\nThree", 600.0, 400.0);
+    for (i, para) in sh.text.as_mut().unwrap().paragraphs.iter_mut().enumerate() {
+        para.props.line_spacing = Some(Spacing::Pct(0.9));
+        para.props.space_before = Some(Spacing::Pts(10.0));
+        para.props.bullet = Some(Bullet::None);
+        if i == 0 {
+            para.runs[0].text.push_str(" wraps onto a second line because this paragraph is long enough to wrap in a narrow box");
+        }
+    }
+    let ctx = Ctx::for_slide(&p, &p.slides[0]).unwrap();
+    let body = sh.text.clone().unwrap();
+    let bp = resolve::body(&ctx, &sh);
+    let opts = Opts { rect: Rect::new(0.0, 0.0, 200.0, 400.0), fields: &NoFields, prompt_color: None, no_shrink: true };
+    let full = layout_scaled(&ctx, &sh, &body, &bp, &opts, 1.0, 0.0);
+    let reduced = layout_scaled(&ctx, &sh, &body, &bp, &opts, 1.0, 0.2);
+    let pitch = |l: &TextLayout| l.lines[1].top - l.lines[0].top;
+    // Lines within the first paragraph: 0.7 / 0.9 of the full pitch.
+    assert!(full.lines[1].para == 0 && reduced.lines[1].para == 0);
+    assert!((pitch(&reduced) / pitch(&full) - 0.7 / 0.9).abs() < 0.005, "{} {}", pitch(&reduced), pitch(&full));
+    // The space before the next paragraph is the same 10 pt.
+    let gap = |l: &TextLayout| {
+        let k = l.lines.iter().position(|x| x.para == 1).unwrap();
+        l.lines[k].top - l.lines[k - 1].bottom
+    };
+    assert!((gap(&full) - 10.0).abs() < 1e-6 && (gap(&reduced) - 10.0).abs() < 1e-6, "{} {}", gap(&full), gap(&reduced));
+}
+
+#[test]
 fn caret_and_hit_roundtrip() {
     let (p, sh) = setup("Hello world", 600.0, 100.0);
     let l = lay(&p, &sh, 600.0, 100.0);

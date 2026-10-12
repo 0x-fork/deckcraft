@@ -320,10 +320,12 @@ fn face_chain(ctx: &Ctx, st: &Style, slot: FontSlot, script: Option<ScriptTag>) 
     chain
 }
 
-fn spacing_pts(s: Option<Spacing>, size: f64, reduce: f64) -> f64 {
+/// Space before or after a paragraph, points. Shrink-on-overflow's line spacing reduction
+/// doesn't apply to it (PowerPoint keeps it).
+fn spacing_pts(s: Option<Spacing>, size: f64) -> f64 {
     match s {
-        Some(Spacing::Pct(p)) => p * size * 1.2 * (1.0 - reduce),
-        Some(Spacing::Pts(v)) => v * (1.0 - reduce),
+        Some(Spacing::Pct(p)) => p * size * 1.2,
+        Some(Spacing::Pts(v)) => v,
         None => 0.0,
     }
 }
@@ -918,7 +920,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         let first_w = (col_w - first_x - mr).max(1.0);
         let rest_w = (col_w - rest_x - mr).max(1.0);
         let raw = break_lines(p, first_w, rest_w, wrap, &tabs, props.default_tab.unwrap_or(72.0), first_x, rest_x);
-        let before = if pi == 0 { 0.0 } else { spacing_pts(props.space_before, p.lead_size, reduce) };
+        let before = if pi == 0 { 0.0 } else { spacing_pts(props.space_before, p.lead_size) };
         y += before.max(0.0) + prev_after;
         let first_line_idx = all_lines.len();
         for (li, rl) in raw.iter().enumerate() {
@@ -941,7 +943,9 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             }
             let natural = (asc + desc).max(size * 1.0);
             let lh = match props.line_spacing {
-                Some(Spacing::Pct(f)) => natural * f.max(0.0) * (1.0 - reduce),
+                // The reduction comes off the percentage (90 % less 20 % is 70 %), as PowerPoint
+                // applies `lnSpcReduction`.
+                Some(Spacing::Pct(f)) => natural * (f - reduce).max(f * 0.1).max(0.0),
                 Some(Spacing::Pts(v)) => v * (1.0 - reduce),
                 None => natural * (1.0 - reduce),
             };
@@ -1082,7 +1086,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             ));
         }
         out.para_lines.push((first_line_idx, raw.len()));
-        prev_after = spacing_pts(props.space_after, p.lead_size, reduce).max(0.0);
+        prev_after = spacing_pts(props.space_after, p.lead_size).max(0.0);
     }
     let total = y;
     out.content_height = total;
