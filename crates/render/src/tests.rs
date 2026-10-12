@@ -523,3 +523,52 @@ fn hyperlinks_draw_in_the_hyperlink_colour_underlined() {
     let own = px(&run_deck(RunProps { link, fill: red.clone(), ..Default::default() }));
     assert_eq!(diff(&own, &px(&run_deck(RunProps { fill: red, underline: Some("sng".into()), ..Default::default() }))), 0);
 }
+
+#[test]
+fn a_linear_gradient_ramps_like_powerpoint() {
+    // Black to white, left to right: PowerPoint draws 105 a quarter of the way and 186 half way
+    // (linear-light mix, S-shaped), not 64 and 128.
+    use deckcraft_model::style::{Fill, Gradient, GradientShape, GradientStop};
+    let stop = |pos, c| GradientStop { pos, color: ColorRef::rgb(c) };
+    let sh = Shape {
+        id: ShapeId(700),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 800.0, 100.0)),
+        fill: Some(Fill::Gradient(Gradient {
+            stops: vec![stop(0.0, deckcraft_color::Rgba::rgb(0, 0, 0)), stop(1.0, deckcraft_color::Rgba::rgb(255, 255, 255))],
+            shape: GradientShape::Linear { angle: 0.0, scaled: false },
+            rotate_with_shape: true,
+        })),
+        line: Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    for (x, want) in [(200, 105), (400, 186), (600, 238)] {
+        let got = img.pixel(x, 50)[0] as i32;
+        assert!((got - want).abs() <= 4, "x {x}: {got} vs {want}");
+    }
+}
+
+#[test]
+fn a_gradient_with_a_stop_off_the_end_stays_linear() {
+    // Stops at 20 % and 100 %: PowerPoint blends linearly in sRGB (96 at 50 %, 175 at 75 %).
+    use deckcraft_model::style::{Fill, Gradient, GradientShape, GradientStop};
+    let stop = |pos, c| GradientStop { pos, color: ColorRef::rgb(c) };
+    let sh = Shape {
+        id: ShapeId(701),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 800.0, 100.0)),
+        fill: Some(Fill::Gradient(Gradient {
+            stops: vec![stop(0.2, deckcraft_color::Rgba::rgb(0, 0, 0)), stop(1.0, deckcraft_color::Rgba::rgb(255, 255, 255))],
+            shape: GradientShape::Linear { angle: 0.0, scaled: false },
+            rotate_with_shape: true,
+        })),
+        line: Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    for (x, want) in [(400, 96), (600, 175)] {
+        let got = img.pixel(x, 50)[0] as i32;
+        assert!((got - want).abs() <= 4, "x {x}: {got} vs {want}");
+    }
+}

@@ -35,10 +35,11 @@ pub fn fill_path(
             if g.stops.is_empty() {
                 return;
             }
-            let mut stops: Vec<(f32, peniko::Color)> =
-                g.stops.iter().map(|s| (s.pos.clamp(0.0, 1.0) as f32, color(shade(rctx.color(&s.color, ph), mode), alpha))).collect();
+            let mut stops: Vec<(f64, Rgba)> = g.stops.iter().map(|s| (s.pos.clamp(0.0, 1.0), shade(rctx.color(&s.color, ph), mode))).collect();
             stops.sort_by(|a, b| a.0.total_cmp(&b.0));
-            let stops: Vec<peniko::ColorStop> = stops.into_iter().map(|(o, c)| peniko::ColorStop { offset: o, color: c.into() }).collect();
+            // PowerPoint's ramp between stops (linear light, S-shaped), see `ramp`.
+            let stops: Vec<peniko::ColorStop> =
+                crate::ramp::expand(&stops).into_iter().map(|(o, c)| peniko::ColorStop { offset: o as f32, color: color(c, alpha).into() }).collect();
             let grad = match &g.shape {
                 GradientShape::Linear { angle, .. } => {
                     // Angle measured clockwise from left→right; span the bounds along that direction.

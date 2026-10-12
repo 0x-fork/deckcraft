@@ -13,6 +13,7 @@ mod morph_path;
 mod morph_text;
 mod paint;
 mod placed;
+mod ramp;
 mod table;
 
 use std::collections::HashMap;
