@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (gap 3 shrinks to media options and rewind: comment threads round-trip now, #70; 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -19,7 +19,7 @@ revision history.
 |---|---|---|:-:|---|---|
 | 1 | PPTX never tested against a corpus of real decks | File format | B | 20–35 | [file-format-parity.md](file-format-parity.md) |
 | 2 | Data loss and crashes on common paths (#60, #40, #59) | Stability | B | 6–12 | this file |
-| 3 | PPTX round trip drops comment threads, media options, rewind (#70, #74, #77) | File format | B | 3–6 | [file-format-parity.md](file-format-parity.md) |
+| 3 | PPTX round trip drops media options and rewind (#74, #77) | File format | B | 2–4 | [file-format-parity.md](file-format-parity.md) |
 | 4 | SVG pictures don't render (EMF/WMF do) | File format | B | 6–12 | [file-format-parity.md](file-format-parity.md) |
 | 5 | No localization: English only | Localization | B (infra + 5 languages) | 55–90 | [localization-parity.md](localization-parity.md) |
 | 6 | No printing | Feature | B | 5–8 | [file-format-parity.md](file-format-parity.md) |
@@ -68,12 +68,12 @@ Detail in [file-format-parity.md](file-format-parity.md).
   `standards/test-corpora.md`), add import → render → export → re-import checks, have the owner open
   outputs in PowerPoint, fix what breaks. **Beta blocker.**
 
-### Round trip loses comment threads, media playback options and animation rewind (#70, #74, #77)
-- **Evidence:** issues filed 2026-10-10 by an automated reviewer; the writer emits legacy comments
-  only (no `p188` modern comments with replies and resolved state, though the reader understands
-  them); media playback options and the animation rewind flag aren't written back.
-- **Impact:** a deck opened and saved silently loses review state and show behaviour.
-- **Estimate:** 3–6 h. **Beta blocker.**
+### Round trip loses media playback options and animation rewind (#74, #77)
+- **Evidence:** issues filed 2026-10-10 by an automated reviewer; media playback options and the
+  animation rewind flag aren't written back. Comment threads left with #70: the writer now emits
+  the `p188` modern part next to the legacy one.
+- **Impact:** a deck opened and saved silently loses show behaviour.
+- **Estimate:** 2–4 h. **Beta blocker.**
 
 ### SVG pictures don't render
 - **Evidence:** `crates/render/src/images.rs` decodes through `image` 0.25 (PNG, JPEG, WebP, GIF,

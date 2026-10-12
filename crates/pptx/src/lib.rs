@@ -21,6 +21,9 @@ use deckcraft_model::Presentation;
 /// Extension URI of the PowerPoint 2010 section list in `presentation.xml`.
 pub(crate) const SECTION_EXT_URI: &str = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}";
 
+/// Extension URI of the modern-comments anchor in a slide (names the threaded comment part).
+pub(crate) const COMMENTS_EXT_URI: &str = "{6950BFC3-D8DA-4A85-94F7-54DA5524770B}";
+
 #[derive(Debug, thiserror::Error)]
 pub enum PptxError {
     #[error("not a PPTX file: {0}")]
