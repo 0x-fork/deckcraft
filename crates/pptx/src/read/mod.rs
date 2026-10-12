@@ -523,10 +523,16 @@ fn read_layout(imp: &mut Imp, part: &Part, doc: &Doc) -> Layout {
             l.shapes = shapes::sp_tree(imp, part, &mut ctx, tree, 0);
         }
     }
+    l.color_map = color_map_override(root);
     if let Some(ext) = root.child("extLst").filter(|e| !has_rel_refs(e)) {
         l.raw_ext = Some(ext.elements().map(|e| part.keep(e)).collect());
     }
     l
+}
+
+/// A layout's or slide's `clrMapOvr/overrideClrMapping` (None for `masterClrMapping` or none).
+fn color_map_override(root: &El) -> Option<Vec<(String, String)>> {
+    root.child("clrMapOvr")?.child("overrideClrMapping").map(color_map)
 }
 
 fn read_slide(imp: &mut Imp, part: &Part, doc: &Doc, id: SlideId, layout: LayoutId) -> Slide {
@@ -536,6 +542,7 @@ fn read_slide(imp: &mut Imp, part: &Part, doc: &Doc, id: SlideId, layout: Layout
         layout,
         hidden: root.bool("show") == Some(false),
         show_master_shapes: root.bool("showMasterSp").unwrap_or(true),
+        color_map: color_map_override(root),
         ..Default::default()
     };
     let mut ctx = shapes::IdCtx::default();

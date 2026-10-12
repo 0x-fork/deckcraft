@@ -730,3 +730,39 @@ fn date_fields_keep_their_type_and_saved_text() {
         assert_eq!(by_name(&q.slides[0], name).text, by_name(&p.slides[0], name).text, "{name}");
     }
 }
+
+#[test]
+fn colour_map_overrides_round_trip() {
+    let mut p = defaults::new_presentation(None);
+    let dark: Vec<(String, String)> =
+        [("bg1", "dk1"), ("tx1", "lt1"), ("bg2", "dk2"), ("tx2", "lt2")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+    let layout = p.slides[0].layout;
+    std::sync::Arc::make_mut(&mut p.masters[0]).layouts.iter_mut().find(|l| l.id == layout).expect("layout").color_map = Some(dark.clone());
+    let first = p.slides[0].id;
+    p.slide_mut(first).expect("slide").color_map = Some(dark.clone());
+    let q = round(&p);
+    let get = |m: &Option<Vec<(String, String)>>, k: &str| m.as_ref().and_then(|m| m.iter().find(|(a, _)| a == k).map(|(_, v)| v.clone()));
+    let ql = q.masters[0].layouts.iter().find(|l| l.color_map.is_some()).expect("the layout keeps its override");
+    assert_eq!(get(&ql.color_map, "bg1").as_deref(), Some("dk1"));
+    assert_eq!(get(&q.slides[0].color_map, "tx1").as_deref(), Some("lt1"));
+    // Layouts and slides without one keep following the master.
+    assert!(q.masters[0].layouts.iter().filter(|l| l.color_map.is_none()).count() >= 1);
+}
+
+#[test]
+fn a_picture_duotone_round_trips() {
+    let mut p = defaults::new_presentation(None);
+    let img = p.add_media("image1.png", "image/png", png(4, 4, [128, 128, 128]));
+    let mut pic = shape(&mut p, "Duotone", 10.0, 10.0, 100.0, 100.0);
+    let mut pf = PictureFill { media: img, ..Default::default() };
+    pf.adjust.duotone = Some((ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Shade(30000)), ColorRef::rgb(Rgba::rgb(250, 240, 200))));
+    pic.kind = deckcraft_model::ShapeKind::Picture { fill: pf };
+    let first = p.slides[0].id;
+    p.slide_mut(first).expect("slide").shapes.push(pic);
+    let q = round(&p);
+    let sh = by_name(&q.slides[0], "Duotone");
+    let deckcraft_model::ShapeKind::Picture { fill } = &sh.kind else { panic!("picture") };
+    let (d, l) = fill.adjust.duotone.as_ref().expect("duotone kept");
+    assert!(matches!(d.base, deckcraft_model::ColorBase::Scheme { slot: SchemeSlot::Accent1 }));
+    assert!(matches!(l.base, deckcraft_model::ColorBase::Rgb { rgb } if rgb == Rgba::rgb(250, 240, 200)));
+}

@@ -243,6 +243,7 @@ pub fn build_master(size: Size, theme: Theme, first_id: u32) -> (Master, u32) {
             background: None,
             show_master_shapes: true,
             preserve: true,
+            color_map: None,
             raw_ext: None,
         });
     };

@@ -683,7 +683,7 @@ impl Renderer {
                 let bounds = Rect::new(0.0, 0.0, w, h);
                 ctx.push_clip_layer(&outline);
                 let t = f.opts.gif_times.iter().find(|g| g.0 == s.id).map(|g| g.1);
-                paint::picture(ctx, f.pres, pf, bounds, m, t);
+                paint::picture(ctx, f.pres, &paint::resolved(rctx, pf, None), bounds, m, t);
                 ctx.pop_layer();
             }
             ShapeKind::Media(mc) => {

@@ -488,6 +488,10 @@ pub struct Slide {
     /// Speaker notes.
     pub notes: TextBody,
     pub comments: Vec<Comment>,
+    /// `clrMapOvr`: a colour map replacing the layout's or master's (`bg1`→`dk1`…); None follows
+    /// the layout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_map: Option<Vec<(String, String)>>,
     /// Unmodelled XML kept for round-trip (custom data, tags).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
@@ -507,6 +511,7 @@ impl Default for Slide {
             animations: vec![],
             notes: TextBody::default(),
             comments: vec![],
+            color_map: None,
             raw_ext: None,
         }
     }
@@ -596,6 +601,10 @@ pub struct Layout {
     pub background: Option<Background>,
     pub show_master_shapes: bool,
     pub preserve: bool,
+    /// `clrMapOvr`: a colour map replacing the master's for this layout and the slides using it
+    /// (dark "section" layouts map `bg1` to `dk1`); None follows the master.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_map: Option<Vec<(String, String)>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
 }
@@ -641,24 +650,17 @@ impl Master {
     }
     /// Resolve `bg1`/`tx1`/`bg2`/`tx2` through the colour map.
     pub fn map_slot(&self, slot: SchemeSlot) -> SchemeSlot {
-        let key = match slot {
-            SchemeSlot::Bg1 => "bg1",
-            SchemeSlot::Tx1 => "tx1",
-            SchemeSlot::Bg2 => "bg2",
-            SchemeSlot::Tx2 => "tx2",
-            other => return other,
-        };
-        self.color_map.iter().find(|(k, _)| k == key).and_then(|(_, v)| SchemeSlot::from_xml(v)).unwrap_or(match slot {
-            SchemeSlot::Bg1 => SchemeSlot::Lt1,
-            SchemeSlot::Tx1 => SchemeSlot::Dk1,
-            SchemeSlot::Bg2 => SchemeSlot::Lt2,
-            _ => SchemeSlot::Dk2,
-        })
+        map_slot(&self.color_map, slot)
     }
     /// The theme's colour scheme with the colour map applied (`bg1`… resolve to mapped colours).
     pub fn scheme(&self) -> ColorScheme {
+        self.scheme_with(&self.color_map)
+    }
+    /// The theme's colour scheme with `map` (a layout's or slide's override, or the master's own)
+    /// applied.
+    pub fn scheme_with(&self, map: &[(String, String)]) -> ColorScheme {
         let mut s = self.theme.colors.clone();
-        if self.color_map.is_empty() {
+        if map.is_empty() {
             return s;
         }
         let base = self.theme.colors.clone();
@@ -668,10 +670,28 @@ impl Master {
             (SchemeSlot::Bg2, SchemeSlot::Lt2),
             (SchemeSlot::Tx2, SchemeSlot::Dk2),
         ] {
-            s.set(slot, base.get(self.map_slot(alias)));
+            s.set(slot, base.get(map_slot(map, alias)));
         }
         s
     }
+}
+
+/// Resolve `bg1`/`tx1`/`bg2`/`tx2` through the colour map `map` (the default mapping when it has
+/// no entry).
+pub fn map_slot(map: &[(String, String)], slot: SchemeSlot) -> SchemeSlot {
+    let key = match slot {
+        SchemeSlot::Bg1 => "bg1",
+        SchemeSlot::Tx1 => "tx1",
+        SchemeSlot::Bg2 => "bg2",
+        SchemeSlot::Tx2 => "tx2",
+        other => return other,
+    };
+    map.iter().find(|(k, _)| k == key).and_then(|(_, v)| SchemeSlot::from_xml(v)).unwrap_or(match slot {
+        SchemeSlot::Bg1 => SchemeSlot::Lt1,
+        SchemeSlot::Tx1 => SchemeSlot::Dk1,
+        SchemeSlot::Bg2 => SchemeSlot::Lt2,
+        _ => SchemeSlot::Dk2,
+    })
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

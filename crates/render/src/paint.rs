@@ -3,7 +3,7 @@
 use deckcraft_color::Rgba;
 use deckcraft_geom::preset::FillMode;
 use deckcraft_model::resolve::Ctx;
-use deckcraft_model::style::{Fill, GradientShape, PictureFill, PictureMode};
+use deckcraft_model::style::{ColorRef, Fill, GradientShape, PictureFill, PictureMode};
 use deckcraft_model::{PhType, Presentation};
 use kurbo::{Affine, BezPath, Point, Rect, Shape as _};
 use vello_cpu::{RenderContext, peniko};
@@ -65,7 +65,7 @@ pub fn fill_path(
         }
         Fill::Picture(pf) => {
             ctx.push_clip_layer(path);
-            picture(ctx, pres, pf, bounds, m, None);
+            picture(ctx, pres, &resolved(rctx, pf, ph), bounds, m, None);
             ctx.pop_layer();
         }
         Fill::Pattern(p) => {
@@ -119,6 +119,16 @@ fn p_rect(x: f64, y: f64, w: f64, h: f64) -> BezPath {
     Rect::new(x, y, x + w, y + h).to_path(0.1)
 }
 fn p_add(_a: &mut BezPath, _b: &mut BezPath) {}
+
+/// `pf` with its duotone colours resolved to plain RGB against the slide's colours and the
+/// placeholder colour `ph` (theme background pictures recolour with `phClr`), so the decoded-image
+/// cache can apply and key them without a colour scheme.
+pub fn resolved<'a>(rctx: &Ctx, pf: &'a PictureFill, ph: Option<Rgba>) -> std::borrow::Cow<'a, PictureFill> {
+    let Some((d, l)) = &pf.adjust.duotone else { return std::borrow::Cow::Borrowed(pf) };
+    let mut out = pf.clone();
+    out.adjust.duotone = Some((ColorRef::rgb(rctx.color(d, ph)), ColorRef::rgb(rctx.color(l, ph))));
+    std::borrow::Cow::Owned(out)
+}
 
 /// Draw a picture fill into `bounds` (shape-local) honouring crop and stretch/tile modes; an animated
 /// GIF shows its frame at `gif_time` seconds.

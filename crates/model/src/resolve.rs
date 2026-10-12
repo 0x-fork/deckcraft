@@ -22,23 +22,27 @@ pub struct Ctx<'a> {
     pub layout: Option<&'a Layout>,
     pub owner: Owner,
     pub scheme: ColorScheme,
+    /// The colour map in force: the slide's override, else its layout's, else the master's.
+    pub color_map: Vec<(String, String)>,
 }
 
 impl<'a> Ctx<'a> {
     pub fn for_slide(pres: &'a Presentation, slide: &Slide) -> Option<Ctx<'a>> {
         let (master, layout) = pres.master_for(slide)?;
-        Some(Ctx { pres, master, layout, owner: Owner::Slide, scheme: master.scheme() })
+        let map = slide.color_map.as_ref().or(layout.and_then(|l| l.color_map.as_ref())).unwrap_or(&master.color_map).clone();
+        Some(Ctx { pres, master, layout, owner: Owner::Slide, scheme: master.scheme_with(&map), color_map: map })
     }
     pub fn for_layout(pres: &'a Presentation, master: &'a Master, layout: &'a Layout) -> Ctx<'a> {
-        Ctx { pres, master, layout: Some(layout), owner: Owner::Layout, scheme: master.scheme() }
+        let map = layout.color_map.as_ref().unwrap_or(&master.color_map).clone();
+        Ctx { pres, master, layout: Some(layout), owner: Owner::Layout, scheme: master.scheme_with(&map), color_map: map }
     }
     pub fn for_master(pres: &'a Presentation, master: &'a Master) -> Ctx<'a> {
-        Ctx { pres, master, layout: None, owner: Owner::Master, scheme: master.scheme() }
+        Ctx { pres, master, layout: None, owner: Owner::Master, scheme: master.scheme(), color_map: master.color_map.clone() }
     }
     pub fn color(&self, c: &ColorRef, ph: Option<Rgba>) -> Rgba {
         let c = match &c.base {
             crate::ColorBase::Scheme { slot } if matches!(slot, SchemeSlot::Bg1 | SchemeSlot::Tx1 | SchemeSlot::Bg2 | SchemeSlot::Tx2) => {
-                ColorRef { base: crate::ColorBase::Scheme { slot: self.master.map_slot(*slot) }, mods: c.mods.clone() }
+                ColorRef { base: crate::ColorBase::Scheme { slot: crate::map_slot(&self.color_map, *slot) }, mods: c.mods.clone() }
             }
             _ => c.clone(),
         };
