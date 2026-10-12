@@ -138,15 +138,22 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
                 app.notes_buf.2 = current.clone();
             }
             let mut buf = app.notes_buf.2.clone();
-            let r = ui.add(
-                egui::TextEdit::multiline(&mut buf)
-                    .id(id)
-                    .hint_text("Click to add notes")
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(2)
-                    .font(theme::font(13.0)),
-            );
+            // Long notes scroll inside the pane instead of spilling over the slide (#221).
+            let r = egui::ScrollArea::vertical()
+                .max_height(ui.available_height())
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut buf)
+                            .id(id)
+                            .hint_text("Click to add notes")
+                            .frame(egui::Frame::NONE)
+                            .desired_width(f32::INFINITY)
+                            .desired_rows(2)
+                            .font(theme::font(13.0)),
+                    )
+                })
+                .inner;
             app.notes_buf.2 = buf.clone();
             if r.lost_focus() && buf != current {
                 let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));

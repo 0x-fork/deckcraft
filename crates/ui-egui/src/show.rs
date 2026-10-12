@@ -33,6 +33,8 @@ pub struct Show {
     goto: String,
     started: bool,
     show_start: f64,
+    /// When the presenter paused the timer.
+    timer_paused: Option<f64>,
     timings: Vec<(usize, f64)>,
     last_move: f64,
     pub ended: bool,
@@ -89,6 +91,7 @@ impl Show {
             goto: String::new(),
             started: false,
             show_start: 0.0,
+            timer_paused: None,
             timings: vec![],
             last_move: 0.0,
             ended: false,
@@ -717,6 +720,23 @@ fn gif_hit(ctx: &egui::Context, ui: &Ui, show: &Show, doc: &Presentation, app: &
 }
 
 impl Show {
+    /// The presenter timer: time since the show started, frozen while paused.
+    fn elapsed(&self, now: f64) -> f64 {
+        self.timer_paused.unwrap_or(now) - self.show_start
+    }
+
+    fn toggle_timer(&mut self, now: f64) {
+        match self.timer_paused.take() {
+            Some(at) => self.show_start += now - at,
+            None => self.timer_paused = Some(now),
+        }
+    }
+
+    fn reset_timer(&mut self, now: f64) {
+        self.show_start = now;
+        self.timer_paused = self.timer_paused.map(|_| now);
+    }
+
     fn reading_bar_hit(&self, ctx: &egui::Context) -> bool {
         // Clicks on the on-screen controls must not also advance.
         ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
@@ -746,8 +766,12 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     }
     let next_tex = show.next_tex.as_ref().filter(|(k, _)| Some(*k) == next).map(|(_, t)| t.clone());
     let notes = doc.slides.get(cur).map(|s| s.notes_text()).unwrap_or_default();
-    let elapsed = now - show.show_start;
+    let elapsed = show.elapsed(now);
     let mut actions = vec![];
+    // The presenter window is dark; default buttons draw dark text on it (#221).
+    let button = |ui: &mut Ui, s: &str| {
+        ui.add(egui::Button::new(egui::RichText::new(s).size(15.0).color(Color32::WHITE)).fill(Color32::from_gray(60)).min_size(vec2(0.0, 30.0)))
+    };
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
@@ -764,16 +788,22 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                         .size(22.0)
                         .color(Color32::WHITE),
                     );
+                    if button(ui, if show.timer_paused.is_some() { "Resume" } else { "Pause" }).clicked() {
+                        show.toggle_timer(now);
+                    }
+                    if button(ui, "Reset").clicked() {
+                        show.reset_timer(now);
+                    }
                     ui.add_space(20.0);
                     ui.label(egui::RichText::new(format!("Slide {} of {}", cur + 1, doc.slides.len())).size(16.0).color(Color32::from_gray(200)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("End Show").clicked() {
+                        if button(ui, "End Show").clicked() {
                             *keep = false;
                         }
-                        if ui.button("Next ▶").clicked() {
+                        if button(ui, "Next ▶").clicked() {
                             actions.push(show.state.next(doc));
                         }
-                        if ui.button("◀ Previous").clicked() {
+                        if button(ui, "◀ Previous").clicked() {
                             actions.push(show.state.prev(doc));
                         }
                     });
@@ -824,6 +854,24 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    /// #221: the presenter could not pause or restart the timer.
+    #[test]
+    fn presenter_timer_pauses_resumes_and_resets() {
+        let doc = deckcraft_engine::Session::with_new().active().unwrap().doc.clone();
+        let mut show = Show::new(&doc, 0, false, false);
+        show.show_start = 10.0;
+        assert_eq!(show.elapsed(15.0), 5.0);
+        show.toggle_timer(15.0);
+        assert_eq!(show.elapsed(40.0), 5.0, "paused");
+        show.toggle_timer(40.0);
+        assert_eq!(show.elapsed(42.0), 7.0, "resumed where it stopped");
+        show.reset_timer(50.0);
+        assert_eq!(show.elapsed(53.0), 3.0, "running from zero");
+        show.toggle_timer(53.0);
+        show.reset_timer(60.0);
+        assert_eq!(show.elapsed(70.0), 0.0, "a paused reset stays paused at zero");
+    }
 
     #[test]
     fn a_transition_keeps_the_old_slide_in_its_own_texture() {
