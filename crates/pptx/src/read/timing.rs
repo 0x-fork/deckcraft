@@ -119,6 +119,12 @@ pub fn animations(imp: &mut Imp, part: &Part, ctx: &IdCtx, timing: &El, _shapes:
         let Some(shape) = ctx.lookup(file_id) else { continue };
         let paragraph = tgt.path(&["txEl", "pRg"]).and_then(|p| p.u32("st"));
         let effect = maps::effect_for_preset(class, preset).unwrap_or_else(|| maps::fallback_effect(class));
+        // PowerPoint writes Float Down as its own preset (47), not as Float with a direction.
+        let (effect, option) = match (class, preset) {
+            (AnimClass::Entrance, 47) => ("float", "d".to_string()),
+            (AnimClass::Exit, 47) => ("floatOut", "d".to_string()),
+            _ => (effect, maps::option_from_subtype(effect, sub)),
+        };
         let start = match c.attr("nodeType") {
             Some("clickEffect") => AnimStart::OnClick,
             Some("afterEffect") => AnimStart::AfterPrevious,
@@ -128,7 +134,7 @@ pub fn animations(imp: &mut Imp, part: &Part, ctx: &IdCtx, timing: &El, _shapes:
             shape,
             class,
             effect: effect.to_string(),
-            option: maps::option_from_subtype(effect, sub),
+            option,
             start,
             duration_ms: max_dur(c, 0).unwrap_or(0),
             delay_ms: c.path(&["stCondLst", "cond"]).and_then(|d| ms_attr(d, "delay")).unwrap_or(0),

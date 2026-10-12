@@ -430,7 +430,11 @@ fn effect_par(w: &mut W, x: &mut Exp, ids: &mut Ids, e: &Eff, first_in_click: bo
     };
     let _ = first_in_click;
     let preset = crate::maps::preset_for(a);
-    let sub = crate::maps::subtype_from_option(&a.effect, &a.option).or(a.preset_subtype.filter(|_| a.preset_id == Some(preset))).unwrap_or(0);
+    let sub = if preset == 47 {
+        0
+    } else {
+        crate::maps::subtype_from_option(&a.effect, &a.option).or(a.preset_subtype.filter(|_| a.preset_id == Some(preset))).unwrap_or(0)
+    };
     let repeat = match a.repeat {
         u32::MAX => Some("indefinite".to_string()),
         0 | 1 => None,

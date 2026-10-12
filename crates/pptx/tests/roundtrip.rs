@@ -730,3 +730,28 @@ fn date_fields_keep_their_type_and_saved_text() {
         assert_eq!(by_name(&q.slides[0], name).text, by_name(&p.slides[0], name).text, "{name}");
     }
 }
+
+/// #147: PowerPoint's Float Down is preset 47 (Float Up is 42); it imported as a plain fade.
+#[test]
+fn float_down_is_preset_47_both_ways() {
+    let mut p = defaults::new_presentation(None);
+    let mut s = new_slide(&mut p, "Float");
+    let sh = shape(&mut p, "Building", 0.0, 0.0, 100.0, 100.0);
+    let id = sh.id;
+    s.shapes.push(sh);
+    s.animations = vec![
+        Animation { shape: id, class: AnimClass::Entrance, effect: "float".into(), option: "d".into(), ..Default::default() },
+        Animation { shape: id, class: AnimClass::Exit, effect: "floatOut".into(), option: "d".into(), ..Default::default() },
+        Animation { shape: id, class: AnimClass::Exit, effect: "floatOut".into(), option: "u".into(), ..Default::default() },
+    ];
+    p.slides.push(Arc::new(s));
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).expect("zip");
+    let xml = std::io::read_to_string(z.by_name("ppt/slides/slide2.xml").expect("slide")).expect("read");
+    assert!(xml.contains(r#"presetID="47" presetClass="entr" presetSubtype="0""#), "{xml}");
+    assert!(xml.contains(r#"presetID="47" presetClass="exit" presetSubtype="0""#), "{xml}");
+    assert!(xml.contains(r#"presetID="42" presetClass="exit" presetSubtype="0""#), "{xml}");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    let got: Vec<(&str, &str)> = q.slides[1].animations.iter().map(|a| (a.effect.as_str(), a.option.as_str())).collect();
+    assert_eq!(got, [("float", "d"), ("floatOut", "d"), ("floatOut", "u")]);
+}

@@ -310,6 +310,10 @@ pub fn fallback_effect(class: AnimClass) -> &'static str {
 
 /// The preset id to write for an animation.
 pub fn preset_for(a: &deckcraft_model::Animation) -> u32 {
+    // Float Down is PowerPoint's preset 47 (Float Up is 42).
+    if matches!(a.effect.as_str(), "float" | "floatOut") && a.option == "d" {
+        return 47;
+    }
     if let Some(p) = a.preset_id {
         let consistent = match effect_for_preset(a.class, p) {
             Some(e) => e == a.effect,
