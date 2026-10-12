@@ -112,7 +112,10 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         Some((Target::Slides, d)) => {
             let idx = d.selection.slide;
             let doc = d.doc.clone();
-            app.textures.slide(ui.ctx(), &doc, idx, px, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times)
+            // A placeholder's prompt makes way for the caret once it is being typed into.
+            let typing_into = d.selection.text.as_ref().filter(|t| !t.notes && t.cell.is_none()).map(|t| t.shape);
+            let no_prompt = typing_into.filter(|id| d.shape(*id).and_then(|sh| sh.text.as_ref()).is_none_or(|body| body.is_empty()));
+            app.textures.slide(ui.ctx(), &doc, idx, px, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times, no_prompt)
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px),
@@ -427,7 +430,9 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
             if blink && let Some((cx, top, bot)) = l.caret(deckcraft_text::Pos { para: ts.caret.0, ch: ts.caret.1 }) {
                 let (p0, p1) = (xf.to_screen(m * Point::new(cx, top)), xf.to_screen(m * Point::new(cx, bot)));
-                painter.line_segment([p0, p1], Stroke::new(1.5, t.caret));
+                // In the colour of the text being typed: a black caret is lost on a dark slide.
+                let color = deckcraft_engine::cmd::text::caret_color(st, ts).map_or(t.caret, theme::to_color32);
+                painter.line_segment([p0, p1], Stroke::new(1.5, color));
             }
         }
     }

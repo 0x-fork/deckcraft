@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use deckcraft_model::edit::{self as ed, Pos};
 use deckcraft_model::resolve::{self, Ctx};
-use deckcraft_model::text::{AutoFit, Hyperlink, Run, RunKind, RunProps, TextBody};
+use deckcraft_model::text::{AutoFit, Hyperlink, Paragraph, Run, RunKind, RunProps, TextBody};
 use deckcraft_model::{Presentation, ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
@@ -133,6 +133,15 @@ pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayo
     }
     let sh = st.shape(t.shape)?;
     let body = sh.text.as_ref()?;
+    // A body nobody has typed into holds no paragraph. Lay it out as one empty paragraph, so
+    // the caret has a line to stand on.
+    let blank;
+    let body = if body.paragraphs.is_empty() {
+        blank = TextBody { paragraphs: vec![Paragraph::default()], ..body.clone() };
+        &blank
+    } else {
+        body
+    };
     let ctx = ctx_for(&st.doc, &st.selection)?;
     let x = xfrm_of(&st.doc, &st.selection, sh);
     let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
@@ -142,6 +151,22 @@ pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayo
         body,
         &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
     ))
+}
+
+/// The colour of text typed at the caret. The canvas draws the caret in it, so the caret shows
+/// wherever the text does: light on a dark slide, dark on a light one. `None` when that text
+/// has no fill to take a colour from.
+pub fn caret_color(st: &DocState, t: &TextSel) -> Option<deckcraft_color::Rgba> {
+    if t.notes || t.cell.is_some() {
+        return None;
+    }
+    let sh = st.shape(t.shape)?;
+    let body = sh.text.as_ref()?;
+    let ctx = ctx_for(&st.doc, &st.selection)?;
+    let blank = Paragraph::default();
+    let para = body.paragraphs.get(t.caret.0).unwrap_or(&blank);
+    let props = resolve::run(&ctx, sh, para, &ed::props_at(body, t.caret));
+    Some(resolve::text_color(&ctx, &props)).filter(|c| c.a > 0)
 }
 
 fn pos_param(p: &Value, key: &str) -> Option<Pos> {

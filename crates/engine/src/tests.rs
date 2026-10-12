@@ -543,3 +543,48 @@ fn inserted_hyperlinks_look_like_links() {
     s.execute("format.underline", &json!({})).unwrap();
     assert_eq!(s.execute("format.state", &json!({})).unwrap()["underline"], false);
 }
+
+#[test]
+fn an_empty_placeholder_has_a_caret() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    let st = s.doc().unwrap();
+    let sel = st.selection.text.clone().unwrap();
+    let layout = cmd::text::layout_for(st, &sel).unwrap();
+    let (x, top, bottom) = layout.caret(deckcraft_text::Pos { para: 0, ch: 0 }).expect("a caret in the empty title");
+    // A centred title: the caret stands in the middle of the text box, one line tall.
+    assert!((x - layout.inner.center().x).abs() < 1.0, "{x} in {:?}", layout.inner);
+    assert!(bottom - top > 20.0, "{top}..{bottom}");
+}
+
+#[test]
+fn the_caret_takes_the_colour_of_the_text() {
+    let caret = |theme: &str| {
+        let mut s = session();
+        s.execute("design.theme", &json!({"name": theme})).unwrap();
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+        s.execute("text.edit", &json!({"id": title})).unwrap();
+        let st = s.doc().unwrap();
+        let empty = cmd::text::caret_color(st, &st.selection.text.clone().unwrap()).unwrap();
+        s.execute("text.insert", &json!({"text": "Typed"})).unwrap();
+        let st = s.doc().unwrap();
+        assert_eq!(cmd::text::caret_color(st, &st.selection.text.clone().unwrap()), Some(empty));
+        empty
+    };
+    // Dark text on the light theme, light text on the dark one: never black on a dark slide.
+    let (light, dark) = (caret("DeckCraft"), caret("Nocturne"));
+    assert!(light.r < 0x60 && light.g < 0x60 && light.b < 0x60, "{light:?}");
+    assert!(dark.r > 0xC0 && dark.g > 0xC0 && dark.b > 0xC0, "{dark:?}");
+    // Text set to red gets a red caret.
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Red"})).unwrap();
+    s.execute("text.selectAll", &json!({})).unwrap();
+    s.execute("format.color", &json!({"color": "#FF0000"})).unwrap();
+    s.execute("text.move", &json!({"to": "end"})).unwrap();
+    let st = s.doc().unwrap();
+    let red = cmd::text::caret_color(st, &st.selection.text.clone().unwrap()).unwrap();
+    assert_eq!((red.r, red.g, red.b), (0xFF, 0, 0));
+}

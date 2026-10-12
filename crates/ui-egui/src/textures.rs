@@ -15,6 +15,7 @@ struct Key {
     size: (u32, u32),
     edit: bool,
     extra: u64,
+    skip_text: Option<ShapeId>,
 }
 
 struct Entry {
@@ -61,6 +62,7 @@ fn threads() -> u16 {
 
 impl Textures {
     /// The canvas texture for slide `index` at `size` pixels; `extra` changes with the GIF frames.
+    /// `skip_text` leaves out one shape's text (the prompt of a placeholder being typed into).
     pub fn slide(
         &mut self,
         ctx: &egui::Context,
@@ -71,6 +73,7 @@ impl Textures {
         extra: u64,
         grayscale: bool,
         gif_times: &[(ShapeId, f64)],
+        skip_text: Option<ShapeId>,
     ) -> Option<TextureHandle> {
         let slide = p.slides.get(index)?.clone();
         let master = master_of(p, &slide);
@@ -80,6 +83,7 @@ impl Textures {
             size,
             edit,
             extra: extra ^ grayscale as u64,
+            skip_text,
         };
         if let Some(e) = &self.canvas
             && e.key == key
@@ -88,7 +92,7 @@ impl Textures {
         }
         let t0 = crate::now_ms();
         let scale = size.0 as f64 / p.slide_size.width.max(1.0);
-        let opts = RenderOpts { scale, edit, gif_times, threads: threads(), size: Some(size), ..Default::default() };
+        let opts = RenderOpts { scale, edit, gif_times, skip_text, threads: threads(), size: Some(size), ..Default::default() };
         let img = deckcraft_render::render_slide(p, index, &opts);
         self.last_render_ms = crate::now_ms() - t0;
         let ci = to_color_image(&img, grayscale);
@@ -121,6 +125,7 @@ impl Textures {
             size: (width_px, h),
             edit: false,
             extra: 0,
+            skip_text: None,
         };
         self.clock += 1;
         let clock = self.clock;
