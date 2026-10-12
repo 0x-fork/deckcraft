@@ -2,7 +2,7 @@
 
 use deckcraft_color::{ColorTransform, Rgba, SchemeSlot};
 use deckcraft_model::Shape;
-use deckcraft_model::chart::{Chart, ChartType, nice_scale};
+use deckcraft_model::chart::{Chart, ChartType, axis_scale};
 use deckcraft_model::resolve::Ctx;
 use deckcraft_model::style::{ColorRef, Fill};
 use deckcraft_model::text::{Align, Anchor, Bullet, TextBody};
@@ -242,17 +242,32 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     let combo = c.kind == ChartType::Combo;
     // Bars are drawn first and lines over them; a combo chart has both.
     let bar_kind = c.series.iter().map(|s| c.series_kind(s)).find(|k| k.is_bar_like());
-    let (lo, hi) = c.axis_range(false).unwrap_or_else(|| c.value_range());
-    let (min, max, step) = nice_scale(lo.min(0.0), hi);
     let horiz = if combo { bar_kind.is_some_and(ChartType::horizontal) } else { c.kind.horizontal() };
+    // As many major units as the value axis has room for labels (PowerPoint's automatic unit).
+    let axis_len = if horiz { area.width() - base * 4.5 } else { area.height() - base * 1.8 };
+    let max_intervals = (axis_len / if horiz { base * 6.0 } else { base * 1.9 }).floor().clamp(2.0, 12.0) as usize;
+    let (min, max, step) = c.axis_scale(false, max_intervals).unwrap_or_else(|| axis_scale(0.0, 1.0, None, None, None, max_intervals, true));
     // A combo chart's secondary value axis, on the right (vertical value axes only).
-    let second = if horiz { None } else { c.axis_range(true).map(|(l, h)| nice_scale(l.min(0.0), h)) };
-    // Axis label gutter.
-    let gutter = base * 3.0;
-    let plot = if horiz {
-        Rect::new(area.x0 + gutter * 1.5, area.y0, area.x1, area.y1 - base * 1.6)
+    let second = if horiz { None } else { c.axis_scale(true, max_intervals) };
+    let ticks = |(lo, hi, st): (f64, f64, f64)| {
+        let n = (((hi - lo) / st.max(1e-12)).round() as i64).clamp(1, 50);
+        (0..=n).map(move |k| lo + k as f64 * st)
+    };
+    // Label gutters as wide as the longest value label.
+    let label_w =
+        |sec: bool, sc: (f64, f64, f64)| ticks(sc).map(|v| c.axis_label(sec, v).chars().count()).max().unwrap_or(1) as f64 * base * 0.55 + base * 0.6;
+    let gutter = if horiz {
+        base * 4.5
+    } else if c.y_hidden {
+        base * 0.5
     } else {
-        Rect::new(area.x0 + gutter, area.y0, area.x1 - if second.is_some() { gutter } else { 0.0 }, area.y1 - base * 1.8)
+        label_w(false, (min, max, step)).clamp(base * 1.5, area.width() * 0.3)
+    };
+    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| label_w(true, sc).clamp(base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
+    let plot = if horiz {
+        Rect::new(area.x0 + gutter, area.y0, area.x1, area.y1 - base * 1.6)
+    } else {
+        Rect::new(area.x0 + gutter, area.y0, area.x1 - gutter_r, area.y1 - base * 1.8)
     };
     if let Some(f) = &c.plot_fill {
         crate::paint::fill_path(ctx, rctx, f, None, &plot.to_path(0.1), plot, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
@@ -265,10 +280,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         _ => to_v(v),
     };
     // Gridlines and value labels.
-    let n_steps = ((span / step).round() as i64).clamp(1, 50);
-    for k in 0..=n_steps {
-        let v = min + k as f64 * step;
+    for v in ticks((min, max, step)) {
         let pos = to_v(v);
+        let text = if c.y_hidden { String::new() } else { c.axis_label(false, v) };
         let mut g = BezPath::new();
         if horiz {
             g.move_to((pos, plot.y0));
@@ -277,7 +291,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 ctx,
                 rctx,
                 m,
-                &fmt_num(v),
+                &text,
                 Rect::new(pos - 30.0, plot.y1 + 2.0, pos + 30.0, plot.y1 + base * 1.5),
                 base,
                 Align::Center,
@@ -292,7 +306,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 ctx,
                 rctx,
                 m,
-                &fmt_num(v),
+                &text,
                 Rect::new(area.x0, pos - base, plot.x0 - base * 0.4, pos + base),
                 base,
                 Align::Right,
@@ -309,16 +323,14 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         }
     }
     // The secondary axis' labels, on the right, without gridlines of their own.
-    if let Some((min2, max2, step2)) = second {
-        let n2 = (((max2 - min2) / step2.max(1e-9)).round() as i64).clamp(1, 50);
-        for k in 0..=n2 {
-            let v = min2 + k as f64 * step2;
+    if let Some(sc) = second.filter(|_| !c.y2_hidden) {
+        for v in ticks(sc) {
             let pos = to_axis(true, v);
             label(
                 ctx,
                 rctx,
                 m,
-                &fmt_num(v),
+                &c.axis_label(true, v),
                 Rect::new(plot.x1 + base * 0.4, pos - base, area.x1, pos + base),
                 base,
                 Align::Left,
@@ -406,7 +418,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 ctx.set_paint(color(series_fill(rctx, c, *si, Some(s)), 1.0));
                 ctx.fill_rect(&r.abs());
                 if c.data_labels {
-                    let t = fmt_num(s.values.get(i).copied().flatten().unwrap_or(0.0));
+                    let t = c.data_label(s, s.values.get(i).copied().flatten().unwrap_or(0.0));
                     let lr = if horiz {
                         Rect::new(r.x1 + 2.0, r.y0, r.x1 + 40.0, r.y1)
                     } else {
