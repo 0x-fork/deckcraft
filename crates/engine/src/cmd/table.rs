@@ -1,10 +1,11 @@
 //! Table Design and Table Layout tabs.
 
-use deckcraft_model::{ShapeKind, Table};
+use deckcraft_geom::{Affine, Point, Rect};
+use deckcraft_model::{Shape, ShapeKind, Table};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{Result, Session};
+use crate::{DocState, Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -63,6 +64,40 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("table.rowHeight", "Height", ["Table Layout", "Cell Size"], None, "{row, height: pt, id?}", has_selection, row_height),
         cmd!(noundo "table.selectCells", "Select Cells", [], None, "{from: [r,c], to: [r,c], id?}", has_selection, select_cells),
     ]
+}
+
+/// A table as drawn on the slide: where it is, its drawn row heights and its visible cells.
+#[derive(Clone, Debug)]
+pub struct TableFrame {
+    /// Table-local (points from the table's top-left corner) → slide space, as the table is drawn.
+    pub affine: Affine,
+    pub cols: Vec<f64>,
+    /// Row heights as drawn: a stored height is a minimum, rows grow to fit their text.
+    pub heights: Vec<f64>,
+    /// Visible cells (merges honoured): (row, col, table-local rect).
+    pub cells: Vec<(usize, usize, Rect)>,
+}
+
+/// The drawn geometry of table shape `sh` on the edited slide (`None` if it isn't a table).
+pub fn table_frame(st: &DocState, sh: &Shape) -> Option<TableFrame> {
+    let ShapeKind::Table(t) = &sh.kind else { return None };
+    // The table is drawn in its own box; rows that grow past it don't move it.
+    let x = sh.xfrm.unwrap_or_else(|| xfrm_of(&st.doc, &st.selection, sh));
+    let heights = table_drawn_heights(&st.doc, &st.selection, t);
+    let cells = deckcraft_render::table_cell_rects(t, &heights);
+    Some(TableFrame { affine: x.affine(), cols: t.cols.clone(), heights, cells })
+}
+
+impl TableFrame {
+    /// Table-local point for slide point `p`.
+    pub fn local(&self, p: Point) -> Point {
+        self.affine.inverse() * p
+    }
+
+    /// Table-local rect of visible cell (`r`, `c`).
+    pub fn cell_rect(&self, r: usize, c: usize) -> Option<Rect> {
+        self.cells.iter().find(|(cr, cc, _)| (*cr, *cc) == (r, c)).map(|x| x.2)
+    }
 }
 
 fn cell_param(p: &Value, key: &str) -> Option<(usize, usize)> {

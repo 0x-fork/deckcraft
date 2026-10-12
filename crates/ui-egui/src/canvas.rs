@@ -486,21 +486,10 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             }
         }
     }
-    // Caret / text selection.
-    if let Some(ts) = &editing
-        && !ts.notes
-        && ts.cell.is_none()
-        && let Some(sh) = st.shape(ts.shape)
-        && let Some(l) = deckcraft_engine::cmd::text::layout_for(st, ts)
-    {
-        let x = deckcraft_engine::cmd::xfrm_of(&st.doc, &st.selection, sh);
-        // Where the text is drawn: flips don't mirror it, vertical text is turned.
-        let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
-        let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
-        let (s0, s1) = ts.ordered();
-        for r in l.selection_rects(deckcraft_text::Pos { para: s0.0, ch: s0.1 }, deckcraft_text::Pos { para: s1.0, ch: s1.1 }) {
-            let pts = [Point::new(r.x0, r.y0), Point::new(r.x1, r.y0), Point::new(r.x1, r.y1), Point::new(r.x0, r.y1)].map(|q| xf.to_screen(m * q));
-            painter.add(egui::Shape::convex_polygon(pts.to_vec(), t.text_selection, Stroke::NONE));
+    // Caret / text selection, in a shape or a table cell.
+    if let Some(ts) = &editing {
+        for quad in text_marks(st, ts).iter().flat_map(|m| &m.selection) {
+            painter.add(egui::Shape::convex_polygon(quad.iter().map(|q| xf.to_screen(*q)).collect(), t.text_selection, Stroke::NONE));
         }
         // An input method's composition: underlined in place, thicker under the part being converted.
         for (a, b, thick) in deckcraft_engine::cmd::text::composition_underlines(st) {
@@ -515,18 +504,14 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             }
         }
     }
-    // Table cell editing: outline the cell.
+    // Table cell editing: outline the cell (merged cells as drawn).
     if let Some(ts) = &editing
         && let (Some((r, c)), Some(sh)) = (ts.cell, st.shape(ts.shape))
-        && let deckcraft_model::ShapeKind::Table(tb) = &sh.kind
+        && let Some(f) = deckcraft_engine::cmd::table::table_frame(st, sh)
+        && let Some(cr) = f.cell_rect(r, c)
     {
-        let x = deckcraft_engine::cmd::xfrm_of(&st.doc, &st.selection, sh);
-        let heights = deckcraft_engine::tools::table_rows(st, tb);
-        let y0: f64 = heights.iter().take(r).sum();
-        let x0: f64 = tb.cols.iter().take(c).sum();
-        let (w, h) = (tb.cols.get(c).copied().unwrap_or(0.0), heights.get(r).copied().unwrap_or(0.0));
-        let a = x.affine();
-        let pts = [Point::new(x0, y0), Point::new(x0 + w, y0), Point::new(x0 + w, y0 + h), Point::new(x0, y0 + h)].map(|q| xf.to_screen(a * q));
+        let pts = [Point::new(cr.x0, cr.y0), Point::new(cr.x1, cr.y0), Point::new(cr.x1, cr.y1), Point::new(cr.x0, cr.y1)]
+            .map(|q| xf.to_screen(f.affine * q));
         poly(painter, pts, Stroke::new(2.0, t.accent));
     }
     // Smart guides, marquee, previews.
@@ -586,6 +571,24 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
         let c = if mode == "highlighter" { c.gamma_multiply(0.45) } else { c };
         painter.add(egui::Shape::line(pts, Stroke::new((*width as f32 * xf.scale).max(1.0), c)));
     }
+}
+
+/// The text selection (quads) of the text being edited, in slide space: in a shape or a table
+/// cell, wherever its text is drawn. The caret is `cmd::text::caret_line`.
+pub(crate) struct TextMarks {
+    pub selection: Vec<[Point; 4]>,
+}
+
+pub(crate) fn text_marks(st: &deckcraft_engine::DocState, ts: &deckcraft_engine::TextSel) -> Option<TextMarks> {
+    let (l, m) = deckcraft_engine::cmd::text::text_frame(st, ts)?;
+    let pos = |p: (usize, usize)| deckcraft_text::Pos { para: p.0, ch: p.1 };
+    let (s0, s1) = ts.ordered();
+    let selection = l
+        .selection_rects(pos(s0), pos(s1))
+        .into_iter()
+        .map(|r| [Point::new(r.x0, r.y0), Point::new(r.x1, r.y0), Point::new(r.x1, r.y1), Point::new(r.x0, r.y1)].map(|q| m * q))
+        .collect();
+    Some(TextMarks { selection })
 }
 
 fn rotate_handle(p: &egui::Painter, c: Pos2, t: &Tokens) {
@@ -696,4 +699,68 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use deckcraft_engine::Session;
+
+    use super::*;
+    use crate::Services;
+
+    fn app_with_table() -> (egui_kittest::Harness<'static, SlideApp>, deckcraft_model::ShapeId) {
+        let mut s = Session::with_new();
+        let data = json!([["Hello world", "b"], ["c", ""]]);
+        let r = s.execute("insert.table", &json!({"rows": 2, "cols": 2, "rect": [100.0, 100.0, 400.0, 80.0], "data": data})).unwrap();
+        let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+        s.execute("edit.deselect", &json!({})).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(s, Services::default()),
+        );
+        // The app keeps requesting repaints, so step frames instead of run().
+        harness.run_steps(2);
+        (harness, id)
+    }
+
+    /// Screen position of slide point (x, y).
+    fn screen(app: &SlideApp, x: f64, y: f64) -> Pos2 {
+        Xf { origin: app.slide_rect.unwrap().min, scale: app.canvas_scale }.to_screen(Point::new(x, y))
+    }
+
+    /// Press and release at `p`, 50 ms apart in input time (two clicks make a double-click).
+    fn click(harness: &mut egui_kittest::Harness<'static, SlideApp>, p: Pos2) {
+        for pressed in [true, false] {
+            let t = harness.ctx.input(|i| i.time) + 0.05;
+            harness.input_mut().time = Some(t);
+            harness.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE });
+            harness.step();
+        }
+    }
+
+    /// Double-clicking a table cell edits it with the caret drawn in that cell.
+    #[test]
+    fn double_click_in_a_table_cell_shows_the_caret_there() {
+        let (mut harness, id) = app_with_table();
+        // The empty cell (1, 1) spans x 300..500, y 140..180.
+        let p = screen(harness.state(), 400.0, 160.0);
+        harness.hover_at(p);
+        harness.step();
+        click(&mut harness, p);
+        click(&mut harness, p);
+        harness.run_steps(2);
+        let st = harness.state().session.active().unwrap();
+        let ts = st.selection.text.clone().expect("editing the cell");
+        assert_eq!((ts.shape, ts.cell), (id, Some((1, 1))));
+        assert!(text_marks(st, &ts).is_some_and(|m| m.selection.is_empty()), "no range");
+        let (top, bottom) = deckcraft_engine::cmd::text::caret_line(st, &ts).expect("the cell's text has a caret");
+        for q in [top, bottom] {
+            assert!(q.x > 300.0 && q.x < 500.0 && q.y >= 140.0 && q.y <= 180.0, "caret {q:?} outside cell (1, 1)");
+        }
+    }
 }

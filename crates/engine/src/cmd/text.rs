@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
+use deckcraft_geom::{Affine, Point, Rect};
 use deckcraft_model::edit::{self as ed, Pos};
 use deckcraft_model::resolve::{self, Ctx};
 use deckcraft_model::text::{AutoFit, Hyperlink, Run, RunKind, RunProps, TextBody};
-use deckcraft_model::{Presentation, ShapeId, ShapeKind};
+use deckcraft_model::{Presentation, Shape, ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
 use super::*;
@@ -159,20 +160,50 @@ pub(crate) fn ctx_for<'a>(doc: &'a Presentation, sel: &Selection) -> Option<Ctx<
 
 /// Lay out the text being edited (for vertical caret movement and hit testing).
 pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayout> {
-    if t.notes || t.cell.is_some() {
+    text_frame(st, t).map(|f| f.0)
+}
+
+/// The text being edited as it is drawn: its layout, and the transform from layout space to the
+/// slide (flips don't mirror text, vertical text is turned). Shapes and table cells alike; the
+/// caret, the text selection, hit testing and caret movement all use it. `None` for notes.
+pub fn text_frame(st: &DocState, t: &TextSel) -> Option<(deckcraft_text::TextLayout, Affine)> {
+    if t.notes {
         return None;
     }
     let sh = st.shape(t.shape)?;
-    let body = sh.text.as_ref()?;
     let ctx = ctx_for(&st.doc, &st.selection)?;
+    let lay = |s: &Shape, body: &TextBody, rect: Rect| {
+        deckcraft_text::layout(&ctx, s, body, &deckcraft_text::Opts { rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false })
+    };
+    if let Some((r, c)) = t.cell {
+        // A cell's text is laid out in the cell's rect with the cell's margins, anchor and the
+        // table style's text look, exactly as the table draws it.
+        let ShapeKind::Table(tb) = &sh.kind else { return None };
+        let frame = super::table::table_frame(st, sh)?;
+        let rect = frame.cell_rect(r, c)?;
+        let body = deckcraft_render::table_cell_body(&ctx, tb, r, c, tb.cell(r, c)?);
+        let tmp = Shape { text: Some(body.clone()), ..Default::default() };
+        let l = lay(&tmp, &body, rect);
+        let m = deckcraft_render::text_transform(frame.affine, rect, l.rotation);
+        return Some((l, m));
+    }
+    let body = sh.text.as_ref()?;
     let x = xfrm_of(&st.doc, &st.selection, sh);
-    let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
-    Some(deckcraft_text::layout(
-        &ctx,
-        sh,
-        body,
-        &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
-    ))
+    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
+    let l = lay(sh, body, tr);
+    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    Some((l, m))
+}
+
+/// The text position under slide point `p` in the text being edited (its shape or cell).
+pub fn text_pos_at(st: &DocState, t: &TextSel, p: Point) -> Pos {
+    match text_frame(st, t) {
+        Some((l, m)) => {
+            let h = l.hit(m.inverse() * p);
+            (h.para, h.ch)
+        }
+        None => (0, 0),
+    }
 }
 
 /// The insertion point on the slide: its line from top to bottom, in slide coordinates (flips and
@@ -180,8 +211,15 @@ pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayo
 /// measured as one empty paragraph, so the caret shows where typing begins. `None` for notes and
 /// table cells, which aren't laid out on the slide here.
 pub fn caret_line(st: &DocState, t: &TextSel) -> Option<(deckcraft_geom::Point, deckcraft_geom::Point)> {
-    if t.notes || t.cell.is_some() {
+    if t.notes {
         return None;
+    }
+    // A table cell: where the cell's text is drawn.
+    if t.cell.is_some() {
+        let (l, m) = text_frame(st, t)?;
+        let aff = if t.at_line_end() { deckcraft_text::Affinity::Upstream } else { deckcraft_text::Affinity::Downstream };
+        let (cx, top, bot) = l.caret_drawn(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 }, aff)?;
+        return Some((m * deckcraft_geom::Point::new(cx, top), m * deckcraft_geom::Point::new(cx, bot)));
     }
     let sh = st.shape(t.shape)?;
     let ctx = ctx_for(&st.doc, &st.selection)?;
@@ -487,11 +525,8 @@ fn commit(s: &mut Session, p: &Value) -> Result<Value> {
 /// the edited text isn't laid out on the slide (notes, table cells).
 pub fn composition_underlines(st: &DocState) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point, bool)> {
     let (Some(c), Some(t)) = (&st.composition, &st.selection.text) else { return vec![] };
-    let Some(sh) = st.shape(t.shape) else { return vec![] };
-    let Some(l) = layout_for(st, t) else { return vec![] };
-    let x = xfrm_of(&st.doc, &st.selection, sh);
-    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
-    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    // Where the text is drawn, in a shape or a table cell.
+    let Some((l, m)) = text_frame(st, t) else { return vec![] };
     let pos = |ch: usize| deckcraft_text::Pos { para: c.start.0, ch: c.start.1 + ch };
     let mut out = vec![];
     let mut add = |a: usize, b: usize, thick: bool| {

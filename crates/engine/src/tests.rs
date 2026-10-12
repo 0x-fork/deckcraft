@@ -401,6 +401,71 @@ fn grown_table_frame_covers_its_drawn_rows() {
     assert!(matches!(s.hit_test(below_stored, 1.0), Some(tools::Hit::Shape { .. })));
 }
 
+/// A table at (100, 100): columns `cols` wide, rows 40 pt tall, cells holding `data`.
+fn table_at(s: &mut Session, cols: &[f64], data: serde_json::Value) -> deckcraft_model::ShapeId {
+    let rows = data.as_array().map_or(1, Vec::len);
+    let w: f64 = cols.iter().sum();
+    let r =
+        s.execute("insert.table", &json!({"rows": rows, "cols": cols.len(), "rect": [100.0, 100.0, w, 40.0 * rows as f64], "data": data})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    for (c, cw) in cols.iter().enumerate() {
+        s.execute("table.columnWidth", &json!({"id": id, "col": c, "width": cw})).unwrap();
+    }
+    s.execute("edit.deselect", &json!({})).unwrap();
+    id
+}
+
+fn text_sel(s: &Session) -> Option<TextSel> {
+    s.doc().unwrap().selection.text.clone()
+}
+
+/// Slide point of the caret before character `ch` of paragraph `para` in the text being edited.
+fn caret_point(s: &Session, para: usize, ch: usize) -> deckcraft_geom::Point {
+    let st = s.doc().unwrap();
+    text_point(st, st.selection.text.as_ref().unwrap(), para, ch)
+}
+
+/// Slide point of the caret before character `ch` of paragraph `para` of text `t`.
+fn text_point(st: &DocState, t: &TextSel, para: usize, ch: usize) -> deckcraft_geom::Point {
+    let (l, m) = cmd::text::text_frame(st, t).unwrap();
+    let (x, top, bot) = l.caret(deckcraft_text::Pos { para, ch }).unwrap();
+    m * deckcraft_geom::Point::new(x, (top + bot) / 2.0)
+}
+
+#[test]
+fn cell_text_is_laid_out_where_the_cell_draws_it() {
+    // The caret and hit testing of a cell's text use the cell's rect, not the table's.
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", ""]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1], "at": [0, 0]})).unwrap();
+    let c = caret_point(&s, 0, 0);
+    assert!(c.x > 300.0 && c.x < 320.0 && c.y > 100.0 && c.y < 140.0, "caret of cell (0, 1) at {c:?}");
+    // An empty cell still has a caret.
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 1]})).unwrap();
+    let c = caret_point(&s, 0, 0);
+    assert!(c.x > 300.0 && c.y > 140.0 && c.y < 180.0, "caret of empty cell (1, 1) at {c:?}");
+    // Hit testing: the start and the end of "Hello world".
+    let st = s.doc().unwrap();
+    let t = TextSel { shape: id, cell: Some((0, 0)), ..Default::default() };
+    assert_eq!(cmd::text::text_pos_at(st, &t, deckcraft_geom::Point::new(101.0, 115.0)), (0, 0));
+    assert_eq!(cmd::text::text_pos_at(st, &t, deckcraft_geom::Point::new(295.0, 115.0)), (0, 11));
+}
+
+#[test]
+fn caret_moves_by_line_in_a_wrapped_cell() {
+    let mut s = session();
+    let id = table_at(&mut s, &[90.0, 200.0], json!([["one two three four five six seven", "b"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0], "at": [0, 0]})).unwrap();
+    s.execute("text.move", &json!({"to": "down"})).unwrap();
+    let down = text_sel(&s).unwrap().caret;
+    assert!(down.0 == 0 && down.1 > 0, "down goes to the next line of the paragraph: {down:?}");
+    s.execute("text.move", &json!({"to": "lineEnd"})).unwrap();
+    let end = text_sel(&s).unwrap().caret;
+    assert!(end.1 > down.1 && end.1 < 33, "end of the second line: {end:?}");
+    s.execute("text.move", &json!({"to": "up"})).unwrap();
+    assert!(text_sel(&s).unwrap().caret.1 < down.1);
+}
+
 #[test]
 fn right_to_left_paragraphs() {
     let mut s = session();
