@@ -1047,6 +1047,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckcraft-metafile"
+version = "0.6.1"
+dependencies = [
+ "kurbo",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "deckcraft-model"
 version = "0.6.1"
 dependencies = [
@@ -1103,6 +1111,7 @@ dependencies = [
  "deckcraft-color",
  "deckcraft-fonts",
  "deckcraft-geom",
+ "deckcraft-metafile",
  "deckcraft-model",
  "deckcraft-text",
  "image",

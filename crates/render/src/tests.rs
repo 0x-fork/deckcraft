@@ -1075,3 +1075,73 @@ fn every_warp_preset_renders_text_inside_the_slide() {
         assert!(x0 <= x1 && y0 <= y1, "{name}: no ink");
     }
 }
+
+/// A placeable WMF, 2 × 1 inch (2880 × 1440 twips): a solid red brush and a rectangle over the
+/// left half, nothing on the right.
+fn half_red_wmf() -> Vec<u8> {
+    fn rec(func: u16, params: &[i16]) -> Vec<u8> {
+        let mut v = ((3 + params.len()) as u32).to_le_bytes().to_vec();
+        v.extend(func.to_le_bytes());
+        for p in params {
+            v.extend(p.to_le_bytes());
+        }
+        v
+    }
+    // CREATEBRUSHINDIRECT (solid, COLORREF 0x000000FF = red), SELECTOBJECT 0, RECTANGLE (bottom,
+    // right, top, left).
+    let body = [rec(0x02FC, &[0, 0xFF, 0, 0]), rec(0x012D, &[0]), rec(0x041B, &[1440, 1440, 0, 0]), rec(0, &[])].concat();
+    let mut f = 0x9AC6_CDD7u32.to_le_bytes().to_vec();
+    f.extend(0u16.to_le_bytes());
+    for v in [0i16, 0, 2880, 1440] {
+        f.extend(v.to_le_bytes());
+    }
+    f.extend(1440u16.to_le_bytes());
+    f.extend(0u32.to_le_bytes());
+    f.extend(0u16.to_le_bytes());
+    let total = (f.len() + 18 + body.len()) / 2;
+    for v in [1u16, 9, 0x300] {
+        f.extend(v.to_le_bytes());
+    }
+    f.extend((total as u32).to_le_bytes());
+    f.extend(16u16.to_le_bytes());
+    f.extend(0u32.to_le_bytes());
+    f.extend(0u16.to_le_bytes());
+    f.extend(body);
+    f
+}
+
+#[test]
+fn metafile_pictures_draw_their_vectors() {
+    let mut p = Presentation::default();
+    let media = p.add_media("image1.wmf", "image/x-wmf", half_red_wmf());
+    let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
+    let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+    for scale in [0.5, 1.0, 3.0] {
+        let img = render_slide(&p, 0, &RenderOpts { scale, ..Default::default() });
+        let at = |x: f64, y: f64| img.pixel((x * scale) as u32, (y * scale) as u32);
+        let left = at(200.0, 200.0);
+        assert!(left[0] > 200 && left[1] < 60 && left[2] < 60, "left half red at {scale}: {left:?}");
+        let right = at(400.0, 200.0);
+        assert!(right[0] > 200 && right[1] > 200 && right[2] > 200, "right half empty at {scale}: {right:?}");
+    }
+}
+
+#[test]
+fn broken_metafiles_draw_nothing_and_never_panic() {
+    let wmf = half_red_wmf();
+    let mut cases: Vec<Vec<u8>> = (0..wmf.len()).step_by(3).map(|n| wmf[..n].to_vec()).collect();
+    cases.push(vec![1, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
+    let mut huge = wmf.clone();
+    huge[10] = 0xFF;
+    huge[11] = 0x7F;
+    cases.push(huge);
+    for bytes in cases {
+        let mut p = Presentation::default();
+        let media = p.add_media("image1.emf", "image/x-emf", bytes);
+        let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
+        let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(0.0, 0.0, 400.0, 200.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        let _ = render_slide(&p, 0, &RenderOpts { scale: 0.25, ..Default::default() });
+    }
+}

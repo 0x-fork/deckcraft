@@ -12,6 +12,7 @@ mod colr;
 
 mod compound;
 mod images;
+mod metafile;
 mod morph_path;
 mod morph_text;
 mod paint;

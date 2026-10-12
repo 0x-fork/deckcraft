@@ -99,10 +99,19 @@ fn duotone_rgb(a: &PictureAdjust) -> Option<(deckcraft_color::Rgba, deckcraft_co
     Some((rgb(d, deckcraft_color::Rgba::BLACK), rgb(l, deckcraft_color::Rgba::WHITE)))
 }
 
-/// Decode encoded bytes (PNG, JPEG, GIF, WebP, BMP, TIFF) to straight RGBA.
+/// Decode encoded bytes (PNG, JPEG, GIF, WebP, BMP, TIFF; WMF and EMF drawn at
+/// [`crate::metafile::DEFAULT_SIDE`]) to straight RGBA.
 pub fn decode(bytes: &[u8]) -> Option<image::RgbaImage> {
+    decode_at(bytes, crate::metafile::DEFAULT_SIDE)
+}
+
+/// [`decode`], with a metafile drawn with its longer side `side` px.
+fn decode_at(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     if bytes.len() > 512 << 20 {
         return None;
+    }
+    if crate::metafile::is_metafile(bytes) {
+        return crate::metafile::rasterize(bytes, side);
     }
     let img = image::load_from_memory(bytes).ok()?;
     let (w, h) = (img.width(), img.height());
@@ -131,13 +140,13 @@ pub fn decode_for(bytes: &Arc<Vec<u8>>, want: f64, adj: &PictureAdjust) -> Optio
     }) {
         return Some(pm);
     }
-    let Some(mut img) = decode(bytes) else {
+    let target = 1u32 << bucket;
+    let Some(mut img) = decode_at(bytes, target) else {
         with(|c| {
             c.bad.insert(addr, bytes.clone());
         });
         return None;
     };
-    let target = 1u32 << bucket;
     let (w, h) = img.dimensions();
     if w.max(h) > target.max(16) && w.max(h) > 4096.min(target * 2) {
         let k = target as f64 / w.max(h) as f64;

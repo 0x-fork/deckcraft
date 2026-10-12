@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 deckcraft-geom = { workspace = true }
 deckcraft-color = { workspace = true }
+deckcraft-metafile = { workspace = true }
 deckcraft-model = { workspace = true }
 deckcraft-fonts = { workspace = true }
 deckcraft-text = { workspace = true }

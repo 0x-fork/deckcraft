@@ -38,7 +38,7 @@ PowerPoint opens and saves; Viewer = opens only).
 |---|---|---|---|
 | PNG, JPEG, GIF (animated), BMP, TIFF, WebP | yes | yes | `image` 0.25; animated GIFs play since #39 |
 | SVG | yes (with PNG fallback) | **no** | The PNG fallback shows; SVG files can't be inserted |
-| EMF / WMF | yes | **no** | Common in decks made on Windows: blank picture |
+| EMF / WMF | yes | partial | Drawn as vectors (paths, pens, bitmaps); text records inside are skipped |
 | HEIC | yes (macOS) | no | |
 | Audio: MP3, AAC/M4A, ALAC, WAV, AIFF, CAF, FLAC, Ogg Vorbis, Opus | yes (Ogg/Opus partly) | yes | Pure-Rust decoders in `crates/media`, `crates/opus` |
 | WMA | yes (Windows) | embedded, not playable | |
@@ -93,7 +93,7 @@ the round trip even though DeckCraft doesn't model it.
    embedded fonts, every transition and animation) in a corpus repo, with import → render → export
    → re-import checks in CI and a PowerPoint reference render for each (owner runs PowerPoint).
 2. The round-trip losses above (#70, #74, #77).
-3. EMF/WMF and SVG rendering.
+3. SVG rendering, and text inside EMF/WMF.
 
 ## Revision history
 
