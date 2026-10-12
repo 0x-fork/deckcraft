@@ -47,7 +47,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("section.removeAll", "Remove All Sections", ["Home", "Slides", "Section"], None, "{}", has_slide, section_remove_all),
         cmd!("section.move", "Move Section", [], None, "{index, to}", has_slide, section_move),
-        cmd!("slide.fromOutline", "Slides from Outline…", ["Insert", "Slides From"], None, "{text}", has_doc, from_outline),
+        cmd!(
+            "slide.fromOutline",
+            "Slides from Outline…",
+            ["Insert", "Slides From"],
+            None,
+            "{text, markdown?: bool (headings are slides, list items bullets)}",
+            has_doc,
+            from_outline
+        ),
     ]
 }
 
@@ -572,10 +580,11 @@ fn section_move(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn from_outline(s: &mut Session, p: &Value) -> Result<Value> {
     let text = str_param(p, "text").unwrap_or("").to_string();
+    let markdown = bool_param(p, "markdown").unwrap_or(false);
     s.edit(|doc, sel| {
         let before = doc.slides.len();
-        let n = deckcraft_format::outline_to_slides(doc, &text);
-        // outline_to_slides appends; move them after the current slide.
+        let n = if markdown { deckcraft_format::markdown_to_slides(doc, &text) } else { deckcraft_format::outline_to_slides(doc, &text) };
+        // both append; move them after the current slide.
         let at = (sel.slide + 1).min(before);
         let new: Vec<_> = doc.slides.drain(before..).collect();
         for (k, sl) in new.into_iter().enumerate() {

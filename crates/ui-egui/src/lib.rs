@@ -519,7 +519,11 @@ impl SlideApp {
             self.set_status(format!("{name}: DeckCraft can't open this kind of file"));
             return;
         };
-        let p = if cmd == "slide.fromOutline" { json!({"text": String::from_utf8_lossy(bytes)}) } else { json!({"name": name, "data": data}) };
+        let p = if cmd == "slide.fromOutline" {
+            json!({"text": String::from_utf8_lossy(bytes), "markdown": lower.ends_with(".md")})
+        } else {
+            json!({"name": name, "data": data})
+        };
         if self.session.active().is_none() && cmd != "file.openBytes" {
             let _ = self.session.execute("file.new", &json!({}));
         }
