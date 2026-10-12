@@ -803,7 +803,18 @@ impl Session {
                         self.execute("text.edit", &json!({"id": id, "at": [pos.0, pos.1]}))?;
                         self.execute("text.selectWord", &json!({}))
                     }
-                    ShapeKind::Group { .. } => Ok(Value::Null),
+                    ShapeKind::Group { .. } => {
+                        // A group is a single selection unit, but its text stays editable:
+                        // double-click reaches the text-holding member under the cursor.
+                        match text_member_at(st, &sh, p, tol).and_then(|mid| st.shape(mid).cloned().map(|m| (mid, m))) {
+                            Some((mid, msh)) if !msh.is_line() => {
+                                let pos = text_pos(st, &msh, p);
+                                self.execute("text.edit", &json!({"id": mid, "at": [pos.0, pos.1]}))?;
+                                self.execute("text.selectWord", &json!({}))
+                            }
+                            _ => Ok(Value::Null),
+                        }
+                    }
                     _ => {
                         self.ui_requests.push(crate::UiRequest::Pane { id: "format".into() });
                         Ok(Value::Null)
@@ -1083,6 +1094,39 @@ impl Session {
 
 fn is_text_first(st: &crate::DocState, id: ShapeId) -> bool {
     st.shape(id).is_some_and(|s| s.ph.is_some() || s.text_box)
+}
+
+/// The topmost text-holding shape under `p` inside group `sh`, recursing into nested groups.
+/// Group children live in the group's child space (`ShapeKind::Group::child`), so the point is
+/// mapped through `group_child_affine`, exactly as `hit_shape` does for group hit-testing.
+fn text_member_at(st: &crate::DocState, sh: &Shape, p: Point, tol: f64) -> Option<ShapeId> {
+    let ShapeKind::Group { children, child } = &sh.kind else { return None };
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let ch = Rect::new(child.x, child.y, child.x + child.w, child.y + child.h);
+    member_at(children, deckcraft_geom::group_child_affine(&x, ch), p, tol)
+}
+
+/// Depth-first (topmost-first) search of `children` for a text-holding shape under `p`.
+/// `to_abs` maps this level's child space to slide space.
+fn member_at(children: &[Shape], to_abs: Affine, p: Point, tol: f64) -> Option<ShapeId> {
+    let q = to_abs.inverse() * p;
+    for c in children.iter().rev() {
+        let Some(cx) = c.xfrm else { continue };
+        let local = cx.affine().inverse() * q;
+        if local.x < -tol || local.y < -tol || local.x > cx.w + tol || local.y > cx.h + tol {
+            continue;
+        }
+        if let ShapeKind::Group { children: gc, child: gch } = &c.kind {
+            let gch = Rect::new(gch.x, gch.y, gch.x + gch.w, gch.y + gch.h);
+            let nested = to_abs * deckcraft_geom::group_child_affine(&cx, gch);
+            if let Some(id) = member_at(gc, nested, p, tol) {
+                return Some(id);
+            }
+        } else if matches!(c.kind, ShapeKind::Shape | ShapeKind::Connector { .. }) && !c.is_line() {
+            return Some(c.id);
+        }
+    }
+    None
 }
 
 fn contains_rect(outer: Rect, inner: Rect) -> bool {
