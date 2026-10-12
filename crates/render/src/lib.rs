@@ -248,7 +248,7 @@ pub fn needs_filters(pres: &Presentation, slide: &Slide) -> bool {
                 return;
             }
             let (e, _) = resolve::effects(&rctx, s);
-            if e.is_some_and(|e| !e.is_empty()) {
+            if e.is_some_and(|e| !e.is_empty()) || text_has_effects(&rctx, s) {
                 any = true;
             }
         });
@@ -259,6 +259,20 @@ pub fn needs_filters(pres: &Presentation, slide: &Slide) -> bool {
     }
     check(&rctx.master.shapes);
     any
+}
+
+/// Does the shape's text have a shadow or glow (on a run, in its list style, or in the master's
+/// text styles it inherits)? Such text is blurred, which needs filters.
+fn text_has_effects(rctx: &Ctx, s: &Shape) -> bool {
+    use deckcraft_model::text::{ListStyle, RunProps};
+    let fx = |r: &RunProps| r.shadow.as_ref().is_some_and(|s| !s.inner) || r.glow.as_ref().is_some_and(|g| g.radius > 0.0);
+    let styled = |l: &ListStyle| l.levels.iter().flatten().any(|lv| fx(&lv.run));
+    let Some(t) = &s.text else { return false };
+    t.paragraphs.iter().any(|p| p.runs.iter().any(|r| fx(&r.props)) || fx(&p.end_props))
+        || styled(&t.list_style)
+        || styled(&rctx.master.title_style)
+        || styled(&rctx.master.body_style)
+        || styled(&rctx.master.other_style)
 }
 
 /// Render slide `index` at `opts.scale` pixels per point. A panic inside the renderer becomes a
@@ -1124,6 +1138,15 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
     for d in l.decos.iter().filter(|d| d.behind) {
         deco(ctx, d);
     }
+    // Text shadows, then glows, under all the text.
+    for pass in [TextEffect::Shadow, TextEffect::Glow] {
+        for run in &l.runs {
+            let ps = para(run.para);
+            if ps.visible && ps.opacity > 0.001 {
+                text_effect(ctx, run, pass, m * Affine::translate(ps.offset), ps.opacity);
+            }
+        }
+    }
     for run in &l.runs {
         if (run.alpha <= 0.0 || run.color.a == 0) && run.outline.is_none() {
             continue;
@@ -1174,6 +1197,49 @@ fn line_bounds(li: &deckcraft_text::LineInfo) -> Option<Rect> {
     let (x0, x1) = li.caret_x.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(*x), b.max(*x)));
     let r = Rect::new(x0, li.top, x1, li.bottom);
     (r.is_finite() && r.width() > 0.0 && r.height() > 0.0).then_some(r)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TextEffect {
+    Shadow,
+    Glow,
+}
+
+/// Draw `run`'s shadow or glow (if it has one) under its glyphs, placed by `m`.
+fn text_effect(ctx: &mut RenderContext, run: &deckcraft_text::GlyphRun, which: TextEffect, m: Affine, opacity: f64) {
+    let Some(fx) = run.effects else { return };
+    let k = run.size / run.face.upem.max(1.0);
+    let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
+    let px = scale_of(m);
+    let (c, sigma, offset, grow) = match (which, fx.shadow, fx.glow) {
+        (TextEffect::Shadow, Some(s), _) => (s.color, s.blur * 0.5 * px, Vec2::new(s.dx, s.dy), 0.0),
+        // Measured on PowerPoint's export: a text glow of radius r is solid to about a third of r
+        // past the glyph's edge and fades out by about two thirds of r.
+        (TextEffect::Glow, _, Some((gc, r))) => (gc, r * 0.15 * px, Vec2::ZERO, r * 0.68),
+        _ => return,
+    };
+    let alpha = (c.a as f64 / 255.0) * opacity;
+    if alpha <= 0.0 {
+        return;
+    }
+    ctx.set_transform(Affine::IDENTITY);
+    ctx.push_layer(None, None, Some(alpha as f32), None, Some(blur(sigma)));
+    ctx.set_paint(color(c.with_alpha(255), 1.0));
+    for (gid, x, y) in &run.glyphs {
+        let path = glyph(&run.face, *gid);
+        if path.elements().is_empty() {
+            continue;
+        }
+        // The offset is in slide space: a shadow falls the same way whatever the text's rotation.
+        let at = pre_translate(m * Affine::translate((*x, *y)), offset * px) * skew * Affine::scale(k);
+        ctx.set_transform(at);
+        ctx.fill_path(&path);
+        if grow > 0.0 {
+            ctx.set_stroke(kurbo::Stroke::new(grow / k.max(1e-9)).with_join(kurbo::Join::Round));
+            ctx.stroke_path(&path);
+        }
+    }
+    ctx.pop_layer();
 }
 
 /// Draw glyph `gid` of `run` with its origin (on the baseline) mapped by `at`, faded by `opacity`.

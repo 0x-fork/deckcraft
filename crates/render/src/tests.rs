@@ -701,3 +701,52 @@ fn a_text_gradient_starts_over_on_every_line() {
         assert!(bottom(band) > 150, "line {band:?} ends at {}", bottom(band));
     }
 }
+
+/// A text box of big black "IIII" with `set` applied to its run.
+fn effect_text(set: impl Fn(&mut deckcraft_model::text::RunProps)) -> Presentation {
+    let mut sh = Shape { id: ShapeId(740), xfrm: Some(Xfrm::new(100.0, 100.0, 600.0, 300.0)), text_box: true, ..Default::default() };
+    let mut t = TextBody::from_text("IIII");
+    let props = &mut t.paragraphs[0].runs[0].props;
+    props.size = Some(100.0);
+    props.fill = Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0))));
+    set(props);
+    sh.text = Some(t);
+    deck_with(vec![sh])
+}
+
+#[test]
+fn text_glow_and_shadow_are_drawn() {
+    let count = |img: &Image, f: &dyn Fn(&[u8; 4]) -> bool| img.pixels.as_chunks::<4>().0.iter().filter(|px| f(px)).count();
+    let green = |p: &[u8; 4]| p[1] > 150 && p[0] < 120 && p[2] < 120;
+    let plain = effect_text(|_| {});
+    assert!(!needs_filters(&plain, &plain.slides[0]));
+    let img = render_slide(&plain, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert_eq!(count(&img, &green), 0);
+    // Glow: a green halo hugging the letters, needing the blur filter.
+    let glow =
+        effect_text(|p| p.glow = Some(deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 255, 0)), radius: 8.0 }));
+    assert!(needs_filters(&glow, &glow.slides[0]), "text glow blurs");
+    let img = render_slide(&glow, 0, &RenderOpts { scale: 1.0, threads: 4, ..Default::default() });
+    let halo = count(&img, &green);
+    assert!(halo > 300, "green halo pixels {halo}");
+    // Shadow: grey ink below and right of the letters, where the plain text has none.
+    let shadow = effect_text(|p| {
+        p.shadow = Some(deckcraft_model::style::Shadow {
+            color: ColorRef::rgb(deckcraft_color::Rgba { r: 0, g: 0, b: 0, a: 128 }),
+            blur: 2.0,
+            dist: 12.0,
+            dir: 45.0,
+            inner: false,
+            sx: 1.0,
+            sy: 1.0,
+            kx: 0.0,
+            ky: 0.0,
+            align: String::new(),
+            rotate_with_shape: false,
+        })
+    });
+    let img = render_slide(&shadow, 0, &RenderOpts { scale: 1.0, threads: 4, ..Default::default() });
+    let base = render_slide(&plain, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let grey = |p: &[u8; 4]| p[0] > 60 && p[0] < 230 && p[0] == p[1] && p[1] == p[2];
+    assert!(count(&img, &grey) > count(&base, &grey) + 300, "a grey shadow appears");
+}

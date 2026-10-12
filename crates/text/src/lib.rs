@@ -57,6 +57,25 @@ pub struct GlyphRun {
     /// Alpha of the fill (0–1).
     pub alpha: f64,
     pub gradient: Option<deckcraft_model::style::Gradient>,
+    /// Shadow and glow behind the glyphs (`a:rPr/a:effectLst`).
+    pub effects: Option<RunEffects>,
+}
+
+/// A text run's shadow and glow, colours resolved.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RunEffects {
+    pub shadow: Option<TextShadow>,
+    /// Glow colour (with its alpha) and radius in points.
+    pub glow: Option<(Rgba, f64)>,
+}
+
+/// An outer shadow: colour (with its alpha), blur radius and offset in points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextShadow {
+    pub color: Rgba,
+    pub blur: f64,
+    pub dx: f64,
+    pub dy: f64,
 }
 
 impl std::fmt::Debug for GlyphRun {
@@ -174,6 +193,7 @@ struct Style {
     outline: Option<(Rgba, f64)>,
     link: bool,
     gradient: Option<deckcraft_model::style::Gradient>,
+    effects: Option<RunEffects>,
     /// "Regular", "Bold"… for the slot and fallback faces.
     style_name: &'static str,
     /// BCP 47 language (`a:rPr/@lang`), for shaping.
@@ -288,6 +308,7 @@ fn make_style(ctx: &Ctx, r: &RunProps, scale: f64, prompt: Option<Rgba>) -> Styl
         outline,
         link: r.link.is_some(),
         gradient,
+        effects: run_effects(ctx, r, scale),
         style_name: style_name(bold, italic),
         lang: r.lang.clone().filter(|l| !l.is_empty()),
         ea,
@@ -494,6 +515,16 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
 
 /// Shape a logical paragraph into cells: bidi levels, per-grapheme faces, items of one level,
 /// script, face and shaping style, each shaped with the whole paragraph as context.
+/// A run's outer shadow and glow (inner shadows aren't drawn on text), at the layout's `scale`.
+fn run_effects(ctx: &Ctx, r: &RunProps, scale: f64) -> Option<RunEffects> {
+    let shadow = r.shadow.as_ref().filter(|s| !s.inner).map(|s| {
+        let a = s.dir.to_radians();
+        TextShadow { color: ctx.color(&s.color, None), blur: s.blur.max(0.0) * scale, dx: a.cos() * s.dist * scale, dy: a.sin() * s.dist * scale }
+    });
+    let glow = r.glow.as_ref().filter(|g| g.radius > 0.0).map(|g| (ctx.color(&g.color, None), g.radius * scale));
+    (shadow.is_some() || glow.is_some()).then_some(RunEffects { shadow, glow })
+}
+
 fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], faces: &mut Vec<Arc<FontFace>>, rtl: bool) -> Vec<Cell> {
     let db = FontDb::global();
     let chars: Vec<char> = text.chars().collect();
@@ -1231,6 +1262,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 link: false,
                 alpha: st.alpha,
                 gradient: None,
+                effects: None,
             });
         }
         // Group visually consecutive cells by (style, face).
@@ -1264,6 +1296,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                     link: st.link,
                     alpha: st.alpha,
                     gradient: st.gradient.clone(),
+                    effects: st.effects,
                 });
                 cur_key = key;
             }
