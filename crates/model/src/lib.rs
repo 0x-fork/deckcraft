@@ -798,6 +798,9 @@ pub struct Presentation {
     pub next_id: u32,
     /// Embedded fonts (family names; bytes in `media`).
     pub embedded_fonts: Vec<(String, MediaId)>,
+    /// Table styles defined in the file (`ppt/tableStyles.xml`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub table_styles: Vec<table::TableStyleDef>,
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,

@@ -872,3 +872,43 @@ fn soft_edges_fade_to_the_outline() {
     // Near the ends of the bounding box's top edge, outside the ellipse, nothing is drawn.
     assert!(alpha(110, 105) < 0.01);
 }
+
+#[test]
+fn a_file_defined_table_style_draws_its_parts() {
+    // Red table background (tblBg), see-through white on banded rows, a 4 pt blue left border and
+    // no inside lines: drawn from the definition, not DeckCraft's own look for the style.
+    use deckcraft_model::style::{Fill, Line};
+    use deckcraft_model::table::{TableBorder, TablePart, TablePartStyle, TableStyleDef};
+    let rgb = |r, g, b| ColorRef::rgb(deckcraft_color::Rgba::rgb(r, g, b));
+    let mut t = Table::new(4, 2, 400.0, 50.0);
+    t.style = "{ABCDEF01-2345-4678-9ABC-DEF012345678}".into();
+    t.first_row = false;
+    t.band_row = true;
+    let line = |c: ColorRef, w| TableBorder::Line { line: Line { fill: Some(Fill::solid(c)), width: Some(w), ..Default::default() } };
+    let mut whole = TablePartStyle { fill: Some(Fill::None), ..Default::default() };
+    whole.borders[0] = Some(line(rgb(0, 0, 255), 4.0));
+    whole.borders[4] = Some(TableBorder::Line { line: Line { fill: Some(Fill::None), ..Default::default() } });
+    let see_through = ColorRef::rgb(deckcraft_color::Rgba { r: 255, g: 255, b: 255, a: 51 });
+    let band = TablePartStyle { fill: Some(Fill::solid(see_through)), ..Default::default() };
+    let def = TableStyleDef {
+        id: t.style.clone(),
+        name: "Probe".into(),
+        parts: vec![(TablePart::WholeTbl, whole), (TablePart::Band1H, band)],
+        background: Some(TablePartStyle { fill: Some(Fill::solid(rgb(255, 0, 0))), ..Default::default() }),
+        raw: String::new(),
+    };
+    let tbl = Shape { id: ShapeId(790), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), kind: ShapeKind::Table(t), ..Default::default() };
+    let mut p = deck_with(vec![tbl]);
+    p.table_styles.push(def);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let px = |x, y| img.pixel(x, y);
+    // Row 1 (band1H): red with 20 % white over it; row 2 (band2H, undefined): plain red.
+    let banded = px(300, 125);
+    assert!(banded[0] > 250 && (40..65).contains(&banded[1]), "{banded:?}");
+    assert_eq!(px(300, 175)[..3], [255, 0, 0]);
+    // No line between the rows; a blue left border.
+    let edge = px(300, 150);
+    assert!(edge[0] > 240, "no inside line: {edge:?}");
+    let left = px(100, 175);
+    assert!(left[2] > 200 && left[0] < 60, "{left:?}");
+}

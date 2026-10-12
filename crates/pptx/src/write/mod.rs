@@ -512,7 +512,7 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
     pres.rels.add("tableStyles", "tableStyles.xml", false);
     x.pkg.xml_part("ppt/presProps.xml", CT_PRES_PROPS, pres_props_xml(p));
     x.pkg.xml_part("ppt/viewProps.xml", CT_VIEW_PROPS, view_props_xml());
-    let ts = crate::tables::table_styles_xml(&x.table_styles);
+    let ts = crate::tables::table_styles_xml(&x.table_styles, &p.table_styles);
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
     let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), &slide_rids);
     x.pkg.xml_part("ppt/presentation.xml", CT_PRES, pxml);

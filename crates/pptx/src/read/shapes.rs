@@ -401,7 +401,11 @@ fn table(imp: &mut Imp, part: &Part, tbl: &El) -> Table {
         t.band_row = pr.bool("bandRow").unwrap_or(false);
         t.band_col = pr.bool("bandCol").unwrap_or(false);
         if let Some(id) = pr.child("tableStyleId").map(|e| e.text()) {
-            t.style = crate::tables::style_from_guid(id.trim());
+            // A style the file defines is drawn from its definition (by its GUID).
+            // DeckCraft's own styles (written with GUIDs derived from their ids) map back to them.
+            let up = id.trim().to_ascii_uppercase();
+            t.style =
+                if imp.table_style_ids.contains(&up) && !crate::tables::is_own_guid(&up) { up } else { crate::tables::style_from_guid(id.trim()) };
         }
     }
     t.cols = tbl

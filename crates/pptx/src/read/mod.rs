@@ -30,6 +30,8 @@ pub struct Imp<'a> {
     pub next: u32,
     pub slide_by_part: HashMap<String, SlideId>,
     pub custom_show_names: HashMap<String, String>,
+    /// GUIDs (upper case) of the table styles the file defines.
+    pub table_style_ids: Vec<String>,
 }
 
 impl Imp<'_> {
@@ -230,6 +232,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         next: max_id.max(1),
         slide_by_part: HashMap::new(),
         custom_show_names: HashMap::new(),
+        table_style_ids: Vec::new(),
     };
     // Slide ids first so hyperlinks anywhere can point at slides.
     let mut slide_ids: Vec<(u32, String, SlideId)> = vec![];
@@ -268,6 +271,13 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
     p.first_slide_number = pres_el.u32("firstSlideNum").unwrap_or(1).min(9999);
     if let Some(dts) = pres_el.child("defaultTextStyle") {
         p.default_text_style = dml::list_style(&mut imp, &pres_part, dts);
+    }
+    if let Some(r) = pres_part.rels.first_of("tableStyles")
+        && let Some(d) = load(&pkg, &r.target)
+    {
+        let part = Part::new(&pkg, &r.target, &d);
+        p.table_styles = table_styles(&mut imp, &part, &d.root);
+        imp.table_style_ids = p.table_styles.iter().map(|s| s.id.clone()).collect();
     }
 
     // Masters and layouts.
@@ -503,6 +513,69 @@ fn walk_shapes_mut(shapes: &mut [deckcraft_model::Shape], f: &mut dyn FnMut(&mut
             walk_shapes_mut(children, f);
         }
     }
+}
+
+/// `a:tblStyleLst`: the table styles the file defines.
+fn table_styles(imp: &mut Imp, part: &Part, root: &El) -> Vec<deckcraft_model::table::TableStyleDef> {
+    use deckcraft_model::table::{TableBorder, TablePart, TablePartStyle, TableStyleDef};
+    root.children_named("tblStyle")
+        .take(256)
+        .filter_map(|st| {
+            let id = st.attr("styleId")?.to_ascii_uppercase();
+            let mut def = TableStyleDef { id, name: st.attr("styleName").unwrap_or("").to_string(), raw: part.keep(st), ..Default::default() };
+            if let Some(bg) = st.child("tblBg") {
+                let mut ps = TablePartStyle::default();
+                if let Some(f) = bg.elements().find(|e| e.local().ends_with("Fill")) {
+                    ps.fill = dml::fill_el(imp, part, f);
+                }
+                if let Some(fr) = bg.child("fillRef") {
+                    ps.fill_ref = Some((
+                        fr.u32("idx").unwrap_or(0),
+                        dml::color(fr).unwrap_or(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent1)),
+                    ));
+                }
+                def.background = Some(ps);
+            }
+            for el in st.elements() {
+                let Some(kind) = TablePart::from_xml(el.local()) else { continue };
+                let mut ps = TablePartStyle::default();
+                if let Some(tx) = el.child("tcTxStyle") {
+                    ps.text_color = dml::color(tx);
+                    ps.bold = tx.attr("b").map(|v| v == "on");
+                    ps.italic = tx.attr("i").map(|v| v == "on");
+                }
+                if let Some(tc) = el.child("tcStyle") {
+                    if let Some(f) = tc.child("fill").and_then(|f| f.elements().next()) {
+                        ps.fill = dml::fill_el(imp, part, f);
+                    }
+                    if let Some(fr) = tc.child("fillRef") {
+                        ps.fill_ref = Some((
+                            fr.u32("idx").unwrap_or(0),
+                            dml::color(fr).unwrap_or(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent1)),
+                        ));
+                    }
+                    if let Some(bd) = tc.child("tcBdr") {
+                        for (i, side) in ["left", "right", "top", "bottom", "insideH", "insideV"].iter().enumerate() {
+                            let Some(b) = bd.child(side) else { continue };
+                            let border = if let Some(ln) = b.child("ln") {
+                                Some(TableBorder::Line { line: dml::line(imp, part, ln) })
+                            } else {
+                                b.child("lnRef").map(|r| TableBorder::Ref {
+                                    idx: r.u32("idx").unwrap_or(0),
+                                    color: dml::color(r).unwrap_or(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent1)),
+                                })
+                            };
+                            if let Some(slot) = ps.borders.get_mut(i) {
+                                *slot = border;
+                            }
+                        }
+                    }
+                }
+                def.parts.push((kind, ps));
+            }
+            Some(def)
+        })
+        .collect()
 }
 
 fn background(imp: &mut Imp, part: &Part, csld: &El) -> Option<Background> {
