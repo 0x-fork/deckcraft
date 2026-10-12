@@ -543,3 +543,55 @@ fn inserted_hyperlinks_look_like_links() {
     s.execute("format.underline", &json!({})).unwrap();
     assert_eq!(s.execute("format.state", &json!({})).unwrap()["underline"], false);
 }
+
+#[test]
+fn every_params_doc_names_its_keys() {
+    for c in command_specs() {
+        assert!(cmd::param_keys(c.params).is_ok(), "{}: {:?}", c.id, cmd::param_keys(c.params));
+    }
+    assert_eq!(cmd::param_keys("{index} | {id}").unwrap(), ["index", "id"]);
+    assert_eq!(cmd::param_keys("{color? | none?: true, kind?: a|b (x, y), ids?} → {id}").unwrap(), ["color", "none", "kind", "ids"]);
+}
+
+#[test]
+fn a_params_doc_spells_out_each_parameter() {
+    use cmd::Param;
+    let p = |name, optional, about, or, object| Param { name, optional, about, or, object };
+    assert_eq!(
+        cmd::parse_params("{preset: rect|roundRect, rect?: [x,y,w,h] pt, index? (else selected shapes)} → {id}").unwrap(),
+        [
+            p("preset", false, "rect|roundRect", false, 0),
+            p("rect", true, "[x,y,w,h] pt", false, 0),
+            p("index", true, "(else selected shapes)", false, 0)
+        ]
+    );
+    assert_eq!(
+        cmd::parse_params("{color? | none?: true, gradient?: {stops, kind?: a|b}, ids?}").unwrap(),
+        [
+            p("color", true, "", false, 0),
+            p("none", true, "true", true, 0),
+            p("gradient", true, "{stops, kind?: a|b}", false, 0),
+            p("ids", true, "", false, 0)
+        ]
+    );
+    assert_eq!(
+        cmd::parse_params("{name} | {major, minor}").unwrap(),
+        [p("name", false, "", false, 0), p("major", false, "", false, 1), p("minor", false, "", false, 1)]
+    );
+}
+
+#[test]
+fn what_a_command_acts_on_names_only_keys_it_takes() {
+    for c in command_specs() {
+        let keys = cmd::param_keys(c.params).unwrap();
+        let said = c.acts_on().unwrap_or_default();
+        assert!(!said.contains("`ids`") || keys.contains(&"ids"), "{}: {said}", c.id);
+        assert!(!said.contains("`id`") || keys.contains(&"id"), "{}: {said}", c.id);
+    }
+    let acts = |id: &str| find_command(id).and_then(|c| c.acts_on());
+    assert_eq!(acts("shape.resize").as_deref(), Some("Acts on the shapes in `ids`, else on the selected shapes."));
+    assert_eq!(acts("table.style").as_deref(), Some("Acts on the shape in `id`, else on the selected shapes."));
+    assert_eq!(acts("shape.setDefault").as_deref(), Some("Acts on the selected shapes."));
+    assert_eq!(acts("format.size").as_deref(), Some("Acts on the selected text or shapes."));
+    assert_eq!(acts("slide.new"), None);
+}

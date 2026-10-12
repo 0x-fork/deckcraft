@@ -1,18 +1,8 @@
-//! Headless DeckCraft.
-//!
-//! ```text
-//! deckcraft-cli info FILE                       # slides, titles, layouts (JSON)
-//! deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] OUT.png|OUT_DIR
-//! deckcraft-cli convert IN OUT                  # .deckcraft ⇄ .pptx, outline .txt, .png (first slide)
-//! deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
-//! deckcraft-cli commands [FILTER]               # list commands (JSON)
-//! deckcraft-cli describe ID                     # one command
-//! deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]   # drive the running app
-//! deckcraft-cli mcp [--connect PORT] [--sample] # MCP server over stdio
-//! deckcraft-cli links | --version
-//! ```
+//! Headless DeckCraft. `deckcraft-cli help` explains each subcommand (`help.rs`).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+
+mod help;
 
 use std::process::ExitCode;
 
@@ -32,20 +22,28 @@ macro_rules! outln {
     }};
 }
 
-const USAGE: &str = "usage: deckcraft-cli info FILE
-       deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] [--edit] OUT
-       deckcraft-cli convert IN OUT
-       deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
-       deckcraft-cli commands [FILTER]
-       deckcraft-cli describe COMMAND
-       deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]
-       deckcraft-cli mcp [--connect PORT] [--sample]
-       deckcraft-cli links | --version";
-
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest = args.get(1..).unwrap_or(&[]);
+    let asks_help = rest.iter().any(|a| a == "--help" || a == "-h");
+    if let Some(page) = args.first().filter(|_| asks_help).and_then(|n| help::page(n)) {
+        outln!("{page}");
+        return ExitCode::SUCCESS;
+    }
     match args.first().map(String::as_str) {
+        Some("help" | "--help" | "-h") => match rest.first() {
+            None => {
+                outln!("{}", help::overview());
+                ExitCode::SUCCESS
+            }
+            Some(name) => match help::page(name) {
+                Some(page) => {
+                    outln!("{page}");
+                    ExitCode::SUCCESS
+                }
+                None => unknown(name),
+            },
+        },
         Some("--version" | "-V" | "version") => {
             outln!("deckcraft-cli {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -55,15 +53,16 @@ fn main() -> ExitCode {
         Some("convert") => report(convert(rest)),
         Some("run") => report(run(rest)),
         Some("commands") => {
-            let s = Session::new();
             let f = rest.first().map(|x| x.to_lowercase());
-            let list: Vec<Value> = s
-                .commands()
-                .into_iter()
+            for c in deckcraft_engine::command_specs()
+                .iter()
                 .filter(|c| f.as_ref().is_none_or(|f| c.id.to_lowercase().contains(f.as_str()) || c.label.to_lowercase().contains(f.as_str())))
-                .map(|c| serde_json::to_value(c).unwrap_or_default())
-                .collect();
-            outln!("{}", serde_json::to_string_pretty(&list).unwrap_or_default());
+            {
+                match c.params.strip_prefix("{}") {
+                    Some(answer) => outln!("{} — {}{answer}", c.id, c.label),
+                    None => outln!("{} — {}: {}", c.id, c.label, c.params),
+                }
+            }
             ExitCode::SUCCESS
         }
         Some("describe") => report(describe(rest.first().map(String::as_str))),
@@ -74,12 +73,20 @@ fn main() -> ExitCode {
             outln!("Discord   {DISCORD}\nWebsite   {WEBSITE}\nApp page  {APP_PAGE}\nGitHub    {GITHUB}");
             ExitCode::SUCCESS
         }
-        _ => {
-            eprintln!("{USAGE}");
-            eprintln!("\nCommunity: {}  ·  {}", deckcraft_engine::links::DISCORD, deckcraft_engine::links::APP_PAGE);
-            ExitCode::FAILURE
-        }
+        Some(other) => unknown(other),
+        None => usage(),
     }
+}
+
+fn unknown(sub: &str) -> ExitCode {
+    eprintln!("deckcraft-cli: unknown subcommand `{sub}`\n");
+    usage()
+}
+
+fn usage() -> ExitCode {
+    eprintln!("{}", help::overview());
+    eprintln!("\nCommunity: {}  ·  {}", deckcraft_engine::links::DISCORD, deckcraft_engine::links::APP_PAGE);
+    ExitCode::FAILURE
 }
 
 fn report(r: Result<(), String>) -> ExitCode {
@@ -218,9 +225,59 @@ fn run(args: &[String]) -> Result<(), String> {
 
 fn describe(id: Option<&str>) -> Result<(), String> {
     let id = id.ok_or("describe needs a command id")?;
-    let c = deckcraft_engine::find_command(id).ok_or_else(|| format!("unknown command `{id}`"))?;
-    outln!("{}  —  {}\n  where:    {}\n  shortcut: {}\n  params:   {}", c.id, c.label, c.menu.join(" ▸ "), c.shortcut.unwrap_or("—"), c.params);
+    let c = deckcraft_engine::find_command(id).ok_or_else(|| deckcraft_engine::EngineError::UnknownCommand(id.into()).to_string())?;
+    let mut head = format!("{}: {}", c.id, c.label);
+    if !c.menu.is_empty() {
+        head.push_str(&format!(", in {}", c.menu.join(" ▸ ")));
+    }
+    if let Some(k) = c.shortcut {
+        head.push_str(&format!(", shortcut {k}"));
+    }
+    outln!("{head}.\n");
+    let (args, answer) = c.params.split_once('→').unwrap_or((c.params, ""));
+    let parsed = deckcraft_engine::cmd::parse_params(c.params);
+    match &parsed {
+        Err(_) => outln!("Parameters: {}", args.trim()),
+        Ok(params) if params.is_empty() => outln!("Takes no parameters."),
+        Ok(params) => print_params(params),
+    }
+    let params = parsed.unwrap_or_default();
+    if let Some(acts) = c.acts_on() {
+        outln!("{acts}");
+    }
+    let remark = remark(args);
+    if !remark.is_empty() {
+        outln!("Note: {remark}");
+    }
+    if !answer.trim().is_empty() {
+        outln!("Answers with {}.", answer.trim());
+    }
+    let call = if params.iter().all(|p| p.optional) { c.id.to_string() } else { format!("'{}={{…}}'", c.id) };
+    outln!("\nRun it with: deckcraft-cli run --cmd {call}");
     Ok(())
+}
+
+fn print_params(params: &[deckcraft_engine::cmd::Param]) {
+    let name = |p: &deckcraft_engine::cmd::Param| {
+        let or = if p.or { "or " } else { "" };
+        let optional = if p.optional { ", optional" } else { "" };
+        format!("{or}{}{optional}", p.name)
+    };
+    let width = params.iter().map(|p| name(p).chars().count()).max().unwrap_or_default();
+    let sets = params.iter().map(|p| p.object).max().unwrap_or_default() > 0;
+    outln!("Parameters:");
+    for (k, p) in params.iter().enumerate() {
+        if sets && params.get(k.wrapping_sub(1)).is_none_or(|before| before.object != p.object) {
+            outln!("  {}", if p.object == 0 { "either:" } else { "or:" });
+        }
+        let indent = if sets { "    " } else { "  " };
+        outln!("{}", format!("{indent}{:<width$}  {}", name(p), p.about).trim_end());
+    }
+}
+
+fn remark(args: &str) -> &str {
+    let after = args.rfind('}').and_then(|i| args.get(i + 1..)).unwrap_or_default().trim().trim_start_matches('—').trim();
+    after.strip_prefix('(').and_then(|n| n.strip_suffix(')')).unwrap_or(after)
 }
 
 fn app(args: &[String]) -> Result<(), String> {

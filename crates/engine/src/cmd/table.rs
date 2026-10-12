@@ -27,7 +27,15 @@ pub fn specs() -> Vec<CommandSpec> {
             s, p, "delCol"
         )),
         cmd!("table.merge", "Merge Cells", ["Table Layout", "Merge"], None, "{from: [r, c], to: [r, c], id?}", has_selection, merge),
-        cmd!("table.split", "Split Cells", ["Table Layout", "Merge"], None, "{cell: [r, c], id?}", has_selection, split),
+        cmd!(
+            "table.split",
+            "Split Cells",
+            ["Table Layout", "Merge"],
+            None,
+            "{cell?: [r, c] (else the edited cell), id?} | {row: index, col: index, id?}",
+            has_selection,
+            split
+        ),
         cmd!(
             "table.style",
             "Table Styles",
@@ -42,7 +50,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Table Style Options",
             ["Table Design", "Table Style Options"],
             None,
-            "{headerRow?, totalRow?, bandedRows?, firstColumn?, lastColumn?, bandedColumns?: bool, id?}",
+            "{headerRow?: bool, totalRow?: bool, bandedRows?: bool, firstColumn?: bool, lastColumn?: bool, bandedColumns?: bool, id?}",
             has_selection,
             options
         ),

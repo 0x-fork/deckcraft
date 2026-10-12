@@ -64,7 +64,7 @@ fn body_mut<'a>(doc: &'a mut Presentation, sel: &Selection, t: &TextSel) -> Opti
 
 /// Edit the active text body and selection; refits auto-sizing text boxes afterwards.
 pub(crate) fn edit_text<T>(s: &mut Session, f: impl FnOnce(&mut TextBody, &mut TextSel) -> T) -> Result<T> {
-    let t0 = s.doc()?.selection.text.clone().ok_or_else(|| bad("text", "no text insertion point"))?;
+    let t0 = s.doc()?.selection.text.clone().ok_or_else(|| bad("text", NO_TEXT_POINT))?;
     // Materialise an inherited placeholder box before editing (so autofit can change it).
     let r = s.edit(|doc, sel| {
         let mut t = t0.clone();
@@ -567,7 +567,7 @@ pub(crate) fn format_run(s: &mut Session, f: &(dyn Fn(&mut RunProps) + Send + Sy
     }
     let ids = st.selection.shapes.clone();
     if ids.is_empty() {
-        return Err(bad("format", "select text or a shape"));
+        return Err(bad("format", SELECT_TEXT_OR_SHAPE));
     }
     edit_shapes(s, &json!({"ids": ids}), "format", |sh| {
         match &mut sh.kind {
@@ -656,7 +656,7 @@ pub(crate) fn format_para(s: &mut Session, f: &(dyn Fn(&mut deckcraft_model::tex
     }
     let ids = st.selection.shapes.clone();
     if ids.is_empty() {
-        return Err(bad("format", "select text or a shape"));
+        return Err(bad("format", SELECT_TEXT_OR_SHAPE));
     }
     edit_shapes(s, &json!({"ids": ids}), "format", |sh| {
         match &mut sh.kind {

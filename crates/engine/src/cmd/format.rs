@@ -39,15 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("format.size", "Font Size", ["Home", "Font"], None, "{size: pt}", has_text_or_shapes, size),
         cmd!("format.grow", "Increase Font Size", ["Home", "Font"], Some("Cmd+Shift+."), "{}", has_text_or_shapes, grow),
         cmd!("format.shrink", "Decrease Font Size", ["Home", "Font"], Some("Cmd+Shift+,"), "{}", has_text_or_shapes, shrink),
-        cmd!(
-            "format.color",
-            "Font Color",
-            ["Home", "Font"],
-            None,
-            "{color: #RRGGBB | accent1..6 | tx1… | {scheme, lumMod…}}",
-            has_text_or_shapes,
-            color
-        ),
+        cmd!("format.color", "Font Color", ["Home", "Font"], None, "{color: #RRGGBB|accent1..6|tx1…|{scheme, lumMod…}}", has_text_or_shapes, color),
         cmd!("format.highlight", "Text Highlight Color", ["Home", "Font"], None, "{color? (absent = none)}", has_text_or_shapes, highlight),
         cmd!("format.case", "Change Case", ["Home", "Font"], Some("Shift+F3"), "{mode: sentence|lower|upper|title|toggle}", has_text_or_shapes, case),
         cmd!("format.caps", "Caps", [], None, "{caps: none|small|all}", has_text_or_shapes, caps),
@@ -149,7 +141,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Text Box Margins",
             ["Format Shape", "Text Box"],
             None,
-            "{left?, top?, right?, bottom?: pt}",
+            "{left?: pt, top?: pt, right?: pt, bottom?: pt}",
             has_text_or_shapes,
             margins
         ),
