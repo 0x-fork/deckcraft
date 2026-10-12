@@ -22,13 +22,9 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
         p.text(pos2(rect.min.x + 120.0, rect.center().y), Align2::LEFT_CENTER, "English (United States)", theme::font(12.0), t.text_dim);
         // Transient status message.
-        if let Some((msg, at)) = app.status.clone() {
-            if crate::now_ms() - at < 6000.0 {
-                p.text(pos2(rect.min.x + 290.0, rect.center().y), Align2::LEFT_CENTER, &msg, theme::font(12.0), t.accent);
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
-            } else {
-                app.status = None;
-            }
+        if let Some(msg) = app.fresh_status() {
+            p.text(pos2(rect.min.x + 290.0, rect.center().y), Align2::LEFT_CENTER, &msg, theme::font(12.0), t.accent);
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
         }
         let mut right = ui.new_child(
             egui::UiBuilder::new()
