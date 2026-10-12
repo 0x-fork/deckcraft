@@ -492,9 +492,7 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
                 st.baseline = 0.0;
                 // Symbol fonts (Wingdings) aren't available: map common private-use bullets.
                 let ch = map_symbol_bullet(char, props.bullet_font.as_deref());
-                if !st.face.covers(ch.chars().next().unwrap_or('•')) {
-                    st.face = db.face("Inter", "Regular");
-                }
+                bullet_face(db, &mut st, &ch);
                 Some((ch, st))
             }
             Some(Bullet::AutoNum { scheme, start_at }) => {
@@ -504,13 +502,24 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
                 }
                 rp.size = Some(lead.size.unwrap_or(18.0) * props.bullet_size.unwrap_or(1.0));
                 rp.underline = None;
-                let st = make_style(ctx, &rp, scale, opts.prompt_color);
-                Some((autonum(scheme, start_at.saturating_sub(1).saturating_add(number.unwrap_or(1))), st))
+                let mut st = make_style(ctx, &rp, scale, opts.prompt_color);
+                let label = autonum(scheme, start_at.saturating_sub(1).saturating_add(number.unwrap_or(1)));
+                bullet_face(db, &mut st, &label);
+                Some((label, st))
             }
             _ => None,
         }
     };
     ParaShaped { cells, styles, faces, props, lead_size, lead_face, bullet, level: para.level, rtl }
+}
+
+/// A face that draws the bullet `label` when the bullet's own can't (circled numbers ①, arrows
+/// and other symbols missing from the text font), by the usual fallback.
+fn bullet_face(db: &FontDb, st: &mut Style, label: &str) {
+    let chars: Vec<char> = label.chars().collect();
+    if !chars.is_empty() && !deckcraft_fonts::covers_cluster(&st.face, &chars) {
+        st.face = db.cascade(&chars, std::slice::from_ref(&st.face), st.style_name);
+    }
 }
 
 /// Shape a logical paragraph into cells: bidi levels, per-grapheme faces, items of one level,
