@@ -195,7 +195,7 @@ fn run(args: &[String]) -> Result<(), String> {
         match a.as_str() {
             "--in" => input = Some(it.next().cloned().ok_or("--in needs a file")?),
             "--sample" => sample = true,
-            "--cmd" => cmds.push(it.next().cloned().ok_or("--cmd needs ID[=JSON]")?),
+            "--cmd" => cmds.push(it.next().cloned().ok_or("--cmd needs COMMAND[=PARAMS]")?),
             "--save" => save = Some(it.next().cloned().ok_or("--save needs a path")?),
             "--export" => export = Some(it.next().cloned().ok_or("--export needs a path")?),
             "--print" => print = true,

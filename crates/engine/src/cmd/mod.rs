@@ -33,6 +33,9 @@ pub struct CommandSpec {
     /// Where it lives: `["Home", "Font"]` (ribbon tab and group) or `["Arrange"]` (menu).
     pub menu: &'static [&'static str],
     pub shortcut: Option<&'static str>,
+    /// The parameters as `describe` and `commands` show them, read by [`parse_params`]: `?` marks
+    /// an optional key, a spaced ` | ` separates alternative sets of keys (so alternative values
+    /// are written unspaced, `ms|null`), `(…)` is a remark and `→` starts the answer.
     pub params: &'static str,
     pub enabled: Enabled,
     pub run: Run,
@@ -53,6 +56,7 @@ pub struct CommandInfo {
 }
 
 impl CommandSpec {
+    /// Holds because `Session::execute` skips the selection check when `id` or `ids` is given.
     pub fn acts_on(&self) -> Option<String> {
         let keys = param_keys(self.params).unwrap_or_default();
         let named = if keys.contains(&"ids") {
@@ -114,7 +118,7 @@ pub fn has_text(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
     if s.active().is_some_and(|d| d.selection.text.is_some()) { Ok(()) } else { Err(NO_TEXT_POINT.into()) }
 }
-/// Text editing or shapes with text selected (formatting commands apply to either).
+/// Text editing or selected shapes (formatting commands apply to either).
 pub fn has_text_or_shapes(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
     if s.active().is_some_and(|d| d.selection.text.is_some() || !d.selection.shapes.is_empty()) { Ok(()) } else { Err(SELECT_TEXT_OR_SHAPE.into()) }

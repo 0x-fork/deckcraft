@@ -32,7 +32,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Split Cells",
             ["Table Layout", "Merge"],
             None,
-            "{cell?: [r, c] (else the edited cell), id?} | {row: index, col: index, id?}",
+            "{cell?: [r, c] (else the edited cell), id?} | {row?: index, col?: index, id?}",
             has_selection,
             split
         ),
