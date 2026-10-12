@@ -19,7 +19,9 @@ use crate::PptxError;
 use crate::opc::{self, NS_A, NS_P, NS_P14, NS_R, PackageOut, RelsOut};
 use crate::xml::{A, W};
 
-const CT_PRES: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
+pub(crate) const CT_PRES: &str = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml";
+pub(crate) const CT_TEMPLATE: &str = "application/vnd.openxmlformats-officedocument.presentationml.template.main+xml";
+pub(crate) const CT_SHOW: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideshow.main+xml";
 const CT_SLIDE: &str = "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
 const CT_LAYOUT: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml";
 const CT_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml";
@@ -360,7 +362,7 @@ fn sanitized(p: &Presentation) -> std::borrow::Cow<'_, Presentation> {
     std::borrow::Cow::Owned(q)
 }
 
-pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
+pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
     let p = sanitized(p);
     let p: &Presentation = &p;
     let mut x = Exp {
@@ -500,7 +502,7 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
     let ts = crate::tables::table_styles_xml(&x.table_styles);
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
     let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), &slide_rids);
-    x.pkg.xml_part("ppt/presentation.xml", CT_PRES, pxml);
+    x.pkg.xml_part("ppt/presentation.xml", main_ct, pxml);
     x.pkg.rels("ppt/presentation.xml", &pres.rels);
 
     // Document properties and package relationships.

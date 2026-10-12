@@ -51,7 +51,18 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
 
 /// Write a `.pptx` package.
 pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
-    write::export(p)
+    write::export(p, write::CT_PRES)
+}
+
+/// Write a package for `ext`: `potx` (template) and `ppsx` (slide show) differ from `pptx` only in
+/// the main part's content type.
+pub fn export_as(p: &Presentation, ext: &str) -> Result<Vec<u8>, PptxError> {
+    let ct = match ext {
+        "potx" => write::CT_TEMPLATE,
+        "ppsx" => write::CT_SHOW,
+        _ => write::CT_PRES,
+    };
+    write::export(p, ct)
 }
 
 /// Content type for a file name's extension.
