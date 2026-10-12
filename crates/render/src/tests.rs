@@ -846,3 +846,29 @@ fn rect_path_gradients_draw_x_shaped_contours() {
     // Along the diagonal to a corner the colour follows the vertical share.
     assert!((v(168, 120) - 51.0).abs() < 6.0, "{}", v(168, 120));
 }
+
+#[test]
+fn soft_edges_fade_to_the_outline() {
+    // An ellipse with a 12 pt soft edge: transparent at its outline, half opaque about 10 pt
+    // inside, opaque further in, as in PowerPoint's export (the fade follows the curve, not the
+    // bounding box).
+    let sh = Shape {
+        id: ShapeId(780),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 300.0, 200.0)),
+        geom: Geom::Preset { name: "ellipse".into(), adj: vec![] },
+        fill: Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0)))),
+        line: Some(deckcraft_model::style::Line { fill: Some(deckcraft_model::style::Fill::None), ..Default::default() }),
+        effects: Some(deckcraft_model::Effects { soft_edge: Some(12.0), ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let alpha = |x: u32, y: u32| 1.0 - img.pixel(x, y)[0] as f64 / 255.0;
+    // Top of the ellipse is at y = 100, x = 250.
+    assert!(alpha(250, 101) < 0.08, "edge {}", alpha(250, 101));
+    let mid = alpha(250, 110);
+    assert!((0.3..0.7).contains(&mid), "0.85 r inside: {mid}");
+    assert!(alpha(250, 130) > 0.97, "inside {}", alpha(250, 130));
+    // Near the ends of the bounding box's top edge, outside the ellipse, nothing is drawn.
+    assert!(alpha(110, 105) < 0.01);
+}

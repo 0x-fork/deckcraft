@@ -765,18 +765,23 @@ impl Renderer {
             }
         }
         if let Some(r) = soft {
-            // Feather: fade the shape's alpha towards the outline.
+            // Feather: the shape (fill and line) fades to nothing at its outline. Measured on
+            // PowerPoint's export: the mask is the outline shrunk by 0.85 r, blurred by a third of
+            // r, so it's half opaque 0.85 r inside the edge and transparent at the edge itself.
             ctx.set_transform(m);
             ctx.push_layer(
                 None,
                 Some(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn)),
                 None,
                 None,
-                Some(blur(r * 0.5 * scale_of(m))),
+                Some(blur(r / 3.0 * scale_of(m))),
             );
             ctx.set_paint(peniko::Color::from_rgba8(0, 0, 0, 255));
-            let inset = Rect::new(0.0, 0.0, w, h).inset(-r * 0.6);
-            ctx.fill_rect(&inset);
+            ctx.fill_path(&outline);
+            ctx.push_blend_layer(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestOut));
+            ctx.set_stroke(kurbo::Stroke::new(r * 1.7).with_join(kurbo::Join::Round));
+            ctx.stroke_path(&outline);
+            ctx.pop_layer();
             ctx.pop_layer();
             ctx.pop_layer();
         }
