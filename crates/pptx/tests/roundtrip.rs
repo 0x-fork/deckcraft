@@ -780,3 +780,19 @@ fn line_break_options_round_trip() {
     assert_eq!(props.latin_line_break, Some(true));
     assert_eq!(props.hanging_punct, Some(false));
 }
+
+#[test]
+fn a_table_fill_round_trips() {
+    let mut p = defaults::new_presentation(None);
+    let mut t = Table::new(2, 2, 200.0, 40.0);
+    t.background = Some(Fill::solid(ColorRef::rgb(Rgba::rgb(0, 112, 192))));
+    let mut sh = shape(&mut p, "Filled table", 10.0, 10.0, 200.0, 80.0);
+    sh.kind = deckcraft_model::ShapeKind::Table(t);
+    let first = p.slides[0].id;
+    p.slide_mut(first).expect("slide").shapes.push(sh);
+    let q = round(&p);
+    let deckcraft_model::ShapeKind::Table(t) = &by_name(&q.slides[0], "Filled table").kind else { panic!("table") };
+    assert!(
+        matches!(&t.background, Some(Fill::Solid { color }) if matches!(color.base, deckcraft_model::ColorBase::Rgb { rgb } if rgb == Rgba::rgb(0, 112, 192)))
+    );
+}

@@ -912,3 +912,22 @@ fn a_file_defined_table_style_draws_its_parts() {
     let left = px(100, 175);
     assert!(left[2] > 200 && left[0] < 60, "{left:?}");
 }
+
+#[test]
+fn a_table_fill_shows_behind_cells_without_their_own() {
+    // `a:tblPr` solidFill (tdf#127237): cells with no fill show the table's blue.
+    use deckcraft_model::style::Fill;
+    let mut t = Table::new(2, 2, 200.0, 50.0);
+    t.style = "none".into();
+    t.background = Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 112, 192))));
+    for r in 0..2 {
+        for c in 0..2 {
+            t.cell_mut(r, c).unwrap().fill = Some(Fill::None);
+        }
+    }
+    let tbl = Shape { id: ShapeId(795), xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)), kind: ShapeKind::Table(t), ..Default::default() };
+    let p = deck_with(vec![tbl]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert_eq!(img.pixel(150, 160)[..3], [0, 112, 192]);
+    assert_eq!(img.pixel(50, 50)[..3], [255, 255, 255]);
+}

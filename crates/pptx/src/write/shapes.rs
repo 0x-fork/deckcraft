@@ -494,6 +494,9 @@ fn table(w: &mut W, x: &mut Exp, o: &mut Out, t: &Table) {
             .t("bandRow", t.band_row)
             .t("bandCol", t.band_col),
     );
+    if let Some(f) = &t.background {
+        dml::fill(w, x, o, f);
+    }
     w.elt("a:tableStyleId", &guid);
     w.close("a:tblPr");
     w.open0("a:tblGrid");

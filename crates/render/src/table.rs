@@ -300,13 +300,20 @@ pub fn cell_rects(t: &Table, heights: &[f64]) -> Vec<(usize, usize, Rect)> {
 pub fn draw(ctx: &mut RenderContext, pres: &Presentation, rctx: &Ctx, t: &Table, m: Affine, _w: f64, _h: f64, fields: &dyn deckcraft_text::Fields) {
     let _ = pres;
     let rects = cell_rects(t, &row_heights(rctx, t, fields));
-    // A file-defined style's table background, behind every cell.
-    if let Some(def) = rctx.pres.table_styles.iter().find(|d| d.id.eq_ignore_ascii_case(&t.style))
-        && let Some((bg, ph)) = def.background.as_ref().and_then(|b| style_fill(rctx, b))
-        && let Some(all) = rects.iter().map(|(_, _, r)| *r).reduce(|a, b| a.union(b))
-    {
-        ctx.set_transform(m);
-        crate::paint::fill_path(ctx, rctx, &bg, ph, &all.to_path(0.1), all, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
+    // Table backgrounds behind every cell: a file-defined style's, then the table's own fill.
+    let style_bg = rctx
+        .pres
+        .table_styles
+        .iter()
+        .find(|d| d.id.eq_ignore_ascii_case(&t.style))
+        .and_then(|d| d.background.as_ref())
+        .and_then(|b| style_fill(rctx, b));
+    let own_bg = t.background.clone().map(|f| (f, None));
+    if let Some(all) = rects.iter().map(|(_, _, r)| *r).reduce(|a, b| a.union(b)) {
+        for (bg, ph) in style_bg.into_iter().chain(own_bg) {
+            ctx.set_transform(m);
+            crate::paint::fill_path(ctx, rctx, &bg, ph, &all.to_path(0.1), all, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
+        }
     }
     for (r, c, rect) in &rects {
         let Some(cell) = t.cell(*r, *c) else { continue };
