@@ -879,6 +879,8 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
     let mut numbering: Vec<u32> = vec![0; 9];
     let mut all_lines: Vec<(LineInfo, LinePlace, f64, Option<(String, f64, f64)>)> = vec![];
     let mut prev_after = 0.0;
+    // How far the last line's full pitch reaches past the text (exact spacing; see below).
+    let mut tail = 0.0;
     let mut shaped_paras: Vec<ParaShaped> = Vec::with_capacity(body.paragraphs.len());
     for (pi, para) in body.paragraphs.iter().enumerate() {
         let lvl = para.level.min(8) as usize;
@@ -947,7 +949,11 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             };
             let ratio = if natural > 0.0 { lh / natural } else { 1.0 };
             let top = y;
-            let baseline = top + asc * ratio;
+            // Exact spacing (`spcPts`), as PowerPoint sets it: the baseline sits at 80 % of the
+            // line pitch, and the text ends at the last line's descent rather than a full pitch.
+            let exact = matches!(props.line_spacing, Some(Spacing::Pts(_)));
+            let baseline = if exact { top + lh * 0.8 } else { top + asc * ratio };
+            tail = if exact { (lh * 0.2 - desc).max(-lh) } else { 0.0 };
             y += lh;
             let x0 = if li == 0 { first_x } else { rest_x };
             let avail = (col_w - x0 - mr).max(0.0);
@@ -1084,7 +1090,8 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         out.para_lines.push((first_line_idx, raw.len()));
         prev_after = spacing_pts(props.space_after, p.lead_size, reduce).max(0.0);
     }
-    let total = y;
+    // The text ends at the last line's descent under exact spacing.
+    let total = (y - tail).max(0.0);
     out.content_height = total;
     // Columns: distribute lines by height.
     let col_h = if ncols > 1 { inner.height() } else { f64::INFINITY };

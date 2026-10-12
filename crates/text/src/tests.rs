@@ -55,6 +55,33 @@ fn shrink_on_overflow() {
 }
 
 #[test]
+fn exact_line_spacing_ends_at_the_last_descent() {
+    // 12 pt text at exactly 26.59 pt per line (a table cell PowerPoint sizes to 24.3 pt of text):
+    // the baseline at 80 % of the pitch, the text ending at the last line's descent.
+    let (p, mut sh) = setup("One\nTwo", 600.0, 300.0);
+    for para in &mut sh.text.as_mut().unwrap().paragraphs {
+        para.props.line_spacing = Some(Spacing::Pts(26.59));
+        para.props.bullet = Some(Bullet::None);
+        for r in &mut para.runs {
+            r.props.size = Some(12.0);
+        }
+    }
+    let l = lay(&p, &sh, 600.0, 300.0);
+    let first = &l.lines[0];
+    assert!((first.baseline - first.top - 26.59 * 0.8).abs() < 0.01, "{:?}", first.baseline - first.top);
+    // The text ends at the last line's descent: above its full pitch by 20 % of it less the
+    // descent (~2.3 pt for 12 pt type).
+    let short = (l.lines[1].bottom - l.lines[0].top) - l.content_height;
+    assert!(short > 1.0 && short < 26.59 * 0.2, "{short}");
+    // Proportional spacing keeps full pitches.
+    for para in &mut sh.text.as_mut().unwrap().paragraphs {
+        para.props.line_spacing = Some(Spacing::Pct(1.0));
+    }
+    let l = lay(&p, &sh, 600.0, 300.0);
+    assert!((l.content_height - (l.lines[1].bottom - l.lines[0].top)).abs() < 0.01);
+}
+
+#[test]
 fn caret_and_hit_roundtrip() {
     let (p, sh) = setup("Hello world", 600.0, 100.0);
     let l = lay(&p, &sh, 600.0, 100.0);
