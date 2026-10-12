@@ -789,3 +789,15 @@ fn show_follows_links() {
     assert_eq!(s.follow(&p, &Action::LastViewed, None), LinkJump::None);
     assert_eq!(s.slide, 3);
 }
+
+/// #147: exits PowerPoint plays downward leave downward here too.
+#[test]
+fn sink_down_and_peek_out_to_bottom_move_down() {
+    for (effect, option) in [("sinkDown", ""), ("peekOut", "b"), ("floatOut", "d")] {
+        let mut a = anim(1, AnimClass::Exit, effect, AnimStart::OnClick);
+        a.option = option.into();
+        let tl = Timeline::new(&slide_with(vec![a]), W, H);
+        let s = tl.state(ShapeId(1), None, 0, 0.5);
+        assert!(s.offset_y > 0.0, "{effect} {option}: {s:?}");
+    }
+}
