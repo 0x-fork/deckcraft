@@ -14,7 +14,7 @@ use std::sync::Arc;
 use deckcraft_geom::{Size, emu_to_pt};
 use deckcraft_model::text::TextBody;
 use deckcraft_model::{
-    Background, Comment, CustomShow, HeaderFooter, Layout, LayoutId, LayoutType, Master, MasterId, MediaId, MediaItem, PhType, Presentation,
+    Background, Comment, CustomShow, Geom, HeaderFooter, Layout, LayoutId, LayoutType, Master, MasterId, MediaId, MediaItem, PhType, Presentation,
     Properties, Section, ShowSettings, Slide, SlideId, defaults,
 };
 
@@ -387,6 +387,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         p.props.company = d.root.child("Company").map(|c| c.text()).unwrap_or_default();
     }
 
+    inherit_placeholder_geometry(&mut p);
     p.header_footer = header_footer(&p);
     p.media = std::mem::take(&mut imp.media);
     p.next_id = imp.next;
@@ -417,6 +418,91 @@ pub fn has_rel_refs(el: &El) -> bool {
 
 pub fn color_map(cm: &El) -> Vec<(String, String)> {
     cm.attrs.iter().filter(|(k, _)| !k.starts_with("xmlns")).map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+
+/// Placeholders read without a geometry (an empty custom geometry, see `shapes::sp`) take the
+/// geometry of the layout or master placeholder they inherit from, as PowerPoint draws them: a
+/// layout's picture placeholder cut into a shape keeps that shape on the slide. Anything left
+/// is a rectangle.
+fn inherit_placeholder_geometry(p: &mut Presentation) {
+    let unset = |g: &Geom| matches!(g, Geom::Custom { paths } if paths.is_empty());
+    // Masters first, then layouts (from their masters), then slides (from layouts and masters).
+    for m in &mut p.masters {
+        let m = Arc::make_mut(m);
+        walk_shapes_mut(&mut m.shapes, &mut |s| {
+            if unset(&s.geom) {
+                s.geom = Geom::default();
+            }
+        });
+    }
+    let mut layout_geoms: Vec<(LayoutId, usize, Geom)> = vec![];
+    for m in &p.masters {
+        for l in &m.layouts {
+            let ctx = deckcraft_model::resolve::Ctx::for_layout(p, m, l);
+            for (i, s) in l.shapes.iter().enumerate() {
+                if unset(&s.geom) {
+                    let (_, mp) = deckcraft_model::resolve::parents(&ctx, s);
+                    layout_geoms.push((l.id, i, mp.map(|m| m.geom.clone()).filter(|g| !unset(g)).unwrap_or_default()));
+                }
+            }
+        }
+    }
+    for m in &mut p.masters {
+        let m = Arc::make_mut(m);
+        for l in &mut m.layouts {
+            for (id, i, g) in layout_geoms.iter().filter(|(id, _, _)| *id == l.id) {
+                let _ = id;
+                if let Some(s) = l.shapes.get_mut(*i) {
+                    s.geom = g.clone();
+                }
+            }
+        }
+    }
+    let mut slide_geoms: Vec<(usize, usize, Geom)> = vec![];
+    for (si, sl) in p.slides.iter().enumerate() {
+        let Some(ctx) = deckcraft_model::resolve::Ctx::for_slide(p, sl) else { continue };
+        for (i, s) in sl.shapes.iter().enumerate() {
+            if unset(&s.geom) {
+                let (lp, mp) = deckcraft_model::resolve::parents(&ctx, s);
+                let g = lp.map(|l| l.geom.clone()).filter(|g| !unset(g)).or_else(|| mp.map(|m| m.geom.clone()).filter(|g| !unset(g)));
+                slide_geoms.push((si, i, g.unwrap_or_default()));
+            }
+        }
+    }
+    for (si, i, g) in slide_geoms {
+        if let Some(sl) = p.slides.get_mut(si)
+            && let Some(s) = Arc::make_mut(sl).shapes.get_mut(i)
+        {
+            s.geom = g;
+        }
+    }
+    // Placeholders inside groups (rare) and anything still unset: rectangles.
+    for sl in &mut p.slides {
+        walk_shapes_mut(&mut Arc::make_mut(sl).shapes, &mut |s| {
+            if unset(&s.geom) {
+                s.geom = Geom::default();
+            }
+        });
+    }
+    for m in &mut p.masters {
+        for l in &mut Arc::make_mut(m).layouts {
+            walk_shapes_mut(&mut l.shapes, &mut |s| {
+                if unset(&s.geom) {
+                    s.geom = Geom::default();
+                }
+            });
+        }
+    }
+}
+
+/// Every shape, groups included.
+fn walk_shapes_mut(shapes: &mut [deckcraft_model::Shape], f: &mut dyn FnMut(&mut deckcraft_model::Shape)) {
+    for s in shapes {
+        f(s);
+        if let deckcraft_model::ShapeKind::Group { children, .. } = &mut s.kind {
+            walk_shapes_mut(children, f);
+        }
+    }
 }
 
 fn background(imp: &mut Imp, part: &Part, csld: &El) -> Option<Background> {

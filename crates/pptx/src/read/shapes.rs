@@ -180,6 +180,15 @@ fn preset_geom(pg: &El) -> Geom {
     Geom::Preset { name, adj }
 }
 
+/// A placeholder whose `spPr` names no geometry takes its layout's (or master's) placeholder's:
+/// marked here with an empty custom geometry, filled in once the layouts are read
+/// (`inherit_placeholder_geometry`).
+fn mark_inherited_geometry(s: &mut Shape, pr: Option<&El>) {
+    if s.ph.is_some() && pr.is_none_or(|pr| pr.child("prstGeom").is_none() && pr.child("custGeom").is_none()) {
+        s.geom = Geom::Custom { paths: vec![] };
+    }
+}
+
 /// `spPr` → transform, geometry, fill, line, effects.
 fn sp_pr(imp: &mut Imp, part: &Part, s: &mut Shape, pr: &El) {
     if let Some(x) = pr.child("xfrm") {
@@ -229,6 +238,7 @@ fn sp(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Shape {
     if let Some(pr) = e.child("spPr") {
         sp_pr(imp, part, &mut s, pr);
     }
+    mark_inherited_geometry(&mut s, e.child("spPr"));
     if e.bool("useBgFill") == Some(true) {
         s.fill = Some(Fill::Background);
     }
