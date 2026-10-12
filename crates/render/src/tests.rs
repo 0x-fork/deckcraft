@@ -750,3 +750,29 @@ fn text_glow_and_shadow_are_drawn() {
     let grey = |p: &[u8; 4]| p[0] > 60 && p[0] < 230 && p[0] == p[1] && p[1] == p[2];
     assert!(count(&img, &grey) > count(&base, &grey) + 300, "a grey shadow appears");
 }
+
+#[test]
+fn pattern_fills_draw_powerpoints_tiles() {
+    // dkVert at one output pixel per pattern cell (0.75 pt): columns 11001100… across, as
+    // PowerPoint's export draws it; pct50 is a checkerboard.
+    use deckcraft_model::style::{Fill, PatternFill};
+    let rgb = |v| ColorRef::rgb(deckcraft_color::Rgba::rgb(v, v, v));
+    let shape = |id, x: f64, preset: &str| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 0.0, 60.0, 60.0)),
+        fill: Some(Fill::Pattern(PatternFill { preset: preset.into(), fg: rgb(0), bg: rgb(255) })),
+        line: Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![shape(750, 0.0, "dkVert"), shape(751, 120.0, "pct50")]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 4.0 / 3.0, ..Default::default() });
+    let dark = |x: u32, y: u32| img.pixel(x, y)[0] < 128;
+    let row: Vec<bool> = (8..16).map(|x| dark(x, 20)).collect();
+    assert_eq!(row, [true, true, false, false, true, true, false, false], "dkVert columns");
+    assert!((8..16).all(|y| dark(8, y) == dark(8, 20)), "dkVert is vertical");
+    // pct50 starts at slide x = 120 pt = 160 px.
+    for (x, y) in [(168, 8), (169, 9), (170, 12)] {
+        assert_ne!(dark(x, y), dark(x + 1, y), "pct50 alternates across at {x},{y}");
+        assert_eq!(dark(x, y), dark(x + 1, y + 1), "pct50 repeats diagonally at {x},{y}");
+    }
+}

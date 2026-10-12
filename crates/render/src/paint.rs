@@ -47,54 +47,10 @@ pub fn fill_path(
         Fill::Pattern(p) => {
             let fg = rctx.color(&p.fg, ph);
             let bg = rctx.color(&p.bg, ph);
-            ctx.set_paint(color(bg, alpha));
-            ctx.fill_path(path);
-            ctx.push_clip_layer(path);
-            ctx.set_paint(color(fg, alpha));
-            pattern(ctx, &p.preset, bounds, m);
-            ctx.pop_layer();
+            crate::pattern::fill(ctx, &p.preset, fg, bg, alpha, path, m);
         }
     }
 }
-
-/// Draw a pattern's foreground marks over `bounds` (8 pt cells).
-fn pattern(ctx: &mut RenderContext, preset: &str, b: Rect, m: Affine) {
-    let k = crate::scale_of(m);
-    let cell = 6.0 / if k.is_finite() { k.clamp(0.25, 4.0) } else { 1.0 };
-    let cell = cell.max(2.0);
-    let mut p = BezPath::new();
-    let (nx, ny) = (((b.width() / cell).ceil() as i64).clamp(0, 2000), ((b.height() / cell).ceil() as i64).clamp(0, 2000));
-    let lw = cell * 0.18;
-    let dense = preset.starts_with("dk") || preset.contains("50") || preset.contains("75") || preset.contains("90");
-    for j in 0..=ny {
-        for i in 0..=nx {
-            let x = b.x0 + i as f64 * cell;
-            let y = b.y0 + j as f64 * cell;
-            let r = match preset {
-                p if p.contains("Horz") || p == "horz" || p.contains("horzBrick") => Rect::new(x, y, x + cell, y + lw),
-                p if p.contains("Vert") || p == "vert" => Rect::new(x, y, x + lw, y + cell),
-                p if p.contains("cross") || p.contains("Grid") || p.contains("grid") => {
-                    p_add(&mut p_rect(x, y, cell, lw), &mut BezPath::new());
-                    Rect::new(x, y, x + cell, y + lw).union(Rect::new(x, y, x + lw, y + cell))
-                }
-                _ => {
-                    let d = if dense { cell * 0.35 } else { cell * 0.2 };
-                    Rect::new(x, y, x + d, y + d)
-                }
-            };
-            p.extend(r.to_path(0.1).iter());
-            if preset.contains("cross") || preset.contains("Grid") || preset.contains("grid") {
-                p.extend(Rect::new(x, y, x + lw, y + cell).to_path(0.1).iter());
-            }
-        }
-    }
-    ctx.fill_path(&p);
-}
-
-fn p_rect(x: f64, y: f64, w: f64, h: f64) -> BezPath {
-    Rect::new(x, y, x + w, y + h).to_path(0.1)
-}
-fn p_add(_a: &mut BezPath, _b: &mut BezPath) {}
 
 /// `pf` with its duotone colours resolved to plain RGB against the slide's colours and the
 /// placeholder colour `ph` (theme background pictures recolour with `phClr`), so the decoded-image
