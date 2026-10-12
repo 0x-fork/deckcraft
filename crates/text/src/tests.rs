@@ -62,12 +62,16 @@ fn saved_shrink_scale_is_drawn() {
     sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.625, line_reduction: 0.2 });
     let l = lay(&p, &sh, 600.0, 300.0);
     assert_eq!((l.font_scale, l.line_reduction), (0.625, 0.2));
-    // Text that doesn't fit even at the saved scale shrinks further.
+    // Text our metrics find overflowing at the saved scale is still drawn at it, as PowerPoint
+    // draws it until the text changes; with no saved scale it shrinks to fit.
     let text = (0..30).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n");
     let (p, mut sh) = setup(&text, 600.0, 200.0);
     sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.9, line_reduction: 0.1 });
     let l = lay(&p, &sh, 600.0, 200.0);
-    assert!(l.font_scale < 0.9 && l.line_reduction >= 0.1, "{} {}", l.font_scale, l.line_reduction);
+    assert_eq!((l.font_scale, l.line_reduction), (0.9, 0.1));
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 1.0, line_reduction: 0.0 });
+    let l = lay(&p, &sh, 600.0, 200.0);
+    assert!(l.font_scale < 0.9, "{}", l.font_scale);
     // Nonsense saved values are ignored.
     let (p, mut sh) = setup("Short", 600.0, 300.0);
     sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: f64::NAN, line_reduction: 5.0 });

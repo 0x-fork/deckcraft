@@ -835,8 +835,13 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
         _ => (1.0, 0.0),
     };
     let mut l = layout_scaled(ctx, shape, body, &bp, opts, scale0, reduce0);
+    // A scale PowerPoint saved is drawn as it is: PowerPoint fits the text again only when it
+    // changes (and editing resets the saved scale), not when a file opens, even where our
+    // metrics would call it overflowing (trailing empty paragraphs, substituted fonts).
+    let saved = scale0 < 1.0 || reduce0 > 0.0;
     if let (AutoFit::Shrink { .. }, false) = (autofit, opts.no_shrink)
         && l.overflow
+        && !saved
     {
         // Binary search the largest scale that fits (steps like 90%, 80%… with line reduction).
         let (mut lo, mut hi) = (0.1_f64, scale0);
