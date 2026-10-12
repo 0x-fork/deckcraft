@@ -493,6 +493,17 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
                 // Symbol fonts (Wingdings) aren't available: map common private-use bullets.
                 let ch = map_symbol_bullet(char, props.bullet_font.as_deref());
                 bullet_face(db, &mut st, &ch);
+
+                // A symbol font (Wingdings, Symbol…) that is installed draws its own glyph, found
+                // at U+F000 + the character code as such fonts map them; otherwise common symbol
+                // bullets are mapped to Unicode look-alikes.
+                let ch = match symbol_font_char(&st.face, char, props.bullet_font.as_deref()) {
+                    Some(c) => c.to_string(),
+                    None => map_symbol_bullet(char, props.bullet_font.as_deref()),
+                };
+                if !st.face.covers(ch.chars().next().unwrap_or('•')) {
+                    st.face = db.face("Inter", "Regular");
+                }
                 Some((ch, st))
             }
             Some(Bullet::AutoNum { scheme, start_at }) => {
@@ -715,11 +726,59 @@ fn shape_item(
     }
 }
 
+/// Is `family` a symbol font (characters at U+F000 + code)?
+fn is_symbol_font(family: &str) -> bool {
+    let f = family.to_ascii_lowercase();
+    f.starts_with("wingdings") || f == "symbol" || f.starts_with("webdings") || f.starts_with("marlett")
+}
+
+/// The character to draw bullet `c` with the installed symbol font `face`, when `font` names a
+/// symbol font that `face` is (not a substitute) and it has the glyph.
+fn symbol_font_char(face: &FontFace, c: &str, font: Option<&str>) -> Option<char> {
+    let font = font?;
+    if !is_symbol_font(font) || !face.family.eq_ignore_ascii_case(font) {
+        return None;
+    }
+    let first = c.chars().next()?;
+    let pua = char::from_u32(0xF000 | ((first as u32) & 0xFF))?;
+    if face.covers(pua) {
+        Some(pua)
+    } else if face.covers(first) {
+        Some(first)
+    } else {
+        None
+    }
+}
+
 fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
     let f = font.unwrap_or("").to_ascii_lowercase();
     let first = c.chars().next().unwrap_or('•');
     if f.contains("wingdings") || f.contains("symbol") || ('\u{f000}'..='\u{f0ff}').contains(&first) {
         let code = (first as u32) & 0xff;
+        // Wingdings 2 and 3 put different shapes at the same codes.
+        if f.starts_with("wingdings 2") {
+            let m = match code {
+                0x97 | 0x98 => '●',
+                0x9e..=0xa1 => '■',
+                0xa2..=0xa5 => '◆',
+                0xea..=0xf3 => '★',
+                0xb7..=0xbf => '○',
+                0x50 => '✓',
+                _ => '•',
+            };
+            return m.to_string();
+        }
+        if f.starts_with("wingdings 3") {
+            let m = match code {
+                0x7d | 0x75 => '►',
+                0x7c | 0x74 => '◄',
+                0x70 => '▲',
+                0x71 => '▼',
+                0xc6 | 0xc7 => '➔',
+                _ => '▶',
+            };
+            return m.to_string();
+        }
         let m = match code {
             0xa7 => '▪',
             0xd8 => '➢',

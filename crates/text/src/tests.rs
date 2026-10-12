@@ -624,3 +624,28 @@ fn a_bullet_the_text_font_lacks_falls_back_to_a_face_that_has_it() {
         assert!(b.glyphs.iter().all(|g| g.0 != 0), "no missing-glyph box");
     }
 }
+
+#[test]
+fn symbol_font_bullets_map_by_font() {
+    // Wingdings 2 code 0xEA is a star, Wingdings 3 0x7D a right-pointing triangle; plain
+    // Wingdings keeps its own table (0xA7 is a small square).
+    let star = String::from_utf8(vec![0xEF, 0x83, 0xAA]).unwrap(); // U+F0EA
+    assert_eq!(map_symbol_bullet(&star, Some("Wingdings 2")), "★");
+    assert_eq!(map_symbol_bullet("\u{7d}", Some("Wingdings 3")), "►");
+    assert_eq!(map_symbol_bullet("\u{f0a7}", Some("Wingdings")), "▪");
+    assert_eq!(map_symbol_bullet("•", Some("Arial")), "•");
+    assert!(is_symbol_font("Wingdings 2") && is_symbol_font("Symbol") && !is_symbol_font("Arial"));
+}
+
+#[test]
+fn an_installed_symbol_font_draws_its_own_bullet() {
+    // Where the deck's symbol font is installed, its glyph is drawn (as PowerPoint does), not a
+    // look-alike. Skipped without Wingdings 2.
+    let db = FontDb::global();
+    if !db.has_family("Wingdings 2") {
+        return;
+    }
+    let face = db.face("Wingdings 2", "Regular");
+    assert_eq!(symbol_font_char(&face, "\u{ea}", Some("Wingdings 2")), Some('\u{f0ea}'));
+    assert_eq!(symbol_font_char(&face, "\u{ea}", Some("Arial")), None);
+}
