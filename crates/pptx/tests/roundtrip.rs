@@ -762,3 +762,25 @@ fn smartart_without_a_drawing_keeps_its_parts() {
     assert!(data.contains("Manager"), "{data}");
     assert!(!data.contains("dataModelExt"), "the link to a drawing that isn't written is dropped: {data}");
 }
+
+/// #203: a legacy OLE object (preview in the VML drawing we don't write) is saved in PowerPoint's
+/// fallback form, without `spid` and with a `p:pic` preview, or PowerPoint won't open the file.
+#[test]
+fn legacy_ole_object_is_written_in_the_fallback_form() {
+    let mut p = defaults::new_presentation(None);
+    let bin = p.add_media("oleObject1.bin", "application/vnd.openxmlformats-officedocument.oleObject", b"\xD0\xCF\x11\xE0not-a-real-ole".to_vec());
+    let prev = p.add_media("image1.png", "image/png", png(4, 3, [10, 20, 30]));
+    let xml = r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:nvGraphicFramePr><p:cNvPr id="4" name="Object 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/2006/ole"><p:oleObj spid="_x0000_s1026" name="Slide" r:id="rId4" progId="PowerPoint.Slide.8"><p:embed/></p:oleObj></a:graphicData></a:graphic></p:graphicFrame>"#;
+    let parts = vec![("rId4".to_string(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject".to_string(), bin)];
+    let mut s = new_slide(&mut p, "OLE");
+    let mut frame = shape(&mut p, "Object 3", 0.0, 0.0, 72.0, 72.0);
+    frame.kind = ShapeKind::Opaque { xml: xml.into(), preview: Some(prev), label: "Slide".into(), parts };
+    s.shapes.push(frame);
+    p.slides.push(Arc::new(s));
+
+    let q = round(&round(&p));
+    let ShapeKind::Opaque { xml, parts, preview, .. } = &by_name(&q.slides[1], "Object 3").kind else { panic!("not kept as an object") };
+    assert!(xml.contains("<p:pic>") && !xml.contains("spid"), "{xml}");
+    assert!(preview.is_some(), "the preview picture is kept");
+    assert!(parts.iter().any(|(_, k, _)| k.ends_with("/oleObject")), "the embedding is kept: {parts:?}");
+}

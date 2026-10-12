@@ -637,6 +637,7 @@ fn opaque(
     {
         let mut root = doc.root;
         set_rel_ids(&mut root, &ids, 0);
+        ole_fallback(&mut root, x, o, preview);
         let id = cx.id_for(s);
         set_cnvpr_id(&mut root, id);
         w.raw(&root.to_xml());
@@ -683,6 +684,36 @@ fn shape_with_id(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, i
         w.close("p:pic");
     } else {
         shape(w, x, o, cx, s, 0);
+    }
+}
+
+/// A legacy OLE object finds its preview in the slide's VML drawing through `spid`, and PowerPoint
+/// won't open the slide without it. We don't write that drawing, so write PowerPoint's own
+/// fallback form instead: no `spid`, and the preview as a `p:pic`.
+fn ole_fallback(root: &mut crate::xml::El, x: &mut Exp, o: &mut Out, preview: Option<deckcraft_model::MediaId>) {
+    let xfrm = root.child("xfrm").map(|t| {
+        let at = |e: &str, a: &str| t.child(e).and_then(|c| c.attr(a)).unwrap_or("0").to_string();
+        (at("off", "x"), at("off", "y"), at("ext", "cx"), at("ext", "cy"))
+    });
+    let Some(ole) = root
+        .elements_mut()
+        .find(|e| e.is("graphic"))
+        .and_then(|g| g.elements_mut().find(|e| e.is("graphicData")))
+        .and_then(|d| d.elements_mut().find(|e| e.is("oleObj")))
+    else {
+        return;
+    };
+    if ole.child("pic").is_some() || ole.attr("spid").is_none() {
+        return;
+    }
+    ole.attrs.retain(|(k, _)| k != "spid");
+    let rel = preview.and_then(|m| x.media_rel(o, m, "image")).unwrap_or_else(|| x.placeholder_rel(o));
+    let (ox, oy, cx, cy) = xfrm.unwrap_or_default();
+    let pic = format!(
+        r#"<p:pic><p:nvPicPr><p:cNvPr id="0" name=""/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="{rel}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="{ox}" y="{oy}"/><a:ext cx="{cx}" cy="{cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic>"#
+    );
+    if let Ok(d) = crate::xml::parse(pic.as_bytes()) {
+        ole.children.push(crate::xml::Node::El(d.root));
     }
 }
 

@@ -346,7 +346,8 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
         let mut pics = vec![];
         e.find_all("blip", &mut pics);
         pics.into_iter().find_map(|b| dml::media_ref(imp, part, b))
-    };
+    }
+    .or_else(|| vml_preview(imp, part, gd?.find("oleObj")?.attr("spid")?));
     let label = if let Some(o) = gd.and_then(|g| g.find("oleObj")) {
         o.attr("progId").or(o.attr("name")).unwrap_or("Object").to_string()
     } else if uri.ends_with("/diagram") {
@@ -373,6 +374,18 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
         .unwrap_or_default();
     s.kind = ShapeKind::Opaque { xml: part.keep(e), preview, label, parts };
     s
+}
+
+/// A legacy OLE object's preview: the picture of its shape (`spid`) in the slide's VML drawing.
+fn vml_preview(imp: &mut Imp, part: &Part, spid: &str) -> Option<deckcraft_model::MediaId> {
+    let found = part.rels.all_of("vmlDrawing").find_map(|r| {
+        let doc = imp.pkg.xml(&r.target)?;
+        let mut shapes = vec![];
+        doc.root.find_all("shape", &mut shapes);
+        let relid = shapes.into_iter().find(|s| s.attr("id") == Some(spid))?.find("imagedata")?.attr("o:relid")?.to_string();
+        Some(imp.pkg.rels(&r.target).get(&relid).filter(|i| !i.external)?.target.clone())
+    })?;
+    imp.media_for(&found)
 }
 
 /// A diagram's data part, without the link to its cached drawing: that link is a slide
