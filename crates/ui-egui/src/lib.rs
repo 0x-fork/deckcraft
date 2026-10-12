@@ -1299,6 +1299,28 @@ mod tests {
         assert!(size(&mut harness).unwrap_or(f64::MAX) < after, "Ctrl+[ shrinks");
     }
 
+    /// Export… had no visible control: only the command palette reached it.
+    #[test]
+    fn title_bar_export_opens_the_export_dialog() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none());
+        // Quick access: Home, Save, Export, each 24 points wide with 2 between, from x = 10.
+        let pos = egui::pos2(10.0 + 2.0 * 26.0 + 12.0, ribbon::TITLE_H / 2.0);
+        harness.hover_at(pos);
+        harness.run_steps(1);
+        harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(2);
+        assert_eq!(harness.state().dialog.as_ref().map(|d| d.id.as_str()), Some("export"));
+    }
+
     #[test]
     fn home_needs_an_open_presentation() {
         let mut app = SlideApp::new(Session::new(), Services::default());
