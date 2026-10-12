@@ -63,6 +63,42 @@ fn fmt_num(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 { format!("{}", v.round() as i64) } else { format!("{v:.1}") }
 }
 
+/// Where the legend goes for `c:legendPos`, and the plot area left over.
+/// `size` is the legend block (width, height); the result is its top-left corner and the plot area.
+/// `r` (also the OOXML default and the fallback for unknown values) and `l` are vertical stacks centred
+/// on the area, `tr` is a vertical stack in the top-right corner, `t` and `b` are centred rows.
+/// An overlaid legend leaves the plot area as it was.
+fn legend_layout(pos: &str, size: (f64, f64), area: Rect, base: f64, overlay: bool) -> (Point, Rect) {
+    let (lw, lh) = size;
+    let gap = base * 0.5;
+    let cx = (area.x0 + area.x1) / 2.0;
+    let cy = ((area.y0 + area.y1) / 2.0 - lh / 2.0).max(area.y0);
+    let mut plot = area;
+    let origin = match pos {
+        "b" => {
+            plot.y1 = area.y1 - lh - gap;
+            Point::new(cx - lw / 2.0, area.y1 - lh)
+        }
+        "t" => {
+            plot.y0 = area.y0 + lh + gap;
+            Point::new(cx - lw / 2.0, area.y0)
+        }
+        "l" => {
+            plot.x0 = area.x0 + lw + gap;
+            Point::new(area.x0, cy)
+        }
+        "tr" => {
+            plot.x1 = area.x1 - lw - gap;
+            Point::new(area.x1 - lw, area.y0)
+        }
+        _ => {
+            plot.x1 = area.x1 - lw - gap;
+            Point::new(area.x1 - lw, cy)
+        }
+    };
+    (origin, if overlay { area } else { plot })
+}
+
 pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h: f64) {
     let text_col = c.text_color.as_ref().map(|t| rctx.color(t, None)).unwrap_or(Rgba::rgb(0x59, 0x59, 0x59));
     let grid_col = Rgba::rgb(0xD9, 0xD9, 0xD9);
@@ -87,25 +123,35 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         area.y0 += base * 2.4;
     }
     let pie = matches!(c.kind, ChartType::Pie | ChartType::Doughnut);
-    // Legend at the bottom.
+    // Legend placed by `c:legendPos`.
     let legend_items: Vec<(String, Rgba)> = if pie {
         c.categories.iter().enumerate().map(|(i, n)| (n.clone(), series_color(rctx, c, i))).collect()
     } else {
         c.series.iter().enumerate().map(|(i, s)| (s.name.clone(), series_fill(rctx, c, i, Some(s)))).collect()
     };
-    if c.legend.is_some() && !legend_items.is_empty() {
-        let ly = area.y1 - base * 1.4;
-        let item_w = (legend_items.iter().map(|(n, _)| n.chars().count() as f64 * base * 0.55 + base * 1.6).sum::<f64>()).min(w * 0.9);
-        let mut x = (w - item_w) / 2.0;
+    if let (Some(pos), false) = (&c.legend, legend_items.is_empty()) {
+        let vertical = matches!(pos.as_str(), "l" | "r" | "tr");
+        let item_ws: Vec<f64> = legend_items.iter().map(|(n, _)| n.chars().count() as f64 * base * 0.55 + base * 1.6).collect();
+        let size = if vertical {
+            (item_ws.iter().copied().fold(0.0, f64::max).min(w * 0.4), legend_items.len() as f64 * base * 1.5)
+        } else {
+            (item_ws.iter().sum::<f64>().min(w * 0.9), base * 1.4)
+        };
+        let (origin, plot_area) = legend_layout(pos, size, area, base, c.legend_overlay);
+        area = plot_area;
+        let (mut x, mut y) = (origin.x, origin.y);
         for (name, col) in &legend_items {
             ctx.set_transform(m);
             ctx.set_paint(color(*col, 1.0));
-            ctx.fill_rect(&Rect::new(x, ly + base * 0.3, x + base * 0.7, ly + base));
+            ctx.fill_rect(&Rect::new(x, y + base * 0.3, x + base * 0.7, y + base));
             let tw = name.chars().count() as f64 * base * 0.55 + base;
-            label(ctx, rctx, m, name, Rect::new(x + base, ly, x + base + tw, ly + base * 1.3), base, Align::Left, Anchor::Middle, text_col, false);
-            x += tw + base * 0.6;
+            label(ctx, rctx, m, name, Rect::new(x + base, y, x + base + tw, y + base * 1.3), base, Align::Left, Anchor::Middle, text_col, false);
+            if vertical {
+                y += base * 1.5;
+            } else {
+                x += tw + base * 0.6;
+            }
         }
-        area.y1 = ly - base * 0.5;
     }
     if pie {
         let Some(s) = c.series.first() else { return };
@@ -391,4 +437,41 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     ctx.set_paint(color(Rgba::rgb(0xBF, 0xBF, 0xBF), 1.0));
     ctx.set_stroke(kurbo::Stroke::new(0.75));
     ctx.stroke_path(&ax);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const AREA: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+
+    #[test]
+    fn right_legend_is_a_centred_column_and_narrows_the_plot() {
+        let (o, plot) = legend_layout("r", (60.0, 100.0), AREA, 10.0, false);
+        assert_eq!((o.x, o.y), (340.0, 100.0));
+        assert_eq!((plot.x0, plot.x1, plot.y0, plot.y1), (0.0, 335.0, 0.0, 300.0));
+    }
+
+    #[test]
+    fn left_top_and_corner_positions() {
+        let (o, plot) = legend_layout("l", (60.0, 100.0), AREA, 10.0, false);
+        assert_eq!((o.x, o.y, plot.x0, plot.x1), (0.0, 100.0, 65.0, 400.0));
+        let (o, plot) = legend_layout("t", (100.0, 14.0), AREA, 10.0, false);
+        assert_eq!((o.x, o.y, plot.y0, plot.y1), (150.0, 0.0, 19.0, 300.0));
+        let (o, plot) = legend_layout("tr", (60.0, 100.0), AREA, 10.0, false);
+        assert_eq!((o.x, o.y, plot.x1), (340.0, 0.0, 335.0));
+    }
+
+    #[test]
+    fn bottom_legend_keeps_the_old_row_layout() {
+        let (o, plot) = legend_layout("b", (100.0, 14.0), AREA, 10.0, false);
+        assert_eq!((o.x, o.y, plot.y1, plot.x1), (150.0, 286.0, 281.0, 400.0));
+    }
+
+    #[test]
+    fn overlay_does_not_shrink_the_plot() {
+        let (o, plot) = legend_layout("r", (60.0, 100.0), AREA, 10.0, true);
+        assert_eq!(plot, AREA);
+        assert_eq!(o.x, 340.0);
+    }
 }

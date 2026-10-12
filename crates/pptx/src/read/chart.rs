@@ -97,6 +97,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
         c.title = None;
     }
     c.legend = ch.child("legend").map(|l| l.child_val("legendPos").unwrap_or("r").to_string());
+    c.legend_overlay = ch.child("legend").and_then(|l| l.child("overlay")).and_then(|o| o.bool("val")).unwrap_or(false);
     c.chart_fill = simple_fill(root.child("spPr"));
     c.plot_fill = simple_fill(pa.child("spPr"));
 
@@ -224,4 +225,22 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
         c.axis_titles.0 = a.child("title").map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
     }
     Some(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legend_position_and_overlay_are_read() {
+        let legend = r#"<c:legend><c:legendPos val="r"/><c:overlay val="1"/></c:legend>"#;
+        let xml = format!(r#"<c:chartSpace xmlns:c="c"><c:chart><c:plotArea/>{legend}</c:chart></c:chartSpace>"#);
+        let c = read_chart_xml(xml.as_bytes()).unwrap();
+        assert_eq!(c.legend.as_deref(), Some("r"));
+        assert!(c.legend_overlay);
+        let xml = br#"<c:chartSpace xmlns:c="c"><c:chart><c:plotArea/><c:legend/></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml).unwrap();
+        assert_eq!(c.legend.as_deref(), Some("r"));
+        assert!(!c.legend_overlay);
+    }
 }

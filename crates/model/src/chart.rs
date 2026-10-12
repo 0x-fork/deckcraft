@@ -144,6 +144,8 @@ pub struct Chart {
     pub categories: Vec<String>,
     pub series: Vec<Series>,
     pub legend: Option<String>,
+    /// `c:legend/c:overlay`: the legend is drawn over the plot instead of shrinking it.
+    pub legend_overlay: bool,
     pub data_labels: bool,
     pub gridlines: bool,
     pub axis_titles: (Option<String>, Option<String>),
@@ -172,6 +174,7 @@ impl Default for Chart {
             categories: vec![],
             series: vec![],
             legend: Some("b".into()),
+            legend_overlay: false,
             data_labels: false,
             gridlines: true,
             axis_titles: (None, None),
