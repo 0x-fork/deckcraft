@@ -213,6 +213,58 @@ impl Chart {
         c.vary_colors = n_series == 1;
         c
     }
+    /// A series' own chart type: its own in a combo chart (columns when it names none), else the
+    /// chart's.
+    pub fn series_kind(&self, s: &Series) -> ChartType {
+        match (self.kind, s.kind) {
+            (ChartType::Combo, Some(k)) if k != ChartType::Combo => k,
+            (ChartType::Combo, _) => ChartType::Column,
+            (k, _) => k,
+        }
+    }
+
+    /// Whether a series is plotted against the secondary value axis (combo charts only).
+    pub fn on_secondary(&self, s: &Series) -> bool {
+        self.kind == ChartType::Combo && s.secondary_axis
+    }
+
+    /// The value range of one value axis: the primary axis (`y_min`/`y_max` apply), or a combo
+    /// chart's secondary axis. A combo chart stacks only its stacked series. `None` when no series
+    /// uses that axis.
+    pub fn axis_range(&self, secondary: bool) -> Option<(f64, f64)> {
+        if self.kind != ChartType::Combo {
+            return (!secondary).then(|| self.value_range());
+        }
+        let ser: Vec<&Series> = self.series.iter().filter(|s| self.on_secondary(s) == secondary).collect();
+        if ser.is_empty() {
+            return None;
+        }
+        let (mut lo, mut hi) = (0.0_f64, 0.0_f64);
+        let n = ser.iter().map(|s| s.values.len()).max().unwrap_or(0);
+        let mut percent = false;
+        for i in 0..n {
+            let (mut p, mut m) = (0.0, 0.0);
+            for s in &ser {
+                let k = self.series_kind(s);
+                let Some(v) = s.values.get(i).copied().flatten().filter(|v| v.is_finite()) else { continue };
+                if k.percent() {
+                    percent = true;
+                } else if k.stacked() {
+                    if v >= 0.0 { p += v } else { m += v }
+                } else {
+                    hi = hi.max(v);
+                    lo = lo.min(v);
+                }
+            }
+            hi = hi.max(p);
+            lo = lo.min(m);
+        }
+        if percent {
+            hi = hi.max(1.0);
+        }
+        Some(if secondary { (lo, hi) } else { (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi)) })
+    }
+
     /// Value range across series (stacked sums for stacked types).
     pub fn value_range(&self) -> (f64, f64) {
         let mut lo: f64 = 0.0;
@@ -281,6 +333,28 @@ mod tests {
         assert!(a.is_finite() && b.is_finite());
         let (a, b, _) = nice_scale(7.0, 7.0);
         assert!(b > a);
+    }
+
+    #[test]
+    fn combo_axis_ranges() {
+        // Spend in columns on the primary axis, clicks as a line on the secondary one.
+        let mut c = Chart::sample(ChartType::Combo);
+        c.series.truncate(2);
+        c.series[0].kind = Some(ChartType::Column);
+        c.series[0].values = vec![Some(200_000.0), Some(310_000.0)];
+        c.series[1].kind = Some(ChartType::Line);
+        c.series[1].values = vec![Some(6_000.0), Some(7_400.0)];
+        c.series[1].secondary_axis = true;
+        assert_eq!(c.axis_range(false), Some((0.0, 310_000.0)));
+        assert_eq!(c.axis_range(true), Some((0.0, 7_400.0)));
+        assert_eq!(c.series_kind(&c.series[1]), ChartType::Line);
+        // Without a secondary series there is no secondary axis; a non-combo chart never has one.
+        c.series[1].secondary_axis = false;
+        assert_eq!(c.axis_range(true), None);
+        let col = Chart::sample(ChartType::Column);
+        assert_eq!(col.axis_range(false), Some(col.value_range()));
+        assert_eq!(col.axis_range(true), None);
+        assert!(!col.on_secondary(&col.series[0]));
     }
 
     #[test]

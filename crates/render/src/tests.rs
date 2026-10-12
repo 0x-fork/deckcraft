@@ -126,6 +126,36 @@ fn effects_tables_charts_render() {
 }
 
 #[test]
+fn combo_chart_draws_columns_and_a_line_on_its_own_axis() {
+    // Columns in the hundreds of thousands, a green line in the thousands on the secondary axis:
+    // the line must sit up in the plot, not flat along the bottom of the primary scale.
+    let mut c = Chart::sample(ChartType::Combo);
+    c.title = None;
+    c.legend = None;
+    c.series.truncate(2);
+    c.categories = vec!["A".into(), "B".into(), "C".into()];
+    c.series[0].kind = Some(ChartType::Column);
+    c.series[0].values = vec![Some(200_000.0), Some(300_000.0), Some(250_000.0)];
+    c.series[1].kind = Some(ChartType::Line);
+    c.series[1].values = vec![Some(7_000.0), Some(7_000.0), Some(7_000.0)];
+    c.series[1].secondary_axis = true;
+    c.series[1].line = Some(deckcraft_model::style::Line::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 176, 80)), 3.0));
+    let sh = Shape { id: ShapeId(620), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let green = |x: u32, y0: u32, y1: u32| {
+        (y0..y1).any(|y| {
+            let p = img.pixel(x, y);
+            p[1] > 120 && p[0] < 80 && p[2] < 140
+        })
+    };
+    // The line is in the upper half (7 000 of an axis to 8 000), and columns fill the plot's bottom.
+    assert!(green(480, 20, 270), "line not in the upper half");
+    assert!(!green(480, 400, 500), "line along the bottom");
+    let col = img.pixel(480, 480);
+    assert!(col[0] < 250 || col[1] < 250 || col[2] < 250, "no column: {col:?}");
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });

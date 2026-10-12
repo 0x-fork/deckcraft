@@ -102,6 +102,11 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     c.plot_fill = simple_fill(pa.child("spPr"));
 
     let mut kinds: Vec<ChartType> = vec![];
+    // The value axis the first plot group uses is the primary one; a group on another value axis
+    // (a combo chart's line on the right) is on the secondary axis.
+    let val_ids: Vec<&str> = pa.children_named("valAx").filter_map(|a| a.child_val("axId")).collect();
+    let group_val_axis = |g: &El| g.children_named("axId").filter_map(|a| a.attr("val")).find(|id| val_ids.contains(id)).map(str::to_string);
+    let mut primary_val: Option<String> = None;
     for g in pa.elements() {
         let name = g.local();
         if !name.ends_with("Chart") {
@@ -167,6 +172,11 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
             c.data_labels = true;
         }
         kinds.push(kind);
+        let val_axis = group_val_axis(g);
+        if primary_val.is_none() {
+            primary_val = val_axis.clone();
+        }
+        let secondary = val_axis.is_some() && val_axis != primary_val;
         for s in g.children_named("ser").take(1000) {
             let mut ser = Series {
                 name: s.child("tx").map(strings).and_then(|v| v.into_iter().next()).unwrap_or_default(),
@@ -175,6 +185,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
                 smooth: s.child("smooth").and_then(|v| v.bool("val")).unwrap_or(false),
                 marker: s.path(&["marker", "symbol"]).and_then(|m| m.attr("val")).filter(|m| *m != "none").map(String::from),
                 kind: Some(kind),
+                secondary_axis: secondary,
                 ..Default::default()
             };
             if let Some(d) = s.child("dLbls").and_then(|d| d.child("showVal")).and_then(|v| v.bool("val")) {
@@ -208,6 +219,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     if c.kind != ChartType::Combo {
         for s in &mut c.series {
             s.kind = None;
+            s.secondary_axis = false;
         }
     }
     // Axes.
@@ -242,5 +254,28 @@ mod tests {
         let c = read_chart_xml(xml).unwrap();
         assert_eq!(c.legend.as_deref(), Some("r"));
         assert!(!c.legend_overlay);
+    }
+
+    #[test]
+    fn combo_chart_with_a_secondary_axis() {
+        // Columns on axes 1/2, a line on axes 3/4 whose value axis is on the right.
+        let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea>
+<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:ser><c:idx val="0"/><c:tx><c:v>Spend</c:v></c:tx><c:cat><c:strLit><c:ptCount val="2"/><c:pt idx="0"><c:v>W1</c:v></c:pt><c:pt idx="1"><c:v>W2</c:v></c:pt></c:strLit></c:cat><c:val><c:numLit><c:ptCount val="2"/><c:pt idx="0"><c:v>200000</c:v></c:pt><c:pt idx="1"><c:v>310000</c:v></c:pt></c:numLit></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart>
+<c:lineChart><c:grouping val="standard"/><c:ser><c:idx val="1"/><c:tx><c:v>Clicks</c:v></c:tx><c:spPr><a:ln w="28575"><a:solidFill><a:srgbClr val="00B050"/></a:solidFill></a:ln></c:spPr><c:val><c:numLit><c:ptCount val="2"/><c:pt idx="0"><c:v>6000</c:v></c:pt><c:pt idx="1"><c:v>7400</c:v></c:pt></c:numLit></c:val></c:ser><c:marker val="1"/><c:axId val="3"/><c:axId val="4"/></c:lineChart>
+<c:catAx><c:axId val="1"/><c:axPos val="b"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:axPos val="l"/><c:crossAx val="1"/></c:valAx>
+<c:valAx><c:axId val="4"/><c:axPos val="r"/><c:crossAx val="3"/></c:valAx><c:catAx><c:axId val="3"/><c:delete val="1"/><c:axPos val="b"/><c:crossAx val="4"/></c:catAx>
+</c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml).unwrap();
+        assert_eq!(c.kind, ChartType::Combo);
+        assert_eq!(c.series.len(), 2);
+        assert!(!c.series[0].secondary_axis);
+        assert!(c.series[1].secondary_axis);
+        assert_eq!(c.series[1].kind, Some(ChartType::LineMarkers));
+        assert!(c.series[1].line.as_ref().is_some_and(|l| l.width.is_some_and(|w| (w - 2.25).abs() < 0.01)));
+        // A chart of one type on one axis has no secondary series.
+        let single = String::from_utf8_lossy(xml)
+            .replace("<c:axId val=\"3\"/><c:axId val=\"4\"/></c:lineChart>", "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>");
+        let c = read_chart_xml(single.as_bytes()).unwrap();
+        assert!(c.series.iter().all(|s| !s.secondary_axis));
     }
 }
