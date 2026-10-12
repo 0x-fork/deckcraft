@@ -127,6 +127,7 @@ fn render(args: &[String]) -> Result<(), String> {
             "--all" => all = true,
             "--edit" => edit = true,
             "--scale" => scale = it.next().and_then(|v| v.parse().ok()).ok_or("--scale needs a number")?,
+            other if other.len() > 1 && other.starts_with('-') => return Err(format!("unknown render option `{other}`")),
             other
                 if input.is_none()
                     && !sample
@@ -277,4 +278,21 @@ fn mcp(args: &[String]) -> Result<(), String> {
     let mut server = Server::new(backend);
     let stdin = std::io::stdin();
     server.serve(stdin.lock(), std::io::stdout()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_refuses_an_unknown_option_instead_of_writing_it_as_a_file() {
+        let out = std::env::temp_dir().join("deckcraft-cli-unknown-option.png");
+        let _ = std::fs::remove_file(&out);
+        for flag in ["--bogus", "-x", "--help"] {
+            let args: Vec<String> = ["--sample", flag, &out.to_string_lossy()].iter().map(|a| a.to_string()).collect();
+            let e = render(&args).unwrap_err();
+            assert!(e.contains(&format!("unknown render option `{flag}`")), "{flag}: {e}");
+            assert!(!out.exists(), "{flag}: rendered anyway");
+        }
+    }
 }
