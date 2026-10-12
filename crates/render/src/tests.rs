@@ -1443,3 +1443,66 @@ fn metafile_pattern_brush_tiles_and_averages_when_tiny() {
     let p = img.get_pixel(16, 16);
     assert!((100..156).contains(&p[0]) && p[3] > 200, "average grey: {p:?}");
 }
+
+/// A 400 x 200 group at (100, 100) holding a dashed 4 pt rectangle and a 3 pt line with an
+/// arrowhead, placed in the group's child coordinates by `to_child` (slide point to child point).
+fn outlined_group(child: Xfrm, to_child: impl Fn(f64, f64) -> (f64, f64)) -> Image {
+    use deckcraft_model::style::{Dash, LineEnd};
+    let ink = |w: f64| deckcraft_model::style::Line { dash: None, ..deckcraft_model::style::Line::solid(ColorRef::rgb(Rgba::rgb(200, 0, 0)), w) };
+    let place = |x0: f64, y0: f64, x1: f64, y1: f64| {
+        let ((a, b), (c, d)) = (to_child(x0, y0), to_child(x1, y1));
+        Xfrm::new(a, b, c - a, d - b)
+    };
+    let rect = Shape {
+        id: ShapeId(11),
+        xfrm: Some(place(140.0, 120.0, 300.0, 200.0)),
+        geom: Geom::preset("rect"),
+        line: Some(deckcraft_model::style::Line { dash: Some(Dash::Preset { name: "dash".into() }), ..ink(4.0) }),
+        ..Default::default()
+    };
+    let end = LineEnd { kind: "triangle".into(), w: "lg".into(), len: "lg".into() };
+    let line = Shape {
+        id: ShapeId(12),
+        xfrm: Some(Xfrm { flip_v: true, ..place(150.0, 170.0, 450.0, 260.0) }),
+        geom: Geom::preset("line"),
+        line: Some(deckcraft_model::style::Line { tail: Some(end), ..ink(3.0) }),
+        ..Default::default()
+    };
+    let pts: Vec<(f64, f64, f32)> = [(160.0, 240.0), (260.0, 285.0)].iter().map(|(x, y)| to_child(*x, *y)).map(|(x, y)| (x, y, 1.0)).collect();
+    let ink = Shape {
+        id: ShapeId(13),
+        xfrm: Some(place(100.0, 100.0, 500.0, 300.0)),
+        kind: ShapeKind::Ink {
+            strokes: vec![deckcraft_model::InkStroke { points: pts, color: Rgba::rgb(200, 0, 0), width: 5.0, highlighter: false }],
+        },
+        ..Default::default()
+    };
+    let group = Shape {
+        id: ShapeId(10),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
+        kind: ShapeKind::Group { children: vec![rect, line, ink], child },
+        ..Default::default()
+    };
+    render_slide(&deck_with(vec![group]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+}
+
+fn inked(img: &Image) -> usize {
+    img.pixels.as_chunks::<4>().0.iter().filter(|px| px[1] < 200).count()
+}
+
+#[test]
+fn group_child_scale_does_not_scale_line_widths() {
+    // Children laid out 1:1 with the slide are the reference.
+    let reference = outlined_group(Xfrm::new(100.0, 100.0, 400.0, 200.0), |x, y| (x, y));
+    let drawn = inked(&reference);
+    assert!((500..20_000).contains(&drawn), "the reference draws thin lines: {drawn}");
+    // The same drawing in a small legacy child space (scale 100), and one scaled unevenly
+    // (100 across, 50 down): same outlines, same line widths, dashes and arrowhead.
+    let uniform = outlined_group(Xfrm::new(1.0, 1.0, 4.0, 2.0), |x, y| (1.0 + (x - 100.0) / 100.0, 1.0 + (y - 100.0) / 100.0));
+    let uneven = outlined_group(Xfrm::new(1.0, 1.0, 4.0, 4.0), |x, y| (1.0 + (x - 100.0) / 100.0, 1.0 + (y - 100.0) / 50.0));
+    for (name, img) in [("uniform", &uniform), ("uneven", &uneven)] {
+        let (n, d) = (inked(img), differing(&reference, img));
+        assert!(n.abs_diff(drawn) * 20 < drawn, "{name}: {n} inked pixels against {drawn}");
+        assert!(d * 20 < drawn, "{name}: {d} differing values against {drawn} inked pixels");
+    }
+}
