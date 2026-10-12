@@ -303,6 +303,7 @@ pub fn body_pr(b: &El) -> BodyProps {
         col_spacing: pt(b, "spcCol"),
         rtl_col: b.bool("rtlCol"),
         upright: b.bool("upright"),
+        space_first_last: b.bool("spcFirstLastPara"),
         ..Default::default()
     };
     for e in b.elements() {
@@ -568,5 +569,8 @@ mod tests {
         assert_eq!(b.vert, Some(TextDir::Vertical270));
         assert_eq!(b.columns, Some(2));
         assert_eq!(b.autofit, Some(AutoFit::Shrink { font_scale: 0.625, line_reduction: 0.2 }));
+        assert_eq!(b.space_first_last, None);
+        let d = parse(br#"<a:bodyPr spcFirstLastPara="1"/>"#).unwrap();
+        assert_eq!(body_pr(&d.root).space_first_last, Some(true));
     }
 }
