@@ -203,6 +203,8 @@ struct Style {
     cs: Option<String>,
     /// Heading font (`+mj-…`): the theme's major font set applies.
     major: bool,
+    /// Pair kerning on: `a:rPr/@kern` is set and the size reaches it.
+    kern: bool,
 }
 
 /// One character of a paragraph after shaping.
@@ -314,6 +316,7 @@ fn make_style(ctx: &Ctx, r: &RunProps, scale: f64, prompt: Option<Rgba>) -> Styl
         ea,
         cs,
         major,
+        kern: r.kern.is_some_and(|k| k > 0.0 && size + 1e-6 >= k * scale),
     }
 }
 
@@ -613,7 +616,8 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
     // Items: maximal ranges of one level, face, script and shaping style (case mapping, language).
     let upper = |i: usize| styles.get(char_style.get(i).copied().unwrap_or(0)).is_some_and(|st| st.caps != Caps::None);
     let lang = |i: usize| styles.get(char_style.get(i).copied().unwrap_or(0)).and_then(|st| st.lang.as_deref());
-    let key = |i: usize| (levels.get(i).copied(), char_face.get(i).copied(), scripts.get(i).map(|s| s.0), upper(i), lang(i));
+    let kern = |i: usize| styles.get(char_style.get(i).copied().unwrap_or(0)).is_some_and(|st| st.kern);
+    let key = |i: usize| (levels.get(i).copied(), char_face.get(i).copied(), scripts.get(i).map(|s| s.0), upper(i), lang(i), kern(i));
     let mut a = 0;
     while a < n {
         let mut b = a + 1;
@@ -628,6 +632,24 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
 
 /// Size of superscript and subscript text relative to the run's size.
 const SUB_SUPER: f64 = 0.66;
+
+/// The OpenType features to change from the shaper's defaults for an item, as PowerPoint draws
+/// it: kerning only where the run asks for it (`kern`), and no standard or contextual ligatures in
+/// Latin, Greek and Cyrillic ("fi", "ffi" and Calibri's "ti" stay apart). Other scripts need
+/// their ligatures (Arabic lam-alef), and emoji sequences are joined by them.
+fn shaping_features(cells: &[Cell], styles: &[Style], script: Option<ScriptTag>) -> Vec<deckcraft_fonts::Feature> {
+    let mut f = vec![];
+    if !cells.first().and_then(|c| styles.get(c.style)).is_some_and(|st| st.kern) {
+        f.extend(deckcraft_fonts::feature("-kern"));
+    }
+    let alphabetic = matches!(script.as_ref(), Some(b"Latn" | b"Grek" | b"Cyrl"));
+    let emoji = cells.iter().any(|c| matches!(c.ch as u32, 0x200D | 0x20E3 | 0xFE0F | 0x2600..=0x27BF | 0x1F000..=0x1FAFF | 0xE0020..=0xE007F));
+    if alphabetic && !emoji {
+        f.extend(deckcraft_fonts::feature("-liga"));
+        f.extend(deckcraft_fonts::feature("-clig"));
+    }
+    f
+}
 
 /// Shape cells `range` (one item) and hang each cluster's glyphs on its first cell, sharing the
 /// cluster's advance among its graphemes (by the ligature's GDEF carets when it has them).
@@ -649,7 +671,8 @@ fn shape_item(
     let Some(face) = faces.get(fi) else { return };
     let rtl = level % 2 == 1;
     let (Some(&b0), Some(&b1)) = (byte_of.get(range.start), byte_of.get(range.end)) else { return };
-    let params = ShapeParams { features: &[], rtl, script, language: lang };
+    let features = shaping_features(cells.get(range.clone()).unwrap_or(&[]), styles, script);
+    let params = ShapeParams { features: &features, rtl, script, language: lang };
     let glyphs = deckcraft_fonts::shape_range(face, text, b0..b1, &params, |ch| if upper { ch.to_uppercase().next().unwrap_or(ch) } else { ch });
     let upem = face.upem.max(1.0);
     let scale_of = |cell: &Cell| {
