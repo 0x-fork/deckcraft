@@ -668,7 +668,9 @@ impl Renderer {
         let fill = if let Some(t) = st.tint { Some(Fill::solid(deckcraft_model::ColorRef::rgb(t))) } else { fill };
         // Effects below the shape.
         if let Some(e) = &effects {
-            self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, m, w, h);
+            // A shape without a fill (an outline, a frame) glows along its line only.
+            let filled = is_pic || fill.as_ref().is_some_and(|f| !matches!(f, Fill::None));
+            self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, filled, m, w, h);
         }
         let soft = effects.as_ref().and_then(|e| e.soft_edge).filter(|r| *r > 0.0);
         if let Some(r) = soft {
@@ -801,6 +803,7 @@ impl Renderer {
         ph: Option<Rgba>,
         geo: &Geometry,
         fill: &Option<Fill>,
+        filled: bool,
         m: Affine,
         w: f64,
         h: f64,
@@ -837,9 +840,15 @@ impl Renderer {
             ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(g.radius * 0.35 * k)));
             ctx.set_transform(m);
             ctx.set_paint(color(c.with_alpha(255), 1.0));
-            ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 1.2).with_join(kurbo::Join::Round));
-            ctx.stroke_path(&silhouette);
-            ctx.fill_path(&silhouette);
+            if filled {
+                ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 1.2).with_join(kurbo::Join::Round));
+                ctx.stroke_path(&silhouette);
+                ctx.fill_path(&silhouette);
+            } else {
+                // The glow spreads its radius to both sides of the line; the inside stays clear.
+                ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 2.0).with_join(kurbo::Join::Round));
+                ctx.stroke_path(&silhouette);
+            }
             ctx.pop_layer();
         }
         if let Some(rf) = &e.reflection {

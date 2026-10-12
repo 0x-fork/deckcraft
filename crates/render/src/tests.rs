@@ -125,6 +125,34 @@ fn effects_tables_charts_render() {
 }
 
 #[test]
+fn glow_of_an_unfilled_shape_follows_its_line() {
+    // A frame (no fill, thin line) with a strong glow: the glow lines its edge, the inside stays
+    // the slide's white, as PowerPoint draws it.
+    let glow = |fill: Option<Fill>| {
+        let mut sh = Shape {
+            id: ShapeId(610),
+            xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 300.0)),
+            fill,
+            line: Some(deckcraft_model::style::Line::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 176, 240)), 0.25)),
+            ..Default::default()
+        };
+        sh.effects = Some(deckcraft_model::Effects {
+            glow: Some(deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 255)), radius: 8.0 }),
+            ..Default::default()
+        });
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let img = glow(Some(Fill::None));
+    let inside = img.pixel(300, 250);
+    assert!(inside[0] > 245 && inside[1] > 245, "{inside:?}");
+    let edge = img.pixel(300, 97);
+    assert!(edge[0] < 230, "{edge:?}");
+    // A filled shape's glow is still the whole silhouette's (the fill covers its inside).
+    let img = glow(Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255)))));
+    assert!(img.pixel(300, 94)[0] < 240);
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
