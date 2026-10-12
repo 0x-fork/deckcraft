@@ -46,6 +46,20 @@ fn bullets_are_drawn_for_body_text() {
 }
 
 #[test]
+fn only_the_first_character_of_a_bullet_is_drawn() {
+    // "••" (seen in the wild) draws one dot in PowerPoint.
+    for (char, glyphs) in [("\u{2022}\u{2022}", 1), ("\u{2022}", 1), ("-->", 1)] {
+        let (p, mut sh) = setup("One", 600.0, 300.0);
+        sh.text.as_mut().unwrap().paragraphs[0].props.bullet = Some(Bullet::Char { char: char.into() });
+        let l = lay(&p, &sh, 600.0, 300.0);
+        let bullet = l.runs.iter().find(|r| r.chars == (0, 0)).expect("bullet run");
+        assert_eq!(bullet.glyphs.len(), glyphs, "{char:?}");
+    }
+    // The first grapheme cluster is kept whole.
+    assert_eq!(map_symbol_bullet("e\u{301}x", None), "e\u{301}");
+}
+
+#[test]
 fn shrink_on_overflow() {
     let text = (0..30).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n");
     let (p, sh) = setup(&text, 600.0, 200.0);

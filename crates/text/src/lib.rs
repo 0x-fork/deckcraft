@@ -686,7 +686,8 @@ fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
         };
         return m.to_string();
     }
-    c.to_string()
+    // PowerPoint draws only the first character of a longer `buChar` ("••" draws one dot).
+    c.graphemes(true).next().unwrap_or("•").to_string()
 }
 
 fn measure_str(face: &FontFace, size: f64, s: &str) -> (f64, Vec<(u32, f64)>) {
