@@ -52,6 +52,53 @@ pub fn substitutes(family: &str) -> &'static [&'static str] {
     }
 }
 
+/// Families whose open substitutes ([`substitutes`]) keep their metrics, so text drawn with
+/// them breaks into the same lines.
+fn has_metric_twin(family: &str) -> bool {
+    matches!(
+        family.to_ascii_lowercase().as_str(),
+        "calibri" | "calibri light" | "cambria" | "cambria math" | "arial" | "helvetica" | "times new roman" | "times" | "courier new" | "courier"
+    )
+}
+
+/// The installed family PowerPoint draws a missing `family` with instead of Calibri: Liberation
+/// Sans and Serif as Arial and Times New Roman (observed in PowerPoint; Liberation Mono, Carlito,
+/// Caladea, Arimo and Tinos are not mapped and draw in Calibri), and Windows' standard font
+/// substitutes (Arial CE, Times New Roman CYR…).
+fn office_twin(family: &str) -> Option<&'static str> {
+    let f = family.to_ascii_lowercase();
+    Some(match f.as_str() {
+        "liberation sans" | "helvetica" | "helv" => "Arial",
+        "liberation serif" | "times" | "tms rmn" => "Times New Roman",
+        _ => {
+            let base = f
+                .strip_suffix(" baltic")
+                .or(f.strip_suffix(" ce"))
+                .or(f.strip_suffix(" cyr"))
+                .or(f.strip_suffix(" greek"))
+                .or(f.strip_suffix(" tur"))?;
+            match base {
+                "arial" => "Arial",
+                "courier new" => "Courier New",
+                "times new roman" => "Times New Roman",
+                _ => return None,
+            }
+        }
+    })
+}
+
+/// Office's downloadable (cloud) families: PowerPoint fetches them when a document uses them, so
+/// they draw as themselves there, not as Calibri. Without them DeckCraft keeps their closest open
+/// substitute ([`substitutes`]; Aptos as Inter).
+fn is_office_cloud_font(family: &str) -> bool {
+    let f = family.to_ascii_lowercase();
+    f.starts_with("aptos") || ["bierstadt", "grandview", "seaford", "skeena", "tenorite"].iter().any(|c| f.starts_with(c))
+}
+
+/// The family PowerPoint draws a document's Latin text in when the font it names isn't installed,
+/// whatever the theme, `panose` or `pitchFamily` say.
+pub const MISSING_FONT_FAMILY: &str = "Calibri";
+
 #[derive(Clone)]
 enum FontBytes {
     Static(&'static [u8]),
@@ -65,6 +112,10 @@ pub struct FontFace {
     pub family: String,
     /// Typographic style name (e.g. "Semibold", "Italic").
     pub style: String,
+    /// The Windows (GDI) family and style names (`name` IDs 1 and 2) when the family differs from
+    /// the typographic one: "Segoe UI Semibold" / "Regular" for Segoe UI Semibold. Documents name
+    /// fonts this way.
+    pub legacy: Option<(String, String)>,
     /// usWeightClass-style weight (400 = regular).
     pub weight: f32,
     pub italic: bool,
@@ -253,6 +304,11 @@ pub struct FontDb {
     /// scan, so what they find doesn't depend on what ran before them.
     #[cfg(not(target_arch = "wasm32"))]
     cataloged: std::sync::OnceLock<()>,
+    /// Families (lower case) whose cataloged files have all been loaded: a family's files load
+    /// together, so a lookup never settles for the one face another name loaded ("Segoe UI
+    /// Semibold" loads a face of the family "Segoe UI").
+    #[cfg(not(target_arch = "wasm32"))]
+    loaded_families: Mutex<std::collections::HashSet<String>>,
     /// System fallback state: enabled, and characters no system font covers.
     #[cfg(not(target_arch = "wasm32"))]
     sys: Mutex<SysFallback>,
@@ -316,6 +372,16 @@ fn face_names(f: &skrifa::FontRef<'_>) -> Option<(String, String)> {
     Some((family, style))
 }
 
+/// A face's Windows (GDI) family and style (`name` IDs 1 and 2) when that family differs from the
+/// typographic `family`.
+fn legacy_names(f: &skrifa::FontRef<'_>, family: &str) -> Option<(String, String)> {
+    let legacy = name(f, &[StringId::FAMILY_NAME])?;
+    if legacy.eq_ignore_ascii_case(family) {
+        return None;
+    }
+    Some((legacy, name(f, &[StringId::SUBFAMILY_NAME]).unwrap_or_else(|| "Regular".into())))
+}
+
 /// (family, style) of every face in the font file at `path`, reading only its table directories
 /// and `name` tables: a scan opens hundreds of font files, many of them megabytes long. A
 /// variable font is cataloged under its default style; its named instances appear once it loads.
@@ -362,8 +428,13 @@ fn file_face_names(path: &std::path::Path) -> Vec<(String, String)> {
                 font.extend_from_slice(&u32::to_be_bytes(v));
             }
             font.extend_from_slice(&table);
-            face_names(&skrifa::FontRef::new(&font).ok()?)
+            let f = skrifa::FontRef::new(&font).ok()?;
+            let (family, style) = face_names(&f)?;
+            // Cataloged under its Windows family too, so "Segoe UI Semibold" finds the file.
+            let legacy = legacy_names(&f, &family);
+            Some(std::iter::once((family, style)).chain(legacy))
         })
+        .flatten()
         .collect()
 }
 
@@ -491,10 +562,12 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         .map(|v| v >= 0.5)
         .or(axis(b"slnt").map(|v| v.abs() > 0.1))
         .unwrap_or(!matches!(a.style, skrifa::attribute::Style::Normal) || style_italic(&style));
+    let legacy = if coords.is_empty() { legacy_names(&f, &family) } else { None };
     Some(FontFace {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         family,
         style,
+        legacy,
         weight,
         italic,
         upem: m.units_per_em.max(1) as f64,
@@ -570,6 +643,8 @@ impl FontDb {
             font_dirs,
             #[cfg(not(target_arch = "wasm32"))]
             cataloged: std::sync::OnceLock::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            loaded_families: Mutex::new(std::collections::HashSet::new()),
             #[cfg(not(target_arch = "wasm32"))]
             sys: Mutex::new(SysFallback { enabled: true, ..Default::default() }),
         }
@@ -676,6 +751,8 @@ impl FontDb {
     /// Returns the number of faces cataloged.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load_system_fonts(&self) -> usize {
+        // Families load again from the new catalog when next looked up.
+        self.loaded_families.lock().unwrap_or_else(|e| e.into_inner()).clear();
         // The first scan, or a rescan once it is done (never both at once).
         let mut first = None;
         self.cataloged.get_or_init(|| first = Some(self.scan_font_dirs()));
@@ -756,17 +833,35 @@ impl FontDb {
             .unwrap_or_else(last_resort_face)
     }
 
+    /// The face a document's text in `family` is drawn with, as PowerPoint draws it: the family
+    /// when it is installed or bundled, or a metric-compatible stand-in (Carlito for Calibri,
+    /// Liberation Sans for Arial…), or the family PowerPoint maps it to (Liberation Sans as Arial,
+    /// see `office_twin`); any other missing family is drawn in Calibri (or Carlito).
+    /// DeckCraft's own default family keeps [`FontDb::face`]'s fallbacks.
+    pub fn document_face(&self, family: &str, style: &str) -> Arc<FontFace> {
+        if family.eq_ignore_ascii_case(FALLBACK_FAMILY) || has_metric_twin(family) || is_office_cloud_font(family) || self.has_family(family) {
+            return self.face(family, style);
+        }
+        if let Some(twin) = office_twin(family) {
+            return self.face(twin, style);
+        }
+        self.face(MISSING_FONT_FAMILY, style)
+    }
+
     fn try_family(&self, family: &str, style: &str) -> Option<Arc<FontFace>> {
-        if let Some(f) = self.find(family, style) {
-            return Some(f);
-        }
+        // Every installed file of the family first, so the best style is among the candidates. The
+        // lock is held while the files load, so another thread looking up the family waits for
+        // them rather than finding none and falling back to another family.
         #[cfg(not(target_arch = "wasm32"))]
-        if self.load_cataloged(family)
-            && let Some(f) = self.find(family, style)
         {
-            return Some(f);
+            let mut loaded = self.loaded_families.lock().unwrap_or_else(|e| e.into_inner());
+            let key = family.to_lowercase();
+            if !loaded.contains(&key) {
+                self.load_cataloged(family);
+                loaded.insert(key);
+            }
         }
-        None
+        self.find(family, style)
     }
 
     /// Is `family` available (loaded, or installed on the system)?
@@ -782,7 +877,9 @@ impl FontDb {
     }
 
     pub(crate) fn is_loaded(&self, family: &str) -> bool {
-        self.read_faces().iter().any(|f| f.family.eq_ignore_ascii_case(family))
+        self.read_faces()
+            .iter()
+            .any(|f| f.family.eq_ignore_ascii_case(family) || f.legacy.as_ref().is_some_and(|(lf, _)| lf.eq_ignore_ascii_case(family)))
     }
 
     /// A variable font's axes: (tag, name, min, default, max), empty for static fonts.
@@ -837,11 +934,27 @@ impl FontDb {
             return self.instance(family, style);
         }
         let faces = self.read_faces();
-        let cands: Vec<&Arc<FontFace>> = faces.iter().filter(|f| f.family.eq_ignore_ascii_case(family)).collect();
+        let mut cands: Vec<&Arc<FontFace>> = faces.iter().filter(|f| f.family.eq_ignore_ascii_case(family)).collect();
+        let ns = norm(style);
+        if cands.is_empty() {
+            // A Windows family name ("Segoe UI Semibold", "Arial Black"): its faces, matched by
+            // their Windows style ("Regular", "Bold"…).
+            cands = faces.iter().filter(|f| f.legacy.as_ref().is_some_and(|(lf, _)| lf.eq_ignore_ascii_case(family))).collect();
+            if let Some(f) = cands.iter().find(|f| f.legacy.as_ref().is_some_and(|(_, ls)| norm(ls) == ns)) {
+                return Some((*f).clone());
+            }
+            // Bold of a family that is itself a weight (Semibold, Light): the face, made bolder
+            // by the caller, as Windows does, rather than a face of another weight.
+            if let Some(f) = cands
+                .iter()
+                .find(|f| f.legacy.as_ref().is_some_and(|(_, ls)| norm(ls) == norm(if style_italic(style) { "Italic" } else { "Regular" })))
+            {
+                return Some((*f).clone());
+            }
+        }
         if cands.is_empty() {
             return None;
         }
-        let ns = norm(style);
         if let Some(f) = cands.iter().find(|f| norm(&f.style) == ns) {
             return Some((*f).clone());
         }
