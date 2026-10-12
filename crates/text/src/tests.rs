@@ -447,3 +447,45 @@ fn superscript_glyphs_sit_inside_their_cells() {
         assert!(g.1 >= x0 - 0.01 && g.1 < x1, "glyph at {} outside its cell {x0}..{x1}", g.1);
     }
 }
+
+/// A wrapping numbered paragraph with `marL` and `indent`; returns (bullet x, first line's text
+/// x, second line's text x).
+fn hanging(margin: f64, indent: f64, bullet: Bullet) -> (Option<f64>, f64, f64) {
+    let text = "Wrapping words go on and on so the paragraph needs at least two or three lines here";
+    let (p, mut sh) = setup(text, 300.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.props.bullet = Some(bullet);
+    para.props.margin_left = Some(margin);
+    para.props.indent = Some(indent);
+    let l = lay(&p, &sh, 300.0, 300.0);
+    assert!(l.lines.len() >= 2, "{} lines", l.lines.len());
+    let bx = l.runs.iter().find(|r| r.cells.is_empty() && !r.glyphs.is_empty()).map(|r| r.glyphs[0].1);
+    (bx, l.lines[0].caret_x[0], l.lines[1].caret_x[0])
+}
+
+#[test]
+fn a_hang_past_the_box_edge_keeps_its_width_on_the_first_line() {
+    // PowerPoint, marL 0 / indent -36pt: the number sits at the box's edge, the first line's text
+    // 36pt in, and the wrapped lines at the margin (observed with PowerPoint's slide export).
+    let num = || Bullet::AutoNum { scheme: "arabicPeriod".into(), start_at: 1 };
+    let (bx, first, rest) = hanging(0.0, -36.0, num());
+    assert!((first - rest - 36.0).abs() < 0.5, "first {first} rest {rest}");
+    assert!((bx.unwrap() - rest).abs() < 0.5, "bullet {bx:?} rest {rest}");
+    // marL 18 / indent -54: number at the edge, first line at 54, the rest at 18.
+    let (bx, first, rest) = hanging(18.0, -54.0, num());
+    assert!((first - rest - 36.0).abs() < 0.5, "first {first} rest {rest}");
+    assert!((rest - bx.unwrap() - 18.0).abs() < 0.5, "bullet {bx:?} rest {rest}");
+    // A character bullet behaves the same.
+    let (_, first, rest) = hanging(0.0, -36.0, Bullet::Char { char: "•".into() });
+    assert!((first - rest - 36.0).abs() < 0.5, "first {first} rest {rest}");
+    // Without a bullet the first line just starts at the edge.
+    let (_, first, rest) = hanging(0.0, -36.0, Bullet::None);
+    assert!((first - rest).abs() < 0.5, "first {first} rest {rest}");
+}
+
+#[test]
+fn an_ordinary_hang_still_puts_the_text_at_the_margin() {
+    let (bx, first, rest) = hanging(36.0, -36.0, Bullet::AutoNum { scheme: "arabicPeriod".into(), start_at: 1 });
+    assert!((first - rest).abs() < 0.5, "first {first} rest {rest}");
+    assert!((rest - bx.unwrap() - 36.0).abs() < 0.5);
+}

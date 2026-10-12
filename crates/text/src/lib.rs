@@ -917,7 +917,11 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         let bullet_w = p.bullet.as_ref().map(|(s, st)| measure_str(&st.face, st.size, s).0).unwrap_or(0.0);
         let first_x = if p.bullet.is_some() {
             let bx = (margin + indent).max(0.0);
-            if indent < 0.0 && bx + bullet_w <= margin { margin } else { bx + bullet_w + if indent >= 0.0 { 0.0 } else { 3.0 } }
+            // A hanging bullet's text starts at the margin. When the hang reaches left of the box
+            // (marL + indent < 0), PowerPoint pins the bullet to the box's edge and keeps the
+            // hang: the first line's text starts at -indent (later lines stay at the margin).
+            let stop = margin.max(-indent);
+            if indent < 0.0 && bx + bullet_w <= stop { stop } else { bx + bullet_w + if indent >= 0.0 { 0.0 } else { 3.0 } }
         } else {
             (margin + indent).max(0.0)
         };
