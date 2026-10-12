@@ -677,6 +677,25 @@ fn rotated_tables_hit_the_cell_under_the_pointer() {
 }
 
 #[test]
+fn tab_moves_between_cells_skipping_merged_ones() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    s.execute("table.merge", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let cell = |s: &Session| text_sel(s).and_then(|t| t.cell);
+    let shift = Mods { shift: true, ..Default::default() };
+    s.key("Tab", Mods::default()).unwrap();
+    assert_eq!(cell(&s), Some((0, 2)), "the cell under the merge is skipped");
+    s.key("Tab", shift).unwrap();
+    assert_eq!(cell(&s), Some((0, 0)));
+    s.key("Tab", shift).unwrap();
+    assert_eq!(cell(&s), Some((0, 0)), "Shift+Tab in the first cell stays");
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 2]})).unwrap();
+    s.key("Tab", Mods::default()).unwrap();
+    assert_eq!((cell(&s), table_of(&s, id).n_rows()), (Some((2, 0)), 3), "Tab in the last cell adds a row");
+}
+
+#[test]
 fn right_to_left_paragraphs() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
