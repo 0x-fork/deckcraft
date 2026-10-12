@@ -37,3 +37,6 @@ sync_github_name = false
 
 [people.Johannesgauss]
 sync_github_name = true
+
+[people.RCShoemaker]
+real_name = "Ryan C. Shoemaker"
