@@ -85,6 +85,16 @@ pub enum Hit {
         id: ShapeId,
         text: bool,
     },
+    /// The right edge of table column `col` (dragging it resizes the column).
+    TableColumn {
+        id: ShapeId,
+        col: usize,
+    },
+    /// The bottom edge of table row `row` (dragging it resizes the row).
+    TableRow {
+        id: ShapeId,
+        row: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -128,6 +138,18 @@ enum Drag {
     },
     TextSelect {
         shape: ShapeId,
+    },
+    /// Dragging a table border: the right edge of column `index`, or the bottom edge of row
+    /// `index`. `start` is the table-local press point, `size` the column's width or the row's
+    /// drawn height then, `frame` where the table was drawn.
+    TableBorder {
+        id: ShapeId,
+        column: bool,
+        index: usize,
+        start: Point,
+        size: f64,
+        frame: Affine,
+        moved: bool,
     },
     Ink {
         points: Vec<(f64, f64, f32)>,
@@ -369,6 +391,8 @@ impl Session {
         let hit = self.hit_test(p, tol);
         let st = self.doc()?;
         match hit {
+            Some(Hit::TableColumn { id, col }) => self.begin_table_border(id, true, col, p)?,
+            Some(Hit::TableRow { id, row }) => self.begin_table_border(id, false, row, p)?,
             Some(Hit::Resize { id, handle }) => {
                 let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
                 self.begin("Size");
@@ -623,6 +647,26 @@ impl Session {
                     })?;
                 }
             }
+            Drag::TableBorder { id, column, index, start, size, frame, moved } => {
+                let local = frame.inverse() * p;
+                let d = if column { local.x - start.x } else { local.y - start.y };
+                if !moved && d.abs() < tol.max(1.0) {
+                    return Ok(Value::Null);
+                }
+                if !moved {
+                    self.begin(if column { "Column Width" } else { "Row Height" });
+                }
+                // An inner column border moves between its two columns (the table keeps its
+                // width); the right edge widens the last column and the table. A row's height is
+                // a minimum: rows still grow to fit their text.
+                if column {
+                    let width = (size + d).max(cmd::table::MIN_COLUMN_WIDTH);
+                    self.execute("table.columnWidth", &json!({"id": id, "col": index, "width": width, "keepTotal": true}))?;
+                } else {
+                    self.execute("table.rowHeight", &json!({"id": id, "row": index, "height": (size + d).max(1.0)}))?;
+                }
+                self.tool.drag = Some(Drag::TableBorder { id, column, index, start, size, frame, moved: true });
+            }
             Drag::Freeform { mode, mut points, pressed } => {
                 // Dragging scribbles (except for curves, which only take clicked points).
                 if pressed && mode != "curve" && points.last().is_none_or(|l| (*l - p).hypot() >= 1.5) {
@@ -814,7 +858,10 @@ impl Session {
         let Some(sh) = st.shape(t.shape) else { return Ok(None) };
         let x = xfrm_of(&st.doc, &st.selection, sh);
         if !x.bounds().inflate(tol, tol).contains(p)
-            || matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. }))
+            || matches!(
+                self.hit_test(p, tol),
+                Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::TableColumn { .. } | Hit::TableRow { .. })
+            )
         {
             return Ok(None);
         }
@@ -858,6 +905,24 @@ impl Session {
         };
         self.execute("text.edit", &params)?;
         Ok(true)
+    }
+
+    /// Press on a table border: dragging it resizes the column or row. Editing a cell of the
+    /// table goes on; otherwise the table becomes the selection.
+    fn begin_table_border(&mut self, id: ShapeId, column: bool, index: usize, p: Point) -> Result<()> {
+        let st = self.doc()?;
+        let Some(f) = st.shape(id).and_then(|sh| cmd::table::table_frame(st, sh)) else { return Ok(()) };
+        let size = if column { f.cols.get(index) } else { f.heights.get(index) }.copied().unwrap_or(0.0);
+        let (start, frame) = (f.local(p), f.affine);
+        if !st.selection.text.as_ref().is_some_and(|t| t.shape == id) {
+            self.select(|_, sel| {
+                sel.shapes = vec![id];
+                sel.text = None;
+                sel.cells = None;
+            })?;
+        }
+        self.tool.drag = Some(Drag::TableBorder { id, column, index, start, size, frame, moved: false });
+        Ok(())
     }
 
     fn is_picture(&self, id: ShapeId) -> bool {
@@ -1244,6 +1309,15 @@ fn hit_shape(st: &crate::DocState, sh: &Shape, p: Point, tol: f64) -> Option<Hit
     let x = xfrm_of(&st.doc, &st.selection, sh);
     let inv = x.affine().inverse();
     let local = inv * p;
+    // Table borders resize rows and columns.
+    let near = local.x >= -tol && local.y >= -tol && local.x <= x.w + tol && local.y <= x.h + tol;
+    if near && let Some(f) = cmd::table::table_frame(st, sh) {
+        match f.border_at(f.local(p), tol) {
+            Some(cmd::table::TableBorder::Column(col)) => return Some(Hit::TableColumn { id: sh.id, col }),
+            Some(cmd::table::TableBorder::Row(row)) => return Some(Hit::TableRow { id: sh.id, row }),
+            None => {}
+        }
+    }
     match &sh.kind {
         ShapeKind::Group { children, child } => {
             // A group is hit when any child is hit; the group is what gets selected.

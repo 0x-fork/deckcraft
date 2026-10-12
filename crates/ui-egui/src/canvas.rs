@@ -404,6 +404,8 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
             _ => egui::CursorIcon::ResizeHorizontal,
         },
         (_, Some(Hit::Rotate { .. })) => egui::CursorIcon::Alias,
+        (_, Some(Hit::TableColumn { .. })) => egui::CursorIcon::ResizeColumn,
+        (_, Some(Hit::TableRow { .. })) => egui::CursorIcon::ResizeRow,
         (_, Some(Hit::Adjust { .. } | Hit::LineEnd { .. })) => egui::CursorIcon::PointingHand,
         (_, Some(Hit::Shape { text: true, .. })) => {
             if app.session.active().is_some_and(|d| d.selection.text.is_some()) {
@@ -771,5 +773,28 @@ mod tests {
         assert_eq!((ts.cell, ts.caret), (Some((0, 0)), (0, 0)));
         let (top, _) = deckcraft_engine::cmd::text::caret_line(st, &ts).unwrap();
         assert!(top.x > 100.0 && top.x < 120.0 && top.y >= 100.0 && top.y < 140.0, "caret {top:?} at the start of cell (0, 0)");
+    }
+
+    /// Table borders show a resize cursor and drag to resize columns.
+    #[test]
+    fn table_borders_resize_with_the_pointer() {
+        let (mut harness, id) = app_with_table();
+        let p = screen(harness.state(), 300.0, 120.0);
+        harness.hover_at(p);
+        harness.step();
+        harness.step();
+        assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::ResizeColumn);
+        let q = screen(harness.state(), 340.0, 120.0);
+        harness.drag_at(p);
+        harness.step();
+        for k in 1..=4 {
+            harness.hover_at(p + (q - p) * k as f32 / 4.0);
+            harness.step();
+        }
+        harness.drop_at(q);
+        harness.run_steps(2);
+        let st = harness.state().session.active().unwrap();
+        let deckcraft_model::ShapeKind::Table(t) = &st.shape(id).unwrap().kind else { panic!("not a table") };
+        assert!((t.cols[0] - 240.0).abs() < 0.5 && (t.cols[1] - 160.0).abs() < 0.5, "{:?}", t.cols);
     }
 }

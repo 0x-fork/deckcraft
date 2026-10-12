@@ -558,6 +558,113 @@ fn caret_moves_by_line_in_a_wrapped_cell() {
 }
 
 #[test]
+fn table_borders_are_hit_where_they_are_drawn() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    let hit = |s: &Session, x: f64, y: f64| s.hit_test(deckcraft_geom::Point::new(x, y), 3.0);
+    assert_eq!(hit(&s, 201.0, 125.0), Some(tools::Hit::TableColumn { id, col: 0 }));
+    assert_eq!(hit(&s, 400.0, 125.0), Some(tools::Hit::TableColumn { id, col: 2 }), "the right edge");
+    assert_eq!(hit(&s, 150.0, 139.0), Some(tools::Hit::TableRow { id, row: 0 }));
+    assert_eq!(hit(&s, 150.0, 181.0), Some(tools::Hit::TableRow { id, row: 1 }), "the bottom edge");
+    assert!(matches!(hit(&s, 100.0, 125.0), Some(tools::Hit::Shape { .. })), "the left edge moves the table");
+    assert!(matches!(hit(&s, 150.0, 125.0), Some(tools::Hit::Shape { .. })));
+    // Hovering a border shows it (the UI picks the resize cursor from the hover).
+    s.pointer(tev(PointerKind::Move, 300.0, 170.0)).unwrap();
+    assert_eq!(s.tool.hover, Some(tools::Hit::TableColumn { id, col: 1 }));
+    // A border inside a merged cell isn't there.
+    s.execute("table.merge", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    assert!(matches!(hit(&s, 200.0, 120.0), Some(tools::Hit::Shape { .. })));
+    assert_eq!(hit(&s, 200.0, 160.0), Some(tools::Hit::TableColumn { id, col: 0 }));
+}
+
+#[test]
+fn dragging_column_borders_resizes_columns() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    let undo_depth = s.doc().unwrap().history.undo.len();
+    // An inner border: the two columns share the change, the table keeps its width.
+    s.pointer(tev(PointerKind::Down, 200.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 215.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 230.0, 128.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 230.0, 128.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![130.0, 70.0, 100.0]);
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 300.0);
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo_depth + 1, "one undo step per drag");
+    // Columns don't collapse.
+    s.pointer(tev(PointerKind::Down, 230.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 500.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 500.0, 125.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![200.0 - cmd::table::MIN_COLUMN_WIDTH, cmd::table::MIN_COLUMN_WIDTH, 100.0]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0, 100.0]);
+    // The right edge: the last column and the table get wider.
+    s.pointer(tev(PointerKind::Down, 400.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 450.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 450.0, 120.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0, 150.0]);
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 350.0);
+    // A click on a border without dragging changes nothing.
+    let before = s.doc().unwrap().doc.clone();
+    s.pointer(tev(PointerKind::Down, 200.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 200.0, 125.0)).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc().unwrap().doc));
+}
+
+#[test]
+fn dragging_a_row_border_sets_the_row_height() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "d"]]));
+    let drawn = |s: &Session| {
+        let st = s.doc().unwrap();
+        tools::table_rows(st, &table_of(s, id))
+    };
+    s.pointer(tev(PointerKind::Down, 150.0, 140.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, 170.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 170.0)).unwrap();
+    assert_eq!(drawn(&s), vec![70.0, 40.0]);
+    let st = s.doc().unwrap();
+    assert_eq!(cmd::xfrm_of(&st.doc, &st.selection, st.shape(id).unwrap()).h, 110.0, "the table grows");
+    // Rows still fit their text: dragging the border up stops at the text.
+    s.pointer(tev(PointerKind::Down, 150.0, 170.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, 60.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 60.0)).unwrap();
+    let h = drawn(&s)[0];
+    assert!(h > 10.0 && h < 40.0, "row 0 shrinks to its text: {h}");
+    // The bottom edge sizes the last row.
+    let bottom = 100.0 + drawn(&s).iter().sum::<f64>();
+    s.pointer(tev(PointerKind::Down, 150.0, bottom)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, bottom + 20.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, bottom + 20.0)).unwrap();
+    assert_eq!(drawn(&s)[1], 60.0);
+}
+
+#[test]
+fn dragging_a_border_while_editing_a_cell_keeps_editing() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1]})).unwrap();
+    s.pointer(tev(PointerKind::Down, 200.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 180.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 180.0, 120.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![80.0, 120.0]);
+    assert_eq!(text_sel(&s).and_then(|t| t.cell), Some((0, 1)));
+}
+
+#[test]
+fn column_width_can_keep_the_table_width() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"]]));
+    s.execute("table.columnWidth", &json!({"id": id, "col": 1, "width": 150.0, "keepTotal": true})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 150.0, 50.0]);
+    s.execute("table.columnWidth", &json!({"id": id, "col": 1, "width": 1000.0, "keepTotal": true})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 200.0 - cmd::table::MIN_COLUMN_WIDTH, cmd::table::MIN_COLUMN_WIDTH]);
+    // The last column has no neighbour: the table changes width.
+    s.execute("table.columnWidth", &json!({"id": id, "col": 2, "width": 80.0, "keepTotal": true})).unwrap();
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 100.0 + (200.0 - cmd::table::MIN_COLUMN_WIDTH) + 80.0);
+}
+
+#[test]
 fn rotated_tables_hit_the_cell_under_the_pointer() {
     let mut s = session();
     let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
