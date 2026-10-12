@@ -776,3 +776,47 @@ fn pattern_fills_draw_powerpoints_tiles() {
         assert_eq!(dark(x, y), dark(x + 1, y + 1), "pct50 repeats diagonally at {x},{y}");
     }
 }
+
+#[test]
+fn compound_lines_draw_their_bands() {
+    // A 24 pt outline on a rectangle, as PowerPoint's export draws each kind (top edge, outside
+    // first): double 8/8/8, thin-thick 4.8/4.8/14.4, triple 4/4/8/4/4.
+    use deckcraft_model::style::{Compound, Fill, Line};
+    let runs = |c: Compound| {
+        let sh = Shape {
+            id: ShapeId(760),
+            xfrm: Some(Xfrm::new(100.0, 100.0, 300.0, 200.0)),
+            fill: Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255)))),
+            line: Some(Line {
+                fill: Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0)))),
+                width: Some(24.0),
+                compound: Some(c),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let p = deck_with(vec![sh]);
+        let img = render_slide(&p, 0, &RenderOpts { scale: 2.0, ..Default::default() });
+        // Down the middle of the top edge (y 100 pt), from 80 pt to 120 pt: lengths of dark and
+        // light runs in points.
+        let mut out: Vec<(bool, f64)> = vec![];
+        for y in 160..240 {
+            let dark = img.pixel(500, y)[0] < 128;
+            match out.last_mut() {
+                Some((d, n)) if *d == dark => *n += 0.5,
+                _ => out.push((dark, 0.5)),
+            }
+        }
+        out.into_iter().filter(|(d, _)| *d).map(|(_, n)| n).collect::<Vec<f64>>()
+    };
+    let close = |got: Vec<f64>, want: &[f64]| got.len() == want.len() && got.iter().zip(want).all(|(g, w)| (g - w).abs() <= 1.0);
+    assert!(close(runs(Compound::Single), &[24.0]));
+    let d = runs(Compound::Double);
+    assert!(close(d.clone(), &[8.0, 8.0]), "{d:?}");
+    let t = runs(Compound::ThinThick);
+    assert!(close(t.clone(), &[4.8, 14.4]), "{t:?}");
+    let k = runs(Compound::ThickThin);
+    assert!(close(k.clone(), &[14.4, 4.8]), "{k:?}");
+    let tri = runs(Compound::Triple);
+    assert!(close(tri.clone(), &[4.0, 8.0, 4.0]), "{tri:?}");
+}

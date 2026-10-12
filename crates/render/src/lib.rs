@@ -9,6 +9,8 @@
 
 mod chart;
 mod colr;
+
+mod compound;
 mod images;
 mod morph_path;
 mod morph_text;
@@ -940,6 +942,19 @@ fn stroke(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, pa
             ctx.set_paint(color(c, alpha));
         }
         _ => ctx.set_paint(color(Rgba::BLACK, alpha)),
+    }
+    // Compound lines: each band stroked along the path moved to its place across the width.
+    let compound = line.compound.unwrap_or_default();
+    if compound != deckcraft_model::style::Compound::Single && lw * scale_of(m) >= 1.5 {
+        let tolerance = 0.1 / scale_of(m).max(1e-6);
+        for &(a, b) in compound::bands(compound) {
+            let d = (-0.5 + (a + b) / 2.0) * lw;
+            let mut band = sk.clone();
+            band.width = (b - a) * lw;
+            ctx.set_stroke(band);
+            ctx.stroke_path(&compound::offset(path, d, tolerance));
+        }
+        return;
     }
     ctx.set_stroke(sk);
     ctx.stroke_path(path);
