@@ -572,3 +572,41 @@ fn a_gradient_with_a_stop_off_the_end_stays_linear() {
         assert!((got - want).abs() <= 4, "x {x}: {got} vs {want}");
     }
 }
+
+#[test]
+fn a_shape_filled_with_the_background_shows_the_slide_background() {
+    // `useBgFill`: PowerPoint paints the slide's background into the shape, laid out on the
+    // slide. A white panel covers a black-to-grey background; a shape on it with the background
+    // fill is a window onto that background.
+    use deckcraft_model::style::{Fill, Gradient, GradientShape, GradientStop};
+    let none = || Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() });
+    let panel = Shape {
+        id: ShapeId(710),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+        fill: Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255)))),
+        line: none(),
+        ..Default::default()
+    };
+    let window = Shape {
+        id: ShapeId(711),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 760.0, 340.0)),
+        fill: Some(Fill::Background),
+        line: none(),
+        ..Default::default()
+    };
+    let mut p = deck_with(vec![panel, window]);
+    let stop = |pos, v| GradientStop { pos, color: ColorRef::rgb(deckcraft_color::Rgba::rgb(v, v, v)) };
+    std::sync::Arc::make_mut(&mut p.slides[0]).background = Some(deckcraft_model::Background::Fill {
+        fill: Fill::Gradient(Gradient {
+            stops: vec![stop(0.0, 0), stop(0.5, 0), stop(1.0, 200)],
+            shape: GradientShape::Linear { angle: 0.0, scaled: false },
+            rotate_with_shape: true,
+        }),
+    });
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert_eq!(img.pixel(50, 50)[0], 255, "the panel stays white outside the window");
+    assert!(img.pixel(300, 270)[0] < 8, "the window shows the background's black half: {:?}", img.pixel(300, 270));
+    // Laid out on the slide: three quarters across the slide is half way from black to grey.
+    let v = img.pixel(720, 270)[0] as i32;
+    assert!((v - 100).abs() <= 6, "{v}");
+}

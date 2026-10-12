@@ -222,11 +222,14 @@ pub struct Renderer {
     resources: Resources,
     /// Outlines morphing in the frame being drawn by `blend`.
     paths: Vec<PathMorph>,
+    /// The background of the slide (layout, master) being drawn, its placeholder colour and the
+    /// slide's view transform: shapes filled with the background (`useBgFill`) show it through.
+    bg: Option<(Fill, Option<Rgba>, Affine)>,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Renderer { resources: Resources::new(), paths: Vec::new() }
+        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None }
     }
 }
 
@@ -590,6 +593,7 @@ impl Renderer {
         ctx.set_transform(view);
         let path = r.to_path(0.1);
         paint::fill_path(ctx, rctx, &fill, ph, &path, r, view, FillMode::Norm, 1.0, f.pres);
+        self.bg = Some((fill, ph, view));
     }
 
     fn shape(&mut self, ctx: &mut RenderContext, f: &Frame, rctx: &Ctx, s: &Shape, parent: Affine, depth: usize) {
@@ -711,7 +715,16 @@ impl Renderer {
                         }
                         ctx.set_transform(m);
                         ctx.set_fill_rule(if sp.even_odd { peniko::Fill::EvenOdd } else { peniko::Fill::NonZero });
-                        paint::fill_path(ctx, rctx, fl, fill_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, sp.fill, fade(i).fill, f.pres);
+                        match (fl, &self.bg) {
+                            // `useBgFill`: the slide's background, laid out on the slide (not the
+                            // shape), shows through the shape.
+                            (Fill::Background, Some((bg, ph, view))) => {
+                                let slide = Rect::new(0.0, 0.0, f.pres.slide_size.width, f.pres.slide_size.height);
+                                let path = (view.inverse() * m) * sp.path.clone();
+                                paint::fill_path(ctx, rctx, bg, *ph, &path, slide, *view, sp.fill, fade(i).fill, f.pres);
+                            }
+                            _ => paint::fill_path(ctx, rctx, fl, fill_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, sp.fill, fade(i).fill, f.pres),
+                        }
                         ctx.set_fill_rule(peniko::Fill::NonZero);
                     }
                 }
