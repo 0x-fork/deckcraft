@@ -79,6 +79,10 @@ pub struct FontFace {
     /// values).
     pub cap_height: f64,
     pub x_height: f64,
+    /// Where the baseline sits in a line, as a share of the line's height from its top: the
+    /// Windows ascent over the Windows ascent plus descent (OS/2 `usWinAscent`/`usWinDescent`),
+    /// the split PowerPoint uses (computed by `line_split`).
+    pub line_split: f64,
     pub shaper: harfrust::ShaperData,
     /// Variable fonts: the named instance's axis settings (user units; empty = default instance),
     /// the normalised location and the shaper's view of it.
@@ -436,6 +440,23 @@ pub(crate) fn last_resort_face() -> Arc<FontFace> {
     .clone()
 }
 
+/// The share of a line above the baseline (`FontFace::line_split`): OS/2 `usWinAscent` over
+/// `usWinAscent + usWinDescent`, else the ascent over ascent plus descent. Fonts whose Windows
+/// extent is huge (Gabriola, Cambria Math: over 1.5 em) get 0.81, where PowerPoint puts their
+/// baseline (observed).
+fn line_split(f: &skrifa::FontRef, ascent: f64, descent: f64, upem: f64) -> f64 {
+    use skrifa::raw::TableProvider;
+    let (a, d) = match f.os2() {
+        Ok(os2) if os2.us_win_ascent() > 0 => (os2.us_win_ascent() as f64, os2.us_win_descent() as f64),
+        _ => (ascent, descent),
+    };
+    let total = a + d;
+    if !total.is_finite() || total <= 0.0 || a < 0.0 || d < 0.0 {
+        return 0.8;
+    }
+    if total > upem * 1.5 { 0.81 } else { (a / total).clamp(0.5, 1.0) }
+}
+
 fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords: Vec<([u8; 4], f32)>) -> Option<FontFace> {
     let data: &[u8] = match &bytes {
         FontBytes::Static(b) => b,
@@ -467,6 +488,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         descent: -(m.descent as f64),
         cap_height: m.cap_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.72),
         x_height: m.x_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.5),
+        line_split: line_split(&f, m.ascent as f64, -(m.descent as f64), m.units_per_em.max(1) as f64),
         shaper,
         coords,
         location,

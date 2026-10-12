@@ -144,6 +144,17 @@ mod tests {
     }
 
     #[test]
+    fn line_split_follows_the_windows_ascent_and_descent() {
+        use skrifa::raw::TableProvider;
+        let f = fontdb::last_resort_face();
+        let font = skrifa::FontRef::new(f.data()).unwrap();
+        let os2 = font.os2().unwrap();
+        let (a, d) = (os2.us_win_ascent() as f64, os2.us_win_descent() as f64);
+        assert!((f.line_split - a / (a + d)).abs() < 1e-9, "{} vs {}", f.line_split, a / (a + d));
+        assert!(f.line_split > 0.5 && f.line_split < 1.0);
+    }
+
+    #[test]
     fn some_face_always_resolves() {
         let db = FontDb::with_font_dirs(Vec::new());
         db.set_system_fallback(false);

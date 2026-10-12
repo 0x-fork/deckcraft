@@ -489,3 +489,34 @@ fn an_ordinary_hang_still_puts_the_text_at_the_margin() {
     assert!((first - rest).abs() < 0.5, "first {first} rest {rest}");
     assert!((rest - bx.unwrap() - 36.0).abs() < 0.5);
 }
+
+#[test]
+fn single_spaced_lines_are_1_2_times_the_size_apart_whatever_the_font() {
+    // PowerPoint spaces single-spaced lines 1.2 × the font size apart in every font, with the
+    // baseline where the font's Windows ascent/descent split puts it (observed on twenty fonts).
+    for size in [18.0, 40.0] {
+        let mut run = Run::new("HHH");
+        run.props.size = Some(size);
+        let (p, mut sh) = bidi_setup(vec![run], 2000.0, false, Align::Left);
+        let t = sh.text.as_mut().unwrap();
+        t.body.autofit = Some(AutoFit::None);
+        let second = t.paragraphs[0].clone();
+        t.paragraphs.push(second.clone());
+        t.paragraphs.push(second);
+        for para in &mut t.paragraphs {
+            para.props.line_spacing = Some(Spacing::Pct(1.0));
+            para.props.space_before = Some(Spacing::Pts(0.0));
+            para.props.space_after = Some(Spacing::Pts(0.0));
+        }
+        let l = lay(&p, &sh, 2000.0, 600.0);
+        assert_eq!(l.lines.len(), 3);
+        // Each line is 1.2 × the size tall (the face is not compared across lines: another
+        // test's thread can load the family between them, see #252).
+        for line in &l.lines {
+            assert!((line.bottom - line.top - size * LINE_PITCH).abs() < 1e-6, "{size}: {}", line.bottom - line.top);
+        }
+        let face = &l.runs[0].face;
+        let first = &l.lines[0];
+        assert!((first.baseline - first.top - size * LINE_PITCH * face.line_split).abs() < 1e-6);
+    }
+}
