@@ -1074,7 +1074,9 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         (r.x1 - bp.inset_r.unwrap_or(7.2)).max(r.x0 + bp.inset_l.unwrap_or(7.2)),
         (r.y1 - bp.inset_b.unwrap_or(3.6)).max(r.y0 + bp.inset_t.unwrap_or(3.6)),
     );
-    let wrap = bp.wrap.unwrap_or(true) && !matches!(bp.autofit, Some(AutoFit::Shape) if shape.text_box && !bp.wrap.unwrap_or(true));
+    // Text that follows a WordArt arch or circle is set on one line per paragraph.
+    let follow = bp.warp.as_deref().is_some_and(deckcraft_geom::warp::is_follow);
+    let wrap = bp.wrap.unwrap_or(true) && !follow && !matches!(bp.autofit, Some(AutoFit::Shape) if shape.text_box && !bp.wrap.unwrap_or(true));
     let ncols = bp.columns.unwrap_or(1).clamp(1, 16) as usize;
     let col_gap = bp.col_spacing.unwrap_or(0.0).max(0.0);
     let col_w = ((inner.width() - col_gap * (ncols as f64 - 1.0)) / ncols as f64).max(1.0);

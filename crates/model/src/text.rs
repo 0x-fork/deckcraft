@@ -98,6 +98,10 @@ pub struct BodyProps {
     pub col_spacing: Option<f64>,
     /// WordArt transform (`prstTxWarp`), e.g. `textArchUp`.
     pub warp: Option<String>,
+    /// The warp's adjust values (`prstTxWarp/avLst`: `adj` or `adj1`, `adj2`…, raw guide values);
+    /// empty = the preset's defaults.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warp_adj: Vec<f64>,
     pub rtl_col: Option<bool>,
     /// Keep text upright when the shape rotates.
     pub upright: Option<bool>,
@@ -119,6 +123,7 @@ impl BodyProps {
         self.col_spacing = self.col_spacing.or(p.col_spacing);
         if self.warp.is_none() {
             self.warp.clone_from(&p.warp);
+            self.warp_adj.clone_from(&p.warp_adj);
         }
         self.rtl_col = self.rtl_col.or(p.rtl_col);
         self.upright = self.upright.or(p.upright);

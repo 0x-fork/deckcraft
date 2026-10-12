@@ -994,3 +994,84 @@ fn shadows_and_glows_spread_like_powerpoints() {
     assert!((60..170).contains(&red(&img, 15, 120)), "{}", red(&img, 15, 120));
     assert!(red(&img, 10, 120) > 245);
 }
+
+/// A 400 × 200 text box at (100, 100) holding `text` at 40 pt, warped by `warp`.
+fn wordart(warp: Option<&str>, text: &str) -> Presentation {
+    let mut t = TextBody::from_text(text);
+    t.paragraphs[0].runs[0].props.size = Some(40.0);
+    t.paragraphs[0].props.align = Some(deckcraft_model::text::Align::Center);
+    t.body.warp = warp.map(String::from);
+    deck_with(vec![Shape { id: ShapeId(700), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), text: Some(t), ..Default::default() }])
+}
+
+/// Ink box (x0, y0, x1, y1) of dark pixels, and the top ink row of each column.
+fn ink(img: &Image) -> ((u32, u32, u32, u32), Vec<Option<u32>>) {
+    let mut b = (u32::MAX, u32::MAX, 0, 0);
+    let mut tops = vec![None; img.width as usize];
+    for y in 0..img.height {
+        for x in 0..img.width {
+            if img.pixel(x, y)[0] < 128 {
+                b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+                if tops[x as usize].is_none() {
+                    tops[x as usize] = Some(y);
+                }
+            }
+        }
+    }
+    (b, tops)
+}
+
+#[test]
+fn wordart_arch_up_lifts_the_middle_of_the_line() {
+    let o = RenderOpts { scale: 1.0, ..Default::default() };
+    let flat = render_slide(&wordart(None, "ARCHED WORDART"), 0, &o);
+    let arched = render_slide(&wordart(Some("textArchUp"), "ARCHED WORDART"), 0, &o);
+    assert!(diff_px(&flat, &arched) > 1000);
+    let ((fx0, _, fx1, _), ftops) = ink(&flat);
+    let ((ax0, ay0, ax1, _), atops) = ink(&arched);
+    let top_near = |tops: &[Option<u32>], x: u32| (x.saturating_sub(15)..x + 15).filter_map(|i| tops.get(i as usize).copied().flatten()).min();
+    // Flat text: the ends and the middle stand on one line.
+    let (fl, fm) = (top_near(&ftops, fx0 + 20).unwrap(), top_near(&ftops, (fx0 + fx1) / 2).unwrap());
+    assert!(fl.abs_diff(fm) < 4, "flat {fl} {fm}");
+    // Arched: the line follows the top of the ellipse inscribed in the box, so the middle is
+    // at the box top and the ends sit clearly lower.
+    let (al, am, ar) = (top_near(&atops, ax0 + 20).unwrap(), top_near(&atops, (ax0 + ax1) / 2).unwrap(), top_near(&atops, ax1 - 20).unwrap());
+    assert!(al > am + 10 && ar > am + 10, "arched {al} {am} {ar}");
+    assert!((80..=110).contains(&ay0), "arch top {ay0}");
+}
+
+#[test]
+fn wordart_plain_stretches_the_ink_over_the_text_rect() {
+    let img = render_slide(&wordart(Some("textPlain"), "PLAIN"), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let ((x0, y0, x1, y1), _) = ink(&img);
+    for (got, want) in [(x0, 100), (y0, 100), (x1, 499), (y1, 299)] {
+        assert!(got.abs_diff(want) <= 2, "ink box {:?}", (x0, y0, x1, y1));
+    }
+}
+
+#[test]
+fn unknown_or_absent_warps_draw_flat_text() {
+    let o = RenderOpts { scale: 0.5, ..Default::default() };
+    // Warm the font database first (other tests load fonts concurrently).
+    let _ = render_slide(&wordart(None, "FLAT"), 0, &o);
+    let flat = render_slide(&wordart(None, "FLAT"), 0, &o);
+    for w in ["textNoShape", "bogus", ""] {
+        assert_eq!(diff_px(&flat, &render_slide(&wordart(Some(w), "FLAT"), 0, &o)), 0, "{w}");
+    }
+}
+
+#[test]
+fn every_warp_preset_renders_text_inside_the_slide() {
+    let o = RenderOpts { scale: 0.5, ..Default::default() };
+    for name in
+        ["textArchUp", "textArchDown", "textCircle", "textButton", "textWave1", "textRingInside", "textCirclePour", "textDeflateInflateDeflate"]
+    {
+        let mut p = wordart(Some(name), "One line\nTwo line\nThree");
+        if let Some(b) = std::sync::Arc::make_mut(&mut p.slides[0]).shapes[0].text.as_mut() {
+            b.body.warp_adj = vec![f64::NAN, -1e12];
+        }
+        let img = render_slide(&p, 0, &o);
+        let ((x0, y0, x1, y1), _) = ink(&img);
+        assert!(x0 <= x1 && y0 <= y1, "{name}: no ink");
+    }
+}

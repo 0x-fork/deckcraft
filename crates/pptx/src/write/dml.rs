@@ -392,7 +392,19 @@ pub fn body_pr(w: &mut W, b: &BodyProps) {
     w.open("a:bodyPr", a);
     if let Some(p) = warp {
         w.open("a:prstTxWarp", A::new().a("prst", p));
-        w.empty0("a:avLst");
+        let adj: Vec<(usize, i64)> =
+            b.warp_adj.iter().take(8).enumerate().filter(|(_, v)| v.is_finite()).map(|(i, v)| (i, v.round().clamp(-2.0e9, 2.0e9) as i64)).collect();
+        if adj.is_empty() {
+            w.empty0("a:avLst");
+        } else {
+            let single = deckcraft_geom::warp::adjust_count(p) <= 1 && b.warp_adj.len() == 1;
+            w.open0("a:avLst");
+            for (i, v) in adj {
+                let n = if single { "adj".to_string() } else { format!("adj{}", i + 1) };
+                w.empty("a:gd", A::new().a("name", n).a("fmla", format!("val {v}")));
+            }
+            w.close("a:avLst");
+        }
         w.close("a:prstTxWarp");
     }
     match b.autofit {

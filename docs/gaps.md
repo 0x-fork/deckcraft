@@ -165,9 +165,13 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 - **Estimate:** 4–6 h.
 
 ### Edit points, text warp, 3-D
-- **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms", "Bevel and 3-D
-  rotation" (missing; `scene3d`/`sp3d` kept as raw XML on round trip).
-- **Estimate:** 4–6 h (edit points), 6–10 h (warp), 8–12 h (3-D render approximation).
+- **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
+  `prstTxWarp` presets render and their adjusts round-trip, but there is no Transform gallery or
+  command to apply one, no adjust handles, and arc/circle placement can differ from PowerPoint by
+  1–3 % of the path length), "Bevel and 3-D rotation" (missing; `scene3d`/`sp3d` kept as raw XML on
+  round trip).
+- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 8–12 h (3-D render
+  approximation).
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks a small built-in list of frequent misspellings
@@ -247,5 +251,6 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | Text warps render (all 40 presets, adjusts round-trip); the warp gap is now the gallery, command and handles |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |

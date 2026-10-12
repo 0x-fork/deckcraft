@@ -321,11 +321,43 @@ pub fn body_pr(b: &El) -> BodyProps {
             }
             "spAutoFit" => p.autofit = Some(AutoFit::Shape),
             "noAutofit" => p.autofit = Some(AutoFit::None),
-            "prstTxWarp" => p.warp = e.attr("prst").filter(|w| *w != "textNoShape").map(String::from),
+            "prstTxWarp" => {
+                p.warp = e.attr("prst").filter(|w| *w != "textNoShape" && !w.is_empty()).map(String::from);
+                p.warp_adj = p.warp.as_deref().map(|w| warp_adjusts(w, e)).unwrap_or_default();
+            }
             _ => {}
         }
     }
     p
+}
+
+/// `prstTxWarp/avLst` guides `adj` / `adj1`… as raw values by index (empty when none is given);
+/// slots the file leaves out keep the preset's default.
+fn warp_adjusts(preset: &str, e: &El) -> Vec<f64> {
+    let mut adj: Vec<f64> = Vec::new();
+    let Some(av) = e.child("avLst") else { return adj };
+    let defaults = deckcraft_geom::warp::adjust_defaults(preset);
+    for gd in av.children_named("gd").take(16) {
+        let n = gd.attr("name").unwrap_or("");
+        let idx = if n == "adj" {
+            0
+        } else if let Some(k) = n.strip_prefix("adj").and_then(|k| k.parse::<usize>().ok()).filter(|k| (1..=8).contains(k)) {
+            k - 1
+        } else {
+            continue;
+        };
+        let Some(v) = gd.attr("fmla").and_then(|f| f.trim().strip_prefix("val")).and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite())
+        else {
+            continue;
+        };
+        while adj.len() <= idx {
+            adj.push(defaults.get(adj.len()).copied().unwrap_or(0.0));
+        }
+        if let Some(slot) = adj.get_mut(idx) {
+            *slot = v.clamp(-1.0e9, 1.0e9);
+        }
+    }
+    adj
 }
 
 fn spacing(e: &El) -> Option<Spacing> {

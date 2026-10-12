@@ -223,6 +223,7 @@ pub fn body(ctx: &Ctx, shape: &Shape) -> BodyProps {
         columns: Some(1),
         col_spacing: Some(0.0),
         warp: None,
+        warp_adj: Vec::new(),
         rtl_col: Some(false),
         upright: Some(false),
     });
