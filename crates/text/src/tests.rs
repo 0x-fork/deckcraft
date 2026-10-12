@@ -395,3 +395,41 @@ fn hostile_bidi_input_never_panics() {
         }
     }
 }
+
+/// Width of `word` laid out in a run with `baseline` (0 = normal, 0.3 = superscript …).
+fn run_width(word: &str, baseline: Option<f64>) -> f64 {
+    let mut run = Run::new(word);
+    run.props.size = Some(24.0);
+    run.props.baseline = baseline;
+    let (p, sh) = bidi_setup(vec![run], 2000.0, false, Align::Left);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let line = &l.lines[0];
+    line.caret_x.last().unwrap() - line.caret_x.first().unwrap()
+}
+
+#[test]
+fn superscript_and_subscript_advance_at_their_drawn_size() {
+    // The glyphs are drawn at two thirds of the size; advancing by the full size spread the
+    // letters apart ("s u p e r").
+    let normal = run_width("superscript", None);
+    for b in [Some(0.3), Some(-0.25)] {
+        let w = run_width("superscript", b);
+        assert!((w / normal - SUB_SUPER).abs() < 0.02, "{b:?}: {w} vs {normal}");
+    }
+}
+
+#[test]
+fn superscript_glyphs_sit_inside_their_cells() {
+    let mut run = Run::new("super");
+    run.props.size = Some(24.0);
+    run.props.baseline = Some(0.3);
+    let (p, sh) = bidi_setup(vec![run], 2000.0, false, Align::Left);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let line = &l.lines[0];
+    let r = l.runs.iter().find(|r| !r.cells.is_empty()).unwrap();
+    assert!((r.size - 24.0 * SUB_SUPER).abs() < 1e-6);
+    for (g, (ci, _)) in r.glyphs.iter().zip(&r.cells) {
+        let (x0, x1) = line.edges[*ci - line.start];
+        assert!(g.1 >= x0 - 0.01 && g.1 < x1, "glyph at {} outside its cell {x0}..{x1}", g.1);
+    }
+}

@@ -566,6 +566,9 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
     cells
 }
 
+/// Size of superscript and subscript text relative to the run's size.
+const SUB_SUPER: f64 = 0.66;
+
 /// Shape cells `range` (one item) and hang each cluster's glyphs on its first cell, sharing the
 /// cluster's advance among its graphemes (by the ligature's GDEF carets when it has them).
 #[allow(clippy::too_many_arguments)]
@@ -593,7 +596,11 @@ fn shape_item(
         let st = styles.get(cell.style);
         let size = st.map(|s| s.size).unwrap_or(18.0);
         let small = st.is_some_and(|s| s.caps == Caps::Small) && cell.ch.is_lowercase();
-        (if small { size * 0.8 } else { size }) / upem
+        let size = if small { size * 0.8 } else { size };
+        // Superscript and subscript glyphs are drawn at two thirds of the size, so they advance by
+        // two thirds too.
+        let size = if st.is_some_and(|s| s.baseline != 0.0) { size * SUB_SUPER } else { size };
+        size / upem
     };
     // Cluster heads in this item, ascending; each cluster spans to the next head.
     let mut heads: Vec<usize> = glyphs.iter().filter_map(|g| char_at_byte.get(&g.cluster).copied()).filter(|h| range.contains(h)).collect();
@@ -1155,7 +1162,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             let Some(st) = p.styles.get(cell.style) else { continue };
             let Some(&(cx, cx1)) = line.edges.get(k) else { continue };
             let base_y = line.baseline - st.baseline * st.size;
-            let size = if st.baseline != 0.0 { st.size * 0.66 } else { st.size };
+            let size = if st.baseline != 0.0 { st.size * SUB_SUPER } else { st.size };
             let size = if st.caps == Caps::Small && cell.ch.is_lowercase() { size * 0.8 } else { size };
             let key = (cell.style, cell.face);
             if key != cur_key {
@@ -1204,9 +1211,8 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                             }
                         }
                     }
-                    let k66 = if st.baseline != 0.0 { 0.66 } else { 1.0 };
                     for (gid, gx, gy) in &cell.glyphs {
-                        r.glyphs.push((*gid, cl + kash + gx * k66, base_y + gy));
+                        r.glyphs.push((*gid, cl + kash + gx, base_y + gy));
                         r.cells.push((ci, cell.ch));
                     }
                 }
