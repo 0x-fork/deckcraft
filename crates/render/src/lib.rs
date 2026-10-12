@@ -8,12 +8,21 @@
 #![forbid(unsafe_code)]
 
 mod chart;
+mod colr;
+
+mod compound;
 mod images;
+mod metafile;
 mod morph_path;
 mod morph_text;
 mod paint;
+mod pattern;
+
+mod pathgrad;
 mod placed;
+mod ramp;
 mod table;
+mod warp;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -221,11 +230,14 @@ pub struct Renderer {
     resources: Resources,
     /// Outlines morphing in the frame being drawn by `blend`.
     paths: Vec<PathMorph>,
+    /// The background of the slide (layout, master) being drawn, its placeholder colour and the
+    /// slide's view transform: shapes filled with the background (`useBgFill`) show it through.
+    bg: Option<(Fill, Option<Rgba>, Affine)>,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Renderer { resources: Resources::new(), paths: Vec::new() }
+        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None }
     }
 }
 
@@ -243,7 +255,7 @@ pub fn needs_filters(pres: &Presentation, slide: &Slide) -> bool {
                 return;
             }
             let (e, _) = resolve::effects(&rctx, s);
-            if e.is_some_and(|e| !e.is_empty()) {
+            if e.is_some_and(|e| !e.is_empty()) || text_has_effects(&rctx, s) {
                 any = true;
             }
         });
@@ -254,6 +266,20 @@ pub fn needs_filters(pres: &Presentation, slide: &Slide) -> bool {
     }
     check(&rctx.master.shapes);
     any
+}
+
+/// Does the shape's text have a shadow or glow (on a run, in its list style, or in the master's
+/// text styles it inherits)? Such text is blurred, which needs filters.
+fn text_has_effects(rctx: &Ctx, s: &Shape) -> bool {
+    use deckcraft_model::text::{ListStyle, RunProps};
+    let fx = |r: &RunProps| r.shadow.as_ref().is_some_and(|s| !s.inner) || r.glow.as_ref().is_some_and(|g| g.radius > 0.0);
+    let styled = |l: &ListStyle| l.levels.iter().flatten().any(|lv| fx(&lv.run));
+    let Some(t) = &s.text else { return false };
+    t.paragraphs.iter().any(|p| p.runs.iter().any(|r| fx(&r.props)) || fx(&p.end_props))
+        || styled(&t.list_style)
+        || styled(&rctx.master.title_style)
+        || styled(&rctx.master.body_style)
+        || styled(&rctx.master.other_style)
 }
 
 /// Render slide `index` at `opts.scale` pixels per point. A panic inside the renderer becomes a
@@ -588,7 +614,12 @@ impl Renderer {
         let r = Rect::new(0.0, 0.0, f.pres.slide_size.width, f.pres.slide_size.height);
         ctx.set_transform(view);
         let path = r.to_path(0.1);
+        // PowerPoint lays every background over white: a picture stretched into part of the
+        // slide, or a see-through colour, leaves white around and under it.
+        ctx.set_paint(color(Rgba::WHITE, 1.0));
+        ctx.fill_path(&path);
         paint::fill_path(ctx, rctx, &fill, ph, &path, r, view, FillMode::Norm, 1.0, f.pres);
+        self.bg = Some((fill, ph, view));
     }
 
     fn shape(&mut self, ctx: &mut RenderContext, f: &Frame, rctx: &Ctx, s: &Shape, parent: Affine, depth: usize) {
@@ -683,7 +714,7 @@ impl Renderer {
                 let bounds = Rect::new(0.0, 0.0, w, h);
                 ctx.push_clip_layer(&outline);
                 let t = f.opts.gif_times.iter().find(|g| g.0 == s.id).map(|g| g.1);
-                paint::picture(ctx, f.pres, pf, bounds, m, t);
+                paint::picture(ctx, f.pres, &paint::resolved(rctx, pf, None), bounds, m, t);
                 ctx.pop_layer();
             }
             ShapeKind::Media(mc) => {
@@ -710,7 +741,16 @@ impl Renderer {
                         }
                         ctx.set_transform(m);
                         ctx.set_fill_rule(if sp.even_odd { peniko::Fill::EvenOdd } else { peniko::Fill::NonZero });
-                        paint::fill_path(ctx, rctx, fl, fill_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, sp.fill, fade(i).fill, f.pres);
+                        match (fl, &self.bg) {
+                            // `useBgFill`: the slide's background, laid out on the slide (not the
+                            // shape), shows through the shape.
+                            (Fill::Background, Some((bg, ph, view))) => {
+                                let slide = Rect::new(0.0, 0.0, f.pres.slide_size.width, f.pres.slide_size.height);
+                                let path = (view.inverse() * m) * sp.path.clone();
+                                paint::fill_path(ctx, rctx, bg, *ph, &path, slide, *view, sp.fill, fade(i).fill, f.pres);
+                            }
+                            _ => paint::fill_path(ctx, rctx, fl, fill_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, sp.fill, fade(i).fill, f.pres),
+                        }
                         ctx.set_fill_rule(peniko::Fill::NonZero);
                     }
                 }
@@ -727,18 +767,23 @@ impl Renderer {
             }
         }
         if let Some(r) = soft {
-            // Feather: fade the shape's alpha towards the outline.
+            // Feather: the shape (fill and line) fades to nothing at its outline. Measured on
+            // PowerPoint's export: the mask is the outline shrunk by 0.85 r, blurred by a third of
+            // r, so it's half opaque 0.85 r inside the edge and transparent at the edge itself.
             ctx.set_transform(m);
             ctx.push_layer(
                 None,
                 Some(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn)),
                 None,
                 None,
-                Some(blur(r * 0.5 * scale_of(m))),
+                Some(blur(r / 3.0 * scale_of(m))),
             );
             ctx.set_paint(peniko::Color::from_rgba8(0, 0, 0, 255));
-            let inset = Rect::new(0.0, 0.0, w, h).inset(-r * 0.6);
-            ctx.fill_rect(&inset);
+            ctx.fill_path(&outline);
+            ctx.push_blend_layer(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestOut));
+            ctx.set_stroke(kurbo::Stroke::new(r * 1.7).with_join(kurbo::Join::Round));
+            ctx.stroke_path(&outline);
+            ctx.pop_layer();
             ctx.pop_layer();
             ctx.pop_layer();
         }
@@ -750,11 +795,14 @@ impl Renderer {
             ctx.push_clip_layer(&outline);
             let c = rctx.color(&sh.color, fx_ph);
             let d = Vec2::new(sh.dir.to_radians().cos(), sh.dir.to_radians().sin()) * sh.dist;
-            ctx.push_layer(None, None, None, None, Some(blur(sh.blur * 0.5 * scale_of(m))));
+            // As PowerPoint draws it (measured on its export): the shadow falls inside along the
+            // edges it points to (45 degrees: the bottom and right), blurred by a third of the
+            // blur radius.
+            ctx.push_layer(None, None, None, None, Some(blur(sh.blur / 3.0 * scale_of(m))));
             ctx.set_paint(color(c, 1.0));
             let mut ring = Rect::new(0.0, 0.0, w, h).inflate(w.max(h), w.max(h)).to_path(0.1);
             let mut hole = outline.clone();
-            hole.apply_affine(Affine::translate(d));
+            hole.apply_affine(Affine::translate(-d));
             ring.extend(hole.iter());
             ctx.set_fill_rule(peniko::Fill::EvenOdd);
             ctx.fill_path(&ring);
@@ -770,7 +818,10 @@ impl Renderer {
             let tr = geo.text_rect;
             if !body.is_empty() {
                 let l = deckcraft_text::layout(rctx, s, body, &Opts { rect: tr, fields: &f.fields, prompt_color: None, no_shrink: false });
-                draw_layout_with(ctx, &l, tr, m, &st.paras);
+                match text_warp(rctx, s, tr).filter(|_| l.rotation == 0.0) {
+                    Some(w) => warp::draw(ctx, &l, tr, m, &st.paras, &w),
+                    None => draw_layout_with(ctx, &l, tr, m, &st.paras),
+                }
             } else if f.opts.edit && s.ph.is_some() {
                 let kind = s.ph_type().unwrap_or(PhType::Body);
                 let prompt_body = prompt_body(rctx, s, kind);
@@ -825,7 +876,8 @@ impl Renderer {
             // Shadow offset is in slide space (doesn't rotate with the shape unless asked).
             let sm = if sh.rotate_with_shape { m * Affine::translate(d) * local } else { pre_translate(m, d * k) * local };
             ctx.set_transform(Affine::IDENTITY);
-            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur * 0.5 * k)));
+            // Blurred by a third of the blur radius, as PowerPoint's export shows.
+            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur / 3.0 * k)));
             ctx.set_transform(sm);
             ctx.set_paint(color(c.with_alpha(255), 1.0));
             ctx.fill_path(&silhouette);
@@ -834,10 +886,12 @@ impl Renderer {
         if let Some(g) = &e.glow {
             let c = rctx.color(&g.color, ph);
             ctx.set_transform(Affine::IDENTITY);
-            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(g.radius * 0.35 * k)));
+            // Measured on PowerPoint's export: a glow of radius r is half strength about half of r
+            // out from the outline and gone by r.
+            ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(g.radius * 0.17 * k)));
             ctx.set_transform(m);
             ctx.set_paint(color(c.with_alpha(255), 1.0));
-            ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 1.2).with_join(kurbo::Join::Round));
+            ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 0.95).with_join(kurbo::Join::Round));
             ctx.stroke_path(&silhouette);
             ctx.fill_path(&silhouette);
             ctx.pop_layer();
@@ -906,6 +960,19 @@ fn stroke(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, pa
             ctx.set_paint(color(c, alpha));
         }
         _ => ctx.set_paint(color(Rgba::BLACK, alpha)),
+    }
+    // Compound lines: each band stroked along the path moved to its place across the width.
+    let compound = line.compound.unwrap_or_default();
+    if compound != deckcraft_model::style::Compound::Single && lw * scale_of(m) >= 1.5 {
+        let tolerance = 0.1 / scale_of(m).max(1e-6);
+        for &(a, b) in compound::bands(compound) {
+            let d = (-0.5 + (a + b) / 2.0) * lw;
+            let mut band = sk.clone();
+            band.width = (b - a) * lw;
+            ctx.set_stroke(band);
+            ctx.stroke_path(&compound::offset(path, d, tolerance));
+        }
+        return;
     }
     ctx.set_stroke(sk);
     ctx.stroke_path(path);
@@ -1084,6 +1151,13 @@ pub fn text_transform(m: Affine, tr: Rect, rotation: f64) -> Affine {
     t
 }
 
+/// The WordArt warp of `s`'s text over its text rectangle `tr`, if it has one DeckCraft draws.
+pub fn text_warp(rctx: &Ctx, s: &Shape, tr: Rect) -> Option<deckcraft_geom::warp::Warp> {
+    let bp = resolve::body(rctx, s);
+    let name = bp.warp.as_deref()?;
+    deckcraft_geom::warp::warp(name, &bp.warp_adj, tr)
+}
+
 /// Draw an already laid-out text block.
 pub fn draw_layout(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout, tr: Rect, m: Affine) {
     draw_layout_with(ctx, l, tr, m, &[]);
@@ -1105,6 +1179,15 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
     for d in l.decos.iter().filter(|d| d.behind) {
         deco(ctx, d);
     }
+    // Text shadows, then glows, under all the text.
+    for pass in [TextEffect::Shadow, TextEffect::Glow] {
+        for run in &l.runs {
+            let ps = para(run.para);
+            if ps.visible && ps.opacity > 0.001 {
+                text_effect(ctx, run, pass, m * Affine::translate(ps.offset), ps.opacity);
+            }
+        }
+    }
     for run in &l.runs {
         if (run.alpha <= 0.0 || run.color.a == 0) && run.outline.is_none() {
             continue;
@@ -1114,8 +1197,24 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
             continue;
         }
         let m = m * Affine::translate(ps.offset);
+        // A gradient fill starts over on every line and spans that line's text (from its top to
+        // its bottom, from its first to its last character), as in PowerPoint.
+        let mut grads: Vec<(usize, peniko::Gradient)> = Vec::new();
         for (gid, x, y) in &run.glyphs {
-            draw_glyph(ctx, run, *gid, m * Affine::translate((*x, *y)), ps.opacity);
+            let at = m * Affine::translate((*x, *y));
+            let Some(g) = run.gradient.as_ref().filter(|g| !g.stops.is_empty()) else {
+                draw_glyph(ctx, run, *gid, at, ps.opacity);
+                continue;
+            };
+            let li = line_at(l, run.para, *y);
+            if !grads.iter().any(|(i, _)| *i == li) {
+                let scheme = deckcraft_color::ColorScheme { name: String::new(), colors: [Rgba::BLACK; 12] };
+                let stops = g.stops.iter().map(|s| (s.pos, s.color.resolve(&scheme, None))).collect();
+                let bounds = l.lines.get(li).and_then(line_bounds).unwrap_or(tr);
+                grads.push((li, paint::gradient(&g.shape, stops, bounds, run.alpha * ps.opacity)));
+            }
+            let fill = grads.iter().find(|(i, _)| *i == li).map(|(_, g)| (g, Affine::translate((-*x, -*y))));
+            draw_glyph_with(ctx, run, *gid, at, ps.opacity, fill);
         }
     }
     for d in l.decos.iter().filter(|d| !d.behind) {
@@ -1123,20 +1222,106 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
     }
 }
 
+/// The line of paragraph `para` holding a glyph on baseline `y` (the nearest baseline).
+fn line_at(l: &deckcraft_text::TextLayout, para: usize, y: f64) -> usize {
+    l.lines
+        .iter()
+        .enumerate()
+        .filter(|(_, li)| li.para == para)
+        .min_by(|a, b| (a.1.baseline - y).abs().total_cmp(&(b.1.baseline - y).abs()))
+        .map(|(i, _)| i)
+        .unwrap_or(0)
+}
+
+/// The box a line's text covers: its top and bottom, its first and last caret.
+fn line_bounds(li: &deckcraft_text::LineInfo) -> Option<Rect> {
+    let (x0, x1) = li.caret_x.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(*x), b.max(*x)));
+    let r = Rect::new(x0, li.top, x1, li.bottom);
+    (r.is_finite() && r.width() > 0.0 && r.height() > 0.0).then_some(r)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum TextEffect {
+    Shadow,
+    Glow,
+}
+
+/// Draw `run`'s shadow or glow (if it has one) under its glyphs, placed by `m`.
+fn text_effect(ctx: &mut RenderContext, run: &deckcraft_text::GlyphRun, which: TextEffect, m: Affine, opacity: f64) {
+    let Some(fx) = run.effects else { return };
+    let k = run.size / run.face.upem.max(1.0);
+    let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
+    let px = scale_of(m);
+    let (c, sigma, offset, grow) = match (which, fx.shadow, fx.glow) {
+        (TextEffect::Shadow, Some(s), _) => (s.color, s.blur * 0.5 * px, Vec2::new(s.dx, s.dy), 0.0),
+        // Measured on PowerPoint's export: a text glow of radius r is solid to about a third of r
+        // past the glyph's edge and fades out by about two thirds of r.
+        (TextEffect::Glow, _, Some((gc, r))) => (gc, r * 0.15 * px, Vec2::ZERO, r * 0.68),
+        _ => return,
+    };
+    let alpha = (c.a as f64 / 255.0) * opacity;
+    if alpha <= 0.0 {
+        return;
+    }
+    ctx.set_transform(Affine::IDENTITY);
+    ctx.push_layer(None, None, Some(alpha as f32), None, Some(blur(sigma)));
+    ctx.set_paint(color(c.with_alpha(255), 1.0));
+    for (gid, x, y) in &run.glyphs {
+        let path = glyph(&run.face, *gid);
+        if path.elements().is_empty() {
+            continue;
+        }
+        // The offset is in slide space: a shadow falls the same way whatever the text's rotation.
+        let at = pre_translate(m * Affine::translate((*x, *y)), offset * px) * skew * Affine::scale(k);
+        ctx.set_transform(at);
+        ctx.fill_path(&path);
+        if grow > 0.0 {
+            ctx.set_stroke(kurbo::Stroke::new(grow / k.max(1e-9)).with_join(kurbo::Join::Round));
+            ctx.stroke_path(&path);
+        }
+    }
+    ctx.pop_layer();
+}
+
 /// Draw glyph `gid` of `run` with its origin (on the baseline) mapped by `at`, faded by `opacity`.
 pub(crate) fn draw_glyph(ctx: &mut RenderContext, run: &deckcraft_text::GlyphRun, gid: u32, at: Affine, opacity: f64) {
+    draw_glyph_with(ctx, run, gid, at, opacity, None);
+}
+
+/// [`draw_glyph`], filled with `fill` (a gradient laid out in the text's space, and the map from
+/// the glyph's origin to that space) instead of the run's colour.
+fn draw_glyph_with(
+    ctx: &mut RenderContext,
+    run: &deckcraft_text::GlyphRun,
+    gid: u32,
+    at: Affine,
+    opacity: f64,
+    fill: Option<(&peniko::Gradient, Affine)>,
+) {
     let alpha = run.alpha * opacity;
     if (alpha <= 0.0 || run.color.a == 0) && run.outline.is_none() {
+        return;
+    }
+    let k = run.size / run.face.upem.max(1.0);
+    // Colour glyphs (emoji) paint their own colours; an outline (text outline effect) still
+    // strokes the plain glyph below.
+    if alpha > 0.0 && run.outline.is_none() && run.face.is_color() && colr::paint(ctx, &run.face, gid, at, k, run.color, alpha) {
         return;
     }
     let path = glyph(&run.face, gid);
     if path.elements().is_empty() {
         return;
     }
-    let k = run.size / run.face.upem.max(1.0);
     let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
     ctx.set_transform(at * skew * Affine::scale(k));
-    if alpha > 0.0 && run.color.a > 0 {
+    if let Some((g, to_text)) = fill
+        && alpha > 0.0
+    {
+        ctx.set_paint(g.clone());
+        ctx.set_paint_transform((skew * Affine::scale(k)).inverse() * to_text);
+        ctx.fill_path(&path);
+        ctx.reset_paint_transform();
+    } else if alpha > 0.0 && run.color.a > 0 {
         ctx.set_paint(color(run.color, alpha));
         ctx.fill_path(&path);
         if run.fake_bold {

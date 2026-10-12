@@ -159,3 +159,31 @@ fn hyperlinked_runs_take_the_theme_hyperlink_look() {
     let dbl = resolve::run(&ctx, title, &para, &RunProps { link, underline: Some("dbl".into()), ..Default::default() });
     assert_eq!((dbl.fill, dbl.underline.as_deref()), (hlink, Some("dbl")));
 }
+
+#[test]
+fn a_layout_colour_map_override_applies_to_its_slides() {
+    // A dark "section" layout maps bg1→dk1 and tx1→lt1; a slide on it that keeps the master
+    // mapping (`masterClrMapping`) follows the layout, as PowerPoint draws it.
+    let mut p = Presentation::default();
+    let dark: Vec<(String, String)> =
+        [("bg1", "dk1"), ("tx1", "lt1"), ("bg2", "dk2"), ("tx2", "lt2")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
+    let layout = p.slides[0].layout;
+    let m = std::sync::Arc::make_mut(&mut p.masters[0]);
+    let colors = m.theme.colors.clone();
+    m.layouts.iter_mut().find(|l| l.id == layout).unwrap().color_map = Some(dark.clone());
+    let s: Slide = (*p.slides[0]).clone();
+    let ctx = Ctx::for_slide(&p, &s).unwrap();
+    assert_eq!(ctx.color(&ColorRef::scheme(SchemeSlot::Bg1), None), colors.get(SchemeSlot::Dk1));
+    assert_eq!(ctx.color(&ColorRef::scheme(SchemeSlot::Tx2), None), colors.get(SchemeSlot::Lt2));
+    assert_eq!(ctx.scheme.get(SchemeSlot::Lt1), colors.get(SchemeSlot::Dk1));
+    // The slide's own override wins over the layout's.
+    let mut own = s.clone();
+    own.color_map = Some([("bg1", "lt1"), ("tx1", "dk1")].iter().map(|(a, b)| (a.to_string(), b.to_string())).collect());
+    let ctx = Ctx::for_slide(&p, &own).unwrap();
+    assert_eq!(ctx.color(&ColorRef::scheme(SchemeSlot::Bg1), None), colors.get(SchemeSlot::Lt1));
+    // The layout itself draws with its override; the master keeps its own map.
+    let m = &p.masters[0];
+    let l = m.layout(layout).unwrap();
+    assert_eq!(Ctx::for_layout(&p, m, l).color(&ColorRef::scheme(SchemeSlot::Bg1), None), colors.get(SchemeSlot::Dk1));
+    assert_eq!(Ctx::for_master(&p, m).color(&ColorRef::scheme(SchemeSlot::Bg1), None), colors.get(SchemeSlot::Lt1));
+}
