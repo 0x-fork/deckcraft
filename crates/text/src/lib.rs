@@ -524,7 +524,9 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
         let (sc, slot) = scripts.get(a).copied().unwrap_or((None, FontSlot::Latin));
         // Spaces, digits and punctuation stay in the face of the text before them when it can
         // draw them, so a phrase isn't cut into items at every space.
-        let neutral = cluster.iter().all(|c| script::script_of(*c).is_none());
+        // Emoji, and pictographs asked to look like text (U+FE0E), pick their own face.
+        let neutral =
+            cluster.iter().all(|c| script::script_of(*c).is_none()) && !deckcraft_fonts::is_emoji_cluster(cluster) && !cluster.contains(&'\u{FE0E}');
         let face = match prev.as_ref() {
             Some(p) if neutral && deckcraft_fonts::covers_cluster(p, cluster) && char_style.get(a.wrapping_sub(1)) == Some(&si) => p.clone(),
             _ => {

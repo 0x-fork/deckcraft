@@ -1108,6 +1108,7 @@ dependencies = [
  "image",
  "kurbo",
  "log",
+ "skrifa 0.47.0",
  "vello_common 0.2.0",
  "vello_cpu 0.2.0",
 ]

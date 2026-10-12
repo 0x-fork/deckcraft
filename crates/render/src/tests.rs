@@ -632,3 +632,29 @@ fn a_background_is_laid_over_white() {
     let g = img.pixel(20, 20);
     assert!(g[3] == 255 && (g[0] as i32 - 127).abs() <= 3, "half-transparent black over white is grey: {g:?}");
 }
+
+#[test]
+fn colour_glyphs_paint_their_layers() {
+    // A COLRv0 test font (crates/render/tests/fixtures): U+E000 is a red square with a blue
+    // square in its middle, U+E001 a square in the text colour.
+    deckcraft_fonts::FontDb::global().add_font(include_bytes!("../tests/fixtures/colr-squares.ttf").to_vec());
+    let mut sh = Shape { id: ShapeId(720), xfrm: Some(Xfrm::new(0.0, 0.0, 400.0, 200.0)), text_box: true, ..Default::default() };
+    let mut t = TextBody::from_text("\u{E000} \u{E001}");
+    let props = &mut t.paragraphs[0].runs[0].props;
+    props.size = Some(72.0);
+    props.font = Some("DeckCraft Colr Squares".into());
+    props.fill = Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 160, 0))));
+    sh.text = Some(t);
+    let p = deck_with(vec![sh]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let count = |f: &dyn Fn(&[u8; 4]) -> bool| img.pixels.as_chunks::<4>().0.iter().filter(|px| f(px)).count();
+    let red = count(&|p| p[0] > 230 && p[1] < 30 && p[2] < 30);
+    let blue = count(&|p| p[0] < 30 && p[1] < 30 && p[2] > 230);
+    let green = count(&|p| p[0] < 30 && p[1] > 140 && p[1] < 180 && p[2] < 30);
+    // 72 pt squares: the blue one is 40 % of the side (16 % of the area).
+    assert!(red > 2500 && blue > 500, "red {red} blue {blue}");
+    let share = blue as f64 / (red + blue) as f64;
+    assert!((share - 0.16).abs() < 0.03, "blue share {share}");
+    // The text-colour glyph is as big as the other square.
+    assert!((green as f64 / (red + blue) as f64 - 1.0).abs() < 0.1, "green {green} vs {}", red + blue);
+}

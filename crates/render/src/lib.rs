@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod chart;
+mod colr;
 mod images;
 mod morph_path;
 mod morph_text;
@@ -1147,11 +1148,16 @@ pub(crate) fn draw_glyph(ctx: &mut RenderContext, run: &deckcraft_text::GlyphRun
     if (alpha <= 0.0 || run.color.a == 0) && run.outline.is_none() {
         return;
     }
+    let k = run.size / run.face.upem.max(1.0);
+    // Colour glyphs (emoji) paint their own colours; an outline (text outline effect) still
+    // strokes the plain glyph below.
+    if alpha > 0.0 && run.outline.is_none() && run.face.is_color() && colr::paint(ctx, &run.face, gid, at, k, run.color, alpha) {
+        return;
+    }
     let path = glyph(&run.face, gid);
     if path.elements().is_empty() {
         return;
     }
-    let k = run.size / run.face.upem.max(1.0);
     let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
     ctx.set_transform(at * skew * Affine::scale(k));
     if alpha > 0.0 && run.color.a > 0 {

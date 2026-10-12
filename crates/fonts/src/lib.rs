@@ -13,7 +13,7 @@ mod fontdb;
 pub mod script;
 mod shape;
 
-pub use fallback::{bundled_families, covers_cluster, ligature_carets};
+pub use fallback::{bundled_families, covers_cluster, is_emoji_cluster, ligature_carets};
 pub use fontdb::{FALLBACK_FAMILY, FaceRef, FontDb, FontFace, LAST_RESORT_FAMILY, base_style, bundled, substitutes, system_font_dirs};
 pub use harfrust::Feature;
 use harfrust::Tag;
@@ -134,6 +134,25 @@ mod tests {
 
     fn any_face() -> std::sync::Arc<FontFace> {
         FontDb::global().face(DEFAULT_FAMILY, "Regular")
+    }
+
+    #[test]
+    fn emoji_clusters_are_recognised() {
+        let c = |s: &str| s.chars().collect::<Vec<char>>();
+        for yes in ["😀", "👍🏽", "❤\u{FE0F}", "👨\u{200D}👩\u{200D}👧", "🇯🇵", "1\u{FE0F}\u{20E3}", "🏳\u{FE0F}\u{200D}🌈"] {
+            assert!(is_emoji_cluster(&c(yes)), "{yes:?}");
+        }
+        for no in ["a", "1", "❤", "☺\u{FE0E}", "😀\u{FE0E}", "字", "→"] {
+            assert!(!is_emoji_cluster(&c(no)), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn colour_fonts_are_recognised() {
+        let db = FontDb::with_font_dirs(Vec::new());
+        assert!(db.add_font(include_bytes!("../../render/tests/fixtures/colr-squares.ttf").to_vec()) > 0);
+        assert!(db.face("DeckCraft Colr Squares", "Regular").is_color());
+        assert!(!fontdb::last_resort_face().is_color());
     }
 
     #[test]

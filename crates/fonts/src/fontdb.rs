@@ -91,6 +91,8 @@ pub struct FontFace {
     pub instance: Option<harfrust::ShaperInstance>,
     /// Basic Multilingual Plane coverage bitset, built on first use.
     bmp: std::sync::OnceLock<Box<[u64]>>,
+    /// Colour glyph tables present (`is_color`), looked up on first use.
+    color: std::sync::OnceLock<bool>,
 }
 
 /// A cheap `Copy` handle to a face. Faces are never unloaded, so the handle lives for the rest of
@@ -157,6 +159,11 @@ impl FontFace {
     }
     pub fn skrifa(&self) -> Option<skrifa::FontRef<'_>> {
         skrifa::FontRef::from_index(self.data(), self.index).ok()
+    }
+    /// Does the face draw colour glyphs (a `COLR`, `CBDT`, `sbix` or `SVG ` table, as colour emoji
+    /// fonts have)?
+    pub fn is_color(&self) -> bool {
+        *self.color.get_or_init(|| has_color_tables(self.data(), self.index))
     }
     pub fn hb(&self) -> Option<harfrust::FontRef<'_>> {
         harfrust::FontRef::from_index(self.data(), self.index).ok()
@@ -256,6 +263,13 @@ pub struct FontDb {
 struct SysFallback {
     enabled: bool,
     misses: std::collections::HashSet<char>,
+}
+
+/// Does face `index` of `data` carry colour glyph tables?
+fn has_color_tables(data: &[u8], index: u32) -> bool {
+    use skrifa::raw::types::Tag;
+    let Ok(f) = skrifa::FontRef::from_index(data, index) else { return false };
+    [b"COLR", b"CBDT", b"sbix", b"SVG "].iter().any(|t| f.table_data(Tag::new(t)).is_some())
 }
 
 /// Families tried (when installed) for characters the loaded fonts lack: CJK, symbols, emoji.
@@ -496,6 +510,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         bytes,
         index,
         bmp: std::sync::OnceLock::new(),
+        color: std::sync::OnceLock::new(),
     })
 }
 
@@ -899,6 +914,61 @@ impl FontDb {
             }
         }
         self.sys.lock().unwrap_or_else(|e| e.into_inner()).misses.insert(c);
+        false
+    }
+
+    /// A loaded colour face drawing all of `cluster`, loading an installed colour font that covers
+    /// `key` if none is loaded yet. Misses are remembered.
+    pub(crate) fn color_face_for(&self, key: char, cluster: &[char]) -> Option<Arc<FontFace>> {
+        let pick = |db: &FontDb| {
+            let faces = db.read_faces();
+            let mut v: Vec<&Arc<FontFace>> = faces.iter().filter(|f| crate::covers_cluster(f, cluster) && f.is_color()).collect();
+            v.sort_by_key(|f| (f.italic, (f.weight - 400.0).abs() as i32));
+            v.first().map(|f| (*f).clone())
+        };
+        if let Some(f) = pick(self) {
+            return Some(f);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.system_color_fallback(key) {
+            return pick(self);
+        }
+        let _ = key;
+        None
+    }
+
+    /// Load an installed colour font covering `c`. True if one was loaded.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn system_color_fallback(&self, c: char) -> bool {
+        static MISSES: Mutex<Option<std::collections::HashSet<char>>> = Mutex::new(None);
+        if c.is_control() || c.is_whitespace() {
+            return false;
+        }
+        {
+            let sys = self.sys.lock().unwrap_or_else(|e| e.into_inner());
+            if !sys.enabled {
+                return false;
+            }
+        }
+        if MISSES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).contains(&c) {
+            return false;
+        }
+        let mut paths: Vec<std::path::PathBuf> = self.read_catalog().iter().map(|e| e.path.clone()).collect();
+        paths.sort();
+        paths.dedup();
+        for p in paths {
+            if std::fs::metadata(&p).map(|m| m.len() > 64 << 20).unwrap_or(true) {
+                continue;
+            }
+            let Ok(data) = std::fs::read(&p) else { continue };
+            let hit = enumerate_faces(&data).iter().any(|(i, _, _, _)| {
+                has_color_tables(&data, *i) && skrifa::FontRef::from_index(&data, *i).is_ok_and(|f| f.charmap().map(c).is_some())
+            });
+            if hit && self.add_font(data) > 0 {
+                return true;
+            }
+        }
+        MISSES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(c);
         false
     }
 
