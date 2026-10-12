@@ -730,3 +730,33 @@ fn date_fields_keep_their_type_and_saved_text() {
         assert_eq!(by_name(&q.slides[0], name).text, by_name(&p.slides[0], name).text, "{name}");
     }
 }
+
+/// #214: a lone guide was always written `adj`, but these presets name it `adj1`, and PowerPoint
+/// won't open the file otherwise. (Names as PowerPoint writes them.)
+#[test]
+fn single_guide_names_follow_the_preset() {
+    let mut p = defaults::new_presentation(None);
+    let mut s = new_slide(&mut p, "Guides");
+    let cases = [
+        ("bentConnector3", "adj1"),
+        ("curvedConnector3", "adj1"),
+        ("frame", "adj1"),
+        ("mathPlus", "adj1"),
+        ("mathMinus", "adj1"),
+        ("mathMultiply", "adj1"),
+        ("roundRect", "adj"),
+        ("chevron", "adj"),
+    ];
+    for (prst, _) in cases {
+        let mut sh = shape(&mut p, prst, 0.0, 0.0, 100.0, 50.0);
+        sh.geom = Geom::Preset { name: prst.into(), adj: vec![20000.0] };
+        s.shapes.push(sh);
+    }
+    p.slides.push(Arc::new(s));
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).expect("zip");
+    let xml = std::io::read_to_string(z.by_name("ppt/slides/slide2.xml").expect("slide")).expect("read");
+    for (prst, gd) in cases {
+        assert!(xml.contains(&format!(r#"<a:prstGeom prst="{prst}"><a:avLst><a:gd name="{gd}" fmla="val 20000"/>"#)), "{prst} → {gd}: {xml}");
+    }
+}
