@@ -244,6 +244,11 @@ fn themes_and_slide_size() {
     assert_eq!(s.doc().unwrap().doc.masters[0].theme.name, "Ember");
     s.execute("design.slideSize", &json!({"preset": "standard"})).unwrap();
     assert_eq!(s.doc().unwrap().doc.slide_size.width, 720.0);
+    s.execute("design.slideSize", &json!({"preset": "widescreen", "orientation": "portrait"})).unwrap();
+    assert_eq!((s.doc().unwrap().doc.slide_size.width, s.doc().unwrap().doc.slide_size.height), (540.0, 960.0));
+    s.execute("design.slideSize", &json!({"w": 540.0, "h": 960.0, "orientation": "landscape"})).unwrap();
+    assert_eq!((s.doc().unwrap().doc.slide_size.width, s.doc().unwrap().doc.slide_size.height), (960.0, 540.0));
+    assert!(s.execute("design.slideSize", &json!({"preset": "standard", "orientation": "sideways"})).is_err());
     s.execute("design.headerFooter", &json!({"slideNumber": true, "footer": true, "footerText": "Hello"})).unwrap();
     let v = s.execute("slide.inspect", &json!({})).unwrap();
     assert!(v["shapes"].as_array().unwrap().iter().any(|x| x["placeholder"] == "sldNum"));
