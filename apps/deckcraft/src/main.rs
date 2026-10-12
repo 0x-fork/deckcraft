@@ -35,6 +35,16 @@ impl eframe::App for App {
     }
     fn on_exit(&mut self) {
         save_prefs(&self.0);
+        // macOS (#279): end the process here, before eframe tears the window down. AccessKit's
+        // macOS adapter subclasses the window's content view and restores its class on teardown;
+        // AppKit's Touch Bar support observes that view (KVO), so in the next display cycle
+        // `-[_NSTouchBarFinderObservation invalidate]` throws "not registered" and the quit ends
+        // in a crash report. eframe calls `on_exit` on every way of quitting (⌘Q, the close
+        // button, `app.quit`), once the unsaved-changes prompt has let the window close, and
+        // nothing after it is needed: the preferences are saved and the log file is unbuffered.
+        // `on_exit` only runs once the app exists, never on a failed start. Same as GridCraft #117.
+        #[cfg(target_os = "macos")]
+        std::process::exit(0);
     }
 }
 
@@ -227,4 +237,32 @@ fn main() -> eframe::Result {
             Ok(Box::new(App(app)))
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #279: on macOS the process ends inside `on_exit`, before eframe would tear the window down.
+    /// The check runs in a child (this test binary again), since on macOS it ends the process.
+    #[test]
+    fn on_exit_ends_the_process_on_macos() {
+        if std::env::var_os("DECKCRAFT_TEST_ON_EXIT").is_some() {
+            let mut app = App(SlideApp::new(Session::new(), Services::default()));
+            println!("calling on_exit");
+            eframe::App::on_exit(&mut app);
+            println!("on_exit returned");
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "tests::on_exit_ends_the_process_on_macos", "--nocapture"])
+            .env("DECKCRAFT_TEST_ON_EXIT", "1")
+            .env("DECKCRAFT_NO_PREFS", "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "{stdout}");
+        assert!(stdout.contains("calling on_exit"), "the child didn't run the test: {stdout}");
+        assert_eq!(stdout.contains("on_exit returned"), !cfg!(target_os = "macos"), "{stdout}");
+    }
 }
