@@ -592,6 +592,10 @@ impl Renderer {
         let r = Rect::new(0.0, 0.0, f.pres.slide_size.width, f.pres.slide_size.height);
         ctx.set_transform(view);
         let path = r.to_path(0.1);
+        // PowerPoint lays every background over white: a picture stretched into part of the
+        // slide, or a see-through colour, leaves white around and under it.
+        ctx.set_paint(color(Rgba::WHITE, 1.0));
+        ctx.fill_path(&path);
         paint::fill_path(ctx, rctx, &fill, ph, &path, r, view, FillMode::Norm, 1.0, f.pres);
         self.bg = Some((fill, ph, view));
     }

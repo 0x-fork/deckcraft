@@ -610,3 +610,25 @@ fn a_shape_filled_with_the_background_shows_the_slide_background() {
     let v = img.pixel(720, 270)[0] as i32;
     assert!((v - 100).abs() <= 6, "{v}");
 }
+
+#[test]
+fn a_background_is_laid_over_white() {
+    // A background picture stretched into the bottom-right quarter (fillRect l=50% t=50%), and a
+    // half-transparent colour: PowerPoint shows white around and under them, not transparency.
+    use deckcraft_model::style::{Fill, PictureFill, PictureMode};
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([0, 0, 200]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let mut p = deck_with(vec![]);
+    let media = p.add_media("bg.png", "image/png", png.into_inner());
+    let pf = PictureFill { media, mode: PictureMode::Stretch { fill_rect: [0.5, 0.5, 0.0, 0.0] }, ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).background = Some(deckcraft_model::Background::Fill { fill: Fill::Picture(pf) });
+    let img = render_slide(&p, 0, &RenderOpts { scale: 0.5, ..Default::default() });
+    assert_eq!(img.pixel(20, 20), [255, 255, 255, 255], "white where the picture doesn't reach");
+    let q = img.pixel(400, 230);
+    assert!(q[2] > 190 && q[0] < 10 && q[3] == 255, "{q:?}");
+    let see_through = ColorRef::rgb(deckcraft_color::Rgba { r: 0, g: 0, b: 0, a: 128 });
+    std::sync::Arc::make_mut(&mut p.slides[0]).background = Some(deckcraft_model::Background::Fill { fill: Fill::solid(see_through) });
+    let img = render_slide(&p, 0, &RenderOpts { scale: 0.5, ..Default::default() });
+    let g = img.pixel(20, 20);
+    assert!(g[3] == 255 && (g[0] as i32 - 127).abs() <= 3, "half-transparent black over white is grey: {g:?}");
+}
