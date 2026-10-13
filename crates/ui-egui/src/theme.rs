@@ -191,6 +191,16 @@ pub fn font_definitions(extra: &[std::sync::Arc<deckcraft_fonts::FontFace>]) -> 
     bold.extend(defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default());
     defs.families.insert(FontFamily::Name("bold".into()), bold);
     add_fallback_faces(&mut defs, extra);
+    // The Japanese interface face (the first one when Inter isn't embedded) hints its en and em
+    // dashes, bars thinner than a pixel, down to nothing, so they drew as gaps in interface text;
+    // unhinted, they draw.
+    for (name, d) in defs.font_data.iter_mut() {
+        if name.contains("BIZ UDPGothic") {
+            let mut data = (**d).clone();
+            data.tweak.hinting = Some(false);
+            *d = std::sync::Arc::new(data);
+        }
+    }
     defs
 }
 
@@ -220,4 +230,39 @@ pub fn font(size: f32) -> egui::FontId {
 
 pub fn to_color32(c: deckcraft_color::Rgba) -> Color32 {
     Color32::from_rgba_unmultiplied(c.r, c.g, c.b, c.a)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Each character of `text` laid out in the interface fonts at interface sizes, and whether it
+    /// has ink (a glyph image).
+    fn drawn(text: &str) -> Vec<(char, f32, bool)> {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(super::font_definitions(&[]));
+        let mut o = ctx.run_ui(Default::default(), |_| {});
+        o.textures_delta.clear();
+        let mut out = vec![];
+        ctx.fonts_mut(|f| {
+            for size in [11.0, 12.0, 13.0, 16.0] {
+                for family in [egui::FontFamily::Proportional, egui::FontFamily::Name("bold".into())] {
+                    let g = f.layout_no_wrap(text.to_string(), egui::FontId::new(size, family), egui::Color32::WHITE);
+                    for gl in g.rows.iter().flat_map(|r| &r.glyphs) {
+                        out.push((gl.chr, size, gl.uv_rect.size.x > 0.0 && gl.uv_rect.size.y > 0.0));
+                    }
+                }
+            }
+        });
+        let mut o = ctx.run_ui(Default::default(), |_| {});
+        o.textures_delta.clear();
+        out
+    }
+
+    #[test]
+    fn thin_punctuation_is_drawn_in_interface_text() {
+        // En and em dashes (thin bars) were hinted down to nothing in the Japanese interface face,
+        // so notes and the outline showed gaps where they were.
+        for (c, size, ink) in drawn("\u{2013}\u{2014}-_\u{2026}\u{2022}\u{00b7}\u{2018}\u{2019}\u{201c}\u{201d}=~") {
+            assert!(ink, "{c:?} ({:04X}) draws nothing at {size} px", c as u32);
+        }
+    }
 }
