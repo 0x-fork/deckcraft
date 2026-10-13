@@ -470,7 +470,12 @@ fn diagram(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, d: &dec
     let rel = |o: &mut Out, kind: &str, part: &str| o.rels.add_new(kind, &crate::opc::relative(&o.name, part), false);
     let drawing_rel = rel(o, dgm::RT_DRAWING, &dname);
     let data = name("data");
-    x.pkg.xml_part(&data, dgm::CT_DATA, dgm::data_xml(d, s.id.0, &drawing_rel));
+    // Node pictures: on the data model's presentation points, through the data part's rels.
+    let mut mout = Out::new(&data);
+    let pics: Vec<(usize, String)> =
+        d.nodes.iter().enumerate().filter_map(|(k, n)| n.picture.and_then(|m| x.media_rel(&mut mout, m, "image")).map(|r| (k, r))).collect();
+    x.pkg.xml_part(&data, dgm::CT_DATA, dgm::data_xml(d, s.id.0, &drawing_rel, &pics));
+    x.pkg.rels(&data, &mout.rels);
     let dm = rel(o, "diagramData", &data);
     let layout = name("layout");
     let lo_xml = d.layout_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::layout_xml(&d.kind));
