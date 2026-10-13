@@ -264,9 +264,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     } else if c.y_hidden {
         base * 0.5
     } else {
-        label_w(false, (min, max, step)).clamp(base * 1.5, area.width() * 0.3)
+        clamp_soft(label_w(false, (min, max, step)), base * 1.5, area.width() * 0.3)
     };
-    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| label_w(true, sc).clamp(base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
+    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| clamp_soft(label_w(true, sc), base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
     let plot = if horiz {
         Rect::new(area.x0 + gutter, area.y0, area.x1, area.y1 - base * 1.6)
     } else {
@@ -378,7 +378,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             );
         }
     }
-    let zero = to_v(0.0f64.clamp(min, max));
+    let zero = to_v(clamp_soft(0.0, min, max));
     if let Some(bk) = bar_kind {
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
@@ -524,6 +524,13 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     ctx.set_paint(color(Rgba::rgb(0xBF, 0xBF, 0xBF), 1.0));
     ctx.set_stroke(kurbo::Stroke::new(0.75));
     ctx.stroke_path(&ax);
+}
+
+/// `v` kept within `lo..=hi` without `f64::clamp`'s panic when `lo > hi` (a chart smaller than
+/// its label font) or a bound is NaN: the upper bound wins.
+pub(crate) fn clamp_soft(v: f64, lo: f64, hi: f64) -> f64 {
+    let v = if v < lo { lo } else { v };
+    if v > hi { hi } else { v }
 }
 
 #[cfg(test)]
