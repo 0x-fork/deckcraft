@@ -63,7 +63,7 @@ the round trip even though DeckCraft doesn't model it.
 | Themes: colour, font (Latin/EA/CS), effect schemes, background styles | yes | yes | Unknown theme parts kept |
 | Notes slides and notes master | yes | yes | No notes-master editing view |
 | Handout master | no | no | |
-| Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group keep their width in points whatever the group's child-coordinate scale (#233); text in a group with a tiny child space is not drawn yet. |
+| Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group, and text, keep their size in points whatever the group's child-coordinate scale (#233). |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
 | Lines: dash, compound, caps, joins, arrowheads | yes | yes | |
 | Effects: shadow, glow, soft edges, reflection | yes | yes | |
