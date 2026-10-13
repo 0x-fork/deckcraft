@@ -3,12 +3,12 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
+| P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
 
 | Area | Parity |
@@ -16,7 +16,7 @@ The summary between `<!-- SUMMARY -->
 | Application shell | 77% |
 | Files | 71% |
 | Slides | 90% |
-| Views | 90% |
+| Views | 95% |
 | Masters & themes | 85% |
 | Shapes | 88% |
 | Format | 83% |
@@ -86,7 +86,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Views | Notes Page | P1 | D |
 | Views | Reading View | P1 | D |
 | Views | Zoom, fit to window | P0 | D |
-| Views | Rulers, gridlines, guides | P1 | P |
+| Views | Rulers, gridlines, guides | P1 | D |
 | Views | Smart guides | P1 | D |
 | Views | Grayscale / black and white view | P2 | D |
 | Views | New window / arrange windows | P2 | M |

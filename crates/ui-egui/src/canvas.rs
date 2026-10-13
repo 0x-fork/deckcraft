@@ -161,6 +161,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     if app.ui.ruler {
         ruler(&painter, avail, slide_rect, scale, &t);
+        ruler_markers(app, ui, &painter, avail, xf, &t);
     }
     pointer(app, ui, &resp, xf);
     overlays(app, ui, &painter, xf, &t);
@@ -363,6 +364,154 @@ fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
         };
         p.line_segment([pos2(left.max.x - w, y), pos2(left.max.x, y)], Stroke::new(1.0, t.text_faint));
         k += 1;
+    }
+}
+
+/// What is being dragged on the ruler.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RulerDrag {
+    /// First-line indent (the top triangle).
+    First,
+    /// Hanging indent (the bottom triangle): moves the left indent, the first line stays put.
+    Hanging,
+    /// Left indent (the box under the hanging triangle): moves both together.
+    Left,
+    /// The tab stop that was at this position (pt from the text area's left).
+    Tab(f64),
+}
+
+/// The paragraph's indents and tab stops on the horizontal ruler while text is being edited,
+/// draggable as in PowerPoint; a click on the ruler adds a left tab, dragging a tab off the
+/// ruler removes it.
+fn ruler_markers(app: &mut SlideApp, ui: &mut Ui, p: &egui::Painter, avail: Rect, xf: Xf, t: &Tokens) {
+    if app.session.active().is_none_or(|d| d.selection.text.is_none()) {
+        return;
+    }
+    let Ok(info) = app.session.execute("format.ruler", &json!({})) else { return };
+    if info["rotated"].as_bool().unwrap_or(true) {
+        return;
+    }
+    let f = |k: &str| info[k].as_f64().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let (x0, width, ml, ind) = (f("x"), f("width"), f("marginLeft"), f("indent"));
+    let tabs: Vec<(f64, String)> = info["tabs"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|t| Some((t["pos"].as_f64()?, t["align"].as_str().unwrap_or("l").to_string()))).collect())
+        .unwrap_or_default();
+    let top = Rect::from_min_max(pos2(avail.min.x + 16.0, avail.min.y), pos2(avail.max.x, avail.min.y + 16.0));
+    let sx = |q: f64| xf.to_screen(Point::new(x0 + q, 0.0)).x;
+    let to_q = |x: f32| ((xf.to_slide(pos2(x, 0.0)).x - x0).clamp(0.0, width.max(0.0)) * 2.0).round() / 2.0;
+    // The text area's span, outlined on the ruler.
+    let area = Rect::from_min_max(pos2(sx(0.0), top.min.y + 2.0), pos2(sx(width), top.max.y - 1.0)).intersect(top);
+    p.rect_stroke(area, CornerRadius::ZERO, Stroke::new(1.0, t.text_faint.gamma_multiply(0.5)), egui::StrokeKind::Inside);
+
+    let resp = ui.interact(top, ui.id().with("ruler_markers"), Sense::click_and_drag());
+    let id = ui.id().with("ruler_drag");
+    let mut drag: Option<RulerDrag> = ui.data(|d| d.get_temp::<RulerDrag>(id));
+    let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
+    if resp.drag_started()
+        && let Some(at) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+    {
+        let near = |q: f64| (sx(q) - at.x).abs() <= 5.0;
+        let y = at.y - top.min.y;
+        drag = if let Some((pos, _)) = tabs.iter().find(|(pos, _)| near(*pos) && y >= 8.0) {
+            Some(RulerDrag::Tab(*pos))
+        } else if y < 6.0 && near(ml + ind) {
+            Some(RulerDrag::First)
+        } else if (6.0..11.0).contains(&y) && near(ml) {
+            Some(RulerDrag::Hanging)
+        } else if y >= 11.0 && near(ml) {
+            Some(RulerDrag::Left)
+        } else {
+            None
+        };
+        ui.data_mut(|d| match drag {
+            Some(v) => {
+                d.insert_temp(id, v);
+            }
+            None => {
+                d.remove::<RulerDrag>(id);
+            }
+        });
+    }
+    // Where each marker is drawn: the dragged one follows the pointer.
+    let live = drag.zip(pointer.filter(|_| resp.dragged())).map(|(d, at)| (d, to_q(at.x), at.y > top.max.y + 20.0));
+    let (mut first, mut left) = (ml + ind, ml);
+    match live {
+        Some((RulerDrag::First, q, _)) => first = q,
+        Some((RulerDrag::Hanging, q, _)) => left = q,
+        Some((RulerDrag::Left, q, _)) => {
+            first = q + ind;
+            left = q;
+        }
+        _ => {}
+    }
+    let col = t.text_dim;
+    let tri = |x: f32, y0: f32, down: bool| {
+        let (a, b) = if down { (y0, y0 + 5.0) } else { (y0 + 5.0, y0) };
+        p.add(egui::Shape::convex_polygon(vec![pos2(x - 4.0, a), pos2(x + 4.0, a), pos2(x, b)], t.card, Stroke::new(1.0, col)));
+    };
+    tri(sx(first), top.min.y + 1.0, true);
+    tri(sx(left), top.min.y + 6.0, false);
+    p.rect(
+        Rect::from_min_max(pos2(sx(left) - 4.0, top.min.y + 11.5), pos2(sx(left) + 4.0, top.max.y - 0.5)),
+        CornerRadius::ZERO,
+        t.card,
+        Stroke::new(1.0, col),
+        egui::StrokeKind::Inside,
+    );
+    for (pos, align) in &tabs {
+        let (q, gone) = match live {
+            Some((RulerDrag::Tab(from), q, off)) if (from - pos).abs() < 0.5 => (q, off),
+            _ => (*pos, false),
+        };
+        if gone {
+            continue;
+        }
+        let (x, y) = (sx(q), top.max.y - 2.0);
+        let st = Stroke::new(1.5, t.text);
+        p.line_segment([pos2(x, y - 6.0), pos2(x, y)], st);
+        match align.as_str() {
+            "r" => {
+                p.line_segment([pos2(x - 5.0, y), pos2(x, y)], st);
+            }
+            "ctr" => {
+                p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
+            }
+            "dec" => {
+                p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
+                p.circle_filled(pos2(x + 3.0, y - 4.0), 1.0, t.text);
+            }
+            _ => {
+                p.line_segment([pos2(x, y), pos2(x + 5.0, y)], st);
+            }
+        }
+    }
+    if drag.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+
+    // Commit on release; a click on bare ruler adds a left tab.
+    if resp.drag_stopped() {
+        if let (Some(d), Some(at)) = (drag, pointer) {
+            let q = to_q(at.x);
+            let r = match d {
+                RulerDrag::First => app.run("format.paragraph", json!({"indentFirst": q - ml})),
+                RulerDrag::Hanging => app.run("format.paragraph", json!({"indentLeft": q, "indentFirst": ml + ind - q})),
+                RulerDrag::Left => app.run("format.paragraph", json!({"indentLeft": q})),
+                RulerDrag::Tab(from) if at.y > top.max.y + 20.0 => app.run("format.tabs", json!({"remove": from})),
+                RulerDrag::Tab(from) => app.run("format.tabs", json!({"move": {"from": from, "to": q}})),
+            };
+            if let Err(e) = r {
+                app.set_status(e);
+            }
+        }
+        ui.data_mut(|d| d.remove::<RulerDrag>(id));
+    } else if resp.clicked()
+        && let Some(at) = resp.interact_pointer_pos()
+        && at.x >= area.min.x
+        && at.x <= area.max.x
+    {
+        let _ = app.run("format.tabs", json!({"add": {"pos": to_q(at.x), "align": "l"}}));
     }
 }
 
@@ -697,3 +846,7 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
         }
     });
 }
+
+#[cfg(test)]
+#[path = "ruler_tests.rs"]
+mod ruler_tests;
