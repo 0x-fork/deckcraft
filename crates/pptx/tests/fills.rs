@@ -170,3 +170,36 @@ fn a_gradient_tile_rect_is_read_and_round_trips() {
     let s = q.slides[0].shapes.iter().find(|s| s.name == "Corner").expect("shape");
     assert!(matches!(&s.fill, Some(Fill::Gradient(g)) if g.tile == [-1.0, -1.0, 0.0, 0.0]), "{:?}", s.fill);
 }
+
+#[test]
+fn a_table_naming_no_style_is_drawn_with_the_table_grid() {
+    let mut p = defaults::new_presentation(None);
+    let id = ShapeId(p.alloc_id());
+    let first = p.slides[0].id;
+    let mut t = deckcraft_model::Table::new(2, 2, 200.0, 40.0);
+    t.style = "none".into();
+    p.slide_mut(first).expect("slide").shapes.push(Shape {
+        id,
+        name: "Grid".into(),
+        xfrm: Some(Xfrm::new(10.0, 10.0, 200.0, 80.0)),
+        kind: deckcraft_model::ShapeKind::Table(t),
+        ..Default::default()
+    });
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let style = |bytes: &[u8]| {
+        let q = deckcraft_pptx::import(bytes).expect("import");
+        let s = q.slides[0].shapes.iter().find(|s| s.name == "Grid").expect("shape").clone();
+        match s.kind {
+            deckcraft_model::ShapeKind::Table(t) => t.style,
+            other => panic!("{other:?}"),
+        }
+    };
+    // Written with its style, it reads back as written.
+    assert_eq!(style(&bytes), "none");
+    // Without a:tableStyleId PowerPoint draws thin dark grid lines.
+    let bare = edit_slides(&bytes, |x| {
+        let (Some(a), Some(b)) = (x.find("<a:tableStyleId>"), x.find("</a:tableStyleId>")) else { return x };
+        format!("{}{}", &x[..a], &x[b + "</a:tableStyleId>".len()..])
+    });
+    assert_eq!(style(&bare), "grid");
+}
