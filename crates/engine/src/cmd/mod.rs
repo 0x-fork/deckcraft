@@ -17,6 +17,7 @@ pub mod slide;
 pub mod table;
 pub mod text;
 pub mod transition;
+pub mod zoom;
 
 use deckcraft_geom::Xfrm;
 use deckcraft_model::ShapeId;
@@ -142,6 +143,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(review::specs());
         v.extend(inspect::specs());
         v.extend(media::specs());
+        v.extend(zoom::specs());
         v
     })
 }

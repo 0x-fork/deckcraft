@@ -316,6 +316,10 @@ pub struct Hyperlink {
     pub tooltip: String,
     #[serde(default)]
     pub highlight_click: bool,
+    /// Zoom (Insert ▸ Zoom) with Return to Zoom: in the show, after this slide is shown and
+    /// advanced past, go back to the slide with the zoom. Saved to .pptx as a plain slide link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_return: Option<crate::SlideId>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -470,7 +470,12 @@ pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
     } else {
         return None;
     };
-    Some(Hyperlink { action: a, tooltip: h.attr("tooltip").unwrap_or("").to_string(), highlight_click: h.bool("highlightClick").unwrap_or(false) })
+    Some(Hyperlink {
+        action: a,
+        tooltip: h.attr("tooltip").unwrap_or("").to_string(),
+        highlight_click: h.bool("highlightClick").unwrap_or(false),
+        zoom_return: None,
+    })
 }
 
 pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {

@@ -789,3 +789,33 @@ fn show_follows_links() {
     assert_eq!(s.follow(&p, &Action::LastViewed, None), LinkJump::None);
     assert_eq!(s.slide, 3);
 }
+
+/// Zoom with Return to Zoom: after the zoomed slides the show goes back to the zoom slide, fully
+/// built; without it, or after jumping elsewhere, the show carries on in order.
+#[test]
+fn show_returns_to_the_zoom_slide() {
+    use deckcraft_model::text::{Action, Hyperlink};
+    let p = pres(6);
+    let link = |to: u32, last: Option<u32>| Hyperlink {
+        action: Action::Slide { slide: SlideId(1000 + to) },
+        tooltip: String::new(),
+        highlight_click: false,
+        zoom_return: last.map(|l| SlideId(1000 + l)),
+    };
+    let mut s = ShowState::new(&p);
+    // A section zoom on slide 0 for slides 2–3.
+    assert_eq!(s.follow_link(&p, &link(2, Some(3)), None), LinkJump::Show(ShowAction::Slide(2)));
+    assert_eq!(s.next(&p), ShowAction::Slide(3));
+    assert_eq!(s.next(&p), ShowAction::Slide(0), "back to the zoom");
+    assert_eq!(s.step, ShowState::steps(&p, 0));
+    assert_eq!(s.next(&p), ShowAction::Slide(1), "then on in order");
+    // Without Return to Zoom the show carries on.
+    let mut s = ShowState::new(&p);
+    s.follow_link(&p, &link(4, None), None);
+    assert_eq!(s.next(&p), ShowAction::Slide(5));
+    // Jumping elsewhere (See All Slides, a number) forgets the zoom.
+    let mut s = ShowState::new(&p);
+    s.follow_link(&p, &link(2, Some(2)), None);
+    s.goto(&p, 4);
+    assert_eq!(s.next(&p), ShowAction::Slide(5));
+}

@@ -324,7 +324,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         app.media.toggle(&doc, id, &clip, crate::media::Owner::Show);
     } else if clicked && let Some(l) = &link {
         let last = show.last_viewed;
-        match show.state.follow(&doc, &l.action, last) {
+        match show.state.follow_link(&doc, l, last) {
             LinkJump::Show(a) => actions.push(a),
             LinkJump::Open(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
             LinkJump::Exit => keep = false,
