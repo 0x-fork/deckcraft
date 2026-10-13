@@ -4,6 +4,9 @@ use deckcraft_model::chart::{Chart, ChartType, Series};
 use deckcraft_model::style::Fill;
 
 use crate::opc::{NS_A, NS_C, NS_R};
+
+/// The Office 2016 chart namespace.
+pub const NS_CX: &str = "http://schemas.microsoft.com/office/drawing/2014/chartex";
 use crate::xml::{A, W};
 
 /// Column letter for a 0-based index (A, B, … Z, AA…).
@@ -362,10 +365,30 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
     w.close(tag);
 }
 
+/// The kept `chartEx` part of an Office 2016 chart (waterfall, funnel…) that is unchanged since
+/// it was read, without its workbook link; `None` when it was edited or isn't one.
+pub fn chartex_xml(c: &Chart) -> Option<Vec<u8>> {
+    let raw = c.raw.as_ref()?;
+    let doc = crate::xml::parse(raw.as_bytes()).ok()?;
+    let mut root = doc.root.clone();
+    crate::read::resolve_mc(&mut root, 0);
+    let mut back = crate::read::chartex_from(&root)?;
+    back.raw = c.raw.clone();
+    if &back != c {
+        return None;
+    }
+    let mut keep = doc.root;
+    keep.remove_all(&["externalData"]);
+    let mut w = W::new();
+    w.raw(&keep.to_xml());
+    Some(w.finish())
+}
+
 /// The chart part XML.
 pub fn chart_xml(c: &Chart) -> Vec<u8> {
     // Reuse the kept part when the chart is unchanged since it was read.
     if let Some(raw) = &c.raw
+        && !raw.contains(NS_CX)
         && let Ok(doc) = crate::xml::parse(raw.as_bytes())
         && doc.root.is("chartSpace")
     {
