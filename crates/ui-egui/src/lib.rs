@@ -457,7 +457,13 @@ impl SlideApp {
             "view.notes" => self.ui.notes = self.flag(p, self.ui.notes),
             "view.ruler" => self.ui.ruler = self.flag(p, self.ui.ruler),
             "view.gridlines" => self.ui.gridlines = self.flag(p, self.ui.gridlines),
-            "view.guides" => self.ui.guides = self.flag(p, self.ui.guides),
+            "view.guides" => {
+                self.ui.guides = self.flag(p, self.ui.guides);
+                // A presentation without guides gets PowerPoint's two centre guides.
+                if self.ui.guides && self.session.active().is_some_and(|d| d.doc.guides.is_empty()) {
+                    let _ = self.session.execute("guide.add", &json!({"defaults": true}));
+                }
+            }
             "view.zoomIn" | "view.zoomOut" => {
                 let cur = self.ui.zoom.unwrap_or(self.canvas_scale);
                 let steps = [0.1, 0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];

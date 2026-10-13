@@ -148,16 +148,9 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             y += step;
         }
     }
+    app.session.tool.guides_visible = app.ui.guides;
     if app.ui.guides {
-        let c = slide_rect.center();
-        painter.line_segment(
-            [pos2(c.x, slide_rect.min.y), pos2(c.x, slide_rect.max.y)],
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 120, 160)),
-        );
-        painter.line_segment(
-            [pos2(slide_rect.min.x, c.y), pos2(slide_rect.max.x, c.y)],
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 120, 160)),
-        );
+        draw_guides(app, &painter, xf, slide_rect, &t);
     }
     if app.ui.ruler {
         ruler(&painter, avail, slide_rect, scale, &t);
@@ -366,6 +359,54 @@ fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
     }
 }
 
+/// The presentation's drawing guides; the one being dragged at its new place, labelled with its
+/// distance from the slide's centre in points.
+fn draw_guides(app: &SlideApp, painter: &egui::Painter, xf: Xf, slide: Rect, t: &Tokens) {
+    let Some(st) = app.session.active() else { return };
+    let size = st.doc.slide_size;
+    let drag = app.session.tool.guide_drag;
+    for (i, g) in st.doc.guides.iter().enumerate() {
+        let (pos, active) = match drag {
+            Some((di, p)) if di == i => (p, true),
+            _ => (g.pos, app.session.tool.guide_hover == Some(i)),
+        };
+        let col = if active { t.accent } else { Color32::from_rgba_unmultiplied(120, 120, 120, 170) };
+        let stroke = Stroke::new(1.0, col);
+        let (a, b) = if g.vertical {
+            let x = xf.to_screen(Point::new(pos, 0.0)).x;
+            (pos2(x, slide.min.y), pos2(x, slide.max.y))
+        } else {
+            let y = xf.to_screen(Point::new(0.0, pos)).y;
+            (pos2(slide.min.x, y), pos2(slide.max.x, y))
+        };
+        // Dashed, like PowerPoint's guides.
+        let len = (b - a).length();
+        let dir = (b - a) / len.max(1.0);
+        let mut d = 0.0;
+        while d < len {
+            painter.line_segment([a + dir * d, a + dir * (d + 4.0).min(len)], stroke);
+            d += 7.0;
+        }
+        if drag.is_some_and(|(di, _)| di == i) {
+            let centre = if g.vertical { size.width / 2.0 } else { size.height / 2.0 };
+            let off = pos - centre;
+            let side = match (g.vertical, off < 0.0, off > 0.0) {
+                (true, true, _) => " left of centre",
+                (true, _, true) => " right of centre",
+                (false, true, _) => " above centre",
+                (false, _, true) => " below centre",
+                _ => " (centre)",
+            };
+            let label = format!("{:.0} pt{side}", off.abs());
+            let at = if g.vertical { pos2(a.x + 6.0, slide.min.y + 6.0) } else { pos2(slide.min.x + 6.0, a.y + 4.0) };
+            let galley = painter.layout_no_wrap(label, theme::font(11.0), t.text);
+            let r = Rect::from_min_size(at, galley.size()).expand(3.0);
+            painter.rect_filled(r, CornerRadius::same(3), t.card);
+            painter.galley(at, galley, t.text);
+        }
+    }
+}
+
 fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     let tol = (4.0 / xf.scale) as f64;
     let m = mods(ui);
@@ -413,7 +454,11 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
             }
         }
         (_, Some(Hit::Shape { .. })) => egui::CursorIcon::Move,
-        _ => egui::CursorIcon::Default,
+        _ => match app.session.tool.guide_drag.map(|g| g.0).or(app.session.tool.guide_hover) {
+            Some(i) if app.session.active().and_then(|d| d.doc.guides.get(i)).is_some_and(|g| g.vertical) => egui::CursorIcon::ResizeHorizontal,
+            Some(_) => egui::CursorIcon::ResizeVertical,
+            None => egui::CursorIcon::Default,
+        },
     };
     if resp.hovered() {
         ui.ctx().set_cursor_icon(cursor);
@@ -682,6 +727,19 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                     }
                 }
             });
+            ui.menu_button("Grid and Guides", |ui| {
+                let mut on = app.ui.guides;
+                if ui.checkbox(&mut on, "Guides").clicked() {
+                    let _ = app.run("view.guides", json!({"on": on}));
+                }
+                for (label, vertical) in [("Add Vertical Guide", true), ("Add Horizontal Guide", false)] {
+                    if ui.button(label).clicked() {
+                        let _ = app.run("guide.add", json!({"vertical": vertical}));
+                        let _ = app.run("view.guides", json!({"on": true}));
+                        ui.close();
+                    }
+                }
+            });
             if ui.button("Reset Slide").clicked() {
                 let _ = app.run("slide.reset", json!({}));
                 ui.close();
@@ -697,3 +755,7 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
         }
     });
 }
+
+#[cfg(test)]
+#[path = "guides_tests.rs"]
+mod guides_tests;

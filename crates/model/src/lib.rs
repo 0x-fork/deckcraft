@@ -843,9 +843,21 @@ pub struct Presentation {
     /// Table styles defined in the file (`ppt/tableStyles.xml`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub table_styles: Vec<table::TableStyleDef>,
+    /// Drawing guides (View › Guides), shared by every slide (`p:guideLst` in viewProps).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<DrawGuide>,
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
+}
+
+/// A drawing guide: a vertical line at `pos` points from the slide's left edge, or a horizontal
+/// one from its top.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrawGuide {
+    pub vertical: bool,
+    pub pos: f64,
 }
 
 impl Default for Presentation {
