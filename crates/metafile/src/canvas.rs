@@ -17,6 +17,8 @@ pub(crate) const PS_NULL: u32 = 5;
 /// Pen style bits; the rest of the style word holds end-cap, join and type flags.
 pub(crate) const PS_STYLE_MASK: u32 = 0x0F;
 pub(crate) const BS_SOLID: u32 = 0;
+/// Cells on the longer side of a computed (gradient or texture) fill tile.
+const SHADE_RES: usize = 128;
 pub(crate) const BS_NULL: u32 = 1;
 pub(crate) const BS_HATCHED: u32 = 2;
 /// BS_PATTERN, BS_DIBPATTERN and BS_DIBPATTERNPT: the brush paints a bitmap tile.
@@ -304,6 +306,8 @@ pub(crate) struct Canvas {
     in_path: bool,
     path: Vec<Op>,
     full: bool,
+    /// Device clip rectangle `[l, t, r, b]` applied to everything drawn (EMF+ sets it).
+    clip: Option<[f64; 4]>,
 }
 
 impl Canvas {
@@ -327,6 +331,7 @@ impl Canvas {
             in_path: false,
             path: Vec::new(),
             full: false,
+            clip: None,
         }
     }
 
@@ -336,6 +341,17 @@ impl Canvas {
     }
 
     fn push(&mut self, raw: Raw) {
+        match self.clip {
+            None => self.push_raw(raw),
+            Some(c) => {
+                for r in crate::clip::clip_raw(raw, c) {
+                    self.push_raw(r);
+                }
+            }
+        }
+    }
+
+    fn push_raw(&mut self, raw: Raw) {
         let cost = match &raw {
             Raw::Path { ops, .. } => ops.len() * std::mem::size_of::<Op>(),
             // A tile shared with its brush is counted once (by the brush); one made for this fill
@@ -454,6 +470,64 @@ impl Canvas {
 
     pub fn set_brush(&mut self, brush: Brush) {
         self.brush = brush;
+    }
+
+    /// Sets the device clip rectangle `[l, t, r, b]` (None: unclipped).
+    pub fn set_clip(&mut self, clip: Option<[f64; 4]>) {
+        self.clip = clip;
+    }
+
+    /// Logical to device as one affine transform (the mapping is affine).
+    pub fn device_affine(&self) -> Xform {
+        let o = self.map.device((0.0, 0.0));
+        let x = self.map.device((1.0, 0.0));
+        let y = self.map.device((0.0, 1.0));
+        [x.0 - o.0, x.1 - o.1, y.0 - o.0, y.1 - o.1, o.0, o.1]
+    }
+
+    /// Text colour, font and alignment set directly (EMF+ strings name their own font and brush);
+    /// the background is transparent.
+    pub fn set_text_style(&mut self, color: [u8; 4], font: LogFont, align: u32) {
+        self.text.color = color;
+        self.text.bk_opaque = false;
+        self.text.align = align;
+        self.text.font = Some(Arc::new(font));
+    }
+
+    /// Fills logical `ops` with a ready-made tile, laid from the device origin.
+    pub fn tile_shape(&mut self, ops: &[Op], tile: Arc<RawTile>) {
+        let dev: Vec<Op> = ops.iter().map(|o| self.map_op(*o)).collect();
+        if dev.len() >= 2 {
+            let even_odd = self.even_odd;
+            self.push(Raw::Pattern { ops: dev, even_odd, tile });
+        }
+    }
+
+    /// Fills logical `ops` with a colour computed per device point (gradients, textures): a tile
+    /// of at most [`SHADE_RES`] cells on the longer side, laid out so that its one repeat covers
+    /// the shape.
+    pub fn shade_shape(&mut self, ops: &[Op], shade: &dyn Fn(P) -> [u8; 4]) {
+        let dev: Vec<Op> = ops.iter().map(|o| self.map_op(*o)).collect();
+        let Some([l, t, r, b]) = crate::clip::ops_bbox(&dev) else { return };
+        let side = (r - l).max(b - t);
+        if dev.len() < 2 || !(side.is_finite() && side > 0.0) {
+            return;
+        }
+        let cell = side / SHADE_RES as f64;
+        let w = (((r - l) / cell).ceil() as usize + 1).clamp(1, SHADE_RES + 1);
+        let h = (((b - t) / cell).ceil() as usize + 1).clamp(1, SHADE_RES + 1);
+        let (pw, ph) = (w as f64 * cell, h as f64 * cell);
+        let mut px = Vec::with_capacity(w * h * 4);
+        for j in 0..h {
+            // The device position this tile row stands for inside the shape's box.
+            let y = t + (j as f64 * cell - t).rem_euclid(ph) + cell / 2.0;
+            for i in 0..w {
+                let x = l + (i as f64 * cell - l).rem_euclid(pw) + cell / 2.0;
+                px.extend_from_slice(&shade((x, y)));
+            }
+        }
+        let even_odd = self.even_odd;
+        self.push(Raw::Pattern { ops: dev, even_odd, tile: Arc::new(RawTile { w, h, px, cell }) });
     }
 
     /// Pushes the drawing state. Past [`MAX_STACK`] levels the parse stops, since later restores

@@ -2,14 +2,26 @@
 //!
 //! Most EMF+ files are *dual*: the same picture is also drawn with plain EMF records, which
 //! [`crate::emf`] already plays, so this reader ignores their EMF+ part. An *EMF+ only* file has
-//! nothing else to draw, so it used to show as an empty picture; for those this reader plays the
-//! vector records: solid brushes and pens, paths, rectangles, polygons, lines, ellipses and
-//! Béziers, under the world and page transforms, save/restore and containers. Images, text,
-//! gradient brushes, clipping and arcs are not drawn yet.
+//! nothing else to draw; for those this reader plays the records:
+//! - brushes (solid, hatch, texture, linear and path gradients), pens, paths, images, fonts,
+//!   string formats and regions, including objects split across several records;
+//! - rectangles, polygons, lines, ellipses, paths and Béziers;
+//! - bitmaps (raw pixel formats, and PNG/JPEG/GIF/TIFF/BMP payloads) and strings (DrawString,
+//!   DrawDriverString with character codes);
+//! - world and page transforms, save/restore and containers;
+//! - clipping to rectangles, and to the bounding rectangle of clip paths and regions.
+//!
+//! Not drawn yet: nested metafile images, glyph-index driver strings, arcs and pies, image
+//! attributes, and region combinations other than intersect and union.
+
+use std::sync::Arc;
 
 use crate::bytes::Bytes;
-use crate::canvas::{BS_NULL, BS_SOLID, Brush, Canvas, PS_NULL, Pen, Xform, mul};
+use crate::canvas::{BS_NULL, BS_SOLID, Brush, Canvas, LogFont, PS_NULL, Pen, RawTile, Xform, hatch_tile, mul};
+use crate::clip::{intersect, ops_bbox};
+use crate::dib::Rgba;
 use crate::geom::{Op, P};
+use crate::text::{ETO_CLIPPED, Font};
 
 /// "EMF+" as the comment identifier of an EMR_COMMENT holding EMF+ records.
 pub(crate) const EMF_PLUS: u32 = 0x2B46_4D45;
@@ -19,12 +31,158 @@ const MAX_OBJECTS: usize = 64;
 const MAX_STACK: usize = 64;
 /// Points per path or point list read, as the plain EMF reader caps paths.
 const MAX_POINTS: usize = 100_000;
+/// Gradient stops read from a brush.
+const MAX_STOPS: usize = 256;
+/// Characters per string.
+const MAX_CHARS: usize = 32_768;
+/// Bytes gathered for one object split across records.
+const MAX_OBJECT_BYTES: usize = 64 * 1024 * 1024;
+/// Nesting depth of region nodes.
+const MAX_REGION_DEPTH: usize = 32;
 
-#[derive(Clone, Debug)]
+const TA_RIGHT: u32 = 2;
+const TA_CENTER: u32 = 6;
+const TA_BOTTOM: u32 = 8;
+const TA_BASELINE: u32 = 24;
+
+/// What a brush paints. Coordinates are in brush space, which `xf` maps to world space.
+#[derive(Clone)]
+enum Fill {
+    Solid([u8; 4]),
+    Hatch { style: u32, fg: [u8; 4], bg: [u8; 4] },
+    Linear { rect: [f64; 4], stops: Vec<(f64, [u8; 4])>, wrap: u32, xf: Xform },
+    Radial { center: P, radius: P, stops: Vec<(f64, [u8; 4])>, xf: Xform },
+    Texture { img: Arc<Rgba>, wrap: u32, xf: Xform },
+}
+
+impl Fill {
+    /// One colour standing for the brush (pens and text draw solid).
+    fn color(&self) -> [u8; 4] {
+        match self {
+            Fill::Solid(c) | Fill::Hatch { fg: c, .. } => *c,
+            Fill::Linear { stops, .. } | Fill::Radial { stops, .. } => ramp(stops, 0.5),
+            Fill::Texture { img, .. } => img.px.get(..4).and_then(|c| c.try_into().ok()).unwrap_or([0, 0, 0, 255]),
+        }
+    }
+
+    /// The colour at a brush-space point.
+    fn sample(&self, p: P) -> [u8; 4] {
+        match self {
+            Fill::Solid(c) | Fill::Hatch { fg: c, .. } => *c,
+            Fill::Linear { rect, stops, wrap, .. } => {
+                let t = if rect[2] == 0.0 { 0.0 } else { (p.0 - rect[0]) / rect[2] };
+                ramp(stops, wrap_t(t, *wrap))
+            }
+            Fill::Radial { center, radius, stops, .. } => {
+                let (dx, dy) = ((p.0 - center.0) / radius.0.max(1e-9), (p.1 - center.1) / radius.1.max(1e-9));
+                ramp(stops, dx.hypot(dy).min(1.0))
+            }
+            Fill::Texture { img, wrap, .. } => {
+                let (w, h) = (img.w as f64, img.h as f64);
+                if w == 0.0 || h == 0.0 {
+                    return [0, 0, 0, 0];
+                }
+                if *wrap == 4 && !(0.0..w).contains(&p.0) || *wrap == 4 && !(0.0..h).contains(&p.1) {
+                    return [0, 0, 0, 0];
+                }
+                let x = (p.0.rem_euclid(w) as usize).min(img.w - 1);
+                let y = (p.1.rem_euclid(h) as usize).min(img.h - 1);
+                let i = (y * img.w + x) * 4;
+                img.px.get(i..i + 4).and_then(|c| c.try_into().ok()).unwrap_or([0, 0, 0, 0])
+            }
+        }
+    }
+
+    fn xf(&self) -> Xform {
+        match self {
+            Fill::Linear { xf, .. } | Fill::Radial { xf, .. } | Fill::Texture { xf, .. } => *xf,
+            _ => IDENTITY,
+        }
+    }
+}
+
+/// Where `t` lands under a wrap mode: tiled, mirrored (flip modes) or clamped.
+fn wrap_t(t: f64, wrap: u32) -> f64 {
+    if !t.is_finite() {
+        return 0.0;
+    }
+    match wrap {
+        1 | 3 => {
+            let m = t.rem_euclid(2.0);
+            if m > 1.0 { 2.0 - m } else { m }
+        }
+        4 => t.clamp(0.0, 1.0),
+        _ => t.rem_euclid(1.0),
+    }
+}
+
+/// The colour at `t` along sorted stops.
+fn ramp(stops: &[(f64, [u8; 4])], t: f64) -> [u8; 4] {
+    let (Some(first), Some(last)) = (stops.first(), stops.last()) else { return [0, 0, 0, 0] };
+    if t <= first.0 {
+        return first.1;
+    }
+    for w in stops.windows(2) {
+        let ((a, ca), (b, cb)) = (w[0], w[1]);
+        if t <= b {
+            let k = if b > a { (t - a) / (b - a) } else { 0.0 };
+            return lerp(ca, cb, k);
+        }
+    }
+    last.1
+}
+
+fn lerp(a: [u8; 4], b: [u8; 4], k: f64) -> [u8; 4] {
+    let mut c = [0u8; 4];
+    for i in 0..4 {
+        c[i] = (f64::from(a[i]) + (f64::from(b[i]) - f64::from(a[i])) * k).round().clamp(0.0, 255.0) as u8;
+    }
+    c
+}
+
+#[derive(Clone)]
+struct FontObj {
+    em: f64,
+    unit: u32,
+    style: u32,
+    family: String,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Format {
+    flags: u32,
+    align: u32,
+    line_align: u32,
+}
+
+#[derive(Clone)]
 enum Obj {
-    Brush([u8; 4]),
-    Pen { color: [u8; 4], width: f64 },
+    Brush(Fill),
+    Pen {
+        color: [u8; 4],
+        width: f64,
+    },
     Path(Vec<Op>),
+    Image(Arc<Rgba>),
+    Font(FontObj),
+    Format(Format),
+    /// A region's bounding rectangle `[l, t, r, b]` in world units; None is infinite.
+    Region(Option<[f64; 4]>),
+}
+
+/// An object arriving in several records: its id, type, total size and the bytes so far.
+struct Partial {
+    id: usize,
+    kind: u16,
+    total: usize,
+    data: Vec<u8>,
+}
+
+struct Saved {
+    id: u32,
+    world: Xform,
+    page: f64,
+    clip: Option<[f64; 4]>,
 }
 
 pub(crate) struct Plus {
@@ -33,13 +191,16 @@ pub(crate) struct Plus {
     dpi: f64,
     world: Xform,
     page: f64,
+    /// Device clip rectangle `[l, t, r, b]`; None is unclipped.
+    clip: Option<[f64; 4]>,
     objects: Vec<Option<Obj>>,
-    stack: Vec<(u32, Xform, f64)>,
+    stack: Vec<Saved>,
+    partial: Option<Partial>,
 }
 
 impl Plus {
     pub fn new() -> Self {
-        Plus { active: false, dpi: 96.0, world: IDENTITY, page: 1.0, objects: vec![None; MAX_OBJECTS], stack: Vec::new() }
+        Plus { active: false, dpi: 96.0, world: IDENTITY, page: 1.0, clip: None, objects: vec![None; MAX_OBJECTS], stack: Vec::new(), partial: None }
     }
 
     /// Plays the EMF+ records of one EMR_COMMENT payload (after the identifier).
@@ -60,6 +221,15 @@ impl Plus {
         }
     }
 
+    /// World units to device pixels before the canvas's own mapping.
+    fn xf(&self) -> Xform {
+        mul(self.world, [self.page, 0.0, 0.0, self.page, 0.0, 0.0])
+    }
+
+    fn painter(&self) -> Painter {
+        Painter { xf: self.xf(), clip: self.clip }
+    }
+
     fn record(&mut self, cv: &mut Canvas, typ: u16, flags: u16, r: Bytes) -> Option<()> {
         if typ == 0x4001 {
             // Header: dual files also draw with EMF records, which win.
@@ -76,38 +246,83 @@ impl Plus {
         let id = usize::from(flags & 0xFF);
         match typ {
             0x4008 => self.object(flags, r),
-            0x400A => self.fill_rects(cv, flags, r),
-            0x400B => self.with_pen(id, |p| p.draw_rects(cv, compressed, r)),
-            0x400C => self.fill_polygon(cv, flags, r),
-            0x400D => self.with_pen(id, |p| {
-                let pts = points(r, 4, r.u32(0)? as usize, compressed)?;
-                p.shape(cv, poly_ops(&pts, flags & 0x2000 != 0), false, true);
+            0x400A => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let p = self.painter();
+                for rc in rects(r, 8, r.u32(4)? as usize, compressed)? {
+                    p.fill(cv, &rect_ops(rc), &fill);
+                }
                 Some(())
-            }),
-            0x400E => self.fill_ellipse(cv, flags, r),
-            0x400F => self.with_pen(id, |p| {
-                let rect = rects(r, 0, 1, compressed)?;
-                p.shape(cv, ellipse_ops(*rect.first()?), false, true);
-                Some(())
-            }),
-            0x4014 => self.fill_path(cv, flags, r),
-            0x4015 => {
-                let path = self.path(id);
-                r.u32(0).and_then(|pen| {
-                    self.with_pen(pen as usize, |p| {
-                        p.shape(cv, path?, false, true);
-                        Some(())
-                    })
-                })
             }
-            0x4019 => self.with_pen(id, |p| {
+            0x400B => {
+                let pen = self.pen(id)?;
+                let p = self.painter();
+                for rc in rects(r, 4, r.u32(0)? as usize, compressed)? {
+                    p.stroke(cv, &rect_ops(rc), pen);
+                }
+                Some(())
+            }
+            0x400C => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let pts = points(r, 8, r.u32(4)? as usize, compressed)?;
+                self.painter().fill(cv, &poly_ops(&pts, true), &fill);
+                Some(())
+            }
+            0x400D => {
+                let pen = self.pen(id)?;
+                let pts = points(r, 4, r.u32(0)? as usize, compressed)?;
+                self.painter().stroke(cv, &poly_ops(&pts, flags & 0x2000 != 0), pen);
+                Some(())
+            }
+            0x400E => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let rect = *rects(r, 4, 1, compressed)?.first()?;
+                self.painter().fill(cv, &ellipse_ops(rect), &fill);
+                Some(())
+            }
+            0x400F => {
+                let pen = self.pen(id)?;
+                let rect = *rects(r, 0, 1, compressed)?.first()?;
+                self.painter().stroke(cv, &ellipse_ops(rect), pen);
+                Some(())
+            }
+            0x4014 => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let ops = self.path(id)?;
+                self.painter().fill(cv, &ops, &fill);
+                Some(())
+            }
+            0x4015 => {
+                let ops = self.path(id)?;
+                let pen = self.pen(r.u32(0)? as usize)?;
+                self.painter().stroke(cv, &ops, pen);
+                Some(())
+            }
+            0x4019 => {
+                let pen = self.pen(id)?;
                 let pts = points(r, 4, r.u32(0)? as usize, compressed)?;
                 let (first, rest) = pts.split_first()?;
                 let mut ops = vec![Op::M(*first)];
                 ops.extend(rest.as_chunks::<3>().0.iter().map(|c| Op::C(c[0], c[1], c[2])));
-                p.shape(cv, ops, false, true);
+                self.painter().stroke(cv, &ops, pen);
                 Some(())
-            }),
+            }
+            0x401A => {
+                let img = self.image(id)?;
+                let dst = *rects(r, 24, 1, compressed)?.first()?;
+                self.draw_image(cv, &img, r, [dst[0], dst[1], dst[2] - dst[0], dst[3] - dst[1]])
+            }
+            0x401B => {
+                let img = self.image(id)?;
+                let pts = points(r, 28, 3, compressed)?;
+                let (p0, p1, p2) = (*pts.first()?, *pts.get(1)?, *pts.get(2)?);
+                // The destination parallelogram's top-left, top-right and bottom-left corners; a
+                // sheared or rotated one is drawn into its bounding rectangle's axes.
+                let dst = [p0.0, p0.1, p1.0 - p0.0 + (p2.0 - p0.0), p2.1 - p0.1 + (p1.1 - p0.1)];
+                self.draw_image(cv, &img, r, dst)
+            }
+            0x401C => self.draw_string(cv, flags, r),
+            0x4036 => self.draw_driver_string(cv, flags, r),
             0x4025 | 0x4028 => r.u32(0).map(|i| self.push(i)),
             0x4027 => r.u32(24).map(|i| self.push(i)),
             0x4026 | 0x4029 => r.u32(0).map(|i| self.pop(i)),
@@ -124,17 +339,37 @@ impl Plus {
                 self.apply([a.cos(), a.sin(), -a.sin(), a.cos(), 0.0, 0.0], flags)
             }
             0x4030 => {
-                let scale = f64::from(r.f32(0)?);
-                let unit = match flags & 0xFF {
-                    3 => self.dpi / 72.0,
-                    4 => self.dpi,
-                    5 => self.dpi / 300.0,
-                    6 => self.dpi / 25.4,
-                    _ => 1.0,
-                };
-                let page = scale * unit;
+                let page = f64::from(r.f32(0)?) * unit_px(u32::from(flags & 0xFF), self.dpi);
                 if page.is_finite() && page > 0.0 && page < 1.0e6 {
                     self.page = page;
+                }
+                Some(())
+            }
+            0x4031 => {
+                self.clip = None;
+                Some(())
+            }
+            0x4032 => {
+                let [x, y, w, h] = floats::<4>(r, 0)?;
+                let dev = self.device_rect(cv, [x, y, x + w, y + h]);
+                self.combine(flags, Some(dev))
+            }
+            0x4033 => {
+                let b = ops_bbox(&self.path(id)?)?;
+                let dev = self.device_rect(cv, b);
+                self.combine(flags, Some(dev))
+            }
+            0x4034 => {
+                let Some(Some(Obj::Region(reg))) = self.objects.get(id).cloned() else { return None };
+                let dev = reg.map(|b| self.device_rect(cv, b));
+                self.combine(flags, dev)
+            }
+            0x4035 => {
+                let [dx, dy] = floats::<2>(r, 0)?;
+                let a = mul(self.xf(), cv.device_affine());
+                let (ox, oy) = (dx * a[0] + dy * a[2], dx * a[1] + dy * a[3]);
+                if let Some(c) = self.clip.as_mut() {
+                    *c = [c[0] + ox, c[1] + oy, c[2] + ox, c[3] + oy];
                 }
                 Some(())
             }
@@ -150,35 +385,94 @@ impl Plus {
 
     fn push(&mut self, id: u32) {
         if self.stack.len() < MAX_STACK {
-            self.stack.push((id, self.world, self.page));
+            self.stack.push(Saved { id, world: self.world, page: self.page, clip: self.clip });
         }
     }
 
     fn pop(&mut self, id: u32) {
-        if let Some(i) = self.stack.iter().rposition(|s| s.0 == id) {
-            let (_, w, p) = self.stack[i];
+        if let Some(i) = self.stack.iter().rposition(|s| s.id == id) {
+            let s = &self.stack[i];
+            (self.world, self.page, self.clip) = (s.world, s.page, s.clip);
             self.stack.truncate(i);
-            self.world = w;
-            self.page = p;
         }
     }
 
-    fn object(&mut self, flags: u16, r: Bytes) -> Option<()> {
-        if flags & 0x8000 != 0 {
-            // Continued (split) objects are images and large paths; not read yet.
+    /// A world rectangle `[l, t, r, b]` as the device rectangle around it.
+    fn device_rect(&self, cv: &Canvas, [l, t, r, b]: [f64; 4]) -> [f64; 4] {
+        let a = mul(self.xf(), cv.device_affine());
+        let pts = [(l, t), (r, t), (l, b), (r, b)].map(|p| apply(a, p));
+        let xs = pts.map(|p| p.0);
+        let ys = pts.map(|p| p.1);
+        let min = |v: [f64; 4]| v.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = |v: [f64; 4]| v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        [min(xs), min(ys), max(xs), max(ys)]
+    }
+
+    /// Combines a new clip area (None: infinite) with the current one under the record's combine
+    /// mode: replace, intersect and union (as the rectangle around both). XOR, exclude and
+    /// complement leave the clip as it was.
+    fn combine(&mut self, flags: u16, new: Option<[f64; 4]>) -> Option<()> {
+        if new.is_some_and(|c| !c.iter().all(|v| v.is_finite())) {
             return None;
         }
-        let id = usize::from(flags & 0xFF);
-        let obj = match (flags >> 8) & 0x7F {
-            1 => brush(r, 0).map(|(c, _)| Obj::Brush(c)),
-            2 => pen(r),
-            3 => path(r).map(Obj::Path),
-            _ => None,
+        self.clip = match (flags >> 8) & 0xF {
+            0 => new,
+            1 => match (self.clip, new) {
+                (None, n) => n,
+                (c, None) => c,
+                (Some(a), Some(b)) => Some(intersect(a, b)),
+            },
+            2 => match (self.clip, new) {
+                (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
+                _ => None,
+            },
+            _ => self.clip,
         };
+        Some(())
+    }
+
+    fn object(&mut self, flags: u16, r: Bytes) -> Option<()> {
+        let id = usize::from(flags & 0xFF);
+        let kind = (flags >> 8) & 0x7F;
+        if flags & 0x8000 != 0 {
+            // A continued object: the total size, then this record's share of the bytes.
+            let total = (r.u32(0)? as usize).min(MAX_OBJECT_BYTES);
+            let chunk = r.tail(4)?.0;
+            let p = match self.partial.take() {
+                Some(p) if p.id == id && p.kind == kind && p.total == total => p,
+                _ => Partial { id, kind, total, data: Vec::new() },
+            };
+            let mut p = p;
+            let room = p.total.saturating_sub(p.data.len());
+            p.data.extend_from_slice(&chunk[..chunk.len().min(room)]);
+            if p.data.len() >= p.total {
+                let obj = parse_object(p.kind, Bytes(&p.data));
+                self.store(p.id, obj);
+            } else {
+                self.partial = Some(p);
+            }
+            return Some(());
+        }
+        // The last piece of a continued object comes without the continue flag.
+        if let Some(mut p) = self.partial.take()
+            && p.id == id
+            && p.kind == kind
+        {
+            let room = p.total.saturating_sub(p.data.len());
+            p.data.extend_from_slice(&r.0[..r.0.len().min(room)]);
+            let obj = parse_object(kind, Bytes(&p.data));
+            self.store(id, obj);
+            return Some(());
+        }
+        let obj = parse_object(kind, r);
+        self.store(id, obj);
+        Some(())
+    }
+
+    fn store(&mut self, id: usize, obj: Option<Obj>) {
         if let Some(slot) = self.objects.get_mut(id) {
             *slot = obj;
         }
-        Some(())
     }
 
     fn path(&self, id: usize) -> Option<Vec<Op>> {
@@ -188,88 +482,238 @@ impl Plus {
         }
     }
 
-    /// The brush colour of a fill record: an ARGB value with the `S` flag, else a brush object.
-    fn brush_of(&self, flags: u16, v: u32) -> Option<[u8; 4]> {
-        if flags & 0x8000 != 0 {
-            return Some(argb(v));
-        }
-        match self.objects.get(v as usize)? {
-            Some(Obj::Brush(c)) => Some(*c),
+    fn pen(&self, id: usize) -> Option<([u8; 4], f64)> {
+        match self.objects.get(id)? {
+            Some(Obj::Pen { color, width }) => Some((*color, *width)),
             _ => None,
         }
     }
 
-    fn with_pen<T>(&mut self, id: usize, f: impl FnOnce(&mut Painter) -> Option<T>) -> Option<T> {
-        let Some(Some(Obj::Pen { color, width })) = self.objects.get(id).cloned() else { return None };
-        let mut p = Painter { xf: mul(self.world, [self.page, 0.0, 0.0, self.page, 0.0, 0.0]), pen: Some((color, width)), fill: None };
-        f(&mut p)
+    fn image(&self, id: usize) -> Option<Arc<Rgba>> {
+        match self.objects.get(id)? {
+            Some(Obj::Image(img)) => Some(img.clone()),
+            _ => None,
+        }
     }
 
-    fn filler(&self, color: [u8; 4]) -> Painter {
-        Painter { xf: mul(self.world, [self.page, 0.0, 0.0, self.page, 0.0, 0.0]), pen: None, fill: Some(color) }
+    /// The brush of a fill record: an ARGB value with the `S` flag, else a brush object.
+    fn brush_of(&self, flags: u16, v: u32) -> Option<Fill> {
+        if flags & 0x8000 != 0 {
+            return Some(Fill::Solid(argb(v)));
+        }
+        match self.objects.get(v as usize)? {
+            Some(Obj::Brush(f)) => Some(f.clone()),
+            _ => None,
+        }
     }
 
-    fn fill_rects(&mut self, cv: &mut Canvas, flags: u16, r: Bytes) -> Option<()> {
-        let c = self.brush_of(flags, r.u32(0)?)?;
-        let rs = rects(r, 8, r.u32(4)? as usize, flags & 0x4000 != 0)?;
-        let p = self.filler(c);
-        for rc in rs {
-            p.shape(cv, rect_ops(rc), true, false);
+    /// DrawImage and DrawImagePoints: the source rectangle (pixels) cut from the image, drawn
+    /// into world rectangle `dst` = `[x, y, w, h]`.
+    fn draw_image(&self, cv: &mut Canvas, img: &Rgba, r: Bytes, dst: [f64; 4]) -> Option<()> {
+        let [sx, sy, sw, sh] = floats::<4>(r, 8)?;
+        let src = if r.u32(4)? == 2 { [sx, sy, sw, sh].map(|v| v.round().clamp(-1.0e9, 1.0e9) as i64) } else { [0; 4] };
+        let (part, dst) = crate::dib::clip_blit(img, src, dst)?;
+        self.painter().image(cv, dst, part);
+        Some(())
+    }
+
+    fn font(&self, id: usize) -> Option<FontObj> {
+        match self.objects.get(id)? {
+            Some(Obj::Font(f)) => Some(f.clone()),
+            _ => None,
+        }
+    }
+
+    /// The font as a LOGFONT whose height is in world units.
+    fn log_font(&self, f: &FontObj) -> LogFont {
+        let em = if f.unit == 0 { f.em } else { f.em * unit_px(f.unit, self.dpi) / self.page };
+        let font = Font {
+            family: f.family.clone(),
+            height: -(em.clamp(0.0, 1.0e6) as f32),
+            weight: if f.style & 1 != 0 { 700 } else { 400 },
+            italic: f.style & 2 != 0,
+            underline: f.style & 4 != 0,
+            strike: f.style & 8 != 0,
+            ..Font::default()
+        };
+        LogFont { font, escapement: 0.0 }
+    }
+
+    /// DrawString: lines of text laid out in a rectangle by the string format's alignments.
+    fn draw_string(&self, cv: &mut Canvas, flags: u16, r: Bytes) -> Option<()> {
+        let font = self.font(usize::from(flags & 0xFF))?;
+        let color = self.brush_of(flags, r.u32(0)?)?.color();
+        let fmt = match self.objects.get(r.u32(4)? as usize) {
+            Some(Some(Obj::Format(f))) => *f,
+            _ => Format::default(),
+        };
+        let len = (r.u32(8)? as usize).min(MAX_CHARS);
+        let [x, y, w, h] = floats::<4>(r, 12)?;
+        let units: Vec<u16> = (0..len).map(|i| r.u16(28 + i * 2)).collect::<Option<_>>()?;
+        let lf = self.log_font(&font);
+        let em = f64::from(-lf.font.height);
+        let lines: Vec<&[u16]> = units.split(|u| *u == 0x0A).collect();
+        let line_h = em * 1.2;
+        let (ax, ta_h) = match fmt.align {
+            1 => (x + w / 2.0, TA_CENTER),
+            2 => (x + w, TA_RIGHT),
+            _ => (x, 0),
+        };
+        let block = line_h * lines.len() as f64;
+        let top = match fmt.line_align {
+            1 => y + (h - block) / 2.0,
+            2 => y + h - block,
+            _ => y,
+        };
+        let clip = (w > 0.0 && h > 0.0 && fmt.flags & 0x4000 == 0).then_some([x, y, x + w, y + h]);
+        let p = self.painter();
+        for (i, line) in lines.iter().enumerate() {
+            let line: Vec<u16> = line.iter().copied().filter(|u| *u != 0x0D).collect();
+            if line.is_empty() {
+                continue;
+            }
+            let (text, dx) = crate::text::decode_utf16(&line, &[]);
+            let at = (ax, top + line_h * i as f64);
+            let (at, ta) = if fmt.line_align == 2 && lines.len() == 1 { ((ax, y + h), ta_h | TA_BOTTOM) } else { (at, ta_h) };
+            p.text(cv, at, text, dx, TextStyle { color, font: lf.clone(), align: ta, clip }, IDENTITY);
         }
         Some(())
     }
 
-    fn fill_polygon(&mut self, cv: &mut Canvas, flags: u16, r: Bytes) -> Option<()> {
-        let c = self.brush_of(flags, r.u32(0)?)?;
-        let pts = points(r, 8, r.u32(4)? as usize, flags & 0x4000 != 0)?;
-        self.filler(c).shape(cv, poly_ops(&pts, true), true, false);
-        Some(())
-    }
-
-    fn fill_ellipse(&mut self, cv: &mut Canvas, flags: u16, r: Bytes) -> Option<()> {
-        let c = self.brush_of(flags, r.u32(0)?)?;
-        let rect = *rects(r, 4, 1, flags & 0x4000 != 0)?.first()?;
-        self.filler(c).shape(cv, ellipse_ops(rect), true, false);
-        Some(())
-    }
-
-    fn fill_path(&mut self, cv: &mut Canvas, flags: u16, r: Bytes) -> Option<()> {
-        let c = self.brush_of(flags, r.u32(0)?)?;
-        let ops = self.path(usize::from(flags & 0xFF))?;
-        self.filler(c).shape(cv, ops, true, false);
+    /// DrawDriverString with character codes (CmapLookup): positioned glyphs on a baseline.
+    fn draw_driver_string(&self, cv: &mut Canvas, flags: u16, r: Bytes) -> Option<()> {
+        let font = self.font(usize::from(flags & 0xFF))?;
+        let color = self.brush_of(flags, r.u32(0)?)?.color();
+        let opts = r.u32(4)?;
+        if opts & 1 == 0 {
+            // Glyph indices into the font: the metafile crate knows no fonts to map them back.
+            return None;
+        }
+        let n = (r.u32(12)? as usize).min(MAX_CHARS);
+        let units: Vec<u16> = (0..n).map(|i| r.u16(16 + i * 2)).collect::<Option<_>>()?;
+        let pos = points(r, 16 + n * 2, n, false)?;
+        let m = if r.u32(8)? != 0 { matrix(r, 16 + n * 10)? } else { IDENTITY };
+        let lf = self.log_font(&font);
+        let first = *pos.first()?;
+        let dx: Vec<f32> = if opts & 4 != 0 {
+            Vec::new()
+        } else {
+            let mut d: Vec<f32> = pos.windows(2).map(|w| (w[1].0 - w[0].0) as f32).collect();
+            d.push(d.last().copied().unwrap_or(-lf.font.height * 0.5));
+            d
+        };
+        let (text, dx) = crate::text::decode_utf16(&units, &dx);
+        self.painter().text(cv, first, text, dx, TextStyle { color, font: lf, align: TA_BASELINE, clip: None }, m);
         Some(())
     }
 }
 
-/// Draws through the canvas with EMF+'s transform and its own pen or brush, then puts the
+/// Page unit to device pixels: world, display and pixel are 1; point, inch, document, mm.
+fn unit_px(unit: u32, dpi: f64) -> f64 {
+    match unit {
+        3 => dpi / 72.0,
+        4 => dpi,
+        5 => dpi / 300.0,
+        6 => dpi / 25.4,
+        _ => 1.0,
+    }
+}
+
+struct TextStyle {
+    color: [u8; 4],
+    font: LogFont,
+    align: u32,
+    /// World clip rectangle `[l, t, r, b]`.
+    clip: Option<[f64; 4]>,
+}
+
+/// Draws through the canvas with EMF+'s transform, clip and its own pen or brush, then puts the
 /// canvas's GDI state back.
 struct Painter {
     xf: Xform,
-    pen: Option<([u8; 4], f64)>,
-    fill: Option<[u8; 4]>,
+    clip: Option<[f64; 4]>,
 }
 
 impl Painter {
-    fn shape(&self, cv: &mut Canvas, ops: Vec<Op>, fill: bool, stroke: bool) {
+    fn begin(&self, cv: &mut Canvas, pre: Xform) {
         let world = cv.world();
         cv.save_dc();
-        cv.modify_world(mul(self.xf, world), 4);
-        let (pc, pw) = self.pen.unwrap_or(([0, 0, 0, 0], 0.0));
-        cv.set_pen(Pen { style: if self.pen.is_some() { 0 } else { PS_NULL }, width: pw, color: pc });
-        cv.set_brush(match self.fill {
-            Some(c) => Brush::new(BS_SOLID, c),
-            None => Brush::new(BS_NULL, [0, 0, 0, 0]),
-        });
-        cv.shape(&ops, fill, stroke);
-        cv.restore_dc(-1);
+        cv.modify_world(mul(mul(pre, self.xf), world), 4);
+        cv.set_clip(self.clip);
     }
 
-    fn draw_rects(&self, cv: &mut Canvas, compressed: bool, r: Bytes) -> Option<()> {
-        for rc in rects(r, 4, r.u32(0)? as usize, compressed)? {
-            self.shape(cv, rect_ops(rc), false, true);
-        }
-        Some(())
+    fn end(&self, cv: &mut Canvas) {
+        cv.restore_dc(-1);
+        cv.set_clip(None);
     }
+
+    fn no_pen(cv: &mut Canvas) {
+        cv.set_pen(Pen { style: PS_NULL, width: 0.0, color: [0, 0, 0, 0] });
+    }
+
+    fn fill(&self, cv: &mut Canvas, ops: &[Op], fill: &Fill) {
+        self.begin(cv, IDENTITY);
+        Self::no_pen(cv);
+        match fill {
+            Fill::Solid(c) => {
+                cv.set_brush(Brush::new(BS_SOLID, *c));
+                cv.shape(ops, true, false);
+            }
+            Fill::Hatch { style, fg, bg } => match hatch_tile(*style, *fg, Some(*bg)) {
+                Some(px) => cv.tile_shape(ops, Arc::new(RawTile { w: 8, h: 8, px, cell: cv.pattern_px })),
+                // GDI+ has many more hatch styles than GDI: those fill with the blend of both colours.
+                None => {
+                    cv.set_brush(Brush::new(BS_SOLID, lerp(*fg, *bg, 0.5)));
+                    cv.shape(ops, true, false);
+                }
+            },
+            _ => {
+                // Device point to brush space: invert brush space → world → device.
+                if let Some(inv) = invert(mul(fill.xf(), cv.device_affine())) {
+                    cv.shade_shape(ops, &|p| fill.sample(apply(inv, p)));
+                }
+            }
+        }
+        self.end(cv);
+    }
+
+    fn stroke(&self, cv: &mut Canvas, ops: &[Op], (color, width): ([u8; 4], f64)) {
+        self.begin(cv, IDENTITY);
+        cv.set_pen(Pen { style: 0, width, color });
+        cv.set_brush(Brush::new(BS_NULL, [0, 0, 0, 0]));
+        cv.shape(ops, false, true);
+        self.end(cv);
+    }
+
+    fn image(&self, cv: &mut Canvas, dst: [f64; 4], img: Rgba) {
+        self.begin(cv, IDENTITY);
+        cv.bitmap(dst, img);
+        self.end(cv);
+    }
+
+    fn text(&self, cv: &mut Canvas, at: P, text: String, dx: Vec<f32>, style: TextStyle, pre: Xform) {
+        self.begin(cv, pre);
+        cv.set_text_style(style.color, style.font, style.align);
+        let (opts, rect) = match style.clip {
+            Some(c) => (ETO_CLIPPED, Some(c)),
+            None => (0, None),
+        };
+        cv.text(at, text, dx, opts, rect);
+        self.end(cv);
+    }
+}
+
+fn apply(m: Xform, p: P) -> P {
+    (p.0 * m[0] + p.1 * m[2] + m[4], p.0 * m[1] + p.1 * m[3] + m[5])
+}
+
+fn invert(m: Xform) -> Option<Xform> {
+    let det = m[0] * m[3] - m[1] * m[2];
+    if !det.is_finite() || det.abs() < 1e-12 {
+        return None;
+    }
+    let (a, b, c, d) = (m[3] / det, -m[1] / det, -m[2] / det, m[0] / det);
+    Some([a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)])
 }
 
 /// ARGB (0xAARRGGBB) to RGBA.
@@ -277,21 +721,102 @@ fn argb(v: u32) -> [u8; 4] {
     [(v >> 16) as u8, (v >> 8) as u8, v as u8, (v >> 24) as u8]
 }
 
-fn matrix(r: Bytes, off: usize) -> Option<Xform> {
-    let mut m = [0.0; 6];
-    for (i, v) in m.iter_mut().enumerate() {
-        *v = f64::from(r.f32(off + i * 4)?);
+fn floats<const N: usize>(r: Bytes, off: usize) -> Option<[f64; N]> {
+    let mut v = [0.0; N];
+    for (i, x) in v.iter_mut().enumerate() {
+        *x = f64::from(r.f32(off + i * 4)?);
     }
-    m.iter().all(|v| v.is_finite()).then_some(m)
+    v.iter().all(|x| x.is_finite()).then_some(v)
 }
 
-/// A brush object at `off`: its colour and byte length. Only solid brushes are read; other kinds
-/// (hatch, texture, gradients) are given their first colour so shapes still show.
-fn brush(r: Bytes, off: usize) -> Option<([u8; 4], usize)> {
-    let kind = r.u32(off + 4)?;
-    let c = argb(r.u32(off + 8)?);
-    let c = if kind == 1 { argb(r.u32(off + 12)?) } else { c };
-    Some((c, 12))
+fn matrix(r: Bytes, off: usize) -> Option<Xform> {
+    floats::<6>(r, off)
+}
+
+fn parse_object(kind: u16, r: Bytes) -> Option<Obj> {
+    match kind {
+        1 => brush(r, 0).map(Obj::Brush),
+        2 => pen(r),
+        3 => path(r).map(Obj::Path),
+        4 => region(r),
+        5 => image(r).map(|i| Obj::Image(Arc::new(i))),
+        6 => font(r),
+        7 => Some(Obj::Format(Format { flags: r.u32(4)?, align: r.u32(12)?, line_align: r.u32(16)? })),
+        _ => None,
+    }
+}
+
+/// A brush object at `off`: version, type, then the type's data.
+fn brush(r: Bytes, off: usize) -> Option<Fill> {
+    let d = r.tail(off + 8)?;
+    match r.u32(off + 4)? {
+        0 => Some(Fill::Solid(argb(d.u32(0)?))),
+        1 => Some(Fill::Hatch { style: d.u32(0)?, fg: argb(d.u32(4)?), bg: argb(d.u32(8)?) }),
+        2 => {
+            let bflags = d.u32(0)?;
+            let wrap = d.u32(4)?;
+            let (xf, off) = if bflags & 0x2 != 0 { (matrix(d, 8)?, 32) } else { (IDENTITY, 8) };
+            Some(Fill::Texture { img: Arc::new(image(d.tail(off)?)?), wrap, xf })
+        }
+        3 => path_gradient(d),
+        4 => linear_gradient(d),
+        _ => None,
+    }
+}
+
+fn linear_gradient(d: Bytes) -> Option<Fill> {
+    let bflags = d.u32(0)?;
+    let wrap = d.u32(4)?;
+    let rect = floats::<4>(d, 8)?;
+    let (c0, c1) = (argb(d.u32(24)?), argb(d.u32(28)?));
+    let mut off = 40;
+    let mut xf = IDENTITY;
+    if bflags & 0x2 != 0 {
+        xf = matrix(d, off)?;
+        off += 24;
+    }
+    let mut stops = vec![(0.0, c0), (1.0, c1)];
+    if bflags & 0x4 != 0 {
+        // Preset colours: positions, then one colour each.
+        let n = (d.u32(off)? as usize).min(MAX_STOPS);
+        let pos: Vec<f64> = (0..n).map(|i| d.f32(off + 4 + i * 4).map(f64::from)).collect::<Option<_>>()?;
+        let cols: Vec<[u8; 4]> = (0..n).map(|i| d.u32(off + 4 + n * 4 + i * 4).map(argb)).collect::<Option<_>>()?;
+        stops = pos.into_iter().zip(cols).collect();
+    } else if bflags & 0x8 != 0 {
+        // Blend factors: positions, then how far from the start colour to the end colour.
+        let n = (d.u32(off)? as usize).min(MAX_STOPS);
+        let pos: Vec<f64> = (0..n).map(|i| d.f32(off + 4 + i * 4).map(f64::from)).collect::<Option<_>>()?;
+        let fac: Vec<f64> = (0..n).map(|i| d.f32(off + 4 + n * 4 + i * 4).map(f64::from)).collect::<Option<_>>()?;
+        stops = pos.into_iter().zip(fac).map(|(p, k)| (p, lerp(c0, c1, k.clamp(0.0, 1.0)))).collect();
+    }
+    stops.retain(|s| s.0.is_finite());
+    stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+    (!stops.is_empty()).then_some(Fill::Linear { rect, stops, wrap, xf })
+}
+
+/// A path gradient: from the centre colour to the (first) surrounding colour at the boundary,
+/// taken as the ellipse in the boundary's bounding rectangle.
+fn path_gradient(d: Bytes) -> Option<Fill> {
+    let bflags = d.u32(0)?;
+    let center_c = argb(d.u32(8)?);
+    let [cx, cy] = floats::<2>(d, 12)?;
+    let nc = (d.u32(20)? as usize).min(MAX_STOPS);
+    let surround = if nc > 0 { argb(d.u32(24)?) } else { center_c };
+    let mut off = 24 + nc * 4;
+    let bbox = if bflags & 0x1 != 0 {
+        let size = d.u32(off)? as usize;
+        let b = ops_bbox(&path(d.tail(off + 4)?)?)?;
+        off = off.checked_add(4 + size)?;
+        b
+    } else {
+        let n = d.u32(off)? as usize;
+        let pts = points(d, off + 4, n, false)?;
+        off = off.checked_add(4 + 8 * n.min(MAX_POINTS))?;
+        ops_bbox(&poly_ops(&pts, true))?
+    };
+    let xf = if bflags & 0x2 != 0 { matrix(d, off)? } else { IDENTITY };
+    let radius = ((bbox[2] - bbox[0]) / 2.0, (bbox[3] - bbox[1]) / 2.0);
+    Some(Fill::Radial { center: (cx, cy), radius, stops: vec![(0.0, center_c), (1.0, surround)], xf })
 }
 
 /// A pen object: version, type, then pen data (flags, unit, width, optional fields), then a brush.
@@ -314,7 +839,7 @@ fn pen(r: Bytes) -> Option<Obj> {
             off += 4 + (r.u32(off)? as usize).min(1 << 20);
         }
     }
-    let (color, _) = brush(r, off)?;
+    let color = brush(r, off)?.color();
     Some(Obj::Pen { color, width: if width.is_finite() { width.clamp(0.0, 1.0e5) } else { 0.0 } })
 }
 
@@ -338,12 +863,10 @@ fn path(r: Bytes) -> Option<Vec<Op>> {
             0 => ops.push(Op::M(p)),
             3 if i + 2 < n => {
                 ops.push(Op::C(p, pts[i + 1], pts[i + 2]));
-                let last = types[i + 2];
-                i += 2;
-                if last & 0x80 != 0 {
+                if types[i + 2] & 0x80 != 0 {
                     ops.push(Op::Z);
                 }
-                i += 1;
+                i += 3;
                 continue;
             }
             _ => ops.push(Op::L(p)),
@@ -354,6 +877,163 @@ fn path(r: Bytes) -> Option<Vec<Op>> {
         i += 1;
     }
     Some(ops)
+}
+
+/// A region object reduced to its bounding rectangle (None: infinite).
+fn region(r: Bytes) -> Option<Obj> {
+    region_node(r, 8, 0).map(|(b, _)| Obj::Region(b))
+}
+
+/// One region node at `off`: its bounds (None: infinite; an empty node is a zero rectangle) and
+/// its length in bytes.
+fn region_node(r: Bytes, off: usize, depth: usize) -> Option<(Option<[f64; 4]>, usize)> {
+    if depth > MAX_REGION_DEPTH {
+        return None;
+    }
+    match r.u32(off)? {
+        0x1000_0000 => {
+            let [x, y, w, h] = floats::<4>(r, off + 4)?;
+            Some((Some([x.min(x + w), y.min(y + h), x.max(x + w), y.max(y + h)]), 20))
+        }
+        0x1000_0001 => {
+            let size = r.u32(off + 4)? as usize;
+            let b = ops_bbox(&path(r.tail(off + 8)?)?).unwrap_or([0.0; 4]);
+            Some((Some(b), 8usize.checked_add(size)?))
+        }
+        0x1000_0002 => Some((Some([0.0; 4]), 4)),
+        0x1000_0003 => Some((None, 4)),
+        mode @ 1..=5 => {
+            let (a, la) = region_node(r, off + 4, depth + 1)?;
+            let (b, lb) = region_node(r, off.checked_add(4 + la)?, depth + 1)?;
+            let out = match mode {
+                1 => match (a, b) {
+                    (None, x) | (x, None) => x,
+                    (Some(a), Some(b)) => Some(intersect(a, b)),
+                },
+                2 => match (a, b) {
+                    (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
+                    _ => None,
+                },
+                // XOR, exclude, complement: the left area bounds the result closely enough.
+                _ => a,
+            };
+            Some((out, (4 + la).checked_add(lb)?))
+        }
+        // Replace: the right-hand area.
+        0 => {
+            let (_, la) = region_node(r, off + 4, depth + 1)?;
+            let (b, lb) = region_node(r, off.checked_add(4 + la)?, depth + 1)?;
+            Some((b, (4 + la).checked_add(lb)?))
+        }
+        _ => None,
+    }
+}
+
+/// A font object: em size, unit, style flags, then the family name in UTF-16.
+fn font(r: Bytes) -> Option<Obj> {
+    let em = f64::from(r.f32(4)?);
+    let n = (r.u32(20)? as usize).min(64);
+    let units: Vec<u16> = (0..n).map(|i| r.u16(24 + i * 2)).collect::<Option<_>>()?;
+    let family = String::from_utf16_lossy(&units).trim_end_matches('\0').to_string();
+    em.is_finite().then_some(Obj::Font(FontObj { em, unit: r.u32(8)?, style: r.u32(12)?, family }))
+}
+
+/// An image object: a bitmap of raw pixels or a compressed (PNG, JPEG, GIF…) file. Metafile
+/// images are not drawn yet.
+fn image(r: Bytes) -> Option<Rgba> {
+    if r.u32(4)? != 1 {
+        return None;
+    }
+    let (w, h, stride) = (r.u32(8)? as i32, r.u32(12)? as i32, r.u32(16)? as i32);
+    let format = r.u32(20)?;
+    let data = r.tail(28)?;
+    if r.u32(24)? == 1 {
+        return decode_compressed(data.0);
+    }
+    let (w, h) = (usize::try_from(w).ok()?, usize::try_from(h).ok()?);
+    if w == 0 || h == 0 || w.checked_mul(h)? > crate::MAX_PIXELS {
+        return None;
+    }
+    let bpp = ((format >> 8) & 0xFF) as usize;
+    let (pal, pixels) = if format & 0x0001_0000 != 0 {
+        // Indexed formats carry a palette first: flags, count, ARGB entries.
+        let n = (data.u32(4)? as usize).min(256);
+        let pal: Vec<[u8; 4]> = (0..n).map(|i| data.u32(8 + i * 4).map(argb)).collect::<Option<_>>()?;
+        (pal, data.tail(8 + n * 4)?)
+    } else {
+        (Vec::new(), data)
+    };
+    let row = (w.checked_mul(bpp)?).div_ceil(8);
+    let stride_abs = (stride.unsigned_abs() as usize).max(row);
+    let mut px = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        let line = pixels.slice(y.checked_mul(stride_abs)?, row)?;
+        for x in 0..w {
+            let c = match (format, bpp) {
+                (_, 1 | 4 | 8) if !pal.is_empty() => {
+                    let bit = x * bpp;
+                    let byte = *line.get(bit / 8)?;
+                    let i = (byte >> (8 - bpp - bit % 8)) & ((1u16 << bpp) - 1) as u8;
+                    pal.get(usize::from(i)).copied().unwrap_or([0, 0, 0, 255])
+                }
+                (_, 24) => {
+                    let p = line.get(x * 3..x * 3 + 3)?;
+                    [p[2], p[1], p[0], 255]
+                }
+                (0x0002_2009, 32) => {
+                    let p = line.get(x * 4..x * 4 + 4)?;
+                    [p[2], p[1], p[0], 255]
+                }
+                (0x000E_200B, 32) => {
+                    let p = line.get(x * 4..x * 4 + 4)?;
+                    let a = u32::from(p[3]);
+                    let un = |v: u8| (u32::from(v) * 255 + a / 2).checked_div(a).map_or(v, |c| c.min(255) as u8);
+                    [un(p[2]), un(p[1]), un(p[0]), p[3]]
+                }
+                (_, 32) => {
+                    let p = line.get(x * 4..x * 4 + 4)?;
+                    [p[2], p[1], p[0], p[3]]
+                }
+                (0x0002_1006, 16) => {
+                    let v = u16::from_le_bytes([*line.get(x * 2)?, *line.get(x * 2 + 1)?]);
+                    let s = |v: u16, bits: u32| ((u32::from(v) * 255) / ((1 << bits) - 1)) as u8;
+                    [s(v >> 11, 5), s((v >> 5) & 0x3F, 6), s(v & 0x1F, 5), 255]
+                }
+                (_, 16) => {
+                    let v = u16::from_le_bytes([*line.get(x * 2)?, *line.get(x * 2 + 1)?]);
+                    let s = |v: u16| ((u32::from(v & 0x1F) * 255) / 31) as u8;
+                    [s(v >> 10), s(v >> 5), s(v), 255]
+                }
+                _ => return None,
+            };
+            px.extend_from_slice(&c);
+        }
+    }
+    // A negative stride stores the rows bottom-up.
+    Some(top_down(Rgba { w, h, bottom_up: stride < 0, px }))
+}
+
+fn top_down(mut img: Rgba) -> Rgba {
+    if img.bottom_up {
+        crate::dib::flip(&mut img, false, true);
+        img.bottom_up = false;
+    }
+    img
+}
+
+fn decode_compressed(bytes: &[u8]) -> Option<Rgba> {
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(1 << 15);
+    limits.max_image_height = Some(1 << 15);
+    limits.max_alloc = Some((crate::MAX_PIXELS * 4) as u64);
+    reader.limits(limits);
+    let img = reader.decode().ok()?.to_rgba8();
+    let (w, h) = (img.width() as usize, img.height() as usize);
+    if w.checked_mul(h)? > crate::MAX_PIXELS {
+        return None;
+    }
+    Some(Rgba { w, h, bottom_up: false, px: img.into_raw() })
 }
 
 /// `n` points at `off`: 16-bit integers when compressed, else 32-bit floats.
