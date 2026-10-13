@@ -101,6 +101,46 @@ fn pairs_are_kerned_only_from_the_kern_size() {
     assert!((above - off).abs() < 0.01, "40 pt is below a 48 pt threshold");
 }
 
+/// Width of the first paragraph "AVATAR WAVE" (kerned from 12 pt) when a second paragraph's run
+/// has character spacing `spc`.
+fn kerned_width_beside_spacing(family: &str, spc: f64) -> f64 {
+    let (p, mut sh) = setup("AVATAR WAVE", 2000.0, 300.0);
+    let t = sh.text.as_mut().unwrap();
+    let mut second = t.paragraphs[0].clone();
+    second.runs[0].props.spacing = Some(spc);
+    t.paragraphs.push(second);
+    for para in &mut t.paragraphs {
+        para.props.bullet = Some(Bullet::None);
+        for r in &mut para.runs {
+            r.props.font = Some(family.into());
+            r.props.size = Some(40.0);
+            r.props.kern = Some(12.0);
+        }
+    }
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    l.lines[0].extent.1 - l.lines[0].extent.0
+}
+
+#[test]
+fn character_spacing_in_the_body_stops_kerning() {
+    let kerns = |f: &FontFace| {
+        let w = |feat: &[deckcraft_fonts::Feature]| deckcraft_fonts::shape(f, "AVATAR", feat, |c| c).iter().map(|g| g.x_advance).sum::<i32>();
+        w(&[]) != w(&deckcraft_fonts::feature("-kern").into_iter().collect::<Vec<_>>())
+    };
+    let Some(family) = first_family(LATIN_FAMILIES, kerns) else {
+        eprintln!("skipped: no font that kerns AVATAR");
+        return;
+    };
+    let (_, off) = glyphs_and_width(&family, "AVATAR WAVE", Some(0.0));
+    let (_, on) = glyphs_and_width(&family, "AVATAR WAVE", Some(12.0));
+    // Small spacing elsewhere keeps the pairs; 0.6 pt or -1 pt anywhere in the box drops them.
+    for (spc, kerned) in [(0.0, true), (0.5, true), (-0.99, true), (0.6, false), (1.0, false), (-1.0, false), (3.0, false)] {
+        let w = kerned_width_beside_spacing(&family, spc);
+        let want = if kerned { on } else { off };
+        assert!((w - want).abs() < 0.01, "{family} spc {spc}: {w} vs {want}");
+    }
+}
+
 #[test]
 fn ligatures_stay_for_scripts_that_need_them() {
     let has = |f: &[deckcraft_fonts::Feature], tag: &str| f.iter().any(|x| Some(*x) == deckcraft_fonts::feature(tag));
