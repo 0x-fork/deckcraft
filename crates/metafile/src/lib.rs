@@ -17,6 +17,7 @@ mod bytes;
 mod canvas;
 mod dib;
 mod emf;
+mod emfplus;
 mod geom;
 mod place;
 mod text;

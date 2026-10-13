@@ -16,7 +16,7 @@ const STOCK: u32 = 0x8000_0000;
 pub(crate) const PS_NULL: u32 = 5;
 /// Pen style bits; the rest of the style word holds end-cap, join and type flags.
 pub(crate) const PS_STYLE_MASK: u32 = 0x0F;
-const BS_SOLID: u32 = 0;
+pub(crate) const BS_SOLID: u32 = 0;
 pub(crate) const BS_NULL: u32 = 1;
 pub(crate) const BS_HATCHED: u32 = 2;
 /// BS_PATTERN, BS_DIBPATTERN and BS_DIBPATTERNPT: the brush paints a bitmap tile.
@@ -440,6 +440,20 @@ impl Canvas {
             4 => self.map.world = x,
             _ => {}
         }
+    }
+
+    /// The current world transform (EMF+ draws through it).
+    pub fn world(&self) -> Xform {
+        self.map.world
+    }
+
+    /// Sets the pen and brush directly (EMF+ records name their own pen and brush).
+    pub fn set_pen(&mut self, pen: Pen) {
+        self.pen = pen;
+    }
+
+    pub fn set_brush(&mut self, brush: Brush) {
+        self.brush = brush;
     }
 
     /// Pushes the drawing state. Past [`MAX_STACK`] levels the parse stops, since later restores
