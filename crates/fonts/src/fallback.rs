@@ -185,7 +185,10 @@ impl FontDb {
         let f = match self.fallback_for(key, exclude) {
             Some(f) if covers_cluster(&f, cluster) => f,
             Some(f) if chain.iter().all(|c| !c.covers(key)) => f,
-            _ => first(),
+            // A letter with marks the run's font lacks (stacked combining marks): a loaded plain
+            // face that draws the whole cluster, as PowerPoint draws the marks, before the run's
+            // font with missing-glyph boxes.
+            _ => self.read_faces().iter().find(|f| !f.is_color() && covers_cluster(f, cluster)).cloned().unwrap_or_else(first),
         };
         // A pictograph that defaults to text presentation (⚠ ♥ ⬆ ▶) whose first fallback is the
         // colour emoji font: PowerPoint draws it from a plain symbol font.

@@ -1196,3 +1196,23 @@ fn rtl_columns_start_on_the_right_and_just_anchoring_sits_at_the_bottom() {
         assert!((lay(&p, &sh, 400.0, 300.0).lines[0].top - b).abs() < 0.01, "{a:?}");
     }
 }
+
+#[test]
+fn stacked_combining_marks_take_a_face_that_draws_them() {
+    // A letter with marks the run's font lacks draws in a face that has them all (no boxes).
+    let db = FontDb::global();
+    let cluster = ['Z', '\u{0334}', '\u{0321}', '\u{031B}'];
+    let run_face = db.face("Inter", "Regular");
+    let f = db.cascade(&cluster, std::slice::from_ref(&run_face), "Regular");
+    if !deckcraft_fonts::covers_cluster(&run_face, &cluster) && ["DejaVu Sans", "Segoe UI"].iter().any(|fam| db.has_family(fam)) {
+        // Make sure a face with the marks is loaded, then the cluster must take one.
+        for fam in ["DejaVu Sans", "Segoe UI"] {
+            if db.has_family(fam) {
+                let _ = db.face(fam, "Regular");
+            }
+        }
+        let f = db.cascade(&cluster, std::slice::from_ref(&run_face), "Regular");
+        assert!(deckcraft_fonts::covers_cluster(&f, &cluster), "{} lacks the marks", f.family);
+    }
+    let _ = f;
+}
