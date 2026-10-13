@@ -16,6 +16,7 @@ pub mod media;
 pub mod menus;
 pub mod panes;
 pub mod ribbon;
+pub mod selpane;
 pub mod show;
 pub mod sorter;
 pub mod status;
@@ -219,6 +220,8 @@ pub struct SlideApp {
     pub ui_fonts: uifonts::UiFonts,
     /// Thumbnail pane drag (slide index, current drop index).
     pub(crate) thumb_drag: Option<(usize, usize)>,
+    /// Selection pane: folded groups, renaming, drag and drop.
+    pub selpane: selpane::State,
 }
 
 impl SlideApp {
@@ -258,6 +261,7 @@ impl SlideApp {
             notes_buf: (0, usize::MAX, String::new()),
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
+            selpane: selpane::State::default(),
         }
     }
 

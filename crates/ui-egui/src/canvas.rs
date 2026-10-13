@@ -461,6 +461,13 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
         } else {
             poly(painter, corners, sel_stroke);
         }
+        if sh.locked && !editing_this {
+            // Locked: greyed handles that don't respond, no rotate or adjust handles.
+            for h in box_handles(&x).0 {
+                painter.circle(xf.to_screen(h), 4.0, t.text_faint, Stroke::new(1.0, t.handle_fill));
+            }
+            continue;
+        }
         if st.selection.shapes.len() == 1 || !editing_this {
             let (hs, rot) = box_handles(&x);
             let rot_s = xf.to_screen(rot);
@@ -640,6 +647,11 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 crate::ribbon::menu_item(app, ui, crate::icons::Icon::Group, "Group", "arrange.group", json!({}));
                 crate::ribbon::menu_item(app, ui, crate::icons::Icon::Ungroup, "Ungroup", "arrange.ungroup", json!({}));
             });
+            let locked = app.session.active().is_some_and(|d| d.selected_shapes().iter().all(|s| s.locked));
+            if ui.button(if locked { "Unlock" } else { "Lock" }).clicked() {
+                let _ = app.run("shape.lock", json!({"locked": !locked}));
+                ui.close();
+            }
             if ui.button("Link…").clicked() {
                 app.dialog = Some(crate::dialogs::Dialog::new("hyperlink"));
                 ui.close();

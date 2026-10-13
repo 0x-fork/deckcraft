@@ -104,6 +104,18 @@ fn remap_connectors(shapes: &mut [Shape], ctx: &IdCtx, depth: usize) {
     }
 }
 
+/// PowerPoint's Lock (right-click > Lock, the Selection pane padlock) writes a full set of locking
+/// attributes; it reads an object as locked only when the whole set for its kind is there, so a
+/// lone `noMove` or `noResize` (other tools' partial locks) isn't Lock.
+fn is_locked(l: &El) -> bool {
+    let set: &[&str] = match l.local() {
+        "grpSpLocks" => &["noGrp", "noUngrp", "noRot", "noMove", "noResize"],
+        "graphicFrameLocks" => &["noGrp", "noDrilldown", "noMove", "noResize"],
+        _ => &["noGrp", "noRot", "noMove", "noResize", "noEditPoints", "noAdjustHandles", "noChangeArrowheads", "noChangeShapeType"],
+    };
+    set.iter().all(|a| l.bool(a) == Some(true))
+}
+
 /// Common non-visual properties (`p:nvSpPr`, `p:nvPicPr`…).
 fn base(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, nv: Option<&El>) -> Shape {
     let c = nv.and_then(|n| n.child("cNvPr"));
@@ -122,10 +134,10 @@ fn base(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, nv: Option<&El>) -> Shape {
             match e.local() {
                 "cNvSpPr" => {
                     s.text_box = e.bool("txBox").unwrap_or(false);
-                    s.locked = e.child("spLocks").is_some_and(|l| l.bool("noMove") == Some(true) && l.bool("noResize") == Some(true));
+                    s.locked = e.child("spLocks").is_some_and(is_locked);
                 }
                 "cNvPicPr" | "cNvGrpSpPr" | "cNvCxnSpPr" | "cNvGraphicFramePr" => {
-                    s.locked = e.elements().next().is_some_and(|l| l.bool("noMove") == Some(true) && l.bool("noResize") == Some(true));
+                    s.locked = e.elements().find(|l| l.local().ends_with("Locks")).is_some_and(is_locked);
                 }
                 "nvPr" => {
                     if let Some(ph) = e.child("ph") {

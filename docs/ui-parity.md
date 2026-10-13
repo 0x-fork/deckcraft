@@ -29,7 +29,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 |---|---|---|
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, some effects, size; no 3-D, thin picture/texture options |
 | Format Background pane | yes | yes |
-| Selection Pane | yes | yes |
+| Selection Pane | front-most first, groups fold, drag to restack, Bring Forward / Send Backward arrows, Show All / Hide All, eye, padlock (Lock), rename in place | same: drag restacks among siblings (a child stays in its group), Ctrl+click toggles, Shift+click selects a run, arrows / Home / End / F2 / Esc in the list, right-click menu |
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
 | Comments pane (threads) | yes | yes |
 | Design Ideas (Designer) | yes (cloud) | no |
@@ -89,4 +89,6 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
+
+| 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
 | 2026-10-10 | major | Created: shell, panes and dialogs, direct manipulation, shortcuts and visual fidelity against PowerPoint 16.113 |

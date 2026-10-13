@@ -210,3 +210,23 @@ fn a_layout_colour_map_override_applies_to_its_slides() {
     assert_eq!(Ctx::for_layout(&p, m, l).color(&ColorRef::scheme(SchemeSlot::Bg1), None), colors.get(SchemeSlot::Dk1));
     assert_eq!(Ctx::for_master(&p, m).color(&ColorRef::scheme(SchemeSlot::Bg1), None), colors.get(SchemeSlot::Lt1));
 }
+
+#[test]
+fn sibling_lists_and_parents_reach_into_groups() {
+    let leaf = |id: u32| Shape { id: ShapeId(id), ..Default::default() };
+    let group = |id: u32, children: Vec<Shape>| Shape {
+        id: ShapeId(id),
+        kind: ShapeKind::Group { children, child: Default::default() },
+        ..Default::default()
+    };
+    let mut tree = vec![leaf(1), group(2, vec![leaf(3), group(4, vec![leaf(5)])]), leaf(6)];
+    assert_eq!(parent_of(&tree, ShapeId(1)), Some(None));
+    assert_eq!(parent_of(&tree, ShapeId(3)), Some(Some(ShapeId(2))));
+    assert_eq!(parent_of(&tree, ShapeId(5)), Some(Some(ShapeId(4))));
+    assert_eq!(parent_of(&tree, ShapeId(9)), None);
+    let ids = |v: &Vec<Shape>| v.iter().map(|s| s.id.0).collect::<Vec<_>>();
+    assert_eq!(sibling_list_mut(&mut tree, ShapeId(6)).map(|v| ids(v)), Some(vec![1, 2, 6]));
+    assert_eq!(sibling_list_mut(&mut tree, ShapeId(4)).map(|v| ids(v)), Some(vec![3, 4]));
+    assert_eq!(sibling_list_mut(&mut tree, ShapeId(5)).map(|v| ids(v)), Some(vec![5]));
+    assert!(sibling_list_mut(&mut tree, ShapeId(9)).is_none());
+}
