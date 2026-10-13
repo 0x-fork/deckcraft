@@ -178,6 +178,8 @@ pub struct Perf {
 }
 
 pub struct SlideApp {
+    /// Table Design's border pen (`color`, `width`, `dash` for `table.borders`).
+    pub table_pen: serde_json::Value,
     pub session: Session,
     pub services: Services,
     pub ui: UiState,
@@ -233,6 +235,7 @@ impl SlideApp {
     pub fn new(session: Session, mut services: Services) -> Self {
         let audio_out = services.audio_out.take();
         SlideApp {
+            table_pen: serde_json::json!({"width": 1.0}),
             session,
             services,
             ui: UiState::default(),

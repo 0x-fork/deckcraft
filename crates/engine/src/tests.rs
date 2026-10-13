@@ -835,3 +835,66 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn table_borders_margins_and_cell_alignment() {
+    let mut s = session();
+    let id = s.execute("insert.table", &json!({"rows": 3, "cols": 3, "rect": [100.0, 100.0, 300.0, 120.0]})).unwrap()["id"].clone();
+    let table = |s: &Session| {
+        let st = s.doc().unwrap();
+        let sh = st.shapes().iter().find(|sh| json!(sh.id) == id).unwrap().clone();
+        let deckcraft_model::ShapeKind::Table(t) = sh.kind else { panic!("not a table") };
+        t
+    };
+    // Outside borders round the top-left 2×2 block; neighbours get the facing side too.
+    let block = json!([[0, 0], [0, 1], [1, 0], [1, 1]]);
+    s.execute("table.borders", &json!({"id": id, "which": "outside", "cells": block, "color": "#FF0000", "width": 2.0, "dash": "dash"})).unwrap();
+    let t = table(&s);
+    let w = |r: usize, c: usize, side: usize| t.rows[r].cells[c].borders[side].as_ref().and_then(|l| l.width);
+    assert_eq!(w(0, 0, 0), Some(2.0));
+    assert_eq!(w(0, 0, 2), Some(2.0));
+    assert_eq!(w(0, 0, 1), None, "inside edge untouched");
+    assert_eq!(w(1, 1, 1), Some(2.0));
+    assert_eq!(w(1, 2, 0), Some(2.0), "neighbour's facing side");
+    assert_eq!(w(2, 1, 2), Some(2.0), "neighbour below");
+    assert!(matches!(&t.rows[0].cells[0].borders[0].as_ref().unwrap().dash, Some(deckcraft_model::style::Dash::Preset { name }) if name == "dash"));
+    // Inside horizontal only for the block.
+    s.execute("table.borders", &json!({"id": id, "which": "insideH", "cells": block})).unwrap();
+    let t = table(&s);
+    assert!(t.rows[0].cells[0].borders[3].is_some() && t.rows[1].cells[0].borders[2].is_some());
+    assert!(t.rows[0].cells[0].borders[1].is_none());
+    // Diagonal and none.
+    s.execute("table.borders", &json!({"id": id, "which": "diagDown", "cells": [[2, 2]]})).unwrap();
+    assert!(table(&s).rows[2].cells[2].diag_down.is_some());
+    s.execute("table.borders", &json!({"id": id, "which": "none"})).unwrap();
+    let t = table(&s);
+    assert!(
+        t.rows
+            .iter()
+            .flat_map(|r| &r.cells)
+            .all(|c| c.diag_down.is_none() && c.borders.iter().all(|b| b.as_ref().is_some_and(|l| l.fill == Some(deckcraft_model::Fill::None))))
+    );
+    assert!(s.execute("table.borders", &json!({"id": id, "which": "sideways"})).is_err());
+    // Margins and vertical alignment.
+    s.execute("table.cellMargins", &json!({"id": id, "preset": "wide", "cells": [[0, 0]]})).unwrap();
+    s.execute("table.cellMargins", &json!({"id": id, "preset": "none", "left": 5.0, "cells": [[0, 1]]})).unwrap();
+    s.execute("table.cellAlign", &json!({"id": id, "anchor": "middle"})).unwrap();
+    let t = table(&s);
+    assert_eq!(t.rows[0].cells[0].margins, Some([14.4; 4]));
+    assert_eq!(t.rows[0].cells[1].margins, Some([5.0, 0.0, 0.0, 0.0]));
+    assert!(t.rows.iter().flat_map(|r| &r.cells).all(|c| c.anchor == Some(deckcraft_model::text::Anchor::Middle)));
+    // Survives PPTX.
+    let p = s.doc().unwrap().doc.as_ref().clone();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&p).unwrap()).unwrap();
+    let bt = back
+        .slides
+        .iter()
+        .flat_map(|sl| &sl.shapes)
+        .find_map(|sh| if let deckcraft_model::ShapeKind::Table(t) = &sh.kind { Some(t.clone()) } else { None })
+        .unwrap();
+    assert_eq!(bt.rows[0].cells[0].margins, Some([14.4; 4]));
+    assert_eq!(bt.rows[1].cells[1].anchor, Some(deckcraft_model::text::Anchor::Middle));
+    // One undo step each.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(table(&s).rows[0].cells[0].anchor.is_none());
+}

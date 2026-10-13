@@ -3,12 +3,12 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
+| P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
 
 | Area | Parity |
@@ -22,7 +22,7 @@ The summary between `<!-- SUMMARY -->
 | Format | 83% |
 | Arrange | 100% |
 | Text | 80% |
-| Tables | 89% |
+| Tables | 95% |
 | Charts | 65% |
 | SmartArt | 33% |
 | Pictures | 48% |
@@ -169,7 +169,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Tables | Insert/delete rows and columns | P0 | D |
 | Tables | Merge and split cells | P1 | D |
 | Tables | Distribute rows/columns, sizes | P1 | D |
-| Tables | Cell fill, borders, margins, alignment | P1 | P |
+| Tables | Cell fill, borders, margins, alignment | P1 | D |
 | Tables | Keyboard navigation between cells | P0 | D |
 | Charts | Insert chart (column, bar, line, area, pie, doughnut, scatter) | P0 | D |
 | Charts | Other chart types (radar, stock, combo, waterfall, funnel, treemap, sunburst, histogram, box) | P2 | P |
