@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod bevel;
 mod chart;
 mod colr;
 
@@ -995,6 +996,24 @@ impl Renderer {
                 ctx.push_layer(Some(&sp.path), Some(peniko::BlendMode::new(mix, peniko::Compose::SrcOver)), None, None, None);
                 paint::fill_path(ctx, rctx, &ov.fill, fx_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, FillMode::Norm, fade(i).fill, f.pres);
                 ctx.pop_layer();
+            }
+        }
+        // A 3-D bevel: the face and a band inside the outline lit as surfaces.
+        if let Some(bv) = effects.as_ref().and_then(|e| e.raw3d.as_deref()).and_then(bevel::from_raw) {
+            let solid = match &fill {
+                Some(Fill::Solid { color: c }) => Some(rctx.color(c, fill_ph)),
+                _ => None,
+            };
+            let filled = is_pic || fill.as_ref().is_some_and(|f| !f.is_none());
+            if filled {
+                let mut area = BezPath::new();
+                for sp in geo.paths.iter().filter(|sp| sp.fill != FillMode::None) {
+                    area.extend(sp.path.iter());
+                }
+                if is_pic || area.elements().is_empty() {
+                    area = outline.clone();
+                }
+                bevel::draw(ctx, &bv, if is_pic { None } else { solid }, &area, Rect::new(0.0, 0.0, w, h), m, 1.0);
             }
         }
         // Outline.

@@ -557,3 +557,26 @@ fn patterns_between_whole_pixel_cells_blend_neighbouring_cells() {
     // The pattern repeats every 6 px (8 cells).
     assert!(row.iter().zip(row.iter().skip(6)).all(|(a, b)| (*a as i32 - *b as i32).abs() <= 2), "{row:?}");
 }
+
+#[test]
+fn a_bevelled_shape_is_lit_from_the_upper_left() {
+    let base = Rgba::rgb(91, 155, 213);
+    let bevelled = |raw: &str| Shape {
+        id: ShapeId(26),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 130.0, 130.0)),
+        fill: solid(base),
+        line: no_line(),
+        effects: Some(deckcraft_model::Effects { bevel: Some("circle".into()), raw3d: Some(raw.into()), ..Default::default() }),
+        ..Default::default()
+    };
+    let raw = r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d><a:bevelT w="152400" h="76200"/></a:sp3d>"#;
+    let img = render(vec![bevelled(raw)]);
+    // PowerPoint: face (99, 166, 226); top of the band saturates, its bottom and right darken.
+    let face = img.pixel(165, 165);
+    assert!(close(face, Rgba::rgb(99, 166, 226), 8), "face {face:?}");
+    let (top, bottom, right) = (img.pixel(165, 104)[2], img.pixel(165, 226)[2], img.pixel(226, 165)[2]);
+    assert!(top > face[2] && bottom < face[2] && right < face[2], "top {top} bottom {bottom} right {right} face {}", face[2]);
+    // Without a 3-D scene PowerPoint draws it flat.
+    let img = render(vec![bevelled(r#"<a:sp3d><a:bevelT w="152400" h="76200"/></a:sp3d>"#)]);
+    assert!(close(img.pixel(165, 104), base, 2) && close(img.pixel(165, 165), base, 2));
+}
