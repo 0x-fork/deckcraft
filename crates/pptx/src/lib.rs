@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod cfb;
 mod custgeom;
 mod maps;
 mod opc;
@@ -42,6 +43,11 @@ pub fn sniff(bytes: &[u8]) -> bool {
         return false;
     }
     zip::ZipArchive::new(std::io::Cursor::new(bytes)).map(|z| z.index_for_name("[Content_Types].xml").is_some()).unwrap_or(false)
+}
+
+/// Is this a password-protected presentation (an encrypted package inside a compound file)?
+pub fn is_encrypted(bytes: &[u8]) -> bool {
+    cfb::is_encrypted(bytes)
 }
 
 /// Read a `.pptx` / `.potx` / `.ppsx` package.

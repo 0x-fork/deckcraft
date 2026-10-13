@@ -279,6 +279,12 @@ impl SlideApp {
         self.status = Some((msg.into(), now_ms()));
     }
 
+    /// A message that must be seen wherever the user is: a toast, which also shows over the start
+    /// screen and the File tab, where there is no status bar.
+    pub fn notify(&mut self, msg: impl Into<String>) {
+        self.toast = Some(toast::Toast { text: msg.into(), at: now_ms() });
+    }
+
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
@@ -563,8 +569,10 @@ impl SlideApp {
 
     fn pick_and_open(&mut self) {
         if let Some(pick) = self.services.pick_open.as_mut() {
-            if let Some(path) = pick("open") {
-                let _ = self.open_path(&path);
+            if let Some(path) = pick("open")
+                && let Err(e) = self.open_path(&path)
+            {
+                self.notify(e);
             }
         } else if let Some(f) = self.services.open_async.as_mut() {
             f("open");
@@ -712,8 +720,10 @@ impl SlideApp {
         if self.session.active().is_none() && cmd != "file.openBytes" {
             let _ = self.session.execute("file.new", &json!({}));
         }
-        if let Err(e) = self.session.execute(cmd, &p) {
-            self.set_status(e.to_string());
+        match self.session.execute(cmd, &p) {
+            Err(e) if cmd == "file.openBytes" => self.notify(e.to_string()),
+            Err(e) => self.set_status(e.to_string()),
+            Ok(_) => {}
         }
     }
 
