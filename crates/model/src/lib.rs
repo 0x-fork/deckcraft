@@ -878,6 +878,10 @@ impl Presentation {
         for md in &self.media {
             m = m.max(md.id.0);
         }
+        for extra in [self.notes_master.as_deref(), self.handout_master.as_deref()].into_iter().flatten() {
+            m = m.max(extra.id.0);
+            walk(&extra.shapes, &mut |sh, _| m = m.max(sh.id.0));
+        }
         self.next_id = m;
     }
     pub fn slide_index(&self, id: SlideId) -> Option<usize> {

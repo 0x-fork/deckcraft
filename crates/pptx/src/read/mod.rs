@@ -385,6 +385,35 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         }
         p.notes_master = Some(Arc::new(m));
     }
+    // Handout master (header, footer, date and slide number for printed handouts).
+    if let Some(r) = pres_part.rels.first_of("handoutMaster")
+        && let Some(d) = load(&pkg, &r.target)
+    {
+        let part = Part::new(&pkg, &r.target, &d);
+        let mut ctx = shapes::IdCtx::default();
+        let mut m = Master { id: MasterId(imp.alloc()), name: "Handout Master".into(), ..Default::default() };
+        if let Some(t) = part.rels.first_of("theme")
+            && let Some(td) = pkg.xml(&t.target)
+        {
+            let tp = Part::new(&pkg, &t.target, &td);
+            m.theme = theme::read_theme(&mut imp, &tp, &td.root);
+        } else if let Some(first) = p.masters.first() {
+            m.theme = first.theme.clone();
+        }
+        if let Some(csld) = d.root.child("cSld") {
+            if let Some(n) = csld.attr("name").filter(|s| !s.is_empty()) {
+                m.name = n.to_string();
+            }
+            m.background = background(&mut imp, &part, csld);
+            if let Some(tree) = csld.child("spTree") {
+                m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+            }
+        }
+        if let Some(cm) = d.root.child("clrMap") {
+            m.color_map = color_map(cm);
+        }
+        p.handout_master = Some(Arc::new(m));
+    }
     // Document properties.
     if let Some(r) = root_rels.first_of("core-properties")
         && let Some(d) = pkg.xml(&r.target)
