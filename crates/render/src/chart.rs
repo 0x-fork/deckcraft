@@ -82,10 +82,6 @@ fn label(ctx: &mut RenderContext, rctx: &Ctx, m: Affine, text: &str, r: Rect, si
     crate::draw_text(ctx, rctx, &tmp, &body, r, m, &deckcraft_text::NoFields, None);
 }
 
-fn fmt_num(v: f64) -> String {
-    if (v - v.round()).abs() < 1e-9 { format!("{}", v.round() as i64) } else { format!("{v:.1}") }
-}
-
 /// Where the legend goes for `c:legendPos`, and the plot area left over.
 /// `size` is the legend block (width, height); the result is its top-left corner and the plot area.
 /// `r` (also the OOXML default and the fallback for unknown values) and `l` are vertical stacks centred
@@ -224,7 +220,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                     ctx,
                     rctx,
                     m,
-                    &fmt_num(*v),
+                    &c.data_label(s, *v),
                     Rect::new(lp.x - 30.0, lp.y - 10.0, lp.x + 30.0, lp.y + 10.0),
                     base,
                     Align::Center,

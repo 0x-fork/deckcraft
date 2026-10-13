@@ -463,6 +463,24 @@ mod tests {
     }
 
     #[test]
+    fn general_labels_keep_every_digit_the_data_has() {
+        // #324: labels were rounded to one decimal ("100000.0" for 99999.99).
+        for kind in [ChartType::Column, ChartType::Pie, ChartType::Doughnut, ChartType::Line, ChartType::Scatter] {
+            let c = Chart::sample(kind);
+            let s = &c.series[0];
+            for (v, want) in
+                [(1220.82, "1220.82"), (99999.99, "99999.99"), (1500.05, "1500.05"), (1500.0, "1500"), (1234.567, "1234.567"), (999.99, "999.99")]
+            {
+                assert_eq!(c.data_label(s, v), want, "{kind:?}");
+            }
+        }
+        // Small ranges keep distinct value-axis ticks (0.123 used to give 0, 0.0, 0.1, 0.1…).
+        let c = Chart::sample(ChartType::Column);
+        let ticks: Vec<String> = (0..=5).map(|i| c.axis_label(false, f64::from(i) * 0.025)).collect();
+        assert_eq!(ticks, ["0", "0.025", "0.05", "0.075", "0.1", "0.125"]);
+    }
+
+    #[test]
     fn axis_labels_use_the_format_and_language() {
         let mut c = Chart::sample(ChartType::Column);
         c.y_format = Some(r#"_-* #\ ##0\ "₽"_-;\-* #\ ##0\ "₽"_-;_-* "-"??\ "₽"_-;_-@_-"#.into());
