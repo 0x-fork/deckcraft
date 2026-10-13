@@ -191,22 +191,65 @@ pub fn picture(ctx: &mut RenderContext, pres: &Presentation, pf: &PictureFill, b
         image: vello_cpu::ImageSource::Pixmap(pm.clone()),
         sampler: peniko::ImageSampler { quality: peniko::ImageQuality::High, ..Default::default() },
     };
-    if let PictureMode::Tile { sx, sy, tx, ty, .. } = &pf.mode {
-        let (sx, sy) = (if *sx > 0.0 { *sx } else { 1.0 }, if *sy > 0.0 { *sy } else { 1.0 });
-        let tile_w = iw * 0.75 * sx;
-        let tile_h = ih * 0.75 * sy;
-        let nx = ((bounds.width() / tile_w.max(1.0)).ceil() as i64).clamp(0, 200);
-        let ny = ((bounds.height() / tile_h.max(1.0)).ceil() as i64).clamp(0, 200);
-        for j in -1..=ny {
-            for i in -1..=nx {
-                let r = Rect::new(bounds.x0 + tx + i as f64 * tile_w, bounds.y0 + ty + j as f64 * tile_h, 0.0, 0.0);
-                let r = Rect::new(r.x0, r.y0, r.x0 + tile_w, r.y0 + tile_h);
-                draw_image(ctx, &image, iw, ih, r, m, alpha);
-            }
+    if let PictureMode::Tile { sx, sy, tx, ty, flip, align } = &pf.mode {
+        // The tile's size: the picture's own size (96 dpi) scaled. A scale of zero or less draws
+        // nothing, as in PowerPoint.
+        if !(*sx > 0.0 && *sy > 0.0 && sx.is_finite() && sy.is_finite()) {
+            return;
+        }
+        let (nw, nh) = images::natural_size(&item.data).unwrap_or((iw, ih));
+        // PowerPoint draws the tile at a whole number of output pixels.
+        let k = px_scale.max(1e-9);
+        let snap = |v: f64| (v * k).round().max(1.0) / k;
+        let (tile_w, tile_h) = (snap(nw * 0.75 * sx), snap(nh * 0.75 * sy));
+        if !(tile_w > 1e-6 && tile_h > 1e-6 && tile_w.is_finite() && tile_h.is_finite()) {
+            return;
+        }
+        let o = tile_origin(bounds, align, (tile_w, tile_h), (*tx, *ty));
+        // Every other tile is mirrored across the flip axes: a reflected repeat.
+        let ext = |mirror: bool| if mirror { peniko::Extend::Reflect } else { peniko::Extend::Repeat };
+        let tiled = vello_cpu::Image {
+            image: vello_cpu::ImageSource::Pixmap(pm.clone()),
+            sampler: peniko::ImageSampler {
+                x_extend: ext(matches!(flip.as_str(), "x" | "xy")),
+                y_extend: ext(matches!(flip.as_str(), "y" | "xy")),
+                quality: peniko::ImageQuality::High,
+                alpha: 1.0,
+            },
+        };
+        ctx.set_transform(m);
+        if alpha < 0.999 {
+            ctx.push_layer(None, None, Some(alpha as f32), None, None);
+        }
+        ctx.set_paint(tiled);
+        ctx.set_paint_transform(Affine::translate(o.to_vec2()) * Affine::scale_non_uniform(tile_w / iw, tile_h / ih));
+        ctx.fill_rect(&bounds);
+        ctx.reset_paint_transform();
+        if alpha < 0.999 {
+            ctx.pop_layer();
         }
         return;
     }
     draw_image(ctx, &image, iw, ih, dest, m, alpha);
+}
+
+/// Where the first tile of a tiled picture fill goes in `bounds`: its corner, edge middle or
+/// centre named by `align` (`tl`, `t`, `tr`, `l`, `ctr`, `r`, `bl`, `b`, `br`) on the same point
+/// of the box, then moved by the offset (points).
+pub fn tile_origin(bounds: Rect, align: &str, tile: (f64, f64), offset: (f64, f64)) -> Point {
+    let (ax, ay) = match align {
+        "t" => (0.5, 0.0),
+        "tr" => (1.0, 0.0),
+        "l" => (0.0, 0.5),
+        "ctr" => (0.5, 0.5),
+        "r" => (1.0, 0.5),
+        "bl" => (0.0, 1.0),
+        "b" => (0.5, 1.0),
+        "br" => (1.0, 1.0),
+        _ => (0.0, 0.0),
+    };
+    let (ox, oy) = (if offset.0.is_finite() { offset.0 } else { 0.0 }, if offset.1.is_finite() { offset.1 } else { 0.0 });
+    Point::new(bounds.x0 + ax * (bounds.width() - tile.0) + ox, bounds.y0 + ay * (bounds.height() - tile.1) + oy)
 }
 
 fn draw_image(ctx: &mut RenderContext, image: &vello_cpu::Image, iw: f64, ih: f64, dest: Rect, m: Affine, alpha: f64) {

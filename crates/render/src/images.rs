@@ -121,6 +121,16 @@ fn decode_at(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     Some(img.to_rgba8())
 }
 
+/// A raster picture's own size in pixels, read from its header (`None` for metafiles and
+/// anything unreadable).
+pub fn natural_size(bytes: &[u8]) -> Option<(f64, f64)> {
+    if crate::metafile::is_metafile(bytes) {
+        return None;
+    }
+    let (w, h) = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
+    (w > 0 && h > 0).then_some((w as f64, h as f64))
+}
+
 /// A premultiplied pixmap of the picture, downsampled so its longer side is near `want` px.
 pub fn decode_for(bytes: &Arc<Vec<u8>>, want: f64, adj: &PictureAdjust) -> Option<Arc<Pixmap>> {
     let addr = Arc::as_ptr(bytes) as usize;

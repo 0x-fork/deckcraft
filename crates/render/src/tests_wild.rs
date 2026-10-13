@@ -387,3 +387,53 @@ fn a_3d_pictures_border_stays_centred_on_its_edge() {
     assert!(close(img.pixel(102, 150), RED, 30), "covers the picture's edge {:?}", img.pixel(102, 150));
     assert!(close(img.pixel(94, 150), WHITE, 10), "reaches half the width out {:?}", img.pixel(94, 150));
 }
+
+#[allow(clippy::unwrap_used)]
+fn half_red_half_blue() -> Vec<u8> {
+    let img = image::RgbImage::from_fn(8, 4, |x, _| if x < 4 { image::Rgb([255, 0, 0]) } else { image::Rgb([0, 0, 255]) });
+    let mut out = std::io::Cursor::new(vec![]);
+    image::DynamicImage::ImageRgb8(img).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+fn tiled(sx: f64, flip: &str, align: &str) -> Image {
+    use deckcraft_model::style::{PictureFill, PictureMode};
+    let mut p = Presentation::default();
+    let media = p.add_media("t.png", "image/png", half_red_half_blue());
+    let mode = PictureMode::Tile { tx: 0.0, ty: 0.0, sx, sy: 10.0, flip: flip.into(), align: align.into() };
+    let sh = Shape {
+        id: ShapeId(21),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 240.0, 60.0)),
+        fill: Some(Fill::Picture(PictureFill { media, mode, ..Default::default() })),
+        line: no_line(),
+        ..Default::default()
+    };
+    std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+    render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() })
+}
+
+#[test]
+fn tiled_pictures_flip_align_and_skip_non_positive_scales() {
+    let blue = Rgba::rgb(0, 0, 255);
+    // 8×4 px at 96 dpi scaled ten times: 60×30 pt tiles, red then blue, from the top-left.
+    let img = tiled(10.0, "none", "tl");
+    assert!(close(img.pixel(115, 115), RED, 30) && close(img.pixel(145, 115), blue, 30) && close(img.pixel(175, 115), RED, 30));
+    // Flipped across x: every other tile mirrored, so the second starts blue.
+    let img = tiled(10.0, "x", "tl");
+    assert!(close(img.pixel(145, 115), blue, 30) && close(img.pixel(175, 115), blue, 30) && close(img.pixel(205, 115), RED, 30));
+    // Aligned right: a tile ends at the box's right edge (340), so 310-340 is blue.
+    let img = tiled(10.0, "none", "r");
+    assert!(close(img.pixel(335, 130), blue, 30) && close(img.pixel(305, 130), RED, 30), "{:?}", img.pixel(305, 130));
+    // A negative scale draws nothing, as in PowerPoint.
+    let img = tiled(-10.0, "none", "tl");
+    assert!(close(img.pixel(115, 115), WHITE, 5) && close(img.pixel(300, 150), WHITE, 5));
+}
+
+#[test]
+fn a_tiles_first_copy_sits_on_the_point_its_alignment_names() {
+    let b = Rect::new(0.0, 0.0, 100.0, 50.0);
+    assert_eq!(paint::tile_origin(b, "tl", (20.0, 10.0), (0.0, 0.0)), Point::new(0.0, 0.0));
+    assert_eq!(paint::tile_origin(b, "ctr", (20.0, 10.0), (0.0, 0.0)), Point::new(40.0, 20.0));
+    assert_eq!(paint::tile_origin(b, "br", (20.0, 10.0), (5.0, -5.0)), Point::new(85.0, 35.0));
+    assert_eq!(paint::tile_origin(b, "nonsense", (20.0, 10.0), (f64::NAN, 1.0)), Point::new(0.0, 1.0));
+}
