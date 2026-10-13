@@ -435,7 +435,9 @@ pub fn shape_geometry(shape: &Shape, w: f64, h: f64) -> Geometry {
                 let (pw, ph) = (if p.w > 0.0 { p.w } else { w.max(1e-9) }, if p.h > 0.0 { p.h } else { h.max(1e-9) });
                 let mut bp = parse_path(&p.d);
                 bp.apply_affine(Affine::scale_non_uniform(w / pw, h / ph));
-                out.push(SubPath { path: bp, fill: p.fill, stroke: p.stroke, even_odd: false });
+                // PowerPoint fills each custom path's sub-paths alternately (even-odd): a sub-path
+                // inside another cuts a hole whichever way it winds, as in icons and outlined text.
+                out.push(SubPath { path: bp, fill: p.fill, stroke: p.stroke, even_odd: true });
             }
             Geometry { paths: out, text_rect: Rect::new(0.0, 0.0, w, h), handles: vec![], sites: vec![] }
         }
@@ -1613,6 +1615,9 @@ pub fn render_shape(pres: &Presentation, slide: &Slide, id: ShapeId, scale: f64)
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tests_wild;
 
 #[cfg(test)]
 mod mt_tests {
