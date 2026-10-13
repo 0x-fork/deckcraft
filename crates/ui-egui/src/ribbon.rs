@@ -1891,6 +1891,11 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
             if let Some(p) = shapes_gallery(ui) {
                 run(app, "shape.change", json!({"preset": p}));
             }
+            ui.separator();
+            if ui.add_enabled(enabled(app, "shape.editPoints"), egui::Button::new("Edit Points")).clicked() {
+                run(app, "shape.editPoints", json!({"on": true}));
+                ui.close();
+            }
         });
         let can_merge = enabled(app, "shape.merge");
         let r = big_button(ui, Icon::MergeShapes, "Merge\nShapes", can_merge).on_hover_text("Merge Shapes");

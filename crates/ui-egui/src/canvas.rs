@@ -468,6 +468,20 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             }
             continue;
         }
+        if app.session.tool.editing_points(st) == Some(sh.id) {
+            // Edit Points: the outline's vertices are the handles.
+            for q in deckcraft_engine::cmd::points::slide_vertices(&st.doc, &st.selection, sh).into_iter().flatten() {
+                let c = xf.to_screen(q);
+                painter.rect(
+                    egui::Rect::from_center_size(c, egui::vec2(7.0, 7.0)),
+                    0.0,
+                    Color32::BLACK,
+                    Stroke::new(1.0, Color32::WHITE),
+                    egui::StrokeKind::Middle,
+                );
+            }
+            continue;
+        }
         if st.selection.shapes.len() == 1 || !editing_this {
             let (hs, rot) = box_handles(&x);
             let rot_s = xf.to_screen(rot);

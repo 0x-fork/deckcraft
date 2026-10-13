@@ -76,6 +76,12 @@ pub enum Hit {
         id: ShapeId,
         index: usize,
     },
+    /// A vertex of a shape whose points are being edited.
+    Vertex {
+        id: ShapeId,
+        path: usize,
+        index: usize,
+    },
     /// Line end 0/1 of a line-like shape.
     LineEnd {
         id: ShapeId,
@@ -118,6 +124,11 @@ enum Drag {
         id: ShapeId,
         index: usize,
         orig: Xfrm,
+    },
+    Vertex {
+        id: ShapeId,
+        path: usize,
+        index: usize,
     },
     Marquee {
         start: Point,
@@ -178,11 +189,18 @@ pub struct ToolState {
     pub path_preview: Vec<Point>,
     pub path_smooth: bool,
     pub path_closing: bool,
+    /// The shape in Edit Points: its vertices are handles instead of the box's.
+    pub edit_points: Option<ShapeId>,
 }
 
 impl ToolState {
     pub fn dragging(&self) -> bool {
         self.drag.is_some()
+    }
+
+    /// The shape in Edit Points, while it is still the one selected shape.
+    pub fn editing_points(&self, st: &crate::DocState) -> Option<ShapeId> {
+        self.edit_points.filter(|id| st.selection.shapes.as_slice() == [*id] && st.selection.text.is_none() && st.shape(*id).is_some())
     }
 
     /// A freeform path is being drawn (Enter/Escape/double-click finish it).
@@ -215,6 +233,13 @@ impl Session {
     /// What's under `p` on the current slide.
     pub fn hit_test(&self, p: Point, tol: f64) -> Option<Hit> {
         let st = self.active()?;
+        // In Edit Points, the edited shape's vertices come first.
+        if let Some(id) = self.tool.editing_points(st)
+            && let Some(sh) = st.shape(id)
+            && let Some((path, index)) = cmd::points::vertex_at(&st.doc, &st.selection, sh, p, tol * 1.6)
+        {
+            return Some(Hit::Vertex { id, path, index });
+        }
         // Handles of selected shapes first.
         if st.selection.text.is_none() || st.selection.shapes.len() == 1 {
             for id in st.selection.shapes.iter().rev() {
@@ -387,6 +412,28 @@ impl Session {
             }
         }
         let hit = self.hit_test(p, tol);
+        // Edit Points: drag a vertex, Ctrl-click one to delete it or the outline to add one;
+        // a click anywhere else leaves Edit Points.
+        if let Some(eid) = self.doc().ok().and_then(|st| self.tool.editing_points(st)) {
+            if let Some(Hit::Vertex { id, path, index }) = hit {
+                if mods.cmd {
+                    return self.execute("shape.deletePoint", &json!({"id": id, "path": path, "index": index}));
+                }
+                self.begin("Edit Points");
+                self.tool.drag = Some(Drag::Vertex { id, path, index });
+                return Ok(json!({"vertex": [path, index]}));
+            }
+            let st = self.doc()?;
+            if let Some(sh) = st.shape(eid)
+                && let Some((path, seg, t)) = cmd::points::segment_at(&st.doc, &st.selection, sh, p, tol * 1.6)
+            {
+                if mods.cmd {
+                    return self.execute("shape.addPoint", &json!({"id": eid, "path": path, "segment": seg, "t": t}));
+                }
+                return Ok(Value::Null);
+            }
+            self.tool.edit_points = None;
+        }
         let st = self.doc()?;
         match hit {
             Some(Hit::Resize { id, handle }) => {
@@ -407,6 +454,8 @@ impl Session {
                 self.begin("Rotate");
                 self.tool.drag = Some(Drag::Rotate { ids, center, start, origs });
             }
+            // Only reached outside Edit Points (handled above).
+            Some(Hit::Vertex { .. }) => {}
             Some(Hit::Adjust { id, index }) => {
                 let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
                 self.begin("Adjust Shape");
@@ -601,6 +650,11 @@ impl Session {
                     Ok(())
                 })?;
             }
+            Drag::Vertex { id, path, index } => {
+                self.tool.drag = Some(Drag::Vertex { id, path, index });
+                self.edit_vertex(id, path, index, p)?;
+                return Ok(Value::Null);
+            }
             Drag::Marquee { start, .. } => {
                 self.tool.marquee = Some(Rect::from_points(start, p));
             }
@@ -659,6 +713,15 @@ impl Session {
             }
         }
         Ok(Value::Null)
+    }
+
+    /// Moves a vertex during a drag (one undo step for the whole drag).
+    fn edit_vertex(&mut self, id: ShapeId, path: usize, index: usize, p: Point) -> Result<()> {
+        let r = cmd::points::move_point_raw(self, id, path, index, p);
+        if let Err(e) = r {
+            log::debug!("edit point: {e}");
+        }
+        Ok(())
     }
 
     fn up(&mut self, p: Point, mods: Mods) -> Result<Value> {

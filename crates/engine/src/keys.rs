@@ -57,6 +57,10 @@ impl Session {
         if self.tool.drawing_freeform() && matches!(k, "enter" | "return" | "escape") {
             return self.finish_freeform(false);
         }
+        if self.tool.edit_points.is_some() && matches!(k, "enter" | "return" | "escape") {
+            self.tool.edit_points = None;
+            return Ok(json!({"handled": true, "command": "shape.editPoints"}));
+        }
         if editing && let Some((id, params)) = self.text_key(k, mods) {
             let r = self.execute(id, &params)?;
             return Ok(json!({"handled": true, "command": id, "result": r}));
