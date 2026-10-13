@@ -622,5 +622,7 @@ mod tests {
         let b = body_pr(&d.root);
         assert_eq!(b.vert, Some(TextDir::MongolianVertical));
         assert_eq!(b.vert.map(|v| v.xml()), Some("mongolianVert"));
+        let d = parse(br#"<a:bodyPr vert="wordArtVertRtl"/>"#).unwrap();
+        assert_eq!(body_pr(&d.root).vert.map(|v| v.xml()), Some("wordArtVertRtl"));
     }
 }

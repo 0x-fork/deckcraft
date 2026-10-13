@@ -1569,14 +1569,14 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
     // stands every character upright, one under the other.
     let upright_text = match vert {
         TextDir::EaVertical => Upright::Cjk,
-        TextDir::Stacked => Upright::All,
+        TextDir::Stacked | TextDir::StackedRtl => Upright::All,
         _ => Upright::None,
     };
     // Mongolian vertical and stacked text: turned like vert, their lines run from left to right
     // (as PowerPoint draws both).
     let lines_ltr = matches!(vert, TextDir::MongolianVertical | TextDir::Stacked);
     let rotation = match vert {
-        TextDir::Vertical | TextDir::EaVertical | TextDir::Stacked | TextDir::MongolianVertical => 90.0,
+        TextDir::Vertical | TextDir::EaVertical | TextDir::Stacked | TextDir::StackedRtl | TextDir::MongolianVertical => 90.0,
         TextDir::Vertical270 => 270.0,
         TextDir::Horizontal => 0.0,
     } + bp.rot.unwrap_or(0.0);
@@ -1828,6 +1828,10 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
     }
     let total = y;
     out.content_height = total;
+    // Where column `c` starts: from the left, or from the right with `rtlCol` (PowerPoint puts the
+    // first column on the right).
+    let rtl_cols = bp.rtl_col.unwrap_or(false) && ncols > 1;
+    let col_x = |c: usize| (if rtl_cols { ncols.saturating_sub(1 + c) } else { c }) as f64 * (col_w + col_gap);
     // Columns: distribute lines by height.
     let col_h = if ncols > 1 { inner.height() } else { f64::INFINITY };
     let mut col = 0usize;
@@ -1843,16 +1847,20 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             li.top -= dy;
             li.baseline -= dy;
             li.bottom -= dy;
-            li.shift_x(col as f64 * (col_w + col_gap));
+        }
+        let cx = col_x(col);
+        if cx != 0.0 {
+            li.shift_x(cx);
         }
     }
     let used_h = if ncols > 1 { all_lines.iter().map(|(l, ..)| l.bottom).fold(0.0, f64::max) } else { total };
     out.overflow = used_h > inner.height() + 0.5 || (ncols > 1 && all_lines.last().is_some_and(|(l, ..)| l.bottom > inner.height() + 0.5));
     let anchor = bp.anchor.unwrap_or(Anchor::Top);
     let dy = match anchor {
-        Anchor::Top | Anchor::Justified | Anchor::Distributed => 0.0,
+        Anchor::Top => 0.0,
         Anchor::Middle => (inner.height() - used_h) / 2.0,
-        Anchor::Bottom => inner.height() - used_h,
+        // PowerPoint draws justified and distributed anchoring at the bottom.
+        Anchor::Bottom | Anchor::Justified | Anchor::Distributed => inner.height() - used_h,
     };
     // anchorCtr: centre the block horizontally.
     let dx = if bp.anchor_ctr.unwrap_or(false) { ((inner.width() - out.content_width) / 2.0).max(0.0) } else { 0.0 };
@@ -1880,10 +1888,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 face: st.face.clone(),
                 size: st.size,
                 color: st.color,
-                glyphs: g
-                    .into_iter()
-                    .map(|(gid, x)| (gid, ox + bx + x + if line.column > 0 { line.column as f64 * (col_w + col_gap) } else { 0.0 }, line.baseline))
-                    .collect(),
+                glyphs: g.into_iter().map(|(gid, x)| (gid, ox + bx + x + col_x(line.column), line.baseline)).collect(),
                 cells: vec![],
                 fake_bold: false,
                 fake_italic: false,

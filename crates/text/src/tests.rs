@@ -1116,6 +1116,11 @@ fn mongolian_lines_run_left_to_right_and_stacked_letters_stand_one_em_apart() {
     sh2.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::Stacked);
     let st = lay(&p2, &sh2, 200.0, 400.0);
     assert!(st.lines[0].top > st.lines[1].top);
+    // wordArtVertRtl stacks the same way with lines from right to left.
+    sh2.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::StackedRtl);
+    let sr = lay(&p2, &sh2, 200.0, 400.0);
+    assert!(sr.lines[0].top < sr.lines[1].top);
+    assert!(sr.runs.iter().filter(|r| !r.cells.is_empty()).all(|r| r.upright));
     let e = &s.lines[0].edges;
     assert!((e[1].1 - e[1].0 - 20.0).abs() < 0.01 && (e[2].1 - e[2].0 - 20.0).abs() < 0.01, "{e:?}");
 }
@@ -1165,4 +1170,29 @@ fn strikethrough_sits_at_the_font_strikeout_position() {
     let d = l.decos.iter().find(|d| !d.behind).expect("a strikethrough");
     assert!((l.lines[0].baseline - d.rect.y0 - r.face.strikeout.0 * k).abs() < 0.01, "top at the strikeout position");
     assert!((d.rect.height() - (r.face.strikeout.1 * k).max(0.5)).abs() < 0.01);
+}
+
+#[test]
+fn rtl_columns_start_on_the_right_and_just_anchoring_sits_at_the_bottom() {
+    let text = "word ".repeat(200);
+    let (p, mut sh) = setup(&text, 400.0, 200.0);
+    let t = sh.text.as_mut().unwrap();
+    t.body.columns = Some(2);
+    t.body.col_spacing = Some(20.0);
+    t.paragraphs[0].runs[0].props.size = Some(12.0);
+    let ltr = lay(&p, &sh, 400.0, 200.0);
+    sh.text.as_mut().unwrap().body.rtl_col = Some(true);
+    let rtl = lay(&p, &sh, 400.0, 200.0);
+    let first = |l: &TextLayout| l.lines.iter().find(|x| x.column == 0).map(|x| x.extent.0).unwrap();
+    let second = |l: &TextLayout| l.lines.iter().find(|x| x.column == 1).map(|x| x.extent.0).unwrap();
+    assert!(first(&ltr) < second(&ltr));
+    assert!(first(&rtl) > second(&rtl), "with rtlCol the first column is on the right");
+    // anchor="just" and "dist" draw like "b".
+    let (p, mut sh) = setup("one line", 400.0, 300.0);
+    sh.text.as_mut().unwrap().body.anchor = Some(Anchor::Bottom);
+    let b = lay(&p, &sh, 400.0, 300.0).lines[0].top;
+    for a in [Anchor::Justified, Anchor::Distributed] {
+        sh.text.as_mut().unwrap().body.anchor = Some(a);
+        assert!((lay(&p, &sh, 400.0, 300.0).lines[0].top - b).abs() < 0.01, "{a:?}");
+    }
 }
