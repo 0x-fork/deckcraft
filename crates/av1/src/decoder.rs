@@ -633,7 +633,9 @@ impl Decoder {
 /// Decode a frame job and publish its results.
 fn run_job(job: FrameJob, pool: &Pool, stats: &Mutex<DecodeStats>) {
     let mut st = DecodeStats::default();
-    match decode_frame(&job, pool, &mut st) {
+    // A panic while decoding must still publish an error: the output and every frame that
+    // references this one wait on these slots.
+    match guarded(|| decode_frame(&job, pool, &mut st)) {
         Ok((rf, pic)) => {
             if let Some(ps) = &job.picture {
                 ps.set(pic.map(Arc::new).ok_or(Error::Invalid("shown frame without picture")));
@@ -650,6 +652,12 @@ fn run_job(job: FrameJob, pool: &Pool, stats: &Mutex<DecodeStats>) {
     if let Ok(mut s) = stats.lock() {
         s.merge(&st);
     }
+}
+
+/// Run `f`, turning a panic into an error (the decoder's own code never panics on purpose; this
+/// keeps a bug from stranding the job's waiters).
+fn guarded<R>(f: impl FnOnce() -> Result<R>) -> Result<R> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(Err(Error::Invalid("frame decode panicked")))
 }
 
 /// The whole decoding process of one frame: setup, tiles, post-filters, motion vector storage
@@ -946,4 +954,33 @@ fn project(fs: &mut FrameState, src: usize, dst_sign: i32) -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    #[test]
+    fn a_panicking_job_still_publishes_an_error_to_its_waiters() {
+        let slot: Arc<Slot<u32>> = Slot::new();
+        let picture: Arc<Slot<u32>> = Slot::new();
+        // Waiters: the output and a dependent frame, on their own threads.
+        let (tx, rx) = std::sync::mpsc::channel();
+        for s in [slot.clone(), picture.clone()] {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(s.wait().is_err());
+            });
+        }
+        let (s, p) = (slot.clone(), picture.clone());
+        std::thread::spawn(move || {
+            let r: Result<u32> = guarded(|| panic!("hostile frame"));
+            p.set(r.clone());
+            s.set(r);
+        });
+        for _ in 0..2 {
+            assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(10)), Ok(true));
+        }
+        assert_eq!(guarded(|| Ok(5)).ok(), Some(5));
+    }
 }
