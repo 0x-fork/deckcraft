@@ -1284,9 +1284,20 @@ impl Renderer {
             ctx.set_transform(Affine::IDENTITY);
             ctx.push_layer(None, None, Some(rf.start_alpha.clamp(0.0, 1.0) as f32 * 0.6), None, Some(blur(rf.blur * 0.5 * k)));
             ctx.set_transform(mm);
-            if let Some(fl) = fill {
-                paint::fill_path(ctx, rctx, fl, ph, &silhouette, Rect::new(0.0, 0.0, w, h), mm, FillMode::Norm, 1.0, rctx.pres);
+            match content {
+                // A picture reflects its pixels (it has no fill of its own).
+                Some(pf) => {
+                    ctx.push_clip_layer(&silhouette);
+                    paint::picture(ctx, rctx.pres, pf, Rect::new(0.0, 0.0, w, h), mm, None);
+                    ctx.pop_layer();
+                }
+                None => {
+                    if let Some(fl) = fill {
+                        paint::fill_path(ctx, rctx, fl, ph, &silhouette, Rect::new(0.0, 0.0, w, h), mm, FillMode::Norm, 1.0, rctx.pres);
+                    }
+                }
             }
+            ctx.set_transform(mm);
             // Fade mask.
             ctx.push_layer(None, Some(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn)), None, None, None);
             let grad = peniko::Gradient::new_linear(Point::new(0.0, h), Point::new(0.0, h * (1.0 - rf.end_pos.clamp(0.01, 1.0))))

@@ -710,3 +710,18 @@ fn an_upright_picture_fill_stays_upright_in_a_turned_shape() {
         }
     }
 }
+
+#[test]
+fn a_picture_reflects_its_pixels() {
+    let mut p = picture_deck(None);
+    let s = std::sync::Arc::make_mut(&mut p.slides[0]);
+    if let Some(sh) = s.shapes.first_mut() {
+        let rf = deckcraft_model::style::Reflection { blur: 0.0, start_alpha: 1.0, end_alpha: 0.0, end_pos: 0.5, dist: 0.0 };
+        sh.effects = Some(deckcraft_model::Effects { reflection: Some(rf), ..Default::default() });
+    }
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    // The blue picture spans 100..200 down; just below it, its reflection tints the page blue.
+    let below = img.pixel(200, 204);
+    assert!(below[2] > 200 && below[0] < 200, "{below:?}");
+    assert!(close(img.pixel(200, 290), WHITE, 10), "faded out by half its height");
+}
