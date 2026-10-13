@@ -161,3 +161,31 @@ fn trimming_a_path_leaves_its_ends_off_by_arc_length() {
     let r = Rect::new(0.0, 0.0, 10.0, 10.0).to_path(0.1);
     assert_eq!(trim_ends(&r, 3.0, 3.0).elements().len(), r.elements().len());
 }
+
+fn radial(focus: [f64; 4]) -> Shape {
+    use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
+    let stops = vec![GradientStop { pos: 0.0, color: ColorRef::rgb(WHITE) }, GradientStop { pos: 1.0, color: ColorRef::rgb(Rgba::BLACK) }];
+    Shape {
+        id: ShapeId(13),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
+        fill: Some(Fill::Gradient(Gradient { stops, shape: GradientShape::Path { path: "circle".into(), focus }, rotate_with_shape: true })),
+        line: no_line(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_radial_gradient_off_centre_ends_on_the_circle_around_the_box() {
+    // Focus a fifth of the way in from the top-left corner. PowerPoint's last colour is reached on
+    // the circle through the box's corners, so the near corner is dark as well as the far one.
+    let img = render(vec![radial([0.2, 0.2, 0.8, 0.8])]);
+    assert!(img.pixel(181, 141)[0] > 240, "white at the focus {:?}", img.pixel(181, 141));
+    assert!(img.pixel(101, 101)[0] < 60, "near corner dark {:?}", img.pixel(101, 101));
+    assert!(img.pixel(498, 298)[0] < 60, "far corner dark {:?}", img.pixel(498, 298));
+    // Straight above the focus the box's edge is well inside the circle: still light.
+    assert!(img.pixel(181, 101)[0] > 150, "{:?}", img.pixel(181, 101));
+    // A centred one is symmetric, dark only at the corners.
+    let img = render(vec![radial([0.5, 0.5, 0.5, 0.5])]);
+    assert!(img.pixel(300, 200)[0] > 240 && img.pixel(101, 101)[0] < 60);
+    assert!((img.pixel(110, 200)[0] as i32 - img.pixel(490, 200)[0] as i32).abs() <= 2);
+}

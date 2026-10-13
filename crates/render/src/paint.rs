@@ -60,16 +60,7 @@ pub fn fill_path(
                     peniko::Gradient::new_linear(Point::new(c.x - dx * half, c.y - dy * half), Point::new(c.x + dx * half, c.y + dy * half))
                         .with_stops(stops.as_slice())
                 }
-                GradientShape::Path { focus, .. } => {
-                    let fx = bounds.x0 + bounds.width() * (focus[0] + (1.0 - focus[2])) / 2.0;
-                    let fy = bounds.y0 + bounds.height() * (focus[1] + (1.0 - focus[3])) / 2.0;
-                    // Reach the farthest corner, so a gradient from a corner covers the whole box.
-                    let r = [(bounds.x0, bounds.y0), (bounds.x1, bounds.y0), (bounds.x0, bounds.y1), (bounds.x1, bounds.y1)]
-                        .iter()
-                        .map(|(x, y)| ((x - fx).powi(2) + (y - fy).powi(2)).sqrt())
-                        .fold(1e-6, f64::max);
-                    peniko::Gradient::new_radial(Point::new(fx, fy), r as f32).with_stops(stops.as_slice())
-                }
+                GradientShape::Path { focus, .. } => circle_gradient(*focus, bounds).with_stops(stops.as_slice()),
             };
             ctx.set_paint(grad);
             ctx.fill_path(path);
@@ -116,17 +107,29 @@ pub fn gradient(shape: &GradientShape, mut stops: Vec<(f64, Rgba)>, bounds: Rect
             peniko::Gradient::new_linear(Point::new(c.x - dx * half, c.y - dy * half), Point::new(c.x + dx * half, c.y + dy * half))
                 .with_stops(stops.as_slice())
         }
-        GradientShape::Path { focus, .. } => {
-            let fx = bounds.x0 + bounds.width() * (focus[0] + (1.0 - focus[2])) / 2.0;
-            let fy = bounds.y0 + bounds.height() * (focus[1] + (1.0 - focus[3])) / 2.0;
-            // Reach the farthest corner, so a gradient from a corner covers the whole box.
-            let r = [(bounds.x0, bounds.y0), (bounds.x1, bounds.y0), (bounds.x0, bounds.y1), (bounds.x1, bounds.y1)]
-                .iter()
-                .map(|(x, y)| ((x - fx).powi(2) + (y - fy).powi(2)).sqrt())
-                .fold(1e-6, f64::max);
-            peniko::Gradient::new_radial(Point::new(fx, fy), r as f32).with_stops(stops.as_slice())
-        }
+        GradientShape::Path { focus, .. } => circle_gradient(*focus, bounds).with_stops(stops.as_slice()),
     }
+}
+
+/// A `circle` path gradient over `bounds` with focus rectangle `focus` (`fillToRect` insets, as
+/// fractions). As PowerPoint draws it (fitted to its exports): the first stop is a point at the
+/// focus (the middle of the focus rectangle) and the last is the circle around the whole box (its
+/// centre, half its diagonal), with circles in between moving from one to the other. A focus off
+/// the centre so bunches the colours on its near side; a gradient "from a corner" reaches its
+/// last colour at that corner too, not only at the far one.
+pub fn circle_gradient(focus: [f64; 4], bounds: Rect) -> peniko::Gradient {
+    let fx = bounds.x0 + bounds.width() * (focus[0] + (1.0 - focus[2])) / 2.0;
+    let fy = bounds.y0 + bounds.height() * (focus[1] + (1.0 - focus[3])) / 2.0;
+    let c = bounds.center();
+    let r = (bounds.width().hypot(bounds.height()) / 2.0).max(1e-6);
+    let f = Point::new(fx, fy);
+    if !(f.is_finite() && c.is_finite() && r.is_finite()) {
+        return peniko::Gradient::new_radial(c, r as f32);
+    }
+    // A focus on or outside the end circle has no circle through it: keep it just inside.
+    let d = f - c;
+    let f = if d.hypot() > r * 0.999 { c + d * (r * 0.999 / d.hypot()) } else { f };
+    peniko::Gradient::new_two_point_radial(f, 0.0, c, r as f32)
 }
 
 /// Draw a picture fill into `bounds` (shape-local) honouring crop and stretch/tile modes; an animated
