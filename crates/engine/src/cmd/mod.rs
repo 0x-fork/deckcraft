@@ -10,6 +10,7 @@ pub mod insert;
 pub mod inspect;
 pub mod media;
 pub mod merge;
+pub mod reuse;
 pub mod review;
 pub mod selection;
 pub mod shape;
@@ -128,6 +129,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(file::specs());
         v.extend(edit::specs());
         v.extend(slide::specs());
+        v.extend(reuse::specs());
         v.extend(insert::specs());
         v.extend(shape::specs());
         v.extend(arrange::specs());

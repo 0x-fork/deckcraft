@@ -380,6 +380,14 @@ fn slides_group(app: &mut SlideApp, ui: &mut Ui) {
                 if ui.button("Slides from Outline…").clicked() {
                     app.dialog = Some(crate::dialogs::Dialog::new("outline"));
                 }
+                let desktop = app.services.pick_open.is_some();
+                for (label, keep) in [("Reuse Slides…", false), ("Reuse Slides (Keep Source Formatting)…", true)] {
+                    let r = ui.add_enabled(desktop, egui::Button::new(label));
+                    if r.clicked() {
+                        run(app, "app.reuseSlidesDialog", json!({"keepFormatting": keep}));
+                    }
+                    r.on_disabled_hover_text("Choosing a presentation to reuse needs the desktop app");
+                }
             });
         }
         rows(ui, |ui| {
