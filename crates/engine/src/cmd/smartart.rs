@@ -23,7 +23,7 @@ pub const MAX_LEVEL: u8 = 8;
 const MAX_SHAPES: usize = 40;
 
 /// DeckCraft's layouts, with the names PowerPoint's gallery gives them.
-pub const LAYOUTS: [(&str, &str); 22] = [
+pub const LAYOUTS: [(&str, &str); 28] = [
     ("list", "Vertical Bullet List"),
     ("blockList", "Basic Block List"),
     ("hBulletList", "Horizontal Bullet List"),
@@ -46,6 +46,12 @@ pub const LAYOUTS: [(&str, &str); 22] = [
     ("timeline", "Basic Timeline"),
     ("venn", "Basic Venn"),
     ("target", "Basic Target"),
+    ("textCycle", "Text Cycle"),
+    ("continuousCycle", "Continuous Cycle"),
+    ("horizontalHierarchy", "Horizontal Hierarchy"),
+    ("gridMatrix", "Grid Matrix"),
+    ("gear", "Gear"),
+    ("funnel", "Funnel"),
 ];
 /// SmartArt Styles.
 pub const STYLES: [(&str, &str); 9] = [
@@ -129,7 +135,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Layout",
             ["SmartArt Design", "Layouts"],
             None,
-            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target}",
+            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target|textCycle|continuousCycle|horizontalHierarchy|gridMatrix|gear|funnel}",
             has_selection,
             change_layout
         ),
@@ -508,8 +514,13 @@ const MIN_SCALE: f64 = 0.25;
 /// body's shrink-on-overflow autofit.
 fn fit_words(sh: &mut Shape) {
     let Some(w) = sh.xfrm.map(|x| x.w) else { return };
+    // Round shapes keep their text in the inscribed rectangle (about 71% of the width).
+    let text_w = match sh.geom.preset_name() {
+        Some("ellipse" | "gear6" | "gear9") => w * 0.71,
+        _ => w,
+    };
     let Some(body) = &mut sh.text else { return };
-    let avail = w - body.body.inset_l.unwrap_or(7.2) - body.body.inset_r.unwrap_or(7.2);
+    let avail = text_w - body.body.inset_l.unwrap_or(7.2) - body.body.inset_r.unwrap_or(7.2);
     let mut scale: f64 = 1.0;
     for p in &body.paragraphs {
         let line = avail - p.props.margin_left.unwrap_or(0.0).max(0.0);
@@ -572,7 +583,8 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
         out.push((sh, vec![]));
     };
     match d.kind.as_str() {
-        "hierarchy" => return hierarchy(d, area),
+        "hierarchy" => return hierarchy(d, area, false),
+        "horizontalHierarchy" => return hierarchy(d, area, true),
         "list" | "hBulletList" => {
             // Vertical / Horizontal Bullet List: a coloured title bar, sub-points in a pale box below.
             let vertical = d.kind == "list";
@@ -785,6 +797,108 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 }
             }
         }
+        "textCycle" | "continuousCycle" => {
+            // Text Cycle: the text alone around a circle, arrows between. Continuous Cycle: boxes on
+            // a ring.
+            let text_only = d.kind == "textCycle";
+            let r = area.h.min(area.w) * 0.36;
+            let (cx, cy) = (area.x + area.w / 2.0, area.y + area.h / 2.0);
+            let dd = (r * 0.8).min(2.0 * std::f64::consts::PI * r / nf * 0.62);
+            if !text_only {
+                let ring = r * 2.0 + dd * 0.3;
+                let mut sh = deco("donut", Xfrm::new(cx - ring / 2.0, cy - ring / 2.0, ring, ring), 0.0);
+                sh.geom = Geom::Preset { name: "donut".into(), adj: vec![7000.0] };
+                paint(d, &mut sh, 0, true);
+                out.push((sh, vec![]));
+            }
+            for (i, g) in gs.iter().enumerate() {
+                let a = (i as f64 / nf * 360.0 - 90.0).to_radians();
+                let (w, h) = (dd * 1.35, dd * 0.7);
+                let mut sh = text_shape("roundRect", Xfrm::new(cx + r * a.cos() - w / 2.0, cy + r * a.sin() - h / 2.0, w, h), &nodes(g), true);
+                paint(d, &mut sh, i, false);
+                if text_only {
+                    sh.fill = Some(Fill::None);
+                    sh.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                    sh.effects = None;
+                    let c = ColorRef::scheme(accent(d, i)).with(ColorTransform::LumMod(75_000));
+                    if let Some(b) = &mut sh.text {
+                        for p in &mut b.paragraphs {
+                            for r in &mut p.runs {
+                                r.props.fill = Some(Fill::solid(c.clone()));
+                            }
+                        }
+                    }
+                    if n > 1 {
+                        let m = ((i as f64 + 0.5) / nf * 360.0 - 90.0).to_radians();
+                        let s = (dd * 0.3).max(6.0);
+                        arrow(
+                            &mut out,
+                            Xfrm::new(cx + r * m.cos() - s / 2.0, cy + r * m.sin() - s * 0.4, s, s * 0.8),
+                            (i as f64 + 0.5) / nf * 360.0,
+                            i,
+                        );
+                    }
+                }
+                out.push((sh, g.clone()));
+            }
+        }
+        "gridMatrix" => {
+            // Grid Matrix: four quadrants on crossed axes.
+            let s = area.h.min(area.w);
+            let (x0, y0) = (area.x + (area.w - s) / 2.0, area.y + (area.h - s) / 2.0);
+            let t = s * 0.06;
+            for (preset, x) in [("leftRightArrow", Xfrm::new(x0, y0 + (s - t) / 2.0, s, t)), ("upDownArrow", Xfrm::new(x0 + (s - t) / 2.0, y0, t, s))]
+            {
+                let mut sh = deco(preset, x, 0.0);
+                paint(d, &mut sh, 0, true);
+                out.push((sh, vec![]));
+            }
+            let q = s / 2.0 - t * 1.2;
+            for (i, g) in gs.iter().take(4).enumerate() {
+                let (c, r) = ((i % 2) as f64, (i / 2) as f64);
+                let x = Xfrm::new(x0 + c * (s / 2.0 + t * 0.7) + t * 0.5 * (1.0 - c), y0 + r * (s / 2.0 + t * 0.7) + t * 0.5 * (1.0 - r), q, q);
+                titled(&mut out, "rect", x, i, g);
+            }
+        }
+        "gear" => {
+            // Gear: up to three interlocking gears, the first the biggest.
+            let s = area.h.min(area.w * 0.62);
+            let (x0, y0) = (area.x + (area.w - s / 0.62) / 2.0, area.y + (area.h - s) / 2.0);
+            let spots = [(0.0, 0.18, 0.66, "gear9"), (0.5, 0.0, 0.48, "gear6"), (0.56, 0.48, 0.42, "gear6")];
+            for (i, g) in gs.iter().take(3).enumerate() {
+                let (fx, fy, fs, preset) = spots[i];
+                let z = s * fs;
+                titled(&mut out, preset, Xfrm::new(x0 + fx * s * 1.3, y0 + fy * s, z, z), i, g);
+            }
+        }
+        "funnel" => {
+            // Funnel: the ideas poured in at the top (up to three), the last one coming out below.
+            let s = area.h.min(area.w);
+            let (cx, y0) = (area.x + area.w / 2.0, area.y);
+            let fw = s * 0.8;
+            let fh = s * 0.62;
+            let mut f = deco("funnel", Xfrm::new(cx - fw / 2.0, y0, fw, fh), 0.0);
+            paint(d, &mut f, 0, true);
+            out.push((f, vec![]));
+            let (inside, last) = match gs.split_last() {
+                Some((l, r)) if !r.is_empty() => (r, Some(l)),
+                _ => (&gs[..], None),
+            };
+            let k = inside.len().min(3);
+            let dc = fw * 0.27;
+            let spots = [(0.0, 0.04), (-0.2, 0.3), (0.2, 0.3)];
+            for (i, g) in inside.iter().take(3).enumerate() {
+                let (dx, dy) = if k == 1 { (0.0, 0.15) } else { spots[i] };
+                titled(&mut out, "ellipse", Xfrm::new(cx + dx * fw - dc / 2.0, y0 + dy * fh + fh * 0.05, dc, dc), i, g);
+            }
+            if let Some(g) = last {
+                let a = s * 0.12;
+                let mut ar = deco("downArrow", Xfrm::new(cx - a / 2.0, y0 + fh, a, a * 1.2), 0.0);
+                paint(d, &mut ar, k, true);
+                out.push((ar, vec![]));
+                titled(&mut out, "roundRect", Xfrm::new(cx - fw * 0.35, y0 + fh + a * 1.3, fw * 0.7, (s - fh - a * 1.3).max(10.0)), k, g);
+            }
+        }
         "pictureHList" => {
             // Horizontal Picture List: a column per node, a big picture over its text.
             let w = area.w / nf;
@@ -843,7 +957,7 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 }
                 if let Some(b) = &mut sh.text {
                     // Text towards the circle's outer side, clear of the overlap.
-                    let p = dc * 0.18;
+                    let p = dc * 0.27;
                     let (dx, dy) = (a.cos() * p, a.sin() * p);
                     b.body.inset_l = Some((7.2 + dx).max(2.0));
                     b.body.inset_r = Some((7.2 - dx).max(2.0));
@@ -890,7 +1004,7 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
 }
 
 /// An organisation chart: one box per node, rows by level, each subtree as wide as its leaves.
-fn hierarchy(d: &Diagram, area: Xfrm) -> Vec<Item> {
+fn hierarchy(d: &Diagram, area: Xfrm, horizontal: bool) -> Vec<Item> {
     let nodes = &d.nodes[..d.nodes.len().min(MAX_SHAPES)];
     if nodes.is_empty() {
         return vec![];
@@ -922,9 +1036,11 @@ fn hierarchy(d: &Diagram, area: Xfrm) -> Vec<Item> {
         .collect();
     let rows = depth.iter().max().copied().unwrap_or(0) + 1;
     let total: usize = kids(None).iter().map(|&r| leaves[r]).sum::<usize>().max(1);
-    let cell_w = area.w / total as f64;
-    let row_h = area.h / rows as f64;
-    let (bw, bh) = (cell_w * 0.85, row_h * 0.6);
+    // Horizontal Hierarchy: the same tree turned a quarter, levels from left to right.
+    let (span, across) = if horizontal { (area.h, area.w) } else { (area.w, area.h) };
+    let cell_w = span / total as f64;
+    let row_h = across / rows as f64;
+    let (bw, bh) = if horizontal { (cell_w * 0.8, row_h * 0.7) } else { (cell_w * 0.85, row_h * 0.6) };
     // Left edge (in leaves) of each node's span.
     let mut left = vec![0usize; nodes.len()];
     let mut next_root = 0;
@@ -949,8 +1065,9 @@ fn hierarchy(d: &Diagram, area: Xfrm) -> Vec<Item> {
     }
     let boxes: Vec<Xfrm> = (0..nodes.len())
         .map(|i| {
-            let cx = area.x + (left[i] as f64 + leaves[i] as f64 / 2.0) * cell_w;
-            Xfrm::new(cx - bw / 2.0, area.y + depth[i] as f64 * row_h + (row_h - bh) / 2.0, bw, bh)
+            let c = (left[i] as f64 + leaves[i] as f64 / 2.0) * cell_w;
+            let r = depth[i] as f64 * row_h + (row_h - bh) / 2.0;
+            if horizontal { Xfrm::new(area.x + r, area.y + c - bw / 2.0, bh, bw) } else { Xfrm::new(area.x + c - bw / 2.0, area.y + r, bw, bh) }
         })
         .collect();
     let mut out: Vec<Item> = nodes
@@ -965,7 +1082,12 @@ fn hierarchy(d: &Diagram, area: Xfrm) -> Vec<Item> {
     for i in 0..nodes.len() {
         if let Some(p) = parent[i] {
             let (a, b) = (boxes[p], boxes[i]);
-            out.push((line_shape((a.x + a.w / 2.0, a.y + a.h), (b.x + b.w / 2.0, b.y)), vec![]));
+            let (p, q) = if horizontal {
+                ((a.x + a.w, a.y + a.h / 2.0), (b.x, b.y + b.h / 2.0))
+            } else {
+                ((a.x + a.w / 2.0, a.y + a.h), (b.x + b.w / 2.0, b.y))
+            };
+            out.push((line_shape(p, q), vec![]));
         }
     }
     out
@@ -1259,7 +1381,8 @@ mod tests {
                 let items = layout_items(&d, area);
                 let mut shown: Vec<usize> = items.iter().flat_map(|(_, m)| m.clone()).collect();
                 shown.sort_unstable();
-                let want: Vec<usize> = (0..6).collect();
+                // Gear draws three gears, as PowerPoint does: the fourth group isn't shown.
+                let want: Vec<usize> = (0..if kind == "gear" { 5 } else { 6 }).collect();
                 assert_eq!(shown, want, "{kind}");
                 for (sh, _) in &items {
                     let x = sh.xfrm.unwrap_or_default();
