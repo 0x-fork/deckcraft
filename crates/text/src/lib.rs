@@ -1057,31 +1057,50 @@ fn is_hangul(c: char) -> bool {
     matches!(c, '\u{1100}'..='\u{11FF}' | '\u{3130}'..='\u{318F}' | '\u{A960}'..='\u{A97F}' | '\u{AC00}'..='\u{D7FF}')
 }
 
-/// Closing East Asian punctuation that may hang past the end of a line (`hangingPunct`).
+/// East Asian commas and full stops, the punctuation PowerPoint lets hang past the end of a line
+/// (`hangingPunct`). Closing brackets don't hang: "「。」" overflowing by its "」" moves to the next
+/// line whole.
 fn is_hanging_punct(c: char) -> bool {
+    matches!(c, '、' | '。' | '，' | '．' | '､' | '｡')
+}
+
+/// Small kana, the prolonged sound mark and iteration marks: PowerPoint keeps them off the start
+/// of a line (strict Japanese line breaking), where UAX #14's default allows a break before them.
+fn is_cj_nonstarter(c: char) -> bool {
     matches!(
         c,
-        '、' | '。'
-            | '，'
-            | '．'
-            | '：'
-            | '；'
-            | '！'
-            | '？'
-            | '）'
-            | '」'
-            | '』'
-            | '】'
-            | '〕'
-            | '〉'
-            | '》'
-            | '〙'
-            | '〛'
-            | '｝'
-            | '］'
-            | '｣'
-            | '､'
-            | '｡'
+        'ぁ' | 'ぃ'
+            | 'ぅ'
+            | 'ぇ'
+            | 'ぉ'
+            | 'っ'
+            | 'ゃ'
+            | 'ゅ'
+            | 'ょ'
+            | 'ゎ'
+            | 'ゕ'
+            | 'ゖ'
+            | 'ァ'
+            | 'ィ'
+            | 'ゥ'
+            | 'ェ'
+            | 'ォ'
+            | 'ッ'
+            | 'ャ'
+            | 'ュ'
+            | 'ョ'
+            | 'ヮ'
+            | 'ヵ'
+            | 'ヶ'
+            | 'ー'
+            | '々'
+            | '〻'
+            | 'ゝ'
+            | 'ゞ'
+            | 'ヽ'
+            | 'ヾ'
+            | '\u{31F0}'..='\u{31FF}'
+            | 'ｧ'..='ｰ'
     )
 }
 
@@ -1113,7 +1132,7 @@ fn break_opportunities(text: &str, latin_break: bool) -> (Vec<bool>, Vec<bool>) 
     for (i, w) in chars.windows(2).enumerate() {
         let (prev, next) = (w[0], w[1]);
         // PowerPoint never breaks after a zero-width space, nor before an em dash (only after it).
-        let keep = if (is_hangul(prev) && is_hangul(next)) || prev == '\u{200B}' || next == '\u{2014}' {
+        let keep = if (is_hangul(prev) && is_hangul(next)) || prev == '\u{200B}' || next == '\u{2014}' || is_cj_nonstarter(next) {
             false
         } else {
             latin_break || !matches!(prev, '/' | '\\') || next.is_whitespace()

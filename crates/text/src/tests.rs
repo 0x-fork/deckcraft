@@ -1013,3 +1013,18 @@ fn a_line_broken_at_a_soft_hyphen_shows_a_hyphen() {
     assert_eq!(wide.lines.len(), 1);
     assert!(wide.runs.iter().all(|r| r.cells.iter().all(|c| c.1 != '\u{AD}' || r.glyphs.iter().all(|g| g.0 != r.face.glyph_for('-')))));
 }
+
+#[test]
+fn small_kana_and_closing_brackets_follow_powerpoint_kinsoku() {
+    // "っ" and "ー" never start a line: the character before them moves down too.
+    let w = one_line("あいうえお") + 0.5;
+    for (text, first) in [("あいうえおっかき", "あいうえ"), ("あいうえおーかき", "あいうえ"), ("あいうえおかき", "あいうえお")]
+    {
+        let lines = wrapped(text, w, |p| p.hanging_punct = Some(true));
+        assert_eq!(lines[0], first, "{text}: {lines:?}");
+    }
+    // A closing bracket doesn't hang like "。" does: "「。」" overflowing by "」" moves down whole.
+    let w = one_line("あいうえ「。") + 0.5;
+    let lines = wrapped("あいうえ「。」かき", w, |p| p.hanging_punct = Some(true));
+    assert_eq!(lines[0], "あいうえ", "{lines:?}");
+}
