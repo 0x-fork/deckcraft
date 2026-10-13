@@ -431,7 +431,7 @@ pub fn ppr(imp: &mut Imp, part: &Part, p: &El) -> (Option<u8>, ParaProps, Option
     (lvl, pp, def)
 }
 
-pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
+pub fn hyperlink(imp: &mut Imp, part: &Part, h: &El) -> Option<Hyperlink> {
     let rid = h.attr("r:id").unwrap_or("");
     let rel = part.rels.get(rid);
     let action = h.attr("action").unwrap_or("");
@@ -450,7 +450,8 @@ pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
         Action::Slide { slide }
     } else if let Some(q) = action.strip_prefix("ppaction://customshow?") {
         let id = q.split('&').find_map(|kv| kv.strip_prefix("id=")).unwrap_or("0");
-        Action::CustomShow { name: imp.custom_show_names.get(id).cloned().unwrap_or_else(|| id.to_string()) }
+        let returns = !matches!(q.split('&').find_map(|kv| kv.strip_prefix("return=")), Some("false" | "0"));
+        Action::CustomShow { name: imp.custom_show_names.get(id).cloned().unwrap_or_else(|| id.to_string()), returns }
     } else if action.starts_with("ppaction://program") {
         Action::Program { path: rel.map(|r| r.target.clone()).unwrap_or_default() }
     } else if action.starts_with("ppaction://media") {
@@ -470,7 +471,13 @@ pub fn hyperlink(imp: &Imp, part: &Part, h: &El) -> Option<Hyperlink> {
     } else {
         return None;
     };
-    Some(Hyperlink { action: a, tooltip: h.attr("tooltip").unwrap_or("").to_string(), highlight_click: h.bool("highlightClick").unwrap_or(false) })
+    Some(Hyperlink {
+        action: a,
+        tooltip: h.attr("tooltip").unwrap_or("").to_string(),
+        highlight_click: h.bool("highlightClick").unwrap_or(false),
+        stop_sound: h.bool("endSnd").unwrap_or(false),
+        sound: h.child("snd").and_then(|s| media_ref(imp, part, s)),
+    })
 }
 
 pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {
@@ -545,9 +552,12 @@ pub fn paragraph(imp: &mut Imp, part: &Part, p: &El) -> Paragraph {
     for e in p.elements() {
         match e.local() {
             "pPr" => {
-                let (lvl, pp, _) = ppr(imp, part, e);
+                let (lvl, pp, def) = ppr(imp, part, e);
                 para.level = lvl.unwrap_or(0);
                 para.props = pp;
+                if let Some(d) = def {
+                    para.def_props = d;
+                }
             }
             "r" => {
                 let props = e.child("rPr").map(|r| rpr(imp, part, r)).unwrap_or_default();

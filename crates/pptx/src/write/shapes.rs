@@ -582,6 +582,8 @@ fn media(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, m: &deckcraft_
             action: deckcraft_model::text::Action::PlayMedia,
             tooltip: String::new(),
             highlight_click: false,
+            sound: None,
+            stop_sound: false,
         });
     }
     cnvpr(w, x, o, id, &s2);

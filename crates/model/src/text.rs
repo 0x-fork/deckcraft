@@ -295,17 +295,36 @@ pub enum Strike {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Action {
-    Url { url: String },
-    Slide { slide: crate::SlideId },
+    Url {
+        url: String,
+    },
+    Slide {
+        slide: crate::SlideId,
+    },
     NextSlide,
     PreviousSlide,
     FirstSlide,
     LastSlide,
     EndShow,
     LastViewed,
-    CustomShow { name: String },
-    Program { path: String },
+    /// Run a custom show. `returns` is PowerPoint's "Show and return".
+    CustomShow {
+        name: String,
+        #[serde(default = "custom_show_returns", skip_serializing_if = "is_true")]
+        returns: bool,
+    },
+    Program {
+        path: String,
+    },
     PlayMedia,
+}
+
+fn custom_show_returns() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -316,6 +335,12 @@ pub struct Hyperlink {
     pub tooltip: String,
     #[serde(default)]
     pub highlight_click: bool,
+    /// Sound played when the action runs (`a:snd`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound: Option<crate::MediaId>,
+    /// `endSnd`: stop the sound that is already playing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stop_sound: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -448,6 +473,10 @@ pub struct Paragraph {
     #[serde(skip_serializing_if = "is_default_para")]
     pub props: ParaProps,
     pub runs: Vec<Run>,
+    /// `a:defRPr`: defaults for runs in this paragraph that omit a property. Sits above the
+    /// placeholder's list style, so a layout can still supply what this paragraph leaves unset.
+    #[serde(skip_serializing_if = "is_default_props")]
+    pub def_props: RunProps,
     /// Properties of the paragraph end mark (used for an empty paragraph's caret).
     #[serde(skip_serializing_if = "is_default_props")]
     pub end_props: RunProps,
