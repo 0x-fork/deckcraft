@@ -46,8 +46,56 @@ pub struct Textures {
     /// Canvas renders so far (tests, performance checks).
     pub canvas_renders: u64,
     thumbs: HashMap<usize, Entry>,
+    /// SmartArt gallery pictures by layout, style and colours (and, for hover previews, the
+    /// outline's hash).
+    smartart: HashMap<String, TextureHandle>,
     clock: u64,
     pub last_render_ms: f64,
+}
+
+impl Textures {
+    /// SmartArt gallery pictures cached so far (tests).
+    pub fn smartart_cached(&self) -> usize {
+        self.smartart.len()
+    }
+
+    /// A SmartArt layout drawn small for a gallery (`nodes` for a preview of the selected
+    /// graphic's own outline), cached; drawn with the active presentation's theme.
+    pub fn smartart(
+        &mut self,
+        ctx: &egui::Context,
+        p: &deckcraft_model::Presentation,
+        slide: usize,
+        kind: &str,
+        style: &str,
+        colors: &str,
+        nodes: Option<&[deckcraft_model::DiagramNode]>,
+        width_px: u32,
+    ) -> Option<TextureHandle> {
+        let mut key = format!("{kind}|{style}|{colors}|{width_px}");
+        if let Some(n) = nodes {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            for x in n {
+                (x.text.as_str(), x.level).hash(&mut h);
+            }
+            key.push_str(&format!("|{:x}", h.finish()));
+        }
+        if let Some(t) = self.smartart.get(&key) {
+            return Some(t.clone());
+        }
+        let mut s = p.slides.get(slide).or_else(|| p.slides.first())?.as_ref().clone();
+        let g = deckcraft_engine::cmd::smartart::preview(kind, style, colors, nodes);
+        let id = g.id;
+        s.shapes = vec![g];
+        let img = deckcraft_render::render_shape(p, &s, id, width_px as f64 / 336.0)?;
+        let tex = ctx.load_texture(format!("smartart-{key}"), to_color_image(&img, false), TextureOptions::LINEAR);
+        if self.smartart.len() > 300 {
+            self.smartart.clear();
+        }
+        self.smartart.insert(key, tex.clone());
+        Some(tex)
+    }
 }
 
 pub fn to_color_image(img: &Image, grayscale: bool) -> ColorImage {
