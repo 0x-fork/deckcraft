@@ -1107,26 +1107,31 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             simple(b.poly(&pts).take(), Rect::new(w * 8757.0 / 21600.0, h * 7637.0 / 21600.0, w * 13917.0 / 21600.0, h * 12963.0 / 21600.0), w, h)
         }
         "sun" => {
-            let k = a(0).clamp(12500.0, 46875.0) / 100000.0;
-            let (cx, cy) = (w / 2.0, h / 2.0);
-            let cr = 0.5 - k;
-            let core = Pb::new().ellipse(cx, cy, w * cr * 0.72, h * cr * 0.72).take();
-            let mut rays = Pb::new();
-            for i in 0..8 {
-                let ang = (i as f64 * 45.0).to_radians();
-                let half = 9f64.to_radians();
-                let rb = cr * 0.72 + 0.06;
-                let tip = (cx + w * 0.5 * ang.cos(), cy + h * 0.5 * ang.sin());
-                let b1 = (cx + w * rb * (ang - half).cos(), cy + h * rb * (ang - half).sin());
-                let b2 = (cx + w * rb * (ang + half).cos(), cy + h * rb * (ang + half).sin());
-                rays.poly(&[tip, b1, b2]);
-            }
-            Geometry {
-                paths: vec![fill(rays.take()), fill(core)],
-                text_rect: Rect::new(w * 0.3, h * 0.3, w * 0.7, h * 0.7),
-                handles: vec![],
-                sites: mid_sites(w, h),
-            }
+            // ECMA-376 sun: eight triangular rays (their bases at fixed fractions of the core's
+            // margin) around a circle of radius 50% - adj.
+            let a = a(0).clamp(12500.0, 46875.0);
+            let g0 = 50000.0 - a;
+            let (g1, g2) = (g0 * 30274.0 / 32768.0, g0 * 12540.0 / 32768.0);
+            let (g10, g11) = ((50000.0 - g1) * 0.75, (50000.0 - g2) * 0.75);
+            let (g12, g13, g14) = (g10 + 3662.0, g11 + 3662.0, g11 + 12500.0);
+            let (g15, g16, g17, g18) = (100000.0 - g10, 100000.0 - g12, 100000.0 - g13, 100000.0 - g14);
+            let x = |g: f64| w * g / 100000.0;
+            let y = |g: f64| h * g / 100000.0;
+            let (ox1, oy1, ox2, oy2) = (w * 18436.0 / 21600.0, h * 3163.0 / 21600.0, w * 3163.0 / 21600.0, h * 18436.0 / 21600.0);
+            let (hc, vc) = (w / 2.0, h / 2.0);
+            b.poly(&[(w, vc), (x(g15), y(g18)), (x(g15), y(g14))]);
+            b.poly(&[(ox1, oy1), (x(g16), y(g13)), (x(g17), y(g12))]);
+            b.poly(&[(hc, 0.0), (x(g18), y(g10)), (x(g14), y(g10))]);
+            b.poly(&[(ox2, oy1), (x(g13), y(g12)), (x(g12), y(g13))]);
+            b.poly(&[(0.0, vc), (x(g10), y(g14)), (x(g10), y(g18))]);
+            b.poly(&[(ox2, oy2), (x(g12), y(g17)), (x(g13), y(g16))]);
+            b.poly(&[(hc, h), (x(g14), y(g15)), (x(g18), y(g15))]);
+            b.poly(&[(ox1, oy2), (x(g17), y(g16)), (x(g16), y(g17))]);
+            b.ellipse(hc, vc, x(g0), y(g0));
+            let g7 = g0 * 23170.0 / 32768.0;
+            let mut g = simple(b.take(), Rect::new(x(50000.0 - g7), y(50000.0 - g7), x(50000.0 + g7), y(50000.0 + g7)), w, h);
+            g.handles.push(Handle::new(0, Point::new(0.0, vc), Vec2::new(w / 100000.0, 0.0), a, 12500.0, 46875.0));
+            g
         }
         "moon" => {
             let k = a(0).clamp(0.0, 87500.0) / 100000.0;
@@ -1612,19 +1617,36 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
         "ribbon" | "ribbon2" => ribbon(name == "ribbon2", w, h, a(0), a(1)),
         "verticalScroll" | "horizontalScroll" => scroll(name == "verticalScroll", w, h, a(0)),
         "wave" | "doubleWave" => {
-            let amp = h * a(0).clamp(0.0, 20000.0) / 1e5;
-            let shift = w * a(1).clamp(-10000.0, 10000.0) / 1e5;
+            // ECMA-376 wave / doubleWave: the top and bottom edges are cubic waves (one or two
+            // periods) of amplitude adj1, shifted sideways by adj2.
+            let a1 = a(0).clamp(0.0, if name == "wave" { 20000.0 } else { 12500.0 });
+            let a2 = a(1).clamp(-10000.0, 10000.0);
+            let y1 = h * a1 / 100000.0;
+            let dy2 = y1 * 10.0 / 3.0;
+            let (y2, y3, y4) = (y1 - dy2, y1 + dy2, h - y1);
+            let (y5, y6) = (y4 - dy2, y4 + dy2);
+            let of2 = w * a2 / 50000.0;
+            let dx2 = of2.min(0.0);
+            let dxr = of2.max(0.0);
+            let (x2, xr, xl, x10) = (-dx2, w - dxr, dxr, w + dx2);
+            let text_y = h * a1 / 50000.0;
             if name == "wave" {
-                b.m(shift.max(0.0), amp).c(w / 3.0, -amp, 2.0 * w / 3.0, 3.0 * amp, w + shift.min(0.0), amp);
-                b.l(w - shift.max(0.0), h - amp).c(2.0 * w / 3.0, h - 3.0 * amp, w / 3.0, h + amp, -shift.min(0.0), h - amp).z();
+                let dx3 = (dx2 + xr) / 3.0;
+                let (x3, x7) = (x2 + dx3, xl + dx3);
+                let (x4, x8) = ((x3 + xr) / 2.0, (x7 + x10) / 2.0);
+                b.m(x2, y1).c(x3, y2, x4, y3, xr, y1).l(x10, y4).c(x8, y6, x7, y5, xl, y4).z();
             } else {
-                b.m(0.0, amp).c(w / 6.0, -amp, w / 3.0, 3.0 * amp, w / 2.0, amp).c(2.0 * w / 3.0, -amp, 5.0 * w / 6.0, 3.0 * amp, w, amp);
-                b.l(w, h - amp)
-                    .c(5.0 * w / 6.0, h - 3.0 * amp, 2.0 * w / 3.0, h + amp, w / 2.0, h - amp)
-                    .c(w / 3.0, h - 3.0 * amp, w / 6.0, h + amp, 0.0, h - amp)
-                    .z();
+                let (dx3, dx4) = ((dx2 + xr) / 6.0, (dx2 + xr) / 3.0);
+                let (x3, x4, x5) = (x2 + dx3, x2 + dx4, (x2 + xr) / 2.0);
+                let x6 = x5 + dx3;
+                let x7 = (x6 + xr) / 2.0;
+                let (x10b, x11, x12) = (xl + dx3, xl + dx4, (xl + x10) / 2.0);
+                let x13 = x12 + dx3;
+                let x14 = (x13 + x10) / 2.0;
+                b.m(x2, y1).c(x3, y2, x4, y3, x5, y1).c(x6, y2, x7, y3, xr, y1).l(x10, y4);
+                b.c(x14, y6, x13, y5, x12, y4).c(x11, y6, x10b, y5, xl, y4).z();
             }
-            simple(b.take(), Rect::new(0.0, amp * 2.0, w, h - amp * 2.0), w, h)
+            simple(b.take(), Rect::new(x2.max(xl), text_y, xr.min(x10), h - text_y), w, h)
         }
         "wedgeRectCallout" | "wedgeRoundRectCallout" => {
             let r = if name == "wedgeRoundRectCallout" { ss * a(2).clamp(0.0, 50000.0) / 1e5 } else { 0.0 };
@@ -2186,6 +2208,25 @@ mod tests {
         use kurbo::Shape as _;
         let bb = g.paths[0].path.bounding_box();
         assert!((bb.x0 + 22.242).abs() < 0.01 && (bb.x1 - 122.242).abs() < 0.01 && bb.y0.abs() < 1e-6 && (bb.y1 - 260.0).abs() < 1e-6, "{bb:?}");
+    }
+
+    #[test]
+    fn sun_and_waves_match_powerpoints_outlines() {
+        // Points read off PowerPoint's outlines of the presets (216 pt square, default adjusts).
+        let k = 216.0;
+        let g = build("sun", k, k, &[]).unwrap();
+        for (x, y) in [(0.85352, 0.14644), (0.76161, 0.33987), (0.66013, 0.23839), (0.42825, 0.79823), (0.20177, 0.57175), (0.75, 0.5), (0.5, 0.25)] {
+            assert!(on_path(&g, Point::new(k * x, k * y), 0.02), "sun ({x}, {y})");
+        }
+        let g = build("wave", k, k, &[]).unwrap();
+        for (x, y) in [(0.21875, 0.00484), (1.0, 0.125), (1.0, 0.875), (0.0, 0.875)] {
+            assert!(on_path(&g, Point::new(k * x, k * y), 0.05), "wave ({x}, {y})");
+        }
+        // Shifted: a wave of 300 × 120 with adj (20000, 8000) starts 0.16 of the width in.
+        let g = build("wave", 300.0, 120.0, &[20000.0, 8000.0]).unwrap();
+        for (x, y) in [(0.18375, 0.00774), (0.84, 0.2), (1.0, 0.8), (0.16, 0.8)] {
+            assert!(on_path(&g, Point::new(300.0 * x, 120.0 * y), 0.05), "shifted wave ({x}, {y})");
+        }
     }
 
     #[test]
