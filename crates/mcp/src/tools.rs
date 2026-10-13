@@ -47,10 +47,10 @@ fn boolean(desc: &str) -> Value {
     json!({"type": "boolean", "description": desc})
 }
 fn mods_schema() -> Value {
-    json!({"type": "object", "description": "Modifier keys (cmd = Command on macOS / Ctrl elsewhere; alt = Option)", "properties": {"shift": {"type": "boolean"}, "alt": {"type": "boolean"}, "cmd": {"type": "boolean"}}})
+    json!({"type": "object", "additionalProperties": false, "description": "Modifier keys (cmd = Command on macOS / Ctrl elsewhere; alt = Option)", "properties": {"shift": {"type": "boolean"}, "alt": {"type": "boolean"}, "cmd": {"type": "boolean"}}})
 }
 fn obj(props: Value, required: &[&str]) -> Value {
-    let mut o = json!({"type": "object", "properties": props});
+    let mut o = json!({"type": "object", "properties": props, "additionalProperties": false});
     if !required.is_empty() {
         o["required"] = json!(required);
     }
@@ -294,8 +294,37 @@ fn wrap(r: Result<Value, String>) -> ToolResult {
     }
 }
 
+/// Keys other than the tool's schema properties are refused, so a misspelled argument does not
+/// succeed with the tool's defaults. Keys inside a free object such as `run_command`'s `params`
+/// belong to the command and are left for the command to read.
+fn unknown_argument_error(name: &str, args: &Value) -> Option<String> {
+    let defs = tool_definitions();
+    let def = defs.iter().find(|t| t.get("name").and_then(Value::as_str) == Some(name))?;
+    let mut allowed: Vec<&str> = def
+        .get("inputSchema")
+        .and_then(|s| s.get("properties"))
+        .and_then(Value::as_object)
+        .map(|p| p.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    allowed.sort_unstable();
+    let obj = args.as_object()?;
+    let mut unknown: Vec<&str> = obj.keys().map(String::as_str).filter(|k| !allowed.contains(k)).collect();
+    unknown.sort_unstable();
+    let first = unknown.first()?;
+    let expected = if allowed.is_empty() { "none".to_string() } else { allowed.join(", ") };
+    let (what, list) = if unknown.len() == 1 {
+        ("unknown argument", format!("{first:?}"))
+    } else {
+        ("unknown arguments", unknown.iter().map(|k| format!("{k:?}")).collect::<Vec<_>>().join(", "))
+    };
+    Some(format!("{name}: {what} {list} (expected: {expected})"))
+}
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, a: &Value) -> ToolResult {
     let a = if a.is_object() { a.clone() } else { json!({}) };
+    if let Some(msg) = unknown_argument_error(name, &a) {
+        return ToolResult::error(msg);
+    }
     match name {
         "list_commands" => wrap(b.call("engine.commands", json!({})).map(|v| {
             let f = a.get("filter").and_then(Value::as_str).unwrap_or("").to_lowercase();

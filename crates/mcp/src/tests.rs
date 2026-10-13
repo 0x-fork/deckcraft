@@ -80,6 +80,28 @@ fn agent_builds_a_deck() {
 }
 
 #[test]
+fn unknown_tool_arguments_are_refused() {
+    let mut s = Server::new(Box::new(Headless::new()));
+    tool(&mut s, "new_presentation", json!({}));
+    let charts = |v: &Value| v["shapes"].as_array().unwrap().iter().filter(|sh| sh["kind"] == "chart").count();
+    let before = charts(&tool(&mut s, "inspect_slide", json!({})));
+    let r = call(&mut s, 2, "tools/call", json!({"name": "insert_chart", "arguments": {"type": "column", "data": [["x", "A"], ["q1", 1]]}}));
+    assert_eq!(r["result"]["isError"], true);
+    let msg = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(msg.contains("unknown argument \"data\"") && msg.contains("categories") && msg.contains("series"), "{msg}");
+    assert_eq!(charts(&tool(&mut s, "inspect_slide", json!({}))), before, "a refused call inserts nothing");
+    let r = call(&mut s, 3, "tools/call", json!({"name": "list_commands", "arguments": {"query": "theme", "limit": 1}}));
+    assert_eq!(r["result"]["isError"], true);
+    let msg = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(msg.contains("unknown arguments \"limit\", \"query\"") && msg.contains("filter"), "{msg}");
+    // The command's own parameters stay inside `params`.
+    tool(&mut s, "run_command", json!({"command": "slide.new", "params": {"layout": "blank"}}));
+    let tools = call(&mut s, 4, "tools/list", json!({}));
+    let chart = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "insert_chart").unwrap();
+    assert_eq!(chart["inputSchema"]["additionalProperties"], false);
+}
+
+#[test]
 fn errors_are_reported_not_panics() {
     let mut s = Server::new(Box::new(Headless::new()));
     let r = call(&mut s, 1, "tools/call", json!({"name": "run_command", "arguments": {"command": "no.such"}}));
