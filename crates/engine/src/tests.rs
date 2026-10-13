@@ -835,3 +835,51 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn picture_styles_replace_each_other_in_one_step() {
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf,
+        0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+        0x82,
+    ];
+    let mut s = session();
+    let data = cmd::base64_encode(PNG);
+    let id = s.execute("insert.picture", &json!({"data": data, "name": "a.png", "rect": [100.0, 100.0, 200.0, 150.0]})).unwrap()["id"].clone();
+    let pic = |s: &Session| s.doc().unwrap().shapes().iter().find(|sh| json!(sh.id) == id).unwrap().clone();
+    assert_eq!(s.execute("picture.styles", &json!({})).unwrap().as_array().unwrap().len(), 24);
+
+    s.execute("picture.style", &json!({"ids": [id], "style": "reflectedRoundedRectangle"})).unwrap();
+    let p = pic(&s);
+    assert_eq!(p.geom.preset_name(), Some("roundRect"));
+    assert!(p.effects.as_ref().unwrap().reflection.is_some());
+
+    // The next style replaces the whole look: no leftover reflection.
+    s.execute("picture.style", &json!({"ids": [id], "style": "simpleFrameWhite"})).unwrap();
+    let p = pic(&s);
+    assert_eq!(p.geom.preset_name(), Some("rect"));
+    let e = p.effects.as_ref().unwrap();
+    assert!(e.reflection.is_none() && e.outer_shadow.is_some());
+    assert_eq!(p.line.as_ref().and_then(|l| l.width), Some(7.0));
+
+    s.execute("picture.style", &json!({"ids": [id], "style": "softEdgeOval"})).unwrap();
+    let p = pic(&s);
+    assert_eq!(p.geom.preset_name(), Some("ellipse"));
+    assert_eq!(p.effects.as_ref().unwrap().soft_edge, Some(12.0));
+    assert!(p.line.as_ref().is_some_and(|l| l.fill == Some(deckcraft_model::Fill::None)));
+
+    // Survives PPTX.
+    let doc = s.doc().unwrap().doc.as_ref().clone();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&doc).unwrap()).unwrap();
+    let bp = back.slides.iter().flat_map(|sl| &sl.shapes).find(|sh| matches!(sh.kind, deckcraft_model::ShapeKind::Picture { .. })).unwrap();
+    assert_eq!(bp.geom.preset_name(), Some("ellipse"));
+    assert_eq!(bp.effects.as_ref().and_then(|e| e.soft_edge), Some(12.0));
+
+    // One undo step per style; none clears; unknown is refused.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(pic(&s).geom.preset_name(), Some("rect"));
+    s.execute("picture.style", &json!({"ids": [id], "style": "none"})).unwrap();
+    assert!(pic(&s).effects.is_none() && pic(&s).line.is_none());
+    assert!(s.execute("picture.style", &json!({"ids": [id], "style": "sparkly"})).is_err());
+}

@@ -2090,29 +2090,59 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
-        let r = big_button(ui, Icon::QuickStyles, "Picture\nStyles", true);
-        egui::Popup::menu(&r).show(|ui| {
-            if ui.button("Simple Frame, White").clicked() {
-                run(app, "shape.line", json!({"color": "#FFFFFF", "width": 6}));
-                run(app, "shape.effects", json!({"shadow": "outer"}));
+        use deckcraft_engine::cmd::picture_style::{STYLES, look};
+        let names: Vec<String> = STYLES.iter().map(|(_, l)| l.to_string()).collect();
+        if let Some(i) = widgets::gallery(
+            ui,
+            STYLES.len(),
+            vec2(56.0, 44.0),
+            None,
+            |p, r, i| paint_picture_style(p, r, STYLES.get(i).and_then(|(id, _)| look(id))),
+            |i| names.get(i).cloned().unwrap_or_default(),
+        ) && let Some((id, _)) = STYLES.get(i)
+        {
+            run(app, "picture.style", json!({"style": id}));
+        }
+    });
+    group(ui, |ui| {
+        let sc = scheme(app);
+        let (m, a) = color_split(ui, Icon::QuickStyles, "Picture Border", Color32::BLACK, true);
+        if m.clicked() {
+            run(app, "shape.line", json!({"color": "#000000", "width": 1.0}));
+        }
+        widgets::color_popup(&a).show(|ui| {
+            if let Some(c) = widgets::color_grid(ui, &sc, Some("No Outline")) {
+                match c {
+                    Some(c) => run(app, "shape.line", json!({"color": cref_param(&c)})),
+                    None => run(app, "shape.line", json!({"none": true})),
+                }
             }
-            if ui.button("Drop Shadow Rectangle").clicked() {
-                run(app, "shape.effects", json!({"shadow": "bottom"}));
-            }
-            if ui.button("Rounded Diagonal Corner").clicked() {
-                run(app, "shape.change", json!({"preset": "round2DiagRect"}));
-            }
-            if ui.button("Soft Edge Rectangle").clicked() {
-                run(app, "shape.effects", json!({"softEdges": 10}));
-            }
-            if ui.button("Reflected Rounded Rectangle").clicked() {
-                run(app, "shape.change", json!({"preset": "roundRect"}));
-                run(app, "shape.effects", json!({"reflection": "half"}));
-            }
-            if ui.button("Oval").clicked() {
-                run(app, "shape.change", json!({"preset": "ellipse"}));
-            }
+            ui.separator();
+            ui.menu_button("Weight", |ui| {
+                for w in [0.25, 0.5, 0.75, 1.0, 1.5, 2.25, 3.0, 4.5, 6.0] {
+                    if ui.button(format!("{w} pt")).clicked() {
+                        run(app, "shape.line", json!({"width": w}));
+                    }
+                }
+            });
+            ui.menu_button("Dashes", |ui| {
+                for (l, d) in [
+                    ("Solid", "solid"),
+                    ("Round Dot", "sysDot"),
+                    ("Square Dot", "sysDash"),
+                    ("Dash", "dash"),
+                    ("Dash Dot", "dashDot"),
+                    ("Long Dash", "lgDash"),
+                ] {
+                    if ui.button(l).clicked() {
+                        run(app, "shape.line", json!({"dash": d}));
+                    }
+                }
+            });
         });
+        if ui.small_button("Reset Style").on_hover_text("Remove the picture style").clicked() {
+            run(app, "picture.style", json!({"style": "none"}));
+        }
         big(app, ui, Icon::AltText, "Alt\nText", "app.dialog", json!({"id": "altText"}));
     });
     arrange_group(app, ui);
@@ -2224,6 +2254,46 @@ fn table_design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
     });
+}
+
+/// A Picture Styles gallery tile: a landscape "picture" in the style's shape and frame.
+fn paint_picture_style(p: &egui::Painter, r: Rect, lk: Option<deckcraft_engine::cmd::picture_style::Look>) {
+    let Some(lk) = lk else { return };
+    let r = r.shrink(7.0);
+    if lk.shadow.is_some() {
+        p.rect_filled(r.translate(vec2(2.0, 2.0)), CornerRadius::same(2), Color32::from_black_alpha(60));
+    }
+    let sky = Color32::from_rgb(0x7F, 0xB2, 0xE5);
+    let frame = lk.frame.map(|(c, w)| Stroke::new((w as f32 / 2.5).clamp(1.0, 4.0), theme::to_color32(c)));
+    let edge = Stroke::new(0.5, Color32::from_gray(150));
+    match lk.preset {
+        "ellipse" => {
+            p.add(egui::Shape::ellipse_filled(r.center(), r.size() / 2.0, sky));
+            p.add(egui::Shape::ellipse_stroke(r.center(), r.size() / 2.0, frame.unwrap_or(edge)));
+        }
+        preset => {
+            let round = if preset == "rect" { 0 } else { 6 };
+            p.rect_filled(r, CornerRadius::same(round), sky);
+            p.rect_stroke(r, CornerRadius::same(round), frame.unwrap_or(edge), egui::StrokeKind::Middle);
+        }
+    }
+    // Hills, so the tile reads as a picture.
+    let base = r.bottom() - r.height() * 0.15;
+    p.line_segment(
+        [pos2(r.left() + r.width() * 0.2, base), pos2(r.center().x, r.top() + r.height() * 0.45)],
+        Stroke::new(1.5, Color32::from_rgb(0x3A, 0x7D, 0x44)),
+    );
+    p.line_segment(
+        [pos2(r.center().x, r.top() + r.height() * 0.45), pos2(r.right() - r.width() * 0.2, base)],
+        Stroke::new(1.5, Color32::from_rgb(0x3A, 0x7D, 0x44)),
+    );
+    if lk.reflection {
+        p.rect_filled(
+            Rect::from_min_max(pos2(r.left(), r.bottom() + 1.0), pos2(r.right(), r.bottom() + 5.0)),
+            CornerRadius::ZERO,
+            sky.gamma_multiply(0.3),
+        );
+    }
 }
 
 pub fn paint_table_style(p: &egui::Painter, r: Rect, id: &str, sc: &deckcraft_color::ColorScheme) {
