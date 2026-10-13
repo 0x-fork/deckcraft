@@ -68,6 +68,10 @@ pub struct TextSel {
     /// Editing the slide's speaker notes (shape is ignored).
     #[serde(default)]
     pub notes: bool,
+    /// The caret position that sits at the end of a wrapped line (after End) rather than at the
+    /// start of the next line. Ignored once the caret moves anywhere else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_end: Option<(usize, usize)>,
 }
 
 impl TextSel {
@@ -76,6 +80,10 @@ impl TextSel {
     }
     pub fn ordered(&self) -> ((usize, usize), (usize, usize)) {
         if self.anchor <= self.caret { (self.anchor, self.caret) } else { (self.caret, self.anchor) }
+    }
+    /// Is the caret drawn at the end of the line before (upstream), not the start of the next?
+    pub fn at_line_end(&self) -> bool {
+        self.line_end == Some(self.caret)
     }
 }
 
@@ -339,6 +347,10 @@ pub struct Session {
     pub media_status: std::collections::HashMap<ShapeId, MediaStatus>,
     /// Animated GIF pictures paused with `media.gifPlay` (the others play).
     pub gif_paused: std::collections::HashSet<ShapeId>,
+    /// Text keys follow the Mac (Option+arrows move by word, Cmd+arrows to the line or text
+    /// ends) instead of Windows and Linux (Ctrl+arrows by word or paragraph). Defaults to the
+    /// platform DeckCraft was built for.
+    pub mac_keys: bool,
 }
 
 impl Default for Session {
@@ -366,6 +378,7 @@ impl Session {
             recovery_dir: None,
             media_status: Default::default(),
             gif_paused: Default::default(),
+            mac_keys: cfg!(target_os = "macos"),
         }
     }
     /// A session with one new presentation open.
@@ -492,6 +505,10 @@ impl Session {
     pub fn select(&mut self, f: impl FnOnce(&Presentation, &mut Selection)) -> Result<()> {
         let st = self.doc_mut()?;
         let doc = st.doc.clone();
+        // A caret placed anywhere starts downstream; only End puts it back at a line's end.
+        if let Some(t) = st.selection.text.as_mut() {
+            t.line_end = None;
+        }
         f(&doc, &mut st.selection);
         clamp_selection(st);
         st.revision += 1;
@@ -536,3 +553,5 @@ pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_keys;

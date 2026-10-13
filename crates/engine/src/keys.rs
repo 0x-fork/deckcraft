@@ -20,6 +20,30 @@ pub fn shortcut_matches(shortcut: &str, key: &str, mods: Mods) -> bool {
     k.eq_ignore_ascii_case(key) && (has("cmd") || has("ctrl")) == mods.cmd && has("shift") == mods.shift && (has("alt") || has("option")) == mods.alt
 }
 
+/// A key name in one spelling: lower case, `ArrowLeft` → `left`, and egui's names for
+/// punctuation keys (`Period`, `CloseBracket`…) → the character, so `Cmd+Shift+.` matches the
+/// key egui reports for Ctrl+Shift+> and `Cmd+]` the one for Ctrl+].
+pub fn key_token(key: &str) -> String {
+    let k = key.to_ascii_lowercase();
+    let k = k.trim_start_matches("arrow");
+    match k {
+        "period" | ">" => ".",
+        "comma" | "<" => ",",
+        "openbracket" | "{" => "[",
+        "closebracket" | "}" => "]",
+        "equals" => "=",
+        "minus" => "-",
+        "plus" => "+",
+        "slash" => "/",
+        "backslash" => "\\",
+        "semicolon" => ";",
+        "quote" => "'",
+        "backtick" => "`",
+        other => other,
+    }
+    .to_string()
+}
+
 impl Session {
     /// Handle one key press. `key` is a name (`Enter`, `Escape`, `Backspace`, `Delete`, `Tab`,
     /// `ArrowLeft`…, `Home`, `End`, `PageUp`, `PageDown`, `F5`) or a character (`b`, `]`).
@@ -28,21 +52,17 @@ impl Session {
         self.end_composition();
         let editing = self.active().is_some_and(|d| d.selection.text.is_some());
         let has_shapes = self.active().is_some_and(|d| !d.selection.shapes.is_empty());
-        let k = key.to_ascii_lowercase();
-        let k = k.trim_start_matches("arrow");
+        let k = key_token(key);
+        let k = k.as_str();
         if self.tool.drawing_freeform() && matches!(k, "enter" | "return" | "escape") {
             return self.finish_freeform(false);
         }
+        if editing && let Some((id, params)) = self.text_key(k, mods) {
+            let r = self.execute(id, &params)?;
+            return Ok(json!({"handled": true, "command": id, "result": r}));
+        }
         if editing && !mods.cmd {
             let r = match k {
-                "left" => Some(self.execute("text.move", &json!({"to": if mods.alt { "wordLeft" } else { "left" }, "extend": mods.shift}))),
-                "right" => Some(self.execute("text.move", &json!({"to": if mods.alt { "wordRight" } else { "right" }, "extend": mods.shift}))),
-                "up" => Some(self.execute("text.move", &json!({"to": if mods.alt { "paraStart" } else { "up" }, "extend": mods.shift}))),
-                "down" => Some(self.execute("text.move", &json!({"to": if mods.alt { "paraEnd" } else { "down" }, "extend": mods.shift}))),
-                "home" => Some(self.execute("text.move", &json!({"to": "lineStart", "extend": mods.shift}))),
-                "end" => Some(self.execute("text.move", &json!({"to": "lineEnd", "extend": mods.shift}))),
-                "backspace" => Some(self.execute("text.delete", &json!({"dir": if mods.alt { "wordBackward" } else { "backward" }}))),
-                "delete" => Some(self.execute("text.delete", &json!({"dir": if mods.alt { "wordForward" } else { "forward" }}))),
                 "enter" | "return" => Some(self.execute("text.insert", &json!({"text": if mods.shift { "\u{b}" } else { "\n" }}))),
                 "escape" | "esc" => Some(self.execute("text.exit", &json!({}))),
                 "tab" => {
@@ -117,6 +137,10 @@ impl Session {
         }
         // Shortcuts from the registry.
         let key_name = match k {
+            "left" => "Left",
+            "right" => "Right",
+            "up" => "Up",
+            "down" => "Down",
             "enter" | "return" => "Enter",
             "escape" | "esc" => "Escape",
             "delete" => "Delete",
@@ -127,7 +151,7 @@ impl Session {
             "end" => "End",
             "tab" => "Tab",
             "space" | " " => "Space",
-            _ => key,
+            _ => k,
         };
         let found = crate::command_specs().iter().find(|c| c.shortcut.is_some_and(|s| shortcut_matches(s, key_name, mods))).map(|c| c.id);
         if let Some(id) = found {
@@ -135,6 +159,50 @@ impl Session {
             return Ok(json!({"handled": true, "command": id, "result": r}));
         }
         Ok(json!({"handled": false}))
+    }
+
+    /// The text-editing command for a navigation or deletion key while editing text, by
+    /// platform: Ctrl (Windows, Linux) or Option (Mac) moves and deletes by word; Ctrl+Up/Down
+    /// moves by paragraph; Ctrl+Home/End (Cmd+Up/Down on the Mac) go to the ends of the text and
+    /// Cmd+Left/Right on the Mac to the ends of the line. Shift extends the selection.
+    fn text_key(&self, k: &str, mods: Mods) -> Option<(&'static str, Value)> {
+        let word = if self.mac_keys { mods.alt && !mods.cmd } else { mods.cmd && !mods.alt };
+        let mac_cmd = self.mac_keys && mods.cmd && !mods.alt;
+        if mods.cmd && !mods.alt && !mods.shift {
+            // Ctrl+] / Ctrl+[ grow and shrink the font, like Ctrl+Shift+> / <.
+            match k {
+                "]" => return Some(("format.grow", json!({}))),
+                "[" => return Some(("format.shrink", json!({}))),
+                _ => {}
+            }
+        }
+        let plain = !mods.cmd && !mods.alt;
+        let to = match k {
+            "left" if word => "wordLeft",
+            "right" if word => "wordRight",
+            "left" if mac_cmd => "lineStart",
+            "right" if mac_cmd => "lineEnd",
+            "left" if plain => "left",
+            "right" if plain => "right",
+            "up" if mac_cmd => "start",
+            "down" if mac_cmd => "end",
+            "up" if word && self.mac_keys => "paraStart",
+            "down" if word && self.mac_keys => "paraEnd",
+            "up" if word => "paraUp",
+            "down" if word => "paraDown",
+            "up" if plain => "up",
+            "down" if plain => "down",
+            "home" if mods.cmd && !mods.alt => "start",
+            "end" if mods.cmd && !mods.alt => "end",
+            "home" if plain => "lineStart",
+            "end" if plain => "lineEnd",
+            "backspace" if word => return Some(("text.delete", json!({"dir": "wordBackward"}))),
+            "delete" if word => return Some(("text.delete", json!({"dir": "wordForward"}))),
+            "backspace" if plain => return Some(("text.delete", json!({"dir": "backward"}))),
+            "delete" if plain => return Some(("text.delete", json!({"dir": "forward"}))),
+            _ => return None,
+        };
+        Some(("text.move", json!({"to": to, "extend": mods.shift})))
     }
 
     /// Type text: into the text being edited, or (a shape selected) start editing it.

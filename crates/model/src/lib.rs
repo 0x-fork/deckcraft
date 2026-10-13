@@ -16,6 +16,7 @@ pub mod style;
 pub mod table;
 pub mod text;
 pub mod theme;
+pub mod words;
 
 use std::sync::Arc;
 

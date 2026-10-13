@@ -1036,6 +1036,89 @@ mod tests {
         assert_eq!(harness.state().session.documents().len(), 2);
     }
 
+    /// #268: Ctrl+Backspace, Ctrl+Delete, Ctrl+arrows and Ctrl+Shift+arrows in text, through real
+    /// egui key events (Windows keys).
+    #[test]
+    fn ctrl_word_keys_edit_text() {
+        use egui::{Key, Modifiers};
+        let mut session = Session::with_new();
+        session.mac_keys = false;
+        session.prefs.autocorrect = false;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, Services::default()),
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.event(egui::Event::Text("Hello, world.  Foo bar".into()));
+        harness.run_steps(1);
+        assert_eq!(title_text(harness.state()), "Hello, world.  Foo bar");
+        let caret = |h: &egui_kittest::Harness<'_, SlideApp>| h.state().session.active().unwrap().selection.text.clone().unwrap();
+        let ctrl = Modifiers::COMMAND;
+        let ctrl_shift = Modifiers::COMMAND | Modifiers::SHIFT;
+
+        // Ctrl+Left stops at every word and punctuation run, as in PowerPoint.
+        let mut stops = vec![];
+        for _ in 0..6 {
+            harness.key_press_modifiers(ctrl, Key::ArrowLeft);
+            harness.run_steps(1);
+            stops.push(caret(&harness).caret.1);
+        }
+        assert_eq!(stops, vec![19, 15, 12, 7, 5, 0]);
+        harness.key_press_modifiers(ctrl, Key::ArrowRight);
+        harness.run_steps(1);
+        assert_eq!(caret(&harness).caret, (0, 5));
+
+        // Ctrl+Shift+Right selects to the next stops.
+        harness.key_press_modifiers(ctrl_shift, Key::ArrowRight);
+        harness.key_press_modifiers(ctrl_shift, Key::ArrowRight);
+        harness.run_steps(1);
+        let t = caret(&harness);
+        assert_eq!((t.anchor, t.caret), ((0, 5), (0, 12)));
+
+        // Ctrl+Delete deletes the next word from the selection's start; Ctrl+Backspace the one
+        // before the caret.
+        harness.key_press_modifiers(ctrl, Key::Delete);
+        harness.run_steps(1);
+        assert_eq!(title_text(harness.state()), "Helloworld.  Foo bar");
+        harness.key_press(Key::End);
+        harness.key_press_modifiers(ctrl, Key::Backspace);
+        harness.run_steps(1);
+        assert_eq!(title_text(harness.state()), "Helloworld.  Foo ");
+
+        // Ctrl+Up/Down go by paragraph, Ctrl+Home/End to the text's ends.
+        harness.key_press(Key::Enter);
+        harness.event(egui::Event::Text("Next".into()));
+        harness.key_press_modifiers(ctrl, Key::ArrowUp);
+        harness.run_steps(1);
+        assert_eq!(caret(&harness).caret, (1, 0));
+        harness.key_press_modifiers(ctrl, Key::ArrowUp);
+        harness.run_steps(1);
+        assert_eq!(caret(&harness).caret, (0, 0));
+        harness.key_press_modifiers(ctrl, Key::ArrowDown);
+        harness.run_steps(1);
+        assert_eq!(caret(&harness).caret, (1, 0));
+        harness.key_press_modifiers(ctrl_shift, Key::Home);
+        harness.run_steps(1);
+        let t = caret(&harness);
+        assert_eq!((t.anchor, t.caret), ((1, 0), (0, 0)));
+
+        // Ctrl+Shift+> (egui reports the Period key) grows the selected text's font.
+        let size = |h: &mut egui_kittest::Harness<'_, SlideApp>| h.state_mut().session.execute("format.state", &json!({})).unwrap()["size"].as_f64();
+        let before = size(&mut harness);
+        harness.key_press_modifiers(ctrl_shift, Key::Period);
+        harness.run_steps(1);
+        let after = size(&mut harness).unwrap();
+        assert!(after > before.unwrap_or(0.0), "{before:?} → {after}");
+        harness.key_press_modifiers(ctrl, Key::OpenBracket);
+        harness.run_steps(1);
+        assert!(size(&mut harness).unwrap_or(f64::MAX) < after, "Ctrl+[ shrinks");
+    }
+
     #[test]
     fn home_needs_an_open_presentation() {
         let mut app = SlideApp::new(Session::new(), Services::default());

@@ -1860,23 +1860,69 @@ impl TextLayout {
     }
     /// Vertical caret movement: the position on the line above/below closest to `x`.
     pub fn vertical(&self, pos: Pos, down: bool, x: f64) -> Pos {
-        let Some(li) = self.line_of(pos) else { return pos };
-        let target = if down { li + 1 } else { li.wrapping_sub(1) };
-        let Some(l) = self.lines.get(target) else { return pos };
+        self.vertical_affine(pos, Affinity::Downstream, down, x).0
+    }
+    /// The line a caret is on. An upstream caret at the start of a soft-wrapped line (where End
+    /// leaves it, after the previous line's trailing spaces) belongs to the line before.
+    pub fn line_index(&self, pos: Pos, affinity: Affinity) -> Option<usize> {
+        if affinity == Affinity::Upstream && pos.ch > 0 {
+            for (i, w) in self.lines.windows(2).enumerate() {
+                if let [a, b] = w
+                    && b.para == pos.para
+                    && a.para == pos.para
+                    && b.start == pos.ch
+                {
+                    return Some(i);
+                }
+            }
+        }
+        self.line_of_affine(pos, affinity)
+    }
+    /// Up/Down from a caret with its affinity: the position on the line above/below nearest `x`.
+    pub fn vertical_affine(&self, pos: Pos, affinity: Affinity, down: bool, x: f64) -> (Pos, Affinity) {
+        let Some(li) = self.line_index(pos, affinity) else { return (pos, affinity) };
+        let target = if down { li.checked_add(1) } else { li.checked_sub(1) };
+        let Some(l) = target.and_then(|t| self.lines.get(t)) else { return (pos, affinity) };
         let p = Point::new(x, (l.top + l.bottom) / 2.0);
         let mut h = self.hit(p);
         if h.para != l.para {
             h.para = l.para;
-            h.ch = h.ch.clamp(l.start, l.end);
         }
-        h
+        h.ch = h.ch.clamp(l.start, l.end);
+        (h, Affinity::Downstream)
     }
     /// Start/end of the visual line containing `pos` (logical: Home/End).
     pub fn line_bounds(&self, pos: Pos) -> (Pos, Pos) {
-        match self.line_of(pos).and_then(|i| self.lines.get(i)) {
+        self.line_bounds_affine(pos, Affinity::Downstream)
+    }
+    /// Start/end of the visual line a caret with this affinity is on.
+    pub fn line_bounds_affine(&self, pos: Pos, affinity: Affinity) -> (Pos, Pos) {
+        match self.line_index(pos, affinity).and_then(|i| self.lines.get(i)) {
             Some(l) => (Pos { para: l.para, ch: l.start }, Pos { para: l.para, ch: l.end }),
             None => (pos, pos),
         }
+    }
+    /// Where End puts the caret: after a soft wrap, past the line's trailing spaces at the start
+    /// of the next line with upstream affinity (so it is still drawn on this line), else the end
+    /// of the paragraph.
+    pub fn line_end_caret(&self, pos: Pos, affinity: Affinity) -> (Pos, Affinity) {
+        let Some(li) = self.line_index(pos, affinity) else { return (pos, Affinity::Downstream) };
+        let Some(l) = self.lines.get(li) else { return (pos, Affinity::Downstream) };
+        match self.lines.get(li + 1) {
+            Some(n) if n.para == l.para && n.start > l.start => (Pos { para: l.para, ch: n.start }, Affinity::Upstream),
+            _ => (Pos { para: l.para, ch: l.end }, Affinity::Downstream),
+        }
+    }
+    /// The caret to draw (x, top, bottom): an upstream caret after a soft wrap is drawn at the end
+    /// of the line it belongs to.
+    pub fn caret_drawn(&self, pos: Pos, affinity: Affinity) -> Option<(f64, f64, f64)> {
+        let li = self.line_index(pos, affinity)?;
+        let l = self.lines.get(li)?;
+        if pos.ch > l.end {
+            let x = l.caret_x.last().copied()?;
+            return Some((x, l.top, l.bottom));
+        }
+        self.caret_at(pos, affinity)
     }
     /// Bounding box of all glyphs/lines (shape-local).
     pub fn bounds(&self) -> Rect {

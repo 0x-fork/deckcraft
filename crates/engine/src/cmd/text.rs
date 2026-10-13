@@ -39,6 +39,16 @@ pub fn specs() -> Vec<CommandSpec> {
             commit
         ),
         cmd!(noundo "text.move", "Move Insertion Point", [], None, "{to: left|right|up|down|wordLeft|wordRight|lineStart|lineEnd|paraStart|paraEnd|start|end, extend?: bool}", has_text, move_caret),
+        cmd!(
+            "text.delete",
+            "Delete Text",
+            [],
+            Some("Backspace"),
+            "{dir?: backward|forward|wordBackward|wordForward} — the word directions are Ctrl+Backspace/Delete: they work from the start of a selection without deleting it",
+            has_text,
+            delete
+        ),
+        cmd!(noundo "text.move", "Move Insertion Point", [], None, "{to: left|right|up|down|wordLeft|wordRight|lineStart|lineEnd|paraStart|paraEnd|paraUp|paraDown|start|end, extend?: bool} — left/right are on screen: in a right-to-left paragraph left goes forward", has_text, move_caret),
         cmd!(noundo "text.select", "Select Text", [], None, "{anchor: [p, c], caret: [p, c]}", has_text, select),
         cmd!(noundo "text.selectAll", "Select All Text", [], None, "{}", has_text, select_all),
         cmd!(noundo "text.selectWord", "Select Word", [], None, "{at?: [p, c]}", has_text, select_word),
@@ -187,7 +197,9 @@ pub fn caret_line(st: &DocState, t: &TextSel) -> Option<(deckcraft_geom::Point, 
         &body,
         &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
     );
-    let (cx, top, bot) = l.caret(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 })?;
+    // After End on a wrapped line the caret is drawn at that line's end.
+    let aff = if t.at_line_end() { deckcraft_text::Affinity::Upstream } else { deckcraft_text::Affinity::Downstream };
+    let (cx, top, bot) = l.caret_drawn(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 }, aff)?;
     let m = deckcraft_render::text_transform(x.affine(), geo.text_rect, l.rotation);
     Some((m * deckcraft_geom::Point::new(cx, top), m * deckcraft_geom::Point::new(cx, bot)))
 }
@@ -232,7 +244,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.select(|_, sel| {
         sel.shapes = vec![id];
-        sel.text = Some(TextSel { shape: id, anchor: at, caret: at, cell, notes: false });
+        sel.text = Some(TextSel { shape: id, anchor: at, caret: at, cell, notes: false, line_end: None });
     })?;
     Ok(json!({"id": id, "at": [at.0, at.1]}))
 }
@@ -503,13 +515,15 @@ pub(crate) fn delete_dir(s: &mut Session, dir: &str) -> Result<Value> {
     let dir = dir.to_string();
     edit_text(s, move |body, t| {
         let (a, b) = t.ordered();
-        let at = if a != b {
+        let at = if dir == "wordBackward" || dir == "wordForward" {
+            // Ctrl+Backspace/Delete work from the start of a selection and leave the rest of it
+            // (PowerPoint for Windows).
+            ed::delete_word(body, a, dir == "wordForward")
+        } else if a != b {
             ed::delete(body, a, b)
         } else {
             let other = match dir.as_str() {
                 "forward" => ed::char_move(body, a, true),
-                "wordBackward" => ed::word_move(body, a, false),
-                "wordForward" => ed::word_move(body, a, true),
                 _ => {
                     // Backspace at the start of an indented/bulleted paragraph outdents first.
                     if a.1 == 0
@@ -536,7 +550,16 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     delete_dir(s, str_param(p, "dir").unwrap_or("backward"))
 }
 
+/// Is paragraph `para` right-to-left (its lines run from the right)?
+fn para_rtl(layout: Option<&deckcraft_text::TextLayout>, body: &TextBody, para: usize) -> bool {
+    match layout.and_then(|l| l.lines.iter().find(|x| x.para == para)) {
+        Some(line) => line.rtl,
+        None => body.paragraphs.get(para).and_then(|x| x.props.rtl).unwrap_or(false),
+    }
+}
+
 fn move_caret(s: &mut Session, p: &Value) -> Result<Value> {
+    use deckcraft_text::Affinity;
     let to = str_param(p, "to").unwrap_or("right").to_string();
     let extend = bool_or(p, "extend", false);
     let st = s.doc()?;
@@ -545,27 +568,44 @@ fn move_caret(s: &mut Session, p: &Value) -> Result<Value> {
     let layout = layout_for(st, &t);
     let lp = |c: Pos| deckcraft_text::Pos { para: c.0, ch: c.1 };
     let caret = t.caret;
+    let aff = if t.at_line_end() { Affinity::Upstream } else { Affinity::Downstream };
+    // Left and right are on screen: in a right-to-left paragraph left goes forward in the text.
+    let rtl = para_rtl(layout.as_ref(), &body, caret.0);
+    let to = match (to.as_str(), rtl) {
+        ("left", true) => "right",
+        ("right", true) => "left",
+        ("wordLeft", true) => "wordRight",
+        ("wordRight", true) => "wordLeft",
+        (x, _) => x,
+    }
+    .to_string();
     let collapse_to = |left: bool| if left { t.ordered().0 } else { t.ordered().1 };
+    let mut upstream = false;
     let new = match to.as_str() {
         "left" if t.is_range() && !extend => collapse_to(true),
         "right" if t.is_range() && !extend => collapse_to(false),
         "left" => ed::char_move(&body, caret, false),
         "right" => ed::char_move(&body, caret, true),
-        "wordLeft" => ed::word_move(&body, caret, false),
-        "wordRight" => ed::word_move(&body, caret, true),
+        // Ctrl+arrows with a selection go on from its start (left) or end (right).
+        "wordLeft" => ed::word_move(&body, if extend { caret } else { collapse_to(true) }, false),
+        "wordRight" => ed::word_move(&body, if extend { caret } else { collapse_to(false) }, true),
         "paraStart" => (caret.0, 0),
         "paraEnd" => (caret.0, body.paragraphs.get(caret.0).map(|x| x.char_len()).unwrap_or(0)),
+        "paraUp" => ed::para_up(&body, caret),
+        "paraDown" => ed::para_down(&body, caret),
         "start" => (0, 0),
         "end" => ed::end(&body),
         "up" | "down" | "lineStart" | "lineEnd" => match &layout {
             Some(l) => {
-                let x = l.caret(lp(caret)).map(|c| c.0).unwrap_or(0.0);
-                let r = match to.as_str() {
-                    "up" => l.vertical(lp(caret), false, x),
-                    "down" => l.vertical(lp(caret), true, x),
-                    "lineStart" => l.line_bounds(lp(caret)).0,
-                    _ => l.line_bounds(lp(caret)).1,
+                let x = l.caret_drawn(lp(caret), aff).map(|c| c.0).unwrap_or(0.0);
+                let (r, a) = match to.as_str() {
+                    "up" => l.vertical_affine(lp(caret), aff, false, x),
+                    "down" => l.vertical_affine(lp(caret), aff, true, x),
+                    "lineStart" => (l.line_bounds_affine(lp(caret), aff).0, Affinity::Downstream),
+                    // End stays on its line: after a soft wrap the caret sits at the line's end.
+                    _ => l.line_end_caret(lp(caret), aff),
                 };
+                upstream = a == Affinity::Upstream;
                 (r.para, r.ch)
             }
             None => match to.as_str() {
@@ -581,12 +621,13 @@ fn move_caret(s: &mut Session, p: &Value) -> Result<Value> {
     s.select(|_, sel| {
         if let Some(tt) = sel.text.as_mut() {
             tt.caret = new;
+            tt.line_end = if upstream { Some(new) } else { None };
             if !extend {
                 tt.anchor = new;
             }
         }
     })?;
-    Ok(json!({"caret": [new.0, new.1]}))
+    Ok(json!({"caret": [new.0, new.1], "lineEnd": upstream}))
 }
 
 fn select(s: &mut Session, p: &Value) -> Result<Value> {
@@ -633,11 +674,14 @@ fn select_para(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc()?;
     let t = st.selection.text.clone().ok_or_else(|| bad("text.selectParagraph", "not editing text"))?;
     let at = pos_param(p, "at").unwrap_or(t.caret);
-    let n = body_of(st, &t).and_then(|b| b.paragraphs.get(at.0)).map(|x| x.char_len()).unwrap_or(0);
+    let body = body_of(st, &t);
+    let n = body.and_then(|b| b.paragraphs.get(at.0)).map(|x| x.char_len()).unwrap_or(0);
+    // The paragraph mark is part of the paragraph (PowerPoint's triple-click selects it too).
+    let end = if body.is_some_and(|b| at.0 + 1 < b.paragraphs.len()) { (at.0 + 1, 0) } else { (at.0, n) };
     s.select(|_, sel| {
         if let Some(t) = sel.text.as_mut() {
             t.anchor = (at.0, 0);
-            t.caret = (at.0, n);
+            t.caret = end;
         }
     })?;
     ok()
