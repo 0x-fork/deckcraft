@@ -66,11 +66,11 @@ fn with<R>(f: impl FnOnce(&mut Cache) -> R) -> R {
 }
 
 fn adjust_key(a: &PictureAdjust) -> u64 {
-    let mut h: u64 = 1469598103934665603;
-    let mut mix = |v: u64| {
-        h ^= v;
-        h = h.wrapping_mul(1099511628211);
-    };
+    use std::hash::Hasher;
+    // A real hash: an FNV-style xor-multiply mix let (b, c) and (-b, -c) collide (the sign bits
+    // cancel), so a picture brightened and contrasted showed the darkened copy's pixels.
+    let mut hs = std::hash::DefaultHasher::new();
+    let mut mix = |v: u64| hs.write_u64(v);
     mix(a.brightness.to_bits());
     mix(a.contrast.to_bits());
     mix(a.saturation.unwrap_or(1.0).to_bits());
@@ -84,7 +84,7 @@ fn adjust_key(a: &PictureAdjust) -> u64 {
             mix(((c.r as u64) << 24) | ((c.g as u64) << 16) | ((c.b as u64) << 8) | c.a as u64 | 1 << 41);
         }
     }
-    h
+    hs.finish()
 }
 
 /// The duotone's dark and light colours. The painter resolves them to plain RGB first (see
@@ -366,6 +366,17 @@ mod tests {
         let other = PictureAdjust { duotone: Some((ColorRef::rgb(Rgba::rgb(0, 0, 0)), ColorRef::rgb(Rgba::rgb(255, 0, 0)))), ..Default::default() };
         assert_ne!(adjust_key(&adj), adjust_key(&other));
         assert_ne!(adjust_key(&adj), adjust_key(&PictureAdjust::default()));
+    }
+
+    #[test]
+    fn opposite_brightness_and_contrast_are_cached_apart() {
+        let a = PictureAdjust { brightness: 0.4, contrast: 0.4, ..Default::default() };
+        let b = PictureAdjust { brightness: -0.4, contrast: -0.4, ..Default::default() };
+        assert_ne!(adjust_key(&a), adjust_key(&b));
+        let c = PictureAdjust { brightness: 0.4, contrast: -0.4, ..Default::default() };
+        let d = PictureAdjust { brightness: -0.4, contrast: 0.4, ..Default::default() };
+        assert_ne!(adjust_key(&c), adjust_key(&d));
+        assert_eq!(adjust_key(&a), adjust_key(&a.clone()));
     }
 
     #[test]
