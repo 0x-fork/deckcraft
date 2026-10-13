@@ -16,6 +16,7 @@ pub mod icons;
 pub mod media;
 pub mod menus;
 pub mod panes;
+pub mod qat;
 pub mod ribbon;
 pub mod selpane;
 pub mod show;
@@ -102,6 +103,8 @@ pub struct UiState {
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
     pub grayscale: bool,
+    /// Quick Access Toolbar buttons, left to right.
+    pub qat: Vec<qat::QatItem>,
 }
 
 impl Default for UiState {
@@ -127,6 +130,7 @@ impl Default for UiState {
             ui_scale: 1.0,
             format_tab: "fill".into(),
             grayscale: false,
+            qat: qat::defaults(),
         }
     }
 }
@@ -168,6 +172,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
+    ("app.qat", "Quick Access Toolbar", None, "{add: command id, params?, label?, icon?} | {remove: id, params?} | {reset: true} → [buttons]"),
     ("app.links", "Community Links", None, "{}"),
 ];
 
@@ -541,6 +546,7 @@ impl SlideApp {
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
+            "app.qat" => return qat::command(self, p),
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
                 self.dialog = Some(dialogs::Dialog::new(d));
@@ -1140,6 +1146,40 @@ mod tests {
         let d = app.session.active().unwrap();
         let sh = &d.doc.slides[0].shapes[0];
         sh.text.as_ref().map(|t| t.paragraphs.iter().map(|p| p.text()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+    }
+
+    #[test]
+    fn quick_access_toolbar_adds_removes_resets_and_persists() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let ids = |app: &SlideApp| app.ui.qat.iter().map(|q| q.id.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(harness.state()), ["app.home", "file.save", "edit.undo", "edit.redo", "show.fromStart"]);
+        let app = harness.state_mut();
+        app.run("app.qat", json!({"add": "insert.table", "label": "Table", "icon": "table"})).unwrap();
+        app.run("app.qat", json!({"add": "insert.table"})).unwrap();
+        app.run("app.qat", json!({"add": "view.pane", "params": {"pane": "selection"}, "label": "Selection Pane"})).unwrap();
+        assert!(app.run("app.qat", json!({"add": "no.such"})).is_err());
+        app.run("app.qat", json!({"remove": "edit.redo"})).unwrap();
+        assert_eq!(ids(app), ["app.home", "file.save", "edit.undo", "show.fromStart", "insert.table", "view.pane"]);
+        assert_eq!(app.ui.qat[4].label, "Table");
+        // Saved with the rest of the UI state and read back.
+        let back: UiState = serde_json::from_value(serde_json::to_value(&app.ui).unwrap()).unwrap();
+        assert_eq!(back.qat, app.ui.qat);
+        harness.run_steps(2);
+        let app = harness.state_mut();
+        app.run("app.qat", json!({"remove": "view.pane", "params": {"pane": "selection"}})).unwrap();
+        assert_eq!(app.ui.qat.len(), 5);
+        app.run("app.qat", json!({"reset": true})).unwrap();
+        assert_eq!(ids(app), ["app.home", "file.save", "edit.undo", "edit.redo", "show.fromStart"]);
+        // An older settings file without the toolbar gets the defaults.
+        let old: UiState = serde_json::from_value(json!({"tab": "Home"})).unwrap();
+        assert_eq!(old.qat.len(), 5);
     }
 
     #[test]

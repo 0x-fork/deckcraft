@@ -3,17 +3,17 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
+| P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
 
 | Area | Parity |
 |---|---|
-| Application shell | 77% |
+| Application shell | 81% |
 | Files | 71% |
 | Slides | 90% |
 | Views | 90% |
@@ -45,7 +45,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Application shell | Start screen (new, templates/themes, recent) | P0 | D |
 | Application shell | Ribbon with Home/Insert/Draw/Design/Transitions/Animations/Slide Show/Review/View tabs | P0 | D |
 | Application shell | Contextual tabs (Shape Format, Picture Format, Table Design/Layout, Chart Design) | P0 | P |
-| Application shell | Quick Access toolbar / title bar commands | P1 | P |
+| Application shell | Quick Access toolbar / title bar commands | P1 | D |
 | Application shell | Native menu bar (macOS) with every command | P1 | M |
 | Application shell | Command palette / Tell me search | P1 | D |
 | Application shell | Keyboard shortcuts for every common command | P0 | D |
