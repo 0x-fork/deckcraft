@@ -327,7 +327,10 @@ fn apply_adjust(img: &mut image::RgbaImage, a: &PictureAdjust) {
         let s = if a.grayscale { 0.0 } else { sat };
         for v in &mut rgb {
             *v = y + (*v - y) * s;
-            *v = (*v - 128.0) * cf + 128.0 + b;
+            // Measured on PowerPoint's export of grey ramps: contrast scales about mid-grey by
+            // `cf`, and brightness adds b · 255 scaled by (1 + cf) / 2 (half of it is applied
+            // before the contrast stretch, half after): +40% bright, +40% contrast maps 0 to 54.
+            *v = (*v - 127.5) * cf + 127.5 + b * (1.0 + cf) / 2.0;
         }
         // Duotone: the pixel's luminance picks a colour between the dark and the light one.
         if let Some((d, l)) = duo {
@@ -366,6 +369,24 @@ mod tests {
         let other = PictureAdjust { duotone: Some((ColorRef::rgb(Rgba::rgb(0, 0, 0)), ColorRef::rgb(Rgba::rgb(255, 0, 0)))), ..Default::default() };
         assert_ne!(adjust_key(&adj), adjust_key(&other));
         assert_ne!(adjust_key(&adj), adjust_key(&PictureAdjust::default()));
+    }
+
+    #[test]
+    fn brightness_and_contrast_map_greys_like_powerpoint() {
+        // Grey levels PowerPoint's export gives for inputs 0, 32, 64, 96 (and 128, 160).
+        let run = |b: f64, c: f64, input: &[u8]| -> Vec<u8> {
+            let mut img = image::RgbaImage::from_fn(input.len() as u32, 1, |x, _| {
+                let v = input[x as usize];
+                image::Rgba([v, v, v, 255])
+            });
+            apply_adjust(&mut img, &PictureAdjust { brightness: b, contrast: c, ..Default::default() });
+            img.pixels().map(|p| p[0]).collect()
+        };
+        let near = |got: Vec<u8>, want: &[u8]| got.iter().zip(want).all(|(g, w)| (*g as i32 - *w as i32).abs() <= 5);
+        assert!(near(run(0.4, 0.4, &[0, 32, 64, 96]), &[54, 105, 157, 210]), "{:?}", run(0.4, 0.4, &[0, 32, 64, 96]));
+        assert!(near(run(0.4, -0.4, &[0, 32, 64, 96]), &[133, 152, 171, 190]));
+        assert!(near(run(-0.4, 0.4, &[128, 160, 192]), &[0, 45, 97]));
+        assert!(near(run(0.0, -0.8, &[0, 128, 255]), &[102, 127, 152]));
     }
 
     #[test]
