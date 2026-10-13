@@ -835,3 +835,55 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn paste_special_keeps_source_look_picture_or_text() {
+    use deckcraft_model::style::{ColorBase, Fill};
+    let mut s = session();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100], "text": "Q3 plan"})).unwrap();
+    s.execute("shape.fill", &json!({"color": "accent1"})).unwrap();
+    let old_accent = {
+        let d = s.doc().unwrap();
+        let sl = d.current_slide().unwrap();
+        d.doc.master_for(sl).unwrap().0.scheme().get(deckcraft_color::SchemeSlot::Accent1)
+    };
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("design.theme", &json!({"name": "Ember"})).unwrap();
+    {
+        let d = s.doc().unwrap();
+        let sl = d.current_slide().unwrap();
+        assert_ne!(d.doc.master_for(sl).unwrap().0.scheme().get(deckcraft_color::SchemeSlot::Accent1), old_accent);
+    }
+    let fill_of = |s: &Session, id: &Value| {
+        let sid = deckcraft_model::ShapeId(id.as_u64().unwrap() as u32);
+        s.doc().unwrap().shape(sid).unwrap().fill.clone()
+    };
+
+    let dest = s.execute("edit.pasteSpecial", &json!({"as": "destinationTheme"})).unwrap();
+    assert!(matches!(fill_of(&s, &dest["ids"][0]), Some(Fill::Solid { color }) if matches!(color.base, ColorBase::Scheme { .. })));
+
+    let keep = s.execute("edit.pasteSpecial", &json!({"as": "keepSource"})).unwrap();
+    match fill_of(&s, &keep["ids"][0]) {
+        Some(Fill::Solid { color }) => assert_eq!(color.base, ColorBase::Rgb { rgb: old_accent }),
+        f => panic!("{f:?}"),
+    }
+    // The clipboard itself still holds the theme-following shape.
+    assert!(matches!(&s.clipboard.shapes[0].fill, Some(Fill::Solid { color }) if matches!(color.base, ColorBase::Scheme { .. })));
+
+    let pic = s.execute("edit.pasteSpecial", &json!({"as": "picture"})).unwrap();
+    let pid = deckcraft_model::ShapeId(pic["id"].as_u64().or_else(|| pic["ids"][0].as_u64()).unwrap() as u32);
+    let d = s.doc().unwrap();
+    let sh = d.shape(pid).unwrap();
+    let deckcraft_model::ShapeKind::Picture { fill } = &sh.kind else { panic!("{:?}", sh.kind) };
+    assert_eq!(d.doc.media(fill.media).unwrap().content_type, "image/png");
+    let x = sh.xfrm.unwrap();
+    assert!((x.w - 216.0).abs() < 1.0 && (x.h - 116.0).abs() < 1.0, "{x:?}");
+
+    let n = s.doc().unwrap().current_slide().unwrap().shapes.len();
+    s.execute("edit.pasteSpecial", &json!({"as": "text"})).unwrap();
+    let d = s.doc().unwrap();
+    let last = d.current_slide().unwrap().shapes.last().unwrap();
+    assert_eq!(d.current_slide().unwrap().shapes.len(), n + 1);
+    assert_eq!(last.text.as_ref().unwrap().text(), "Q3 plan");
+    assert!(s.execute("edit.pasteSpecial", &json!({"as": "bogus"})).is_err());
+}

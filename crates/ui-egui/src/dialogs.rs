@@ -49,6 +49,7 @@ fn title(id: &str) -> &'static str {
         "symbol" => "Symbol",
         "equation" => "Equation",
         "spelling" => "Spelling",
+        "pasteSpecial" => "Paste Special",
         "accessibility" => "Accessibility Checker",
         "language" => "Language",
         "customShow" => "Custom Shows",
@@ -506,6 +507,27 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 run(app, "format.font", json!({"family": "Liberation Serif"}));
                 run(app, "format.italic", json!({"on": true}));
                 run(app, "format.size", json!({"size": 28}));
+            }
+            ok || cancel
+        }
+        "pasteSpecial" => {
+            const OPTS: [(&str, &str); 4] = [
+                ("destinationTheme", "Use Destination Theme"),
+                ("keepSource", "Keep Source Formatting"),
+                ("picture", "Picture (PNG)"),
+                ("text", "Keep Text Only"),
+            ];
+            let has_shapes = !app.session.clipboard.shapes.is_empty();
+            let mut cur = d.get("as", "destinationTheme");
+            ui.label("As:");
+            for (id, label) in OPTS {
+                let ok = has_shapes || matches!(id, "destinationTheme" | "text");
+                ui.add_enabled_ui(ok, |ui| ui.radio_value(&mut cur, id.to_string(), label));
+            }
+            d.fields.insert("as".into(), cur.clone());
+            let (ok, cancel) = buttons(ui, "OK");
+            if ok {
+                run(app, "edit.pasteSpecial", json!({"as": cur}));
             }
             ok || cancel
         }

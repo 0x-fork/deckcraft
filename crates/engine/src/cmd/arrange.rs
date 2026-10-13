@@ -153,7 +153,7 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Bounds of shapes (rotation included).
-fn union_bounds(xs: &[Xfrm]) -> Option<Rect> {
+pub(crate) fn union_bounds(xs: &[Xfrm]) -> Option<Rect> {
     let mut it = xs.iter().map(Xfrm::bounds);
     let first = it.next()?;
     Some(it.fold(first, |a, b| a.union(b)))
