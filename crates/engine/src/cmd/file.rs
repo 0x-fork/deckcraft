@@ -94,13 +94,36 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
     s.add_document(st)
 }
 
+/// A presentation read from disk, not yet added to a session: [`read_presentation_file`] needs no
+/// session, so a host can run it on a background thread and add the result with
+/// [`add_presentation_file`].
+#[derive(Debug)]
+pub struct LoadedFile {
+    pub path: String,
+    pub doc: Presentation,
+    /// A native or PPTX file (saving goes back to it); an outline import has no file to save to.
+    pub native: bool,
+}
+
+/// Read and parse the presentation at `path`.
 #[cfg(not(target_arch = "wasm32"))]
-fn open(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
+pub fn read_presentation_file(path: &str) -> Result<LoadedFile> {
     let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let doc = open_presentation(path, &bytes)?;
     let native = deckcraft_format::sniff(&bytes) || deckcraft_pptx::sniff(&bytes);
-    let i = add_opened(s, path, native.then(|| path.to_string()), doc);
+    Ok(LoadedFile { path: path.to_string(), doc, native })
+}
+
+/// Add a presentation read by [`read_presentation_file`] as the active document.
+pub fn add_presentation_file(s: &mut Session, f: LoadedFile) -> usize {
+    let LoadedFile { path, doc, native } = f;
+    add_opened(s, &path, native.then(|| path.clone()), doc)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
+    let i = add_presentation_file(s, read_presentation_file(path)?);
     let st = s.doc()?;
     Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts}))
 }

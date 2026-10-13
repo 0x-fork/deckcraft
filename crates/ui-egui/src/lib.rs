@@ -15,6 +15,7 @@ pub mod fillui;
 pub mod icons;
 pub mod media;
 pub mod menus;
+pub mod opening;
 pub mod panes;
 pub mod ribbon;
 pub mod selpane;
@@ -188,6 +189,8 @@ pub struct SlideApp {
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
+    /// A presentation being read in the background, with its progress window ([`opening`]).
+    pub opening: Option<opening::Opening>,
     /// A brief notice over the bottom of the window (missing fonts on opening a file).
     pub toast: Option<toast::Toast>,
     /// Documents (by uid) whose missing fonts have been mentioned.
@@ -242,6 +245,7 @@ impl SlideApp {
             show: None,
             media: media::MediaHost::new(audio_out),
             status: None,
+            opening: None,
             toast: None,
             fonts_noted: Default::default(),
             perf: Perf { frame_ms: 0.0, render_ms: 0.0, fps: 0.0 },
@@ -564,7 +568,7 @@ impl SlideApp {
     fn pick_and_open(&mut self) {
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick("open") {
-                let _ = self.open_path(&path);
+                self.open_path_in_background(&path);
             }
         } else if let Some(f) = self.services.open_async.as_mut() {
             f("open");
@@ -573,11 +577,16 @@ impl SlideApp {
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
+        self.note_recent(path);
+        Ok(())
+    }
+
+    /// A presentation was opened from `path`: first in the recent list, shown in Normal view.
+    pub(crate) fn note_recent(&mut self, path: &str) {
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
         self.ui.recent.truncate(12);
         self.ui.view = ViewMode::Normal;
-        Ok(())
     }
 
     fn pick_and_insert(&mut self, purpose: &str, cmd: &str) {
@@ -741,6 +750,7 @@ impl SlideApp {
         }
         self.last_time = now;
         self.drain_control(ctx);
+        self.poll_opening();
         if self.fonts_ready {
             self.drain_inbox();
         }
@@ -935,6 +945,7 @@ impl SlideApp {
         let t0 = now_ms();
         let t = theme::Tokens::get(&ctx);
         self.tick_media(&ctx);
+        self.opening_ui(&ctx);
         if self.show.is_some() {
             show::ui(self, ui);
             self.perf.frame_ms = now_ms() - t0;
