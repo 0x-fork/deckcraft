@@ -11,6 +11,7 @@ pub mod cmd;
 pub mod connect;
 pub mod fonts;
 pub mod guard;
+pub mod inkshape;
 pub mod keys;
 pub mod links;
 pub mod recovery;

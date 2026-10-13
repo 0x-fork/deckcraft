@@ -1200,8 +1200,12 @@ fn draw(app: &mut SlideApp, ui: &mut Ui) {
         }
     });
     group(ui, |ui| {
-        let r = big_button(ui, Icon::InkToShape, "Ink to\nShape", false);
-        let _ = r.on_hover_text("Ink to Shape (coming soon)");
+        let has_ink = app.session.doc().is_ok_and(|d| d.shapes().iter().any(|s| matches!(s.kind, deckcraft_model::ShapeKind::Ink { .. })));
+        let r = big_button(ui, Icon::InkToShape, "Ink to\nShape", has_ink);
+        if r.on_hover_text("Ink to Shape: turn drawn lines, rectangles, ovals and triangles into shapes").clicked() {
+            app.session.set_tool(ToolKind::Select);
+            run(app, "draw.inkToShape", json!({}));
+        }
         let r = big_button(ui, Icon::InkToText, "Ink to\nText", false);
         let _ = r.on_hover_text("Ink to Text (coming soon)");
         let r = big_button(ui, Icon::InkToMath, "Ink to\nMath", false);
@@ -2420,3 +2424,7 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
 }
+
+#[cfg(test)]
+#[path = "inktoshape_tests.rs"]
+mod inktoshape_tests;
