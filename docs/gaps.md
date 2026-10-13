@@ -197,8 +197,8 @@ Detail in [ui-parity.md](ui-parity.md).
   blocker.**
 - **Format Shape pane thinner than PowerPoint's** (Fill/Line/Effects/Size/Text Box pages, picture
   and texture options, 3-D). 6–10 h. **Beta blocker.**
-- **First-run and start screen** (#17, #76: missing File overlay, broken layout; recent files and
-  templates thin). 3–5 h.
+- **File tab depth** (#76 landed the Backstage): no online templates, cloud places, printer
+  choice, video/GIF/CD exports or document protection. 4–8 h for the parts that need no cloud.
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.

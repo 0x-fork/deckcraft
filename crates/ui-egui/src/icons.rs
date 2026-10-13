@@ -306,6 +306,13 @@ icons! {
     Collapse => "collapse",
     Expand => "expand",
     Pin => "pin",
+    // File tab (Backstage)
+    BackCircle => "back-circle",
+    SaveAs => "save-as",
+    Account => "account",
+    Recent => "recent",
+    NewFile => "new-file",
+    OpenFolder => "open-folder",
     // Status bar (small, monochrome)
     NotesSmall => "notes-small",
     CommentsSmall => "comments-small",
@@ -2359,6 +2366,33 @@ fn draw(p: &Pen<'_>, icon: Icon) {
             p.rshape(&m(&[(-6.0, 0.0), (6.0, 0.0), (6.0, 2.5), (-6.0, 2.5)]), 0.6, R, N);
             p.poly(&m(&[(-3.0, -7.0), (3.0, -7.0), (3.6, 0.0), (-3.6, 0.0)]), R, N);
             p.rshape(&m(&[(-4.2, -10.0), (4.2, -10.0), (4.2, -7.0), (-4.2, -7.0)]), 0.6, R, N);
+        }
+
+        // ----- File tab (Backstage) navigation: outlines in the ink colour -----
+        I::BackCircle => {
+            p.circle((12.0, 12.0), 9.8, N, K);
+            p.arrow((17.0, 12.0), (6.5, 12.0), K);
+        }
+        I::SaveAs => {
+            p.rline(&[(11.0, 20.5), (2.5, 20.5), (2.5, 3.0), (15.0, 3.0), (18.0, 6.0), (18.0, 10.5)], 1.2, K);
+            p.rect(6.0, 3.0, 13.0, 7.5, 0.6, N, K);
+            p.seg_w((13.5, 21.0), (21.5, 13.0), O, 1.4);
+            p.seg_w((12.5, 22.0), (13.5, 21.0), K, 1.0);
+        }
+        I::Account => {
+            p.circle((12.0, 8.0), 4.5, N, K);
+            p.line(&arc_pts((12.0, 22.0), 8.5, 7.5, 180.0, 360.0), K);
+        }
+        I::Recent => {
+            p.circle((12.0, 12.0), 9.8, N, K);
+            p.line(&[(12.0, 6.0), (12.0, 12.0), (16.0, 14.5)], K);
+        }
+        I::NewFile => {
+            p.rline(&[(14.0, 2.5), (5.0, 2.5), (5.0, 21.5), (19.0, 21.5), (19.0, 7.5), (14.0, 2.5), (14.0, 7.5), (19.0, 7.5)], 0.8, K);
+        }
+        I::OpenFolder => {
+            p.rline(&[(18.5, 9.0), (18.5, 6.5), (10.0, 6.5), (8.0, 4.0), (2.5, 4.0), (2.5, 19.5), (18.0, 19.5)], 1.0, K);
+            p.rline(&[(2.5, 19.5), (6.0, 10.0), (22.0, 10.0), (18.0, 19.5)], 1.0, K);
         }
 
         // ----- Status bar (monochrome) -----

@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod backstage;
 pub mod canvas;
 pub mod control;
 pub mod credits;
@@ -154,6 +155,9 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
     ("app.home", "Home", None, "{on?}"),
+    ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
+    ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
+    ("app.print", "Print", Some("Cmd+P"), "{layout?, perPage?, slides?, includeHidden?, frame?}"),
     ("app.about", "About DeckCraft", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
@@ -200,9 +204,10 @@ pub struct SlideApp {
     pub palette: Option<(String, usize)>,
     /// Integrated title bar (macOS traffic lights over our chrome).
     pub integrated_titlebar: bool,
-    /// The start screen is shown over the open presentations (Home), with the document count
-    /// and active index when it was opened: opening or creating a presentation leaves it.
-    pub home: Option<(usize, Option<usize>)>,
+    /// The File tab's full-window view (Backstage). Over a presentation it replaces the ribbon,
+    /// slides and status bar until Esc or Back; with nothing open it is the start screen. Opening,
+    /// creating or closing a presentation leaves it.
+    pub backstage: Option<backstage::Backstage>,
     pending_urls: Vec<String>,
     shot_token: u64,
     queued_shots: Vec<(u64, f64, u32)>,
@@ -247,7 +252,7 @@ impl SlideApp {
             canvas_region: None,
             palette: None,
             integrated_titlebar: false,
-            home: None,
+            backstage: None,
             pending_urls: vec![],
             shot_token: 0,
             queued_shots: vec![],
@@ -289,13 +294,153 @@ impl SlideApp {
         r
     }
 
-    fn docs_key(&self) -> (usize, Option<usize>) {
+    pub(crate) fn docs_key(&self) -> (usize, Option<usize>) {
         (self.session.documents().len(), self.session.active_index())
     }
 
-    /// Home is open over a presentation (not just the start screen with nothing open).
-    pub fn home_open(&self) -> bool {
-        self.home.is_some() && self.session.active().is_some()
+    /// The File tab's view is open over a presentation (not just the start screen with nothing
+    /// open).
+    pub fn backstage_open(&self) -> bool {
+        self.backstage.is_some() && self.session.active().is_some()
+    }
+
+    /// Opens the File tab's view on `page` (keeping its state when it is already open).
+    pub fn open_backstage(&mut self, page: backstage::Page) {
+        let key = self.docs_key();
+        match &mut self.backstage {
+            Some(b) => b.go(page),
+            None => self.backstage = Some(backstage::Backstage::new(page, key)),
+        }
+    }
+
+    /// Back to the presentation (no effect on the start screen, where nothing is open).
+    pub fn close_backstage(&mut self) {
+        if self.session.active().is_some() {
+            self.backstage = None;
+        }
+    }
+
+    /// Keeps the File tab's view in step with the open presentations: it closes when one is
+    /// opened, created or closed (the result shows), and it is the start screen when none is open.
+    fn sync_backstage(&mut self) {
+        let key = self.docs_key();
+        let has_doc = self.session.active().is_some();
+        let stale = self.backstage.as_ref().is_some_and(|b| b.docs != key);
+        if has_doc && stale {
+            self.backstage = None;
+        } else if !has_doc && (stale || self.backstage.is_none()) {
+            self.backstage = Some(backstage::Backstage::new(backstage::Page::Home, key));
+        }
+    }
+
+    /// File › Close and Ctrl+W: closes the active presentation, asking first when it has unsaved
+    /// changes (Save, Don't Save, Cancel), as PowerPoint does.
+    pub fn close_presentation(&mut self) {
+        match self.session.active() {
+            None => {}
+            Some(d) if d.is_dirty() => self.dialog = Some(dialogs::Dialog::new("close")),
+            Some(_) => {
+                let _ = self.run("file.close", json!({}));
+            }
+        }
+    }
+
+    /// The file name a save or export suggests: the presentation's title with `ext`.
+    fn suggested_name(&self, ext: &str) -> String {
+        let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
+        format!("{name}.{ext}")
+    }
+
+    /// Exports the active presentation as `fmt` (`pdf`, `png`, `pngAll`, `jpeg`, `pptx`,
+    /// `deckcraft`, `outline`) through `file.export`: the save picker on the desktop, a download
+    /// on the web. `extra` adds `file.export` params (the PDF's layout, slides…). The
+    /// presentation keeps its own file. Returns whether a file was written or handed over.
+    pub fn export_as(&mut self, fmt: &str, extra: Value) -> bool {
+        let Some(slide) = self.session.active().map(|d| d.selection.slide) else { return false };
+        let (ext, format, all) = match fmt {
+            "pdf" => ("pdf", "pdf", false),
+            "png" => ("png", "png", false),
+            "pngAll" => ("png", "png", true),
+            "jpeg" | "jpg" => ("jpg", "jpeg", false),
+            "pptx" => ("pptx", "pptx", false),
+            "outline" | "txt" => ("txt", "outline", false),
+            "deckcraft" => ("deckcraft", "deckcraft", false),
+            other => {
+                self.set_status(format!("DeckCraft can't export “{other}”"));
+                return false;
+            }
+        };
+        let suggested = self.suggested_name(ext);
+        if let Some(pick) = self.services.pick_save.as_mut() {
+            let Some(path) = pick(&suggested) else { return false };
+            let mut params = json!({"path": path, "format": format, "all": all});
+            if let (Some(o), Some(x)) = (params.as_object_mut(), extra.as_object()) {
+                o.extend(x.clone());
+            }
+            return match self.run("file.export", params) {
+                Ok(_) => {
+                    self.set_status(format!("Exported {path}"));
+                    true
+                }
+                Err(_) => false,
+            };
+        }
+        let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
+        let bytes = match format {
+            "png" | "jpeg" => {
+                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale: 2.0, ..Default::default() });
+                Ok(if format == "png" { img.to_png() } else { img.to_jpeg(92) })
+            }
+            "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
+            other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
+        };
+        self.download(&suggested, bytes)
+    }
+
+    /// Hands `bytes` to the browser as a download (web); false (with the reason in the status
+    /// bar) when there are no bytes or no way to download.
+    fn download(&mut self, name: &str, bytes: deckcraft_engine::Result<Vec<u8>>) -> bool {
+        match (bytes, self.services.download.as_mut()) {
+            (Ok(b), Some(dl)) => {
+                dl(name, &b);
+                true
+            }
+            (Err(e), _) => {
+                self.set_status(e.to_string());
+                false
+            }
+            (Ok(_), None) => {
+                self.set_status("Saving a copy needs a file picker, which this window doesn't have.");
+                false
+            }
+        }
+    }
+
+    /// File › Print: DeckCraft prints through a PDF. On the desktop the PDF (with the Print page's
+    /// layout, slides and options) is written to the temporary folder and opened in the system's
+    /// PDF viewer, which has the printers; on the web it downloads.
+    pub fn print_pdf(&mut self, params: Value) -> bool {
+        let Some((title, doc)) = self.session.active().map(|d| (d.title(), d.doc.clone())) else { return false };
+        let mut params = if params.is_object() { params } else { json!({}) };
+        if self.services.pick_save.is_none() {
+            // Web: the browser hands the PDF to the user.
+            let bytes = deckcraft_engine::cmd::file::pdf_bytes(&doc, &params);
+            return self.download(&format!("{title}.pdf"), bytes);
+        }
+        let safe: String = title.chars().map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' { c } else { '_' }).collect();
+        let path = std::env::temp_dir().join(format!("{safe} (print).pdf")).to_string_lossy().to_string();
+        if let Some(o) = params.as_object_mut() {
+            o.insert("path".into(), json!(path));
+            o.insert("format".into(), json!("pdf"));
+        }
+        match self.run("file.export", params) {
+            Ok(_) => {
+                self.open_url(&format!("file:///{}", path.replace('\\', "/").trim_start_matches('/')));
+                self.set_status("Opened the presentation as a PDF to print");
+                true
+            }
+            Err(_) => false,
+        }
     }
 
     fn flag(&mut self, params: &Value, cur: bool) -> bool {
@@ -358,8 +503,34 @@ impl SlideApp {
                 self.media.stop_owned(media::Owner::Show);
             }
             "app.home" => {
-                let on = self.flag(p, self.home.is_some());
-                self.home = (on && self.session.active().is_some()).then(|| self.docs_key());
+                let on = self.flag(p, self.backstage_open());
+                if on {
+                    self.open_backstage(backstage::Page::Home);
+                } else {
+                    self.close_backstage();
+                }
+            }
+            "app.backstage" => {
+                if !p.get("on").and_then(Value::as_bool).unwrap_or(true) {
+                    self.close_backstage();
+                    return Ok(json!({"page": self.backstage.as_ref().map(|b| b.page.id())}));
+                }
+                let page = match p.get("page").and_then(Value::as_str) {
+                    Some(id) => backstage::Page::parse(id).ok_or_else(|| format!("unknown File page `{id}`"))?,
+                    None => backstage::Page::Home,
+                };
+                if page.needs_doc() && self.session.active().is_none() {
+                    return Err(format!("File › {} needs an open presentation", page.label()));
+                }
+                self.open_backstage(page);
+                return Ok(json!({"page": page.id()}));
+            }
+            "app.closePresentation" => self.close_presentation(),
+            "app.print" => {
+                if self.session.active().is_none() {
+                    return Err("nothing to print: no presentation is open".into());
+                }
+                return Ok(json!({"printed": self.print_pdf(p.clone())}));
             }
             "app.about" => self.dialog = Some(dialogs::Dialog::new("about")),
             "app.palette" => self.palette = Some((String::new(), 0)),
@@ -678,16 +849,22 @@ impl SlideApp {
             return;
         }
         let events = ctx.input(|i| i.events.clone());
-        if self.home_open() {
-            // Only app shortcuts (Open, Command Palette…) and Escape, which goes back to the
-            // presentation: typing, pasting or deleting would edit the hidden presentation.
+        if self.backstage.is_some() {
+            // The File tab: its own keys (Esc goes back, arrows walk the side menu) and app
+            // shortcuts (New, Open, Command Palette…); typing, pasting or deleting would edit the
+            // hidden presentation.
             for e in events {
                 if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
-                    if key == egui::Key::Escape {
-                        self.home = None;
-                    } else if mods.cmd || mods.alt {
-                        menus::ui_shortcut(self, key, mods);
+                    if backstage::key(self, key, mods) || !(mods.cmd || mods.alt) || menus::ui_shortcut(self, key, mods) {
+                        continue;
+                    }
+                    // Engine shortcuts that don't touch the hidden slide (Ctrl+N).
+                    if mods.cmd
+                        && matches!(key, egui::Key::N)
+                        && let Err(e) = self.session.key(key_name(key), mods)
+                    {
+                        self.set_status(e.to_string());
                     }
                 }
             }
@@ -763,18 +940,21 @@ impl SlideApp {
             self.perf.frame_ms = now_ms() - t0;
             return;
         }
-        if self.home.is_some_and(|k| k != self.docs_key()) {
-            self.home = None;
-        }
+        self.sync_backstage();
         self.keyboard(&ctx);
+        self.sync_backstage();
         ribbon::title_bar(self, ui);
-        if self.session.active().is_some() && !self.home_open() {
+        if self.backstage.is_none() && self.session.active().is_some() {
             ribbon::show(self, ui);
             status::status_bar(self, ui);
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
-            if self.session.active().is_none() || self.home_open() {
-                dialogs::start_screen(self, ui);
+            if self.backstage.is_some() {
+                // File tab: the Backstage view replaces everything below the title bar.
+                backstage::show(self, ui);
+                return;
+            }
+            if self.session.active().is_none() {
                 return;
             }
             match self.ui.view {
@@ -1010,7 +1190,7 @@ mod tests {
 
         harness.state_mut().run("app.home", json!({})).unwrap();
         harness.run_steps(2);
-        assert!(harness.state().home_open());
+        assert!(harness.state().backstage_open());
         assert_eq!(harness.state().session.documents().len(), 1, "Home doesn't create a presentation");
 
         // Typing on the start screen doesn't reach the presentation behind it; Escape goes back.
@@ -1021,18 +1201,18 @@ mod tests {
         assert!(!harness.state().session.active().unwrap().is_dirty());
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
-        assert!(!harness.state().home_open());
+        assert!(!harness.state().backstage_open());
 
         // Home again toggles; picking a theme on the start screen (a new presentation) leaves it.
         harness.state_mut().run("app.home", json!({})).unwrap();
         harness.run_steps(2);
-        assert!(harness.state().home_open());
+        assert!(harness.state().backstage_open());
         harness.state_mut().run("app.home", json!({})).unwrap();
-        assert!(!harness.state().home_open());
+        assert!(!harness.state().backstage_open());
         harness.state_mut().run("app.home", json!({"on": true})).unwrap();
         harness.state_mut().run("file.new", json!({})).unwrap();
         harness.run_steps(2);
-        assert!(!harness.state().home_open(), "a new presentation leaves Home");
+        assert!(!harness.state().backstage_open(), "a new presentation leaves Home");
         assert_eq!(harness.state().session.documents().len(), 2);
     }
 
@@ -1123,7 +1303,7 @@ mod tests {
     fn home_needs_an_open_presentation() {
         let mut app = SlideApp::new(Session::new(), Services::default());
         app.run("app.home", json!({})).unwrap();
-        assert!(!app.home_open() && app.home.is_none(), "with nothing open the start screen shows anyway");
+        assert!(!app.backstage_open(), "with nothing open the start screen shows anyway");
     }
     fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
         let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(

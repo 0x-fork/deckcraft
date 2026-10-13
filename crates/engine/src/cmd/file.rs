@@ -15,7 +15,16 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path, format?}", has_doc, save_as),
         cmd!(noundo "file.saveTemplate", "Save as Template…", ["File"], None, "{path}", has_doc, save_as),
         cmd!(query "file.saveBytes", "Save to Data", [], None, "{format?: deckcraft|pptx} → {data: base64}", has_doc, save_bytes_cmd),
-        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, dpi?, slides?: [index], includeHidden?, textLayer?, frame?}", has_doc, export),
+        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, dpi?, slides?: [index] | \"1-3,5\", includeHidden?, textLayer?, frame?}", has_doc, export),
+        cmd!(
+            query "file.info",
+            "Info",
+            ["File"],
+            None,
+            "{} → {title, path, format, dirty, slides, hiddenSlides, sections, bytes?, properties}",
+            has_doc,
+            info
+        ),
         cmd!(query "file.render", "Render Slide", [], None, "{slide?: index, scale?, edit?: bool} → {png: base64, width, height}", has_doc, render),
         cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{}", has_doc, close),
         cmd!(
@@ -118,26 +127,59 @@ pub fn save_bytes(doc: &Presentation, format: &str) -> Result<Vec<u8>> {
     }
 }
 
-/// PDF options from command params: `{layout: slides|notes|handouts, perPage, dpi, slides: [i],
-/// includeHidden, textLayer, frame}`.
-pub fn pdf_options(p: &Value) -> deckcraft_pdf::PdfOptions {
+/// PDF options from command params: `{layout: slides|notes|handouts, perPage, dpi, slides,
+/// includeHidden, textLayer, frame}` for a presentation of `count` slides. `slides` is a list of
+/// 0-based indices or a range as typed in PowerPoint's Print page (`"1-3, 5"`, 1-based).
+pub fn pdf_options(p: &Value, count: usize) -> Result<deckcraft_pdf::PdfOptions> {
     let mut o = deckcraft_pdf::PdfOptions { layout: deckcraft_pdf::PageLayout::Slides, ..Default::default() };
     o.layout = match str_param(p, "layout").unwrap_or("slides") {
         "notes" => deckcraft_pdf::PageLayout::Notes,
-        "handouts" => deckcraft_pdf::PageLayout::Handouts { per_page: usize_param(p, "perPage").unwrap_or(6).min(9) as u8 },
+        "handouts" => deckcraft_pdf::PageLayout::Handouts { per_page: usize_param(p, "perPage").unwrap_or(6).clamp(1, 9) as u8 },
         _ => deckcraft_pdf::PageLayout::Slides,
     };
     o.dpi = f64_or(p, "dpi", o.dpi).clamp(36.0, 600.0);
-    o.slides = p.get("slides").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_u64().map(|x| x as usize)).collect());
+    o.slides = match p.get("slides") {
+        Some(Value::Array(a)) => Some(a.iter().filter_map(|v| v.as_u64().map(|x| x as usize)).filter(|i| *i < count).collect()),
+        Some(Value::String(text)) if !text.trim().is_empty() => Some(parse_slide_range(text, count)?),
+        _ => None,
+    };
     o.include_hidden = bool_or(p, "includeHidden", false);
     o.text_layer = bool_or(p, "textLayer", true);
     o.frame_slides = bool_or(p, "frame", true);
-    o
+    Ok(o)
+}
+
+/// A slide range as typed in the Print page's Slides box (`"1-3, 5"`; 1-based, either separator
+/// `,` or `;`, ranges either way round) → 0-based indices in order, without repeats. Numbers past
+/// the last slide or a range that isn't numbers is an error, as in PowerPoint.
+pub fn parse_slide_range(text: &str, count: usize) -> Result<Vec<usize>> {
+    let invalid = || bad("file.export", format!("“{text}” isn't a valid slide range: use numbers and ranges such as 1-3, 5"));
+    let mut out: Vec<usize> = vec![];
+    for part in text.split([',', ';']).map(str::trim).filter(|p| !p.is_empty()) {
+        let (a, b) = match part.split_once('-') {
+            Some((a, b)) => (a.trim(), b.trim()),
+            None => (part, part),
+        };
+        let (a, b) = (a.parse::<usize>().map_err(|_| invalid())?, b.parse::<usize>().map_err(|_| invalid())?);
+        let (lo, hi) = (a.min(b), a.max(b));
+        if lo == 0 || hi > count {
+            return Err(bad("file.export", format!("the presentation has {count} slides; “{part}” is outside them")));
+        }
+        for i in lo - 1..hi {
+            if !out.contains(&i) {
+                out.push(i);
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(invalid());
+    }
+    Ok(out)
 }
 
 /// PDF bytes for `doc` with [`pdf_options`] from `p`.
 pub fn pdf_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
-    deckcraft_pdf::export(doc, &pdf_options(p)).map_err(|e| EngineError::Other(e.to_string()))
+    deckcraft_pdf::export(doc, &pdf_options(p, doc.slides.len())?).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 pub fn format_for_path(path: &str) -> &'static str {
@@ -264,7 +306,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(json!({"files": written}))
         }
         "pdf" => {
-            let bytes = deckcraft_pdf::export(&st.doc, &pdf_options(p)).map_err(|e| EngineError::Other(e.to_string()))?;
+            let bytes = pdf_bytes(&st.doc, p)?;
             write_file(&path, &bytes)?;
             Ok(json!({"path": path, "bytes": bytes.len()}))
         }
@@ -274,6 +316,27 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(json!({"path": path, "bytes": bytes.len()}))
         }
     }
+}
+
+/// File › Info: what the Info page shows about the active presentation.
+fn info(s: &mut Session, _p: &Value) -> Result<Value> {
+    let st = s.doc()?;
+    let doc = &st.doc;
+    #[cfg(not(target_arch = "wasm32"))]
+    let bytes = st.path.as_ref().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len());
+    #[cfg(target_arch = "wasm32")]
+    let bytes: Option<u64> = None;
+    Ok(json!({
+        "title": st.title(),
+        "path": st.path,
+        "format": st.path.as_deref().map(format_for_path),
+        "dirty": st.is_dirty(),
+        "slides": doc.slides.len(),
+        "hiddenSlides": doc.slides.iter().filter(|sl| sl.hidden).count(),
+        "sections": doc.sections.len(),
+        "bytes": bytes,
+        "properties": serde_json::to_value(&doc.props).unwrap_or_default(),
+    }))
 }
 
 fn close(s: &mut Session, _p: &Value) -> Result<Value> {

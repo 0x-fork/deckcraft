@@ -774,3 +774,64 @@ fn ime_composition_underlines_follow_the_text() {
     s.commit_text("日本語").unwrap();
     assert!(cmd::text::composition_underlines(s.doc().unwrap()).is_empty());
 }
+
+/// File › Info (#76): the active presentation's name, location, counts and properties.
+#[test]
+fn file_info_reports_the_presentation() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.go", &json!({"index": 1})).unwrap();
+    s.execute("slide.hide", &json!({})).unwrap();
+    s.execute("file.properties", &json!({"title": "Quarterly", "author": "Ada"})).unwrap();
+    let v = s.execute("file.info", &json!({})).unwrap();
+    assert_eq!(v["slides"], 3);
+    assert_eq!(v["hiddenSlides"], 1);
+    assert_eq!(v["path"], serde_json::Value::Null);
+    assert_eq!(v["dirty"], true);
+    assert_eq!(v["properties"]["title"], "Quarterly");
+    assert_eq!(v["properties"]["author"], "Ada");
+    assert!(v["title"].as_str().is_some_and(|t| !t.is_empty()));
+    // A query: no undo step, and nothing changes.
+    let before = s.doc().unwrap().history.undo.len();
+    s.execute("file.info", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().history.undo.len(), before);
+    // Saved to disk, it reports where and how big.
+    let dir = std::env::temp_dir().join(format!("deckcraft-info-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Info test.pptx").to_string_lossy().to_string();
+    s.execute("file.saveAs", &json!({"path": path})).unwrap();
+    let v = s.execute("file.info", &json!({})).unwrap();
+    assert_eq!(v["path"], path.as_str());
+    assert_eq!(v["format"], "pptx");
+    assert_eq!(v["dirty"], false);
+    assert!(v["bytes"].as_u64().is_some_and(|b| b > 0));
+    let _ = std::fs::remove_dir_all(&dir);
+    // Nothing open: an error, not a panic.
+    let mut empty = Session::new();
+    assert!(empty.execute("file.info", &json!({})).is_err());
+}
+
+/// The Print page's Slides box (#76): PowerPoint-style ranges, 1-based.
+#[test]
+fn slide_ranges_parse_like_powerpoints_print_box() {
+    use cmd::file::parse_slide_range as r;
+    assert_eq!(r("1-3, 5", 6).unwrap(), vec![0, 1, 2, 4]);
+    assert_eq!(r("3-1;2", 6).unwrap(), vec![0, 1, 2], "reversed ranges and repeats");
+    assert_eq!(r(" 6 ", 6).unwrap(), vec![5]);
+    assert!(r("7", 6).is_err(), "past the last slide");
+    assert!(r("0", 6).is_err());
+    assert!(r("a-b", 6).is_err());
+    assert!(r(" , ", 6).is_err());
+    assert!(r("1-99999999999999999999999", 6).is_err(), "hostile numbers are refused");
+    // file.export takes the same text for a PDF.
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    let one = cmd::file::pdf_bytes(&doc, &json!({"slides": "2"})).unwrap();
+    let both = cmd::file::pdf_bytes(&doc, &json!({"slides": "1-2"})).unwrap();
+    assert!(one.len() < both.len());
+    assert!(cmd::file::pdf_bytes(&doc, &json!({"slides": "5"})).is_err());
+    let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
+    assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
+}
