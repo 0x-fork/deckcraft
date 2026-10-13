@@ -687,6 +687,20 @@ fn select_para(s: &mut Session, p: &Value) -> Result<Value> {
     ok()
 }
 
+/// Turn leading tabs of a paragraph into its outline level (capped at 8) and strip them.
+/// Returns whether any tab was found.
+pub(crate) fn apply_leading_tabs(para: &mut deckcraft_model::text::Paragraph) -> bool {
+    let tabs = para.runs.first().map(|r| r.text.chars().take_while(|c| *c == '\t').count()).unwrap_or(0);
+    if tabs == 0 {
+        return false;
+    }
+    if let Some(r) = para.runs.first_mut() {
+        r.text = r.text.trim_start_matches('\t').to_string();
+    }
+    para.level = tabs.min(8) as u8;
+    true
+}
+
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let text = str_param(p, "text").ok_or_else(|| bad("text.set", "missing `text`"))?.to_string();
     let id = match id_param(p, "id") {
@@ -706,13 +720,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         let mut nb = TextBody::from_text(&text);
         for (i, para) in nb.paragraphs.iter_mut().enumerate() {
             // Leading tabs set the outline level.
-            let tabs = para.runs.first().map(|r| r.text.chars().take_while(|c| *c == '\t').count()).unwrap_or(0);
-            if tabs > 0
-                && let Some(r) = para.runs.first_mut()
+            if !apply_leading_tabs(para)
+                && let Some((lv, pp)) = levels.get(i)
             {
-                r.text = r.text.trim_start_matches('\t').to_string();
-                para.level = tabs.min(8) as u8;
-            } else if let Some((lv, pp)) = levels.get(i) {
                 para.level = *lv;
                 para.props = pp.clone();
             }

@@ -108,7 +108,12 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(b) = str_param(p, "body")
             && let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| !k.is_title()))
         {
-            sh.text = Some(TextBody::from_text(b));
+            let mut body = TextBody::from_text(b);
+            // Leading tabs set the outline level, as in text.set.
+            for para in &mut body.paragraphs {
+                super::text::apply_leading_tabs(para);
+            }
+            sh.text = Some(body);
         }
         let at = usize_param(p, "at").unwrap_or(if doc.slides.is_empty() { 0 } else { sel.slide + 1 }).min(doc.slides.len());
         let id = slide.id;
@@ -583,4 +588,25 @@ fn from_outline(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(json!({"slides": n}))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn new_slide_body_leading_tabs_become_levels() {
+        let mut s = Session::with_new();
+        let text = "Level one\n\tLevel two\n\t\tLevel three\nLevel one again";
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "Indent", "body": text})).expect("new slide");
+        let st = s.doc().expect("doc");
+        let slide = st.doc.slides.get(st.selection.slide).expect("slide");
+        let body = slide.shapes.iter().find(|x| x.ph_type().is_some_and(|k| !k.is_title())).expect("body");
+        let paras = &body.text.as_ref().expect("text").paragraphs;
+        let got: Vec<(u8, String)> = paras.iter().map(|p| (p.level, p.text())).collect();
+        let want = [(0, "Level one"), (1, "Level two"), (2, "Level three"), (0, "Level one again")];
+        assert_eq!(got, want.iter().map(|(l, t)| (*l, t.to_string())).collect::<Vec<_>>());
+    }
 }
