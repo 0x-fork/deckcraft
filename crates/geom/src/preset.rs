@@ -1124,7 +1124,10 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             if name == "rightBracket" {
                 path.apply_affine(kurbo::Affine::new([-1.0, 0.0, 0.0, 1.0, w, 0.0]));
             }
-            Geometry { paths: vec![stroke_only(path)], text_rect: full, handles: vec![], sites: mid_sites(w, h) }
+            // Filled (when the shape has a fill) out to the straight side, as PowerPoint does.
+            let mut area = path.clone();
+            area.close_path();
+            Geometry { paths: vec![fill_only(area), stroke_only(path)], text_rect: full, handles: vec![], sites: mid_sites(w, h) }
         }
         "leftBrace" | "rightBrace" => {
             let r = (ss * a(0).clamp(0.0, 25000.0 * h / ss.max(1e-9)) / 1e5).min(h / 4.0);
@@ -1136,7 +1139,10 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             if name == "rightBrace" {
                 path.apply_affine(kurbo::Affine::new([-1.0, 0.0, 0.0, 1.0, w, 0.0]));
             }
-            Geometry { paths: vec![stroke_only(path)], text_rect: full, handles: vec![], sites: mid_sites(w, h) }
+            // Filled (when the shape has a fill) out to the straight side, as PowerPoint does.
+            let mut area = path.clone();
+            area.close_path();
+            Geometry { paths: vec![fill_only(area), stroke_only(path)], text_rect: full, handles: vec![], sites: mid_sites(w, h) }
         }
         "rightArrow" => arrow(Dir::Right, w, h, a(0), a(1)),
         "leftArrow" => arrow(Dir::Left, w, h, a(0), a(1)),
@@ -1967,5 +1973,20 @@ mod tests {
     fn lines_are_open() {
         assert!(build("line", 10.0, 10.0, &[]).unwrap().is_open());
         assert!(!build("rect", 10.0, 10.0, &[]).unwrap().is_open());
+    }
+
+    #[test]
+    fn brackets_and_braces_fill_out_to_their_straight_side() {
+        // PowerPoint fills a bracket or brace (when it has a fill) between its curve and the
+        // straight side it opens to; only the curve is outlined.
+        for name in ["leftBracket", "rightBracket", "leftBrace", "rightBrace"] {
+            let g = build(name, 40.0, 100.0, &[]).unwrap();
+            let filled: Vec<_> = g.paths.iter().filter(|p| p.fill != FillMode::None).collect();
+            assert_eq!(filled.len(), 1, "{name}");
+            assert!(!filled[0].stroke, "{name}: the filled area is not outlined");
+            let area = filled[0].path.area().abs();
+            assert!(area > 40.0 * 100.0 * 0.4 && area < 40.0 * 100.0, "{name}: {area}");
+            assert!(g.paths.iter().any(|p| p.stroke && p.fill == FillMode::None), "{name}: the curve is outlined");
+        }
     }
 }

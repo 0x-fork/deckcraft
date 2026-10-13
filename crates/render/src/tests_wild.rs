@@ -313,3 +313,21 @@ fn children_filled_with_the_group_fill_show_one_fill_across_the_group() {
     assert!(r[2] > 200 && r[0] < 60, "right end {r:?}");
     assert!(close(img.pixel(200, 150), WHITE, 5), "the gap between the children stays empty");
 }
+
+#[test]
+fn open_freeforms_take_arrowheads_even_when_filled() {
+    // An open custom path with a fill and a tail arrow: PowerPoint draws the arrow.
+    let end = deckcraft_model::style::LineEnd { kind: "triangle".into(), w: "med".into(), len: "med".into() };
+    let sh = Shape {
+        id: ShapeId(19),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        geom: Geom::Custom { paths: vec![CustomPath { w: 100.0, h: 100.0, d: "M 0 100 L 50 0 L 100 100".into(), ..Default::default() }] },
+        fill: solid(Rgba::rgb(0, 200, 0)),
+        line: Some(Line { fill: solid(RED), width: Some(4.0), tail: Some(end), ..Default::default() }),
+        ..Default::default()
+    };
+    let img = render(vec![sh]);
+    // The line ends at (300, 200) heading down-right at 45°; the 12 pt head's base corner reaches
+    // (295.7, 187.3), 3.5 pt off the line's axis: outside the 4 pt line and outside the fill.
+    assert!(close(img.pixel(294, 189), RED, 60), "arrowhead drawn {:?}", img.pixel(294, 189));
+}

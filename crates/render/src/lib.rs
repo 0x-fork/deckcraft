@@ -974,7 +974,12 @@ impl Renderer {
         if line.fill.as_ref().is_some_and(|f| !f.is_none()) {
             let lw = line.width.unwrap_or(0.75).max(0.0);
             let (base, rel) = self.line_space(m, depth);
-            let ends = s.is_line() || geo.is_open();
+            // Arrowheads go on lines, arcs and open freeforms (filled or not), never on closed
+            // outlines or on presets like brackets.
+            let ends = s.is_line()
+                || geo.is_open()
+                || (matches!(s.geom, Geom::Custom { .. })
+                    && geo.paths.iter().find(|p| p.stroke).is_some_and(|p| !p.path.elements().iter().any(|e| matches!(e, PathEl::ClosePath))));
             let trims = if ends { head_trims(&line, lw) } else { (0.0, 0.0) };
             let has_heads = ends && [&line.head, &line.tail].iter().any(|e| e.as_ref().is_some_and(|e| e.kind != "none"));
             // A see-through line and its arrowheads are one shape in PowerPoint: drawn opaque into
