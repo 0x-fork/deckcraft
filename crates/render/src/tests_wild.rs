@@ -189,3 +189,39 @@ fn a_radial_gradient_off_centre_ends_on_the_circle_around_the_box() {
     assert!(img.pixel(300, 200)[0] > 240 && img.pixel(101, 101)[0] < 60);
     assert!((img.pixel(110, 200)[0] as i32 - img.pixel(490, 200)[0] as i32).abs() <= 2);
 }
+
+fn shadow(sx: f64, sy: f64, kx: f64, align: &str) -> deckcraft_model::style::Shadow {
+    deckcraft_model::style::Shadow {
+        color: ColorRef::rgb(Rgba::BLACK),
+        blur: 0.0,
+        dist: 0.0,
+        dir: 0.0,
+        inner: false,
+        sx,
+        sy,
+        kx,
+        ky: 0.0,
+        align: align.into(),
+        rotate_with_shape: false,
+    }
+}
+
+fn with_effects(fill: Option<Fill>, line: Option<Line>, effects: deckcraft_model::Effects) -> Shape {
+    Shape { id: ShapeId(14), xfrm: Some(Xfrm::new(100.0, 100.0, 100.0, 100.0)), fill, line, effects: Some(effects), ..Default::default() }
+}
+
+#[test]
+fn a_perspective_shadow_lies_along_the_edge_its_alignment_names() {
+    // Half height, skewed 45° so its top leans right, anchored at the bottom middle: the shadow's
+    // bottom edge is the shape's (y = 200) and its top (y = 150) is 50 pt to the right.
+    let fx = deckcraft_model::Effects { outer_shadow: Some(shadow(1.0, 0.5, -45.0, "b")), ..Default::default() };
+    let img = render(vec![with_effects(solid(RED), no_line(), fx)]);
+    assert!(close(img.pixel(210, 175), Rgba::BLACK, 30), "{:?}", img.pixel(210, 175));
+    assert!(close(img.pixel(240, 155), Rgba::BLACK, 30), "{:?}", img.pixel(240, 155));
+    assert!(close(img.pixel(240, 180), WHITE, 10), "{:?}", img.pixel(240, 180));
+    assert!(close(img.pixel(205, 140), WHITE, 10), "nothing above the half height {:?}", img.pixel(205, 140));
+    // Anchored bottom-right and half as big again: it grows up and to the left only.
+    let fx = deckcraft_model::Effects { outer_shadow: Some(shadow(1.5, 1.5, 0.0, "br")), ..Default::default() };
+    let img = render(vec![with_effects(solid(RED), no_line(), fx)]);
+    assert!(close(img.pixel(70, 70), Rgba::BLACK, 30) && close(img.pixel(210, 210), WHITE, 10));
+}

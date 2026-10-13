@@ -1105,10 +1105,7 @@ impl Renderer {
         if let Some(sh) = &e.outer_shadow {
             let c = rctx.color(&sh.color, ph);
             let d = Vec2::new(sh.dir.to_radians().cos(), sh.dir.to_radians().sin()) * sh.dist;
-            let c0 = Point::new(w / 2.0, h / 2.0);
-            let local = Affine::translate(c0.to_vec2())
-                * Affine::new([sh.sx, sh.ky.to_radians().tan(), sh.kx.to_radians().tan(), sh.sy, 0.0, 0.0])
-                * Affine::translate(-c0.to_vec2());
+            let local = shadow_local(sh, w, h);
             // Shadow offset is in slide space (doesn't rotate with the shape unless asked).
             let sm = if sh.rotate_with_shape { m * Affine::translate(d) * local } else { pre_translate(m, d * k) * local };
             ctx.set_transform(Affine::IDENTITY);
@@ -1167,6 +1164,32 @@ impl Renderer {
             ctx.pop_layer();
         }
     }
+}
+
+/// A shadow's own scale and skew (`sx`, `sy`, `kx`, `ky`) in the shape's space, about the point
+/// of the shape's box its alignment names (`algn`: `b` is the middle of the bottom edge, `tl` the
+/// top-left corner…), as PowerPoint applies them: skewed, then scaled. A perspective shadow
+/// (`algn="b"`, `sy` 23%, `kx` -20°) so lies flat along the shape's bottom edge, not around its
+/// middle.
+fn shadow_local(sh: &deckcraft_model::style::Shadow, w: f64, h: f64) -> Affine {
+    let (ax, ay) = match sh.align.as_str() {
+        "tl" => (0.0, 0.0),
+        "t" => (0.5, 0.0),
+        "tr" => (1.0, 0.0),
+        "l" => (0.0, 0.5),
+        "r" => (1.0, 0.5),
+        "bl" => (0.0, 1.0),
+        "b" => (0.5, 1.0),
+        "br" => (1.0, 1.0),
+        _ => (0.5, 0.5),
+    };
+    let a = Vec2::new(w * ax, h * ay);
+    let (tx, ty) = (sh.kx.to_radians().tan(), sh.ky.to_radians().tan());
+    let k = Affine::new([sh.sx, sh.sy * ty, sh.sx * tx, sh.sy, 0.0, 0.0]);
+    if !k.is_finite() {
+        return Affine::IDENTITY;
+    }
+    Affine::translate(a) * k * Affine::translate(-a)
 }
 
 fn pre_translate(m: Affine, d: Vec2) -> Affine {
