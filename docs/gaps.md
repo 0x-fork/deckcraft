@@ -236,8 +236,10 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Performance
 
-- **No baseline.** Nothing measures open time, render time per slide, show frame rate or memory
-  against PowerPoint. 4–8 h for a benchmark suite in `xtask`.
+- **Baseline measured, not compared.** `cargo xtask bench` (and `deckcraft-cli bench FILE`) times
+  open, per-slide render, save, PPTX round trip and PDF export, and peak memory, against a saved
+  baseline; show frame rate isn't measured and there are no PowerPoint numbers to set beside it.
+  2–4 h.
 - **Morph aligns outlines every frame** (#67, PR open). 1 h.
 
 ## Ecosystem
@@ -256,6 +258,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |
