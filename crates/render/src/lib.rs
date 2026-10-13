@@ -943,6 +943,17 @@ impl Renderer {
             let lit = light::Lighting::from_raw(raw);
             extrude::draw(ctx, &outline, w, h, &cam, ex.depth, pre, turn, extrude::side_color(rctx, &ex, face), &lit);
         }
+        // A 3-D contour: a band around the outline, behind the face (and in front of any sides).
+        if let Some(raw) = effects.as_ref().and_then(|e| e.raw3d.as_deref())
+            && let Some(c) = extrude::contour_from_raw(raw)
+        {
+            let face = match &fill {
+                Some(Fill::Solid { color: col }) => Some(rctx.color(col, fill_ph)),
+                _ => None,
+            };
+            let col = c.color.as_ref().map(|k| rctx.color(k, face)).or(face).unwrap_or(Rgba::rgb(0xff, 0xff, 0xff));
+            extrude::draw_contour(ctx, &outline, m, c.width, col, &light::Lighting::from_raw(raw));
+        }
         // Fill.
         match &s.kind {
             ShapeKind::Picture { fill: pf } => {
