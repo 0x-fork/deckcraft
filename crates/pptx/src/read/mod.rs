@@ -32,6 +32,8 @@ pub struct Imp<'a> {
     pub custom_show_names: HashMap<String, String>,
     /// GUIDs (upper case) of the table styles the file defines.
     pub table_style_ids: Vec<String>,
+    /// Per legacy VML drawing part: shape id → preview picture part (see `shapes::vml_preview`).
+    pub vml_previews: HashMap<String, HashMap<String, String>>,
 }
 
 impl Imp<'_> {
@@ -233,6 +235,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         slide_by_part: HashMap::new(),
         custom_show_names: HashMap::new(),
         table_style_ids: Vec::new(),
+        vml_previews: HashMap::new(),
     };
     // Slide ids first so hyperlinks anywhere can point at slides.
     let mut slide_ids: Vec<(u32, String, SlideId)> = vec![];
