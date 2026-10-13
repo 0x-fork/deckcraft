@@ -632,3 +632,33 @@ fn a_large_pictures_shadow_is_whole() {
     }
     assert!(counts[1] > 3000 && (counts[0] as i64 - counts[1] as i64).abs() < 300, "{counts:?}");
 }
+
+#[test]
+fn a_gradient_not_rotating_with_its_shape_keeps_to_the_slide() {
+    use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
+    let blue = Rgba::rgb(0, 0, 255);
+    for rotate_with_shape in [true, false] {
+        let g = Gradient {
+            stops: vec![GradientStop { pos: 0.0, color: ColorRef::rgb(RED) }, GradientStop { pos: 1.0, color: ColorRef::rgb(blue) }],
+            shape: GradientShape::Linear { angle: 0.0, scaled: false },
+            rotate_with_shape,
+            tile: [0.0; 4],
+        };
+        // 200 × 100 turned a quarter: it covers 150..250 across and 50..250 down.
+        let sh = Shape {
+            id: ShapeId(28),
+            xfrm: Some(Xfrm { rot: 90.0, ..Xfrm::new(100.0, 100.0, 200.0, 100.0) }),
+            fill: Some(Fill::Gradient(g)),
+            line: no_line(),
+            ..Default::default()
+        };
+        let img = render(vec![sh]);
+        let (left, top) = (img.pixel(152, 150), img.pixel(200, 52));
+        if rotate_with_shape {
+            assert!(top[0] > 200 && top[2] < 60, "turned with the shape: red at the top {top:?}");
+        } else {
+            assert!(left[0] > 200 && left[2] < 60, "upright: red at the left {left:?}");
+            assert!(img.pixel(248, 150)[2] > 200, "blue at the right");
+        }
+    }
+}

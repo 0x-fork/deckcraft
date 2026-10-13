@@ -35,6 +35,18 @@ pub fn fill_path(
             if g.stops.is_empty() {
                 return;
             }
+            // `rotWithShape="0"`: the gradient keeps to the slide's axes when the shape is
+            // rotated or flipped, laid out over the box the shape covers on the slide.
+            let c = m.as_coeffs();
+            let turned = c[1].abs() > 1e-9 || c[2].abs() > 1e-9 || c[0] < 0.0 || c[3] < 0.0;
+            let path_kind = matches!(&g.shape, GradientShape::Path { path: k, .. } if matches!(k.as_str(), "rect" | "shape"));
+            if !g.rotate_with_shape && turned && !path_kind && m.determinant().abs() > 1e-12 {
+                let on_slide = m.transform_rect_bbox(bounds);
+                let upright = deckcraft_model::style::Gradient { rotate_with_shape: true, ..g.clone() };
+                let paint_path = m * path.clone();
+                fill_path(ctx, rctx, &Fill::Gradient(upright), ph, &paint_path, on_slide, Affine::IDENTITY, mode, alpha, pres);
+                return;
+            }
             // A linear gradient spans its tile rectangle (the shape's box unless `tileRect` moves
             // its edges); a radial one ends on the circle around it, from a focus placed in the
             // shape's own box (PowerPoint's "from corner" presets centre the tile on the corner).
