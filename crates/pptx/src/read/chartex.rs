@@ -110,6 +110,10 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
         if c.categories.is_empty() {
             c.categories = d.categories.clone();
         }
+        if let Some(b) = s.child("layoutPr").and_then(|l| l.child("binning")) {
+            c.bin_count = b.child("binCount").and_then(|n| n.u32("val")).filter(|n| *n > 0);
+            c.bin_size = b.child("binSize").and_then(|n| n.attr("val")).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite() && *v > 0.0);
+        }
         if let Some(st) = s.child("layoutPr").and_then(|l| l.child("subtotals")) {
             c.subtotals = st.children_named("idx").filter_map(|i| i.u32("val")).map(|i| i as usize).take(MAX_POINTS).collect();
         }

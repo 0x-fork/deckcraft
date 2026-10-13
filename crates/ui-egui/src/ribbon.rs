@@ -1046,8 +1046,13 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
         big(app, ui, Icon::SmartArt, "SmartArt", "app.dialog", json!({"id": "smartart"}));
         let r = big_button(ui, Icon::Chart, "Chart", enabled(app, "insert.chart"));
         egui::Popup::menu(&r).show(|ui| {
-            for k in deckcraft_model::chart::ChartType::MAIN {
-                if ui.button(k.label()).clicked() {
+            for k in chart_menu_types() {
+                if k.is_none() {
+                    ui.separator();
+                }
+                if let Some(k) = k
+                    && ui.button(k.label()).clicked()
+                {
                     run(app, "insert.chart", json!({"type": format!("{k:?}")}));
                 }
             }
@@ -2304,7 +2309,11 @@ fn chart_design(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         let r = big_button(ui, Icon::ChangeChartType, "Change\nChart Type", true);
         egui::Popup::menu(&r).show(|ui| {
-            for k in deckcraft_model::chart::ChartType::MAIN {
+            for k in chart_menu_types() {
+                let Some(k) = k else {
+                    ui.separator();
+                    continue;
+                };
                 if ui.button(k.label()).clicked() {
                     // Replace the chart's type keeping its data.
                     if let Some(id) = app.session.active().and_then(|d| d.selection.shapes.first().copied()) {
@@ -2419,4 +2428,14 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
         _ => (0..=40).map(|i| i as f32 / 40.0).map(|u| at(u, 0.5 + 0.35 * (u * 19.0).sin() * (1.0 - u * 0.4))).collect(),
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
+}
+
+/// The chart types in the Insert Chart and Change Chart Type menus: the main ones, a separator
+/// (`None`), then the Office 2016 types not already listed.
+fn chart_menu_types() -> Vec<Option<deckcraft_model::chart::ChartType>> {
+    use deckcraft_model::chart::ChartType;
+    let mut v: Vec<Option<ChartType>> = ChartType::MAIN.iter().copied().map(Some).collect();
+    v.push(None);
+    v.extend(ChartType::OFFICE_2016.iter().copied().filter(|k| !ChartType::MAIN.contains(k)).map(Some));
+    v
 }

@@ -146,10 +146,12 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, Pareto,
-  box & whisker) are read for their data and written back unchanged. Waterfalls (floating bars,
-  totals, connectors), funnels, treemaps (squarified) and sunbursts (innermost ring) are drawn;
-  histograms and box & whisker still use the column renderer, an edited one is saved as a plain
-  column chart, and region maps aren't read.
+  box & whisker) are read, drawn, inserted, edited and saved as `chartEx` (kept unchanged, else
+  written from the model, with a plain chart fallback). Waterfalls float and total, funnels,
+  treemaps (squarified) and sunbursts (innermost ring only) have their own layouts, histograms and
+  Paretos bin their data (count, width or Scott's rule), and box & whisker charts use exclusive
+  quartiles with 1.5 IQR whiskers. Multi-level treemap and sunburst hierarchies, inclusive
+  quartiles and region maps remain.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
