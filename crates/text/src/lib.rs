@@ -1999,8 +1999,10 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                     }
                 }
                 if let Some(sk) = st.strike {
-                    let t = (st.size * 0.05).max(0.5);
-                    let sy = line.baseline - st.size * 0.3;
+                    // At the strikeout position and thickness of the run's own font.
+                    let k = st.size / st.face.upem.max(1.0);
+                    let t = (st.face.strikeout.1 * k).max(0.5);
+                    let sy = line.baseline - st.face.strikeout.0 * k;
                     out.decos.push(Deco {
                         rect: Rect::new(cx, sy, cx1, sy + t),
                         color: st.color,

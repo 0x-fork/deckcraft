@@ -1151,3 +1151,18 @@ fn fallback_faces_do_not_move_the_baseline() {
         assert!((b.0 - plain.0).abs() < 0.01 && (b.1 - plain.1).abs() < 0.01, "{text:?}: {b:?} vs {plain:?}");
     }
 }
+
+#[test]
+fn strikethrough_sits_at_the_font_strikeout_position() {
+    let (p, mut sh) = setup("Struck", 2000.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.props.bullet = Some(Bullet::None);
+    para.runs[0].props.size = Some(96.0);
+    para.runs[0].props.strike = Some(Strike::Single);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let r = l.runs.iter().find(|r| !r.cells.is_empty()).unwrap();
+    let k = 96.0 / r.face.upem;
+    let d = l.decos.iter().find(|d| !d.behind).expect("a strikethrough");
+    assert!((l.lines[0].baseline - d.rect.y0 - r.face.strikeout.0 * k).abs() < 0.01, "top at the strikeout position");
+    assert!((d.rect.height() - (r.face.strikeout.1 * k).max(0.5)).abs() < 0.01);
+}

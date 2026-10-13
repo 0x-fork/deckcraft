@@ -137,6 +137,9 @@ pub struct FontFace {
     /// Underline position (top edge, below the baseline) and thickness in font units (`post`
     /// table; 0.1 and 0.05 em when the font has none). PowerPoint draws single underlines there.
     pub underline: (f64, f64),
+    /// Strikethrough position (top edge, above the baseline) and thickness in font units (OS/2;
+    /// 0.26 and 0.05 em when the font has none). PowerPoint draws single strikethroughs there.
+    pub strikeout: (f64, f64),
     pub shaper: harfrust::ShaperData,
     /// Variable fonts: the named instance's axis settings (user units; empty = default instance),
     /// the normalised location and the shaper's view of it.
@@ -590,6 +593,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         x_height: m.x_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.5),
         line_split: line_split(&f, m.ascent as f64, -(m.descent as f64), m.units_per_em.max(1) as f64),
         underline: underline_metrics(m.underline, m.units_per_em.max(1) as f64),
+        strikeout: strikeout_metrics(m.strikeout, m.units_per_em.max(1) as f64),
         shaper,
         coords,
         location,
@@ -610,6 +614,18 @@ fn underline_metrics(d: Option<skrifa::metrics::Decoration>, upem: f64) -> (f64,
             (-(d.offset as f64), d.thickness as f64)
         }
         _ => (upem * 0.1, upem * 0.05),
+    }
+}
+
+/// The strikethrough's top edge above the baseline and its thickness, font units, from OS/2 (its
+/// position is the top edge: Arial's 530/2048 is where PowerPoint's strikethrough starts, 25 px
+/// above the baseline at 96 pt); fonts without a usable one get 0.26 em and 0.05 em.
+fn strikeout_metrics(d: Option<skrifa::metrics::Decoration>, upem: f64) -> (f64, f64) {
+    match d {
+        Some(d) if d.thickness > 0.0 && (d.thickness as f64) < upem * 0.3 && d.offset > 0.0 && (d.offset as f64) < upem => {
+            (d.offset as f64, d.thickness as f64)
+        }
+        _ => (upem * 0.26, upem * 0.05),
     }
 }
 
