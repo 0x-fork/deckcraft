@@ -119,6 +119,74 @@ pub fn keep_xml(el: &El, ns: &[(String, String)]) -> String {
 /// Namespace prefixes whose `mc:Choice` content we understand.
 const SUPPORTED_MC: [&str; 9] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188"];
 
+/// Relationship types whose parts are kept verbatim, and whether they hang off the package root.
+const KEPT_RELS: [(&str, bool); 3] = [
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml", false),
+    ("http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels", true),
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties", true),
+];
+
+/// A part we may keep: outside `ppt/` and the properties the writer makes itself.
+fn keepable(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    !n.is_empty()
+        && !n.contains("..")
+        && !n.starts_with("ppt/")
+        && n != "docprops/core.xml"
+        && n != "docprops/app.xml"
+        && !n.starts_with("[content_types]")
+}
+
+/// Custom XML data, sensitivity labels and custom properties, with the parts they relate to
+/// (`itemProps`) and their relationships parts, as written.
+fn kept_parts(pkg: &Package, pres_path: &str) -> Vec<deckcraft_model::KeptPart> {
+    use deckcraft_model::KeptPart;
+    let mut out: Vec<KeptPart> = Vec::new();
+    let text = |name: &str| pkg.get(name).and_then(|b| std::str::from_utf8(b).ok()).map(str::to_string);
+    for (holder, from_root) in [("", true), (pres_path, false)] {
+        let Some(doc) = pkg.xml(&opc::rels_path(holder)) else { continue };
+        let base = opc::dir_of(holder);
+        for r in doc.root.children_named("Relationship") {
+            let (Some(ty), Some(target)) = (r.attr("Type"), r.attr("Target")) else { continue };
+            if r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("external"))
+                || !KEPT_RELS.iter().any(|(t, root)| *t == ty && *root == from_root)
+            {
+                continue;
+            }
+            let name = opc::resolve(&base, target);
+            if !keepable(&name) || out.iter().any(|k| k.name.eq_ignore_ascii_case(&name)) || out.len() >= 400 {
+                continue;
+            }
+            let Some(xml) = text(&name) else { continue };
+            out.push(KeptPart {
+                content_type: pkg.content_type(&name).unwrap_or_default(),
+                name: name.clone(),
+                xml,
+                rel_type: ty.to_string(),
+                from_root,
+            });
+            // The part's own relationships (customXml item → itemProps) and their targets.
+            let rp = opc::rels_path(&name);
+            if let Some(rels_xml) = text(&rp) {
+                for sub in pkg.rels(&name).items.iter().filter(|s| !s.external && keepable(&s.target)) {
+                    if let Some(x) = text(&sub.target)
+                        && !out.iter().any(|k| k.name.eq_ignore_ascii_case(&sub.target))
+                    {
+                        out.push(KeptPart {
+                            content_type: pkg.content_type(&sub.target).unwrap_or_default(),
+                            name: sub.target.clone(),
+                            xml: x,
+                            ..Default::default()
+                        });
+                    }
+                }
+                out.push(KeptPart { name: rp, xml: rels_xml, ..Default::default() });
+            }
+        }
+    }
+    out
+}
+
 /// Replace every `mc:AlternateContent` by the children of the branch we can read best.
 pub fn resolve_mc(el: &mut El, depth: usize) {
     if depth > crate::xml::MAX_DEPTH {
@@ -396,6 +464,8 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
     {
         p.props.company = d.root.child("Company").map(|c| c.text()).unwrap_or_default();
     }
+
+    p.kept_parts = kept_parts(&pkg, &pres_path);
 
     inherit_placeholder_geometry(&mut p);
     p.header_footer = header_footer(&p);

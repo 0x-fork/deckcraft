@@ -516,7 +516,32 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
     let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), &slide_rids);
     x.pkg.xml_part("ppt/presentation.xml", CT_PRES, pxml);
+    // Kept parts never replace a part the writer makes.
+    let kept: Vec<_> = p
+        .kept_parts
+        .iter()
+        .filter(|k| {
+            let n = k.name.to_ascii_lowercase();
+            !n.is_empty()
+                && !n.contains("..")
+                && !n.starts_with("ppt/")
+                && !n.starts_with("docprops/core")
+                && !n.starts_with("docprops/app")
+                && !n.starts_with("[content_types]")
+                && n != "_rels/.rels"
+        })
+        .collect();
+    for k in kept.iter().filter(|k| !k.rel_type.is_empty() && !k.from_root) {
+        pres.rels.add_new(&k.rel_type, &opc::relative("ppt/presentation.xml", &k.name), false);
+    }
     x.pkg.rels("ppt/presentation.xml", &pres.rels);
+    for k in &kept {
+        if k.content_type.is_empty() {
+            x.pkg.raw(&k.name, k.xml.clone().into_bytes());
+        } else {
+            x.pkg.xml_part(&k.name, &k.content_type, k.xml.clone().into_bytes());
+        }
+    }
 
     // Document properties and package relationships.
     x.pkg.xml_part("docProps/core.xml", CT_CORE, core_xml(p));
@@ -525,6 +550,9 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
     root.add("officeDocument", "ppt/presentation.xml", false);
     root.add(opc::RT_CORE, "docProps/core.xml", false);
     root.add("extended-properties", "docProps/app.xml", false);
+    for k in kept.iter().filter(|k| !k.rel_type.is_empty() && k.from_root) {
+        root.add_new(&k.rel_type, &k.name, false);
+    }
     x.pkg.rels("", &root);
     x.pkg.finish()
 }

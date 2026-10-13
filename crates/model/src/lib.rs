@@ -817,6 +817,21 @@ pub struct MediaItem {
     pub link: Option<String>,
 }
 
+/// An XML package part DeckCraft doesn't model, kept as written.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct KeptPart {
+    /// Part name from the package root (`customXml/item1.xml`).
+    pub name: String,
+    /// Content type; empty for a relationships part.
+    pub content_type: String,
+    pub xml: String,
+    /// Full relationship type linking it, empty when only its sibling parts point at it.
+    pub rel_type: String,
+    /// Linked from the package root rather than from the presentation part.
+    pub from_root: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Presentation {
@@ -843,6 +858,10 @@ pub struct Presentation {
     /// Table styles defined in the file (`ppt/tableStyles.xml`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub table_styles: Vec<table::TableStyleDef>,
+    /// Package parts kept verbatim for round trip: custom XML data (SharePoint metadata), the
+    /// sensitivity label and custom document properties.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kept_parts: Vec<KeptPart>,
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
