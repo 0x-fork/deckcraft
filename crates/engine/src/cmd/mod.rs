@@ -2,6 +2,7 @@
 
 pub mod animation;
 pub mod arrange;
+pub mod compress;
 pub mod design;
 pub mod edit;
 pub mod file;
@@ -142,6 +143,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(review::specs());
         v.extend(inspect::specs());
         v.extend(media::specs());
+        v.extend(compress::specs());
         v
     })
 }

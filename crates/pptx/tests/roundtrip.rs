@@ -991,3 +991,48 @@ fn transition_defaults_read_like_powerpoint() {
         assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
     }
 }
+
+/// Picture Format › Compress Pictures: a big picture shown small is downsampled, its original
+/// goes when nothing else uses it, the saved file shrinks, a copy that wasn't compressed keeps
+/// the original, and undo brings everything back.
+#[test]
+fn compress_pictures_shrinks_the_file_and_keeps_shared_originals() {
+    use deckcraft_engine::Session;
+    use serde_json::json;
+    let b64 = deckcraft_engine::cmd::base64_encode;
+    // A noisy 1600 × 1600 picture (doesn't compress away on its own).
+    let big = {
+        let img = image::RgbImage::from_fn(1600, 1600, |x, y| image::Rgb([(x * 31 % 251) as u8, (y * 17 % 253) as u8, ((x * y) % 255) as u8]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    };
+    let mut s = Session::with_new();
+    s.execute("insert.picture", &json!({"data": b64(&big), "name": "noise.png"})).unwrap();
+    s.execute("shape.resize", &json!({"w": 144, "h": 144})).unwrap();
+    let size_before = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap().len();
+    let r = s.execute("picture.compress", &json!({"ppi": 150})).unwrap();
+    assert_eq!(r["pictures"], 1, "{r}");
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.media.len(), 1, "the original is gone");
+    let img = image::load_from_memory(&doc.media[0].data).unwrap();
+    assert_eq!((img.width(), img.height()), (300, 300), "2 in at 150 ppi");
+    let size_after = deckcraft_pptx::export(&doc).unwrap().len();
+    assert!(size_after * 4 < size_before, "{size_before} → {size_after}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.media[0].data.len(), big.len(), "undo restores the original");
+
+    // A duplicate that isn't compressed still needs the original.
+    s.execute("edit.duplicate", &json!({})).unwrap();
+    let copy = s.doc().unwrap().selection.shapes.clone();
+    let first: Vec<_> = s.doc().unwrap().doc.slides[0].shapes.iter().map(|sh| sh.id).filter(|id| !copy.contains(id)).collect();
+    s.execute("picture.compress", &json!({"ppi": 150, "ids": [first.last().unwrap().0]})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.media.len(), 2);
+    assert!(doc.media.iter().any(|m| m.data.len() == big.len()), "the copy keeps the original");
+    // All pictures: the copy gets compressed too, and the original goes.
+    s.execute("picture.compress", &json!({"ppi": 150, "all": true})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert!(doc.media.iter().all(|m| m.data.len() < big.len() / 4));
+    assert!(s.execute("picture.compress", &json!({"ppi": 5, "all": true})).is_err());
+}
