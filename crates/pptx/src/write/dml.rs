@@ -78,22 +78,22 @@ pub fn fill(w: &mut W, x: &mut Exp, o: &mut Out, f: &Fill) {
         Fill::Solid { color: c } => solid(w, c),
         Fill::Gradient(g) => {
             w.open("a:gradFill", A::new().a("rotWithShape", if g.rotate_with_shape { "1" } else { "0" }));
-            w.open0("a:gsLst");
+            // No stops: no `a:gsLst`, so the gradient keeps taking them from its style's fill.
             let mut stops = g.stops.clone();
-            if stops.is_empty() {
-                stops.push(deckcraft_model::style::GradientStop { pos: 0.0, color: ColorRef::rgb(deckcraft_color::Rgba::WHITE) });
-            }
             if stops.len() == 1 {
                 let mut s = stops[0].clone();
                 s.pos = 1.0;
                 stops.push(s);
             }
-            for s in &stops {
-                w.open("a:gs", A::new().a("pos", pct(s.pos.clamp(0.0, 1.0))));
-                color(w, &s.color);
-                w.close("a:gs");
+            if !stops.is_empty() {
+                w.open0("a:gsLst");
+                for s in &stops {
+                    w.open("a:gs", A::new().a("pos", pct(s.pos.clamp(0.0, 1.0))));
+                    color(w, &s.color);
+                    w.close("a:gs");
+                }
+                w.close("a:gsLst");
             }
-            w.close("a:gsLst");
             match &g.shape {
                 GradientShape::Linear { angle, scaled } => {
                     w.empty("a:lin", A::new().a("ang", ang(*angle)).a("scaled", if *scaled { "1" } else { "0" }))

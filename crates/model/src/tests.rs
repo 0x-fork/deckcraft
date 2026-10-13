@@ -63,6 +63,29 @@ fn shape_style_fill_resolves_through_theme() {
 }
 
 #[test]
+fn a_gradient_without_stops_takes_them_from_its_style() {
+    // `a:gradFill` with only a direction: PowerPoint fills it with the stops of the theme gradient
+    // the style's fillRef names, in the style's colour, along the shape's own direction.
+    let p = Presentation::default();
+    let s = &p.slides[0];
+    let ctx = Ctx::for_slide(&p, s).unwrap();
+    let own = style::Gradient { stops: vec![], shape: style::GradientShape::Linear { angle: 45.0, scaled: true }, rotate_with_shape: true };
+    let mut st = ShapeStyle::accent(SchemeSlot::Accent2);
+    st.fill_ref.0 = 3;
+    let sh = Shape { style: Some(st.clone()), fill: Some(Fill::Gradient(own.clone())), ..Default::default() };
+    let (f, ph) = resolve::fill(&ctx, &sh);
+    let Some(Fill::Gradient(g)) = f else { panic!("expected a gradient") };
+    let Some(Fill::Gradient(theme)) = p.masters[0].theme.format.fills.get(2).cloned() else { panic!("theme fill 3 is a gradient") };
+    assert_eq!(g.stops, theme.stops);
+    assert_eq!(g.shape, own.shape, "the shape's own direction");
+    assert_eq!(ph, Some(p.masters[0].theme.colors.get(SchemeSlot::Accent2)));
+    // A solid style fill has no stops to give: the gradient stays empty (draws nothing).
+    st.fill_ref.0 = 1;
+    let sh = Shape { style: Some(st), fill: Some(Fill::Gradient(own.clone())), ..Default::default() };
+    assert_eq!(resolve::fill(&ctx, &sh).0, Some(Fill::Gradient(own)));
+}
+
+#[test]
 fn serde_roundtrip() {
     let p = Presentation::default();
     let j = serde_json::to_string(&p).unwrap();

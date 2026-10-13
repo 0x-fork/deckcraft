@@ -79,3 +79,26 @@ fn regex_free_strip(s: &str, open: &str, close: &str) -> String {
     let Some(j) = s[i..].find(close).map(|j| j + i + close.len()) else { return s.to_string() };
     format!("{}{}", &s[..i], &s[j..])
 }
+
+#[test]
+fn a_gradient_without_stops_is_saved_without_stops() {
+    // `a:gradFill` with no `a:gsLst` takes its stops from the style's fill in PowerPoint; saving
+    // must not turn it into a gradient of its own (it used to become solid white).
+    use deckcraft_model::style::{Gradient, GradientShape};
+    let mut p = defaults::new_presentation(None);
+    let id = ShapeId(p.alloc_id());
+    let first = p.slides[0].id;
+    let own = Gradient { stops: vec![], shape: GradientShape::Linear { angle: 45.0, scaled: true }, rotate_with_shape: true };
+    p.slide_mut(first).expect("slide").shapes.push(Shape {
+        id,
+        name: "Styled".into(),
+        xfrm: Some(Xfrm::new(10.0, 10.0, 200.0, 100.0)),
+        fill: Some(Fill::Gradient(own.clone())),
+        style: Some(deckcraft_model::ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        ..Default::default()
+    });
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    let s = q.slides[0].shapes.iter().find(|s| s.name == "Styled").expect("shape");
+    assert_eq!(s.fill, Some(Fill::Gradient(own)));
+}

@@ -134,11 +134,8 @@ pub fn xfrm(ctx: &Ctx, shape: &Shape) -> Xfrm {
 /// Effective fill and the style colour (`phClr`) to resolve it with.
 pub fn fill(ctx: &Ctx, shape: &Shape) -> (Option<Fill>, Option<Rgba>) {
     let (lp, mp) = parents(ctx, shape);
-    for s in [Some(shape), lp, mp].into_iter().flatten() {
-        if let Some(f) = &s.fill {
-            return (Some(f.clone()), None);
-        }
-        if let Some(st) = &s.style {
+    let style_fill = |s: &Shape| {
+        s.style.as_ref().map(|st| {
             let (idx, col) = &st.fill_ref;
             let ph = ctx.color(col, None);
             let f = match *idx {
@@ -146,7 +143,25 @@ pub fn fill(ctx: &Ctx, shape: &Shape) -> (Option<Fill>, Option<Rgba>) {
                 i if i >= 1001 => ctx.master.theme.format.bg_fills.get((i - 1001) as usize).cloned(),
                 i => ctx.master.theme.format.fills.get((i - 1) as usize).cloned(),
             };
-            return (f, Some(ph));
+            (f, Some(ph))
+        })
+    };
+    for s in [Some(shape), lp, mp].into_iter().flatten() {
+        if let Some(f) = &s.fill {
+            // A gradient without stops (`a:gradFill` with no `a:gsLst`) takes them from the
+            // gradient its style refers to, keeping its own direction, as PowerPoint draws it.
+            if let Fill::Gradient(g) = f
+                && g.stops.is_empty()
+                && let Some((Some(Fill::Gradient(sg)), ph)) = style_fill(s)
+            {
+                let mut g = g.clone();
+                g.stops = sg.stops;
+                return (Some(Fill::Gradient(g)), ph);
+            }
+            return (Some(f.clone()), None);
+        }
+        if let Some(r) = style_fill(s) {
+            return r;
         }
     }
     if shape.text_box {
