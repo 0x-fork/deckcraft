@@ -1813,71 +1813,119 @@ fn cloud(name: &str, w: f64, h: f64, a0: f64, a1: f64) -> Geometry {
     Geometry { paths, text_rect, handles, sites: mid_sites(w, h) }
 }
 
+/// The equation shapes, by ECMA-376's formulas (checked against PowerPoint's outlines at several
+/// sizes and adjust values). Their bars span 73.49% of the width; the plus and multiply bars are
+/// `adj1` of the shorter side thick, the others' `adj1` of the height.
 fn math(name: &str, w: f64, h: f64, a0: f64, a1: f64, a2: f64) -> Geometry {
+    let pin = |lo: f64, v: f64, hi: f64| v.max(lo).min(hi.max(lo));
     let ss = w.min(h);
-    let t = ss * a0.clamp(0.0, 50000.0) / 1e5;
-    let (cx, cy) = (w / 2.0, h / 2.0);
-    let mx = w * 0.0735;
-    let my = h * 0.0735;
+    let (hc, vc) = (w / 2.0, h / 2.0);
+    let dx1 = w * 73490.0 / 200000.0;
+    let (x1, x2) = (hc - dx1, hc + dx1);
     let mut b = Pb::new();
-    match name {
+    let text = match name {
         "mathPlus" => {
-            let (hx, hy) = (cx - mx, cy - my);
-            b.poly(&[
-                (cx - t / 2.0, cy - hy),
-                (cx + t / 2.0, cy - hy),
-                (cx + t / 2.0, cy - t / 2.0),
-                (cx + hx, cy - t / 2.0),
-                (cx + hx, cy + t / 2.0),
-                (cx + t / 2.0, cy + t / 2.0),
-                (cx + t / 2.0, cy + hy),
-                (cx - t / 2.0, cy + hy),
-                (cx - t / 2.0, cy + t / 2.0),
-                (cx - hx, cy + t / 2.0),
-                (cx - hx, cy - t / 2.0),
-                (cx - t / 2.0, cy - t / 2.0),
-            ]);
+            let a = pin(0.0, a0, 73490.0);
+            let dy1 = h * 73490.0 / 200000.0;
+            let dx2 = ss * a / 200000.0;
+            let (y1, y2, y3, y4) = (vc - dy1, vc - dx2, vc + dx2, vc + dy1);
+            let (xa, xb) = (hc - dx2, hc + dx2);
+            b.poly(&[(x1, y2), (xa, y2), (xa, y1), (xb, y1), (xb, y2), (x2, y2), (x2, y3), (xb, y3), (xb, y4), (xa, y4), (xa, y3), (x1, y3)]);
+            Rect::new(x1, y2, x2, y3)
         }
         "mathMinus" => {
-            b.poly(&[(mx, cy - t / 2.0), (w - mx, cy - t / 2.0), (w - mx, cy + t / 2.0), (mx, cy + t / 2.0)]);
+            let dy1 = h * pin(0.0, a0, 100000.0) / 200000.0;
+            b.poly(&[(x1, vc - dy1), (x2, vc - dy1), (x2, vc + dy1), (x1, vc + dy1)]);
+            Rect::new(x1, vc - dy1, x2, vc + dy1)
         }
         "mathEqual" => {
-            let gap = h * a1.clamp(0.0, 100000.0) / 1e5;
-            b.poly(&[(mx, cy - gap / 2.0 - t), (w - mx, cy - gap / 2.0 - t), (w - mx, cy - gap / 2.0), (mx, cy - gap / 2.0)]);
-            b.poly(&[(mx, cy + gap / 2.0), (w - mx, cy + gap / 2.0), (w - mx, cy + gap / 2.0 + t), (mx, cy + gap / 2.0 + t)]);
+            let a = pin(0.0, a0, 36745.0);
+            let g = pin(0.0, a1, 100000.0 - 2.0 * a);
+            let (dy1, dy2) = (h * a / 100000.0, h * g / 200000.0);
+            let (y2, y3) = (vc - dy2, vc + dy2);
+            let (y1, y4) = (y2 - dy1, y3 + dy1);
+            b.poly(&[(x1, y1), (x2, y1), (x2, y2), (x1, y2)]);
+            b.poly(&[(x1, y3), (x2, y3), (x2, y4), (x1, y4)]);
+            Rect::new(x1, y1, x2, y4)
         }
         "mathNotEqual" => {
-            let gap = h * a2.clamp(0.0, 100000.0) / 1e5;
-            b.poly(&[(mx, cy - gap / 2.0 - t), (w - mx, cy - gap / 2.0 - t), (w - mx, cy - gap / 2.0), (mx, cy - gap / 2.0)]);
-            b.poly(&[(mx, cy + gap / 2.0), (w - mx, cy + gap / 2.0), (w - mx, cy + gap / 2.0 + t), (mx, cy + gap / 2.0 + t)]);
-            let ang = (a1 / 60000.0).to_radians();
-            let dir = Vec2::new(ang.cos(), ang.sin());
-            let len = (h / 2.0 - my) / ang.sin().abs().max(0.2);
-            let perp = Vec2::new(-dir.y, dir.x) * (t / 2.0);
-            let c = Point::new(cx, cy);
-            let p = [c - dir * len - perp, c + dir * len - perp, c + dir * len + perp, c - dir * len + perp];
-            b.poly(&p.map(|q| (q.x, q.y)));
+            let a = pin(0.0, a0, 50000.0);
+            let cr_ang = pin(4200000.0, a1, 6600000.0);
+            let g = pin(0.0, a2, 100000.0 - 2.0 * a);
+            let (dy1, dy2) = (h * a / 100000.0, h * g / 200000.0);
+            let hd2 = (h / 2.0).max(1e-9);
+            let (y2, y3) = (vc - dy2, vc + dy2);
+            let (y1, y4) = (y2 - dy1, y3 + dy1);
+            let cadj2 = cr_ang - 5400000.0;
+            let xadj2 = hd2 * (cadj2 / 60000.0).to_radians().tan();
+            let len = xadj2.hypot(hd2);
+            let bhw = len * dy1 / hd2;
+            let x7 = hc + xadj2 - bhw / 2.0;
+            let at = |y: f64| x7 - xadj2 * y / hd2;
+            let (x6, x5, x4, x3) = (at(y1), at(y2), at(y3), at(y4));
+            let rx7 = x7 + bhw;
+            let dx7 = dy1 * hd2 / len;
+            let dy3 = dy1 * xadj2 / len;
+            let (rx, lx, ry, ly) = if cadj2 > 0.0 { (x7 + dx7, x7, dy3, 0.0) } else { (rx7, rx7 - dx7, 0.0, -dy3) };
+            b.poly(&[
+                (x1, y1),
+                (x6, y1),
+                (lx, ly),
+                (rx, ry),
+                (x6 + bhw, y1),
+                (x2, y1),
+                (x2, y2),
+                (x5 + bhw, y2),
+                (x4 + bhw, y3),
+                (x2, y3),
+                (x2, y4),
+                (x3 + bhw, y4),
+                (w - lx, h - ly),
+                (w - rx, h - ry),
+                (x3, y4),
+                (x1, y4),
+                (x1, y3),
+                (x4, y3),
+                (x5, y2),
+                (x1, y2),
+            ]);
+            Rect::new(x1, y1, x2, y4)
         }
         "mathDivide" => {
-            let gap = h * a1.clamp(0.0, 100000.0) / 1e5;
-            let r = ss * a2.clamp(0.0, 50000.0) / 1e5 / 2.0;
-            b.poly(&[(mx, cy - t / 2.0), (w - mx, cy - t / 2.0), (w - mx, cy + t / 2.0), (mx, cy + t / 2.0)]);
-            b.ellipse(cx, cy - t / 2.0 - gap - r, r, r);
-            b.ellipse(cx, cy + t / 2.0 + gap + r, r, r);
+            let a = pin(1000.0, a0, 36745.0);
+            let max3 = ((73490.0 - a) / 4.0).min(36745.0 * w / h.max(1e-9));
+            let r3 = pin(1000.0, a2, max3);
+            let g = pin(0.0, a1, 73490.0 - 4.0 * r3 - a);
+            let dy1 = h * a / 200000.0;
+            let yg = h * g / 100000.0;
+            let rad = h * r3 / 100000.0;
+            let (y3, y4) = (vc - dy1, vc + dy1);
+            let y2 = y3 - (yg + rad);
+            let y1 = y2 - rad;
+            b.ellipse(hc, y1 + rad, rad, rad);
+            b.ellipse(hc, h - y1 - rad, rad, rad);
+            b.poly(&[(x1, y3), (x2, y3), (x2, y4), (x1, y4)]);
+            Rect::new(x1, y3, x2, y4)
         }
         _ => {
-            // mathMultiply: two bars crossing at the centre along the diagonals.
-            let len = ((cx - mx).powi(2) + (cy - my).powi(2)).sqrt();
-            let c = Point::new(cx, cy);
-            for d in [Vec2::new(cx - mx, cy - my), Vec2::new(cx - mx, -(cy - my))] {
-                let dir = d / d.hypot().max(1e-9);
-                let perp = Vec2::new(-dir.y, dir.x) * (t / 2.0);
-                let p = [c - dir * len - perp, c + dir * len - perp, c + dir * len + perp, c - dir * len + perp];
-                b.poly(&p.map(|q| (q.x, q.y)));
-            }
+            // mathMultiply: an X whose arms run along the box's diagonals.
+            let th = ss * pin(0.0, a0, 51965.0) / 100000.0;
+            let ang = h.atan2(w);
+            let (sa, ca, ta) = (ang.sin(), ang.cos(), ang.tan().max(1e-9));
+            let lm = w.hypot(h) * (1.0 - 51965.0 / 100000.0);
+            let (xm, ym) = (ca * lm / 2.0, sa * lm / 2.0);
+            let (dxam, dyam) = (sa * th / 2.0, ca * th / 2.0);
+            let (xa, ya, xb, yb) = (xm - dxam, ym + dyam, xm + dxam, ym - dyam);
+            let yc = (hc - xb) * ta + yb;
+            let (xd, xe) = (w - xb, w - xa);
+            let xfe = (vc - ya) / ta;
+            let (xf, xl) = (xe - xfe, xa + xfe);
+            let (yg, yh, yi) = (h - ya, h - yb, h - yc);
+            b.poly(&[(xa, ya), (xb, yb), (hc, yc), (xd, yb), (xe, ya), (xf, vc), (xe, yg), (xd, yh), (hc, yi), (xb, yh), (xa, yg), (xl, vc)]);
+            Rect::new(xa, yb, xe, yh)
         }
-    }
-    Geometry { paths: vec![fill(b.take())], text_rect: Rect::new(mx, cy - t / 2.0, w - mx, cy + t / 2.0), handles: vec![], sites: mid_sites(w, h) }
+    };
+    Geometry { paths: vec![fill(b.take())], text_rect: text, handles: vec![], sites: mid_sites(w, h) }
 }
 
 fn ribbon(up: bool, w: f64, h: f64, a0: f64, a1: f64) -> Geometry {
@@ -2117,6 +2165,27 @@ mod tests {
         assert!(on_path(&g, Point::new(w / 4.0, h / 5.0), 1e-3) && on_path(&g, Point::new(w * 0.75, 0.0), 1e-3));
         let g = build("flowChartMultidocument", w, h, &[]).unwrap();
         assert!(on_path(&g, at(2972.0, 0.0), 1e-6) && on_path(&g, at(18595.0, 18022.0), 1e-6));
+    }
+
+    #[test]
+    fn equation_shapes_match_powerpoints_outlines() {
+        // Corners read off PowerPoint's own outlines of the presets at their default adjusts.
+        let g = build("mathMultiply", 216.0, 216.0, &[]).unwrap();
+        for (x, y) in [(0.32333, 0.15702), (0.5, 0.33369), (0.84298, 0.32333), (0.66631, 0.5), (0.33369, 0.5)] {
+            assert!(on_path(&g, Point::new(216.0 * x, 216.0 * y), 0.01), "multiply ({x}, {y})");
+        }
+        let g = build("mathEqual", 300.0, 120.0, &[]).unwrap();
+        for (x, y) in [(0.13255, 0.5588), (0.86745, 0.794), (0.13255, 0.206), (0.86745, 0.4412)] {
+            assert!(on_path(&g, Point::new(300.0 * x, 120.0 * y), 0.01), "equal ({x}, {y})");
+        }
+        let g = build("mathPlus", 216.0, 216.0, &[]).unwrap();
+        assert!(on_path(&g, Point::new(216.0 * 0.3824, 216.0 * 0.13255), 0.01) && on_path(&g, Point::new(216.0 * 0.86745, 216.0 * 0.6176), 0.01));
+        // A tall "not equal": its slash, leaning at the default 110° from top to bottom, reaches
+        // past the box's sides exactly as far as PowerPoint's (-22.242 to 122.242).
+        let g = build("mathNotEqual", 100.0, 260.0, &[]).unwrap();
+        use kurbo::Shape as _;
+        let bb = g.paths[0].path.bounding_box();
+        assert!((bb.x0 + 22.242).abs() < 0.01 && (bb.x1 - 122.242).abs() < 0.01 && bb.y0.abs() < 1e-6 && (bb.y1 - 260.0).abs() < 1e-6, "{bb:?}");
     }
 
     #[test]
