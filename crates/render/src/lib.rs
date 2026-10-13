@@ -257,6 +257,17 @@ impl Default for Renderer {
     }
 }
 
+static PANICS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn note_panic() {
+    PANICS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Render panics caught (and drawn as blank) since start; soak tests require it to stay 0.
+pub fn panics_caught() -> u64 {
+    PANICS.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 thread_local! {
     static RENDERER: std::cell::RefCell<Renderer> = std::cell::RefCell::new(Renderer::default());
 }
@@ -330,6 +341,7 @@ pub fn render_slide_drawn(pres: &Presentation, index: usize, opts: &RenderOpts) 
         }
         Err(_) => {
             log::error!("rendering slide {index} panicked; showing a blank slide");
+            note_panic();
             RENDERER.with(|r| *r.borrow_mut() = Renderer::default());
             let (w, h) = output_size(pres, opts);
             (Image { width: w as u32, height: h as u32, pixels: vec![255; w as usize * h as usize * 4] }, page)
@@ -354,6 +366,7 @@ pub fn render_slide_part(pres: &Presentation, index: usize, part: SlidePart, opt
         Ok(img) => img,
         Err(_) => {
             log::error!("rendering part of slide {index} panicked; showing nothing");
+            note_panic();
             RENDERER.with(|r| *r.borrow_mut() = Renderer::default());
             let (w, h) = output_size(pres, opts);
             Image { width: w as u32, height: h as u32, pixels: vec![0; w as usize * h as usize * 4] }
@@ -385,6 +398,7 @@ pub fn render_blend(
         Ok(img) => img,
         Err(_) => {
             log::error!("rendering a frame between slides {old} and {new} panicked; showing the new slide");
+            note_panic();
             RENDERER.with(|r| *r.borrow_mut() = Renderer::default());
             render_slide(pres, new, opts)
         }
@@ -397,6 +411,7 @@ pub fn render_layout(pres: &Presentation, master: usize, layout: Option<usize>, 
         Ok(img) => img,
         Err(_) => {
             log::error!("rendering a layout panicked; showing a blank image");
+            note_panic();
             RENDERER.with(|r| *r.borrow_mut() = Renderer::default());
             Image::default()
         }

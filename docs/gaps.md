@@ -48,11 +48,14 @@ revision history.
 - **Estimate:** 4–8 h (backend probing outside the process or a safe-mode fallback, a software
   renderer path). Needs a tester with the hardware. **Beta blocker.**
 
-### No soak or long-session testing
-- **Evidence:** unit tests (504), PPTX malformed/fuzz tests and the command panic guard exist; no
-  random command sequences over big decks, no memory or undo-depth soak.
-- **Impact:** unknown crash and slowdown rate in long sessions.
-- **Estimate:** 4–8 h.
+### Soak testing is new
+- **Evidence:** `crates/ui-egui/src/ui_soak_tests.rs` drives the whole window with seeded random
+  clicks, drags, keys (plain, Ctrl, Shift), typing and scrolling over the sample deck, checking
+  document validity, bounded undo/journal/thumbnail/texture caches, zero caught command and
+  render panics (`Session::panics_caught`, `deckcraft_render::panics_caught`) and a mean frame
+  under 250 ms; 4 × 3000-action runs are clean. Engine-level command soak: PR #502.
+- **Impact:** long-session crash rate is sampled in CI; RSS is not measured directly.
+- **Estimate:** 1–2 h (RSS sampling per platform).
 
 ## File formats
 

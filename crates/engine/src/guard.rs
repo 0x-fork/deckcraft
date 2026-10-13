@@ -52,6 +52,7 @@ impl Session {
                     st.revision = revision.max(st.revision).saturating_add(1);
                 }
                 log::error!("command `{id}` panicked: {msg}");
+                self.panics_caught = self.panics_caught.saturating_add(1);
                 if let Some(dir) = self.recovery_dir.clone()
                     && let Err(e) = crate::recovery::save(self, &dir)
                 {
@@ -85,6 +86,7 @@ mod tests {
         assert!(err.to_string().contains("test.panic") && err.to_string().contains("boom"), "{err}");
         let st = s.active().unwrap();
         assert!(std::sync::Arc::ptr_eq(&st.doc, &before), "the document is the one from before the command");
+        assert_eq!(s.panics_caught, 1, "the guard counts what it caught");
         // The session keeps working.
         s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [36, 236, 200, 400]})).unwrap();
     }
