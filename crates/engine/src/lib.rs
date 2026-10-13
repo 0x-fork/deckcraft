@@ -509,9 +509,15 @@ impl Session {
         if let Some(t) = st.selection.text.as_mut() {
             t.line_end = None;
         }
+        let owner = |sel: &Selection| sel.text.as_ref().map(|t| (sel.slide, sel.target, t.shape, t.cell, t.notes));
+        let before = owner(&st.selection);
         f(&doc, &mut st.selection);
         clamp_selection(st);
         st.revision += 1;
+        // A composition belongs to the text body it began in: leaving that body settles it.
+        if st.composition.is_some() && owner(&st.selection) != before {
+            self.end_composition();
+        }
         Ok(())
     }
 }
