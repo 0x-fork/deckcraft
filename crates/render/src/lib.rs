@@ -1167,10 +1167,19 @@ fn stroke(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, pa
     };
     // Hairlines stay visible at any zoom.
     let min_w = 0.5 / scale_of(m).max(1e-6);
-    let mut sk = kurbo::Stroke::new(lw.max(min_w)).with_caps(cap).with_join(join);
+    let sw = lw.max(min_w);
+    let mut sk = kurbo::Stroke::new(sw).with_caps(cap).with_join(join);
+    // Square caps on a dashed line square off only the line's own two ends (where a dash is
+    // drawn): each dash itself ends flat, as PowerPoint draws them.
+    let mut square_ends = None;
     if let Some(d) = &line.dash {
         let pat: Vec<f64> = d.pattern().iter().map(|v| v * lw.max(0.75)).collect();
+        let pat = dash_with_caps(pat, cap, sw);
         if !pat.is_empty() && pat.iter().all(|v| *v > 0.0) {
+            if cap == kurbo::Cap::Square {
+                sk = sk.with_caps(kurbo::Cap::Butt);
+                square_ends = Some(square_dash_ends(path, &pat, sw));
+            }
             sk = sk.with_dashes(0.0, pat);
         }
     }
@@ -1200,6 +1209,103 @@ fn stroke(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, pa
     }
     ctx.set_stroke(sk);
     ctx.stroke_path(path);
+    if let Some(ends) = square_ends {
+        ctx.fill_path(&ends);
+    }
+}
+
+/// The square caps of a dashed line drawn `width` wide with dash `pattern`: a half-width square
+/// past the start of each open sub-path (every dash pattern starts with a dash) and past its end
+/// when the pattern is in a dash there.
+fn square_dash_ends(path: &BezPath, pattern: &[f64], width: f64) -> BezPath {
+    use kurbo::{ParamCurve, ParamCurveArclen};
+    let mut out = BezPath::new();
+    let period: f64 = pattern.iter().sum();
+    let mut cap = |at: Point, dir: Vec2| {
+        let n = Vec2::new(-dir.y, dir.x) * (width / 2.0);
+        let back = dir * (width / 2.0);
+        out.move_to(at + n);
+        out.line_to(at + n + back);
+        out.line_to(at - n + back);
+        out.line_to(at - n);
+        out.close_path();
+    };
+    let dir = |seg: &kurbo::PathSeg, t0: f64, t1: f64| {
+        let d = seg.eval(t1) - seg.eval(t0);
+        let d = if d.hypot() > 1e-9 { d } else { seg.end() - seg.start() };
+        if d.hypot() > 1e-9 { Some(d.normalize()) } else { None }
+    };
+    let mut subs: Vec<(Vec<kurbo::PathSeg>, bool)> = vec![];
+    let mut cur: Vec<kurbo::PathSeg> = vec![];
+    let mut closed = false;
+    let mut last = Point::ZERO;
+    let mut start = Point::ZERO;
+    for el in path.elements() {
+        let seg = match *el {
+            PathEl::MoveTo(p) => {
+                if !cur.is_empty() {
+                    subs.push((std::mem::take(&mut cur), closed));
+                }
+                closed = false;
+                last = p;
+                start = p;
+                continue;
+            }
+            PathEl::LineTo(p) => kurbo::PathSeg::Line(kurbo::Line::new(last, p)),
+            PathEl::QuadTo(a, p) => kurbo::PathSeg::Quad(kurbo::QuadBez::new(last, a, p)),
+            PathEl::CurveTo(a, b, p) => kurbo::PathSeg::Cubic(kurbo::CubicBez::new(last, a, b, p)),
+            PathEl::ClosePath => {
+                closed = true;
+                last = start;
+                continue;
+            }
+        };
+        last = seg.end();
+        cur.push(seg);
+    }
+    if !cur.is_empty() {
+        subs.push((cur, closed));
+    }
+    for segs in subs.iter().filter(|(s, c)| !c && !s.is_empty()).map(|(s, _)| s) {
+        let (Some(first), Some(end)) = (segs.first(), segs.last()) else { continue };
+        if let Some(d) = dir(first, 1e-3, 0.0) {
+            cap(first.start(), d);
+        }
+        let len: f64 = segs.iter().map(|s| s.arclen(1e-3)).sum();
+        if !(period > 0.0 && len.is_finite()) {
+            continue;
+        }
+        let mut pos = len % period;
+        // Ending exactly on a period boundary is the end of a gap.
+        let mut on = pos > period * 1e-6;
+        for v in pattern.iter().cycle().take(pattern.len()) {
+            if pos <= *v {
+                break;
+            }
+            pos -= v;
+            on = !on;
+        }
+        if on && let Some(d) = dir(end, 1.0 - 1e-3, 1.0) {
+            cap(end.end(), d);
+        }
+    }
+    out
+}
+
+/// A dash pattern (on, off, on, off… lengths) for a line drawn `width` wide with `cap`. As
+/// PowerPoint draws them, round caps sit inside each dash's length rather than adding to it: a
+/// "round dot" (`sysDot`, one width on and one off) is a row of separate circles, not a solid
+/// line. So each dash loses a width (half at each end, where the caps go) and each gap gains it; a
+/// dash no longer than the width becomes just its two caps. (Square-capped dashes end flat; see
+/// `square_dash_ends`.)
+fn dash_with_caps(mut pat: Vec<f64>, cap: kurbo::Cap, width: f64) -> Vec<f64> {
+    if cap != kurbo::Cap::Round || !pat.len().is_multiple_of(2) || !(width.is_finite() && width > 0.0) {
+        return pat;
+    }
+    for (i, v) in pat.iter_mut().enumerate() {
+        *v = if i.is_multiple_of(2) { (*v - width).max(width * 1e-3) } else { *v + width };
+    }
+    pat
 }
 
 fn end_points(path: &BezPath) -> Option<((Point, Point), (Point, Point))> {
