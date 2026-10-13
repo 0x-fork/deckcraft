@@ -933,7 +933,8 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             g
         }
         "can" | "flowChartMagneticDisk" => {
-            let v = if name == "can" { a(0).clamp(0.0, 50000.0 * h / ss.max(1e-9)) } else { 33333.0 * h / ss.max(1e-9) / 2.0 };
+            // The disk's ends are a third of its height (ECMA-376: ellipses of radius h/6).
+            let v = if name == "can" { a(0).clamp(0.0, 50000.0 * h / ss.max(1e-9)) } else { 100000.0 / 3.0 * h / ss.max(1e-9) };
             let eh = ss * v / 100000.0;
             let r = eh / 2.0;
             let body = Pb::new().m(0.0, r).l(0.0, h - r).arc(w / 2.0, r, 180.0, -180.0).l(w, r).arc(w / 2.0, r, 0.0, -180.0).z().take();
@@ -950,7 +951,8 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             g
         }
         "flowChartMagneticDrum" => {
-            let r = w / 6.0 / 2.0;
+            // ECMA-376: end ellipses of radius w/6 across.
+            let r = w / 6.0;
             let body = Pb::new().m(r, 0.0).l(w - r, 0.0).arc(r, h / 2.0, 270.0, 180.0).l(r, h).arc(r, h / 2.0, 90.0, 180.0).z().take();
             let side = Pb::new().m(w - r, 0.0).arc(r, h / 2.0, 270.0, -180.0).take();
             Geometry {
@@ -1184,10 +1186,36 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             g
         }
         "moon" => {
+            // ECMA-376 moon: the outer edge is the left half of an ellipse w × h/2 centred on the
+            // right edge; the inner edge an arc through the corners and (adj · w, middle) of a
+            // larger ellipse (rx = g18, ry = dy1) whose centre lies right of that point.
             let k = a(0).clamp(0.0, 87500.0) / 100000.0;
-            let g0 = w * k;
-            b.m(w, 0.0).arc(w, h / 2.0, 270.0, -180.0).arc((w - g0).max(0.0), h / 2.0, 90.0, 180.0).z();
-            simple(b.take(), Rect::new(w * 0.1, h * 0.25, w * (1.0 - k).max(0.2) * 0.8, h * 0.75), w, h)
+            let ssf = ss.max(1e-9);
+            let g0 = ss * k;
+            let g1 = (ss - g0).max(1e-9);
+            let g2 = g0 * g0 / g1;
+            let g3 = ss * ss / g1;
+            let g5 = 2.0 * g3 - g2;
+            let g6 = g5 - g0;
+            let dy1 = (g5 / 2.0 - g0) * (h / 2.0) / ssf;
+            let (g0w, g6w) = (g0 * w / ssf, g6 * w / ssf);
+            let rx = (g6w - g0w) / 2.0;
+            let cx = g0w + rx;
+            b.m(w, 0.0).arc(w, h / 2.0, 270.0, -180.0);
+            if rx > 1e-9 && dy1 > 1e-9 {
+                // From the bottom-right corner back up to the top-right through (g0w, h/2).
+                let t0 = ((h / 2.0) / dy1).clamp(-1.0, 1.0).atan2((w - cx) / rx);
+                let t1 = (-(h / 2.0) / dy1).clamp(-1.0, 1.0).atan2((w - cx) / rx) + std::f64::consts::TAU;
+                let arc = Arc::new(Point::new(cx, h / 2.0), Vec2::new(rx, dy1), t0, t1 - t0, 0.0);
+                arc.to_cubic_beziers(0.05, |p1, p2, p| {
+                    b.p.curve_to(p1, p2, p);
+                });
+            }
+            b.z();
+            let g12 = g0 * 9598.0 / 32768.0;
+            let g13 = ss - g12;
+            let dy4 = (ss * ss - g13 * g13).max(0.0).sqrt() * (h / 2.0) / ssf;
+            simple(b.take(), Rect::new(g12 * w / ssf, h / 2.0 - dy4, g0w, h / 2.0 + dy4), w, h)
         }
         "cloud" | "cloudCallout" => cloud(name, w, h, a(0), a(1)),
         "bracketPair" => {
@@ -2296,6 +2324,24 @@ mod tests {
         let g = build("star6", k, k, &[]).unwrap();
         let bb = g.paths[0].path.bounding_box();
         assert!((bb.x0).abs() < 0.5 && (bb.x1 - k).abs() < 0.5, "{bb:?}");
+    }
+
+    #[test]
+    fn moon_disk_and_drum_match_powerpoints_outlines() {
+        let k = 216.0;
+        // Moon, default: the inner edge runs through (0.5, 0.5) and (0.625, 0.2266) of the box.
+        let g = build("moon", k, k, &[]).unwrap();
+        for (x, y) in [(0.5, 0.5), (0.626, 0.2266), (0.0, 0.5), (1.0, 0.0)] {
+            assert!(on_path(&g, Point::new(k * x, k * y), 0.5), "moon ({x}, {y})");
+        }
+        // 300 × 120 at 30%: its inner edge reaches 30% of the width in.
+        let g = build("moon", 300.0, 120.0, &[30000.0]).unwrap();
+        assert!(on_path(&g, Point::new(90.0, 60.0), 0.5));
+        // Magnetic disk ends are ellipses h/6 high, drum ends w/6 across.
+        let g = build("flowChartMagneticDisk", k, k, &[]).unwrap();
+        assert!(on_path(&g, Point::new(k, k / 6.0), 0.01) && on_path(&g, Point::new(k / 2.0, k / 3.0), 0.5));
+        let g = build("flowChartMagneticDrum", k, k, &[]).unwrap();
+        assert!(on_path(&g, Point::new(k / 6.0, 0.0), 0.01) && on_path(&g, Point::new(0.0, k / 2.0), 0.01));
     }
 
     #[test]
