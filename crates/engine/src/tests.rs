@@ -835,3 +835,51 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn picture_recolor_and_transparent_color() {
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0xf8, 0xcf,
+        0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x89, 0x99, 0x3d, 0x1d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+        0x82,
+    ];
+    let mut s = session();
+    let id = s.execute("insert.picture", &json!({"data": cmd::base64_encode(PNG), "name": "a.png"})).unwrap()["id"].clone();
+    let adj = |s: &Session| match &s.doc().unwrap().shapes().iter().find(|sh| json!(sh.id) == id).unwrap().kind {
+        deckcraft_model::ShapeKind::Picture { fill } => fill.adjust.clone(),
+        _ => panic!("not a picture"),
+    };
+    assert_eq!(s.execute("picture.recolors", &json!({})).unwrap().as_array().unwrap().len(), 21);
+    s.execute("picture.recolor", &json!({"ids": [id], "preset": "bw50"})).unwrap();
+    assert_eq!(adj(&s).bilevel, Some(0.5));
+    // A new preset replaces the old one.
+    s.execute("picture.recolor", &json!({"ids": [id], "preset": "accent2Light"})).unwrap();
+    let a = adj(&s);
+    assert!(a.bilevel.is_none());
+    assert!(matches!(&a.duotone, Some((d, _)) if *d == deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)));
+    s.execute("picture.recolor", &json!({"ids": [id], "preset": "washout"})).unwrap();
+    let a = adj(&s);
+    assert!(a.duotone.is_none() && a.brightness == 0.7 && a.contrast == -0.7);
+    s.execute("picture.recolor", &json!({"ids": [id], "preset": "grayscale"})).unwrap();
+    let a = adj(&s);
+    assert!(a.grayscale && a.brightness == 0.0, "washout undone by the next preset");
+    assert!(s.execute("picture.recolor", &json!({"ids": [id], "preset": "plaid"})).is_err());
+
+    s.execute("picture.transparentColor", &json!({"ids": [id], "color": "#FFFFFF"})).unwrap();
+    assert_eq!(adj(&s).clear_color, Some(deckcraft_color::Rgba::rgb(255, 255, 255)));
+    // Both survive PPTX.
+    let doc = s.doc().unwrap().doc.as_ref().clone();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&doc).unwrap()).unwrap();
+    let ba = back.slides.iter().flat_map(|sl| &sl.shapes).find_map(|sh| match &sh.kind {
+        deckcraft_model::ShapeKind::Picture { fill } => Some(fill.adjust.clone()),
+        _ => None,
+    });
+    let ba = ba.unwrap();
+    assert!(ba.grayscale);
+    assert_eq!(ba.clear_color, Some(deckcraft_color::Rgba::rgb(255, 255, 255)));
+    s.execute("picture.transparentColor", &json!({"ids": [id], "none": true})).unwrap();
+    assert!(adj(&s).clear_color.is_none());
+    s.execute("picture.recolor", &json!({"ids": [id], "preset": "none"})).unwrap();
+    assert_eq!(adj(&s), deckcraft_model::style::PictureAdjust::default());
+}

@@ -2072,9 +2072,39 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
                     run(app, "picture.adjust", json!({"saturation": s}));
                 }
             }
-            if ui.button("Grayscale").clicked() {
-                run(app, "picture.adjust", json!({"grayscale": true}));
+            ui.separator();
+            ui.label("Recolor");
+            let sc = scheme(app);
+            let presets = deckcraft_engine::cmd::recolor::presets();
+            let names: Vec<String> = presets.iter().map(|(_, l)| l.clone()).collect();
+            if let Some(i) = widgets::gallery(
+                ui,
+                presets.len(),
+                vec2(40.0, 30.0),
+                None,
+                |p, r, i| {
+                    if let Some((id, _)) = presets.get(i) {
+                        paint_recolor(p, r, id, &sc);
+                    }
+                },
+                |i| names.get(i).cloned().unwrap_or_default(),
+            ) && let Some((id, _)) = presets.get(i)
+            {
+                run(app, "picture.recolor", json!({"preset": id}));
             }
+            ui.separator();
+            ui.menu_button("Set Transparent Color", |ui| {
+                ui.label("Pixels of this colour become transparent:");
+                if let Some(c) = widgets::color_grid(ui, &sc, Some("None")) {
+                    match c {
+                        Some(c) => {
+                            let rgb = c.resolve(&sc, None);
+                            run(app, "picture.transparentColor", json!({"color": format!("#{}", rgb.hex())}));
+                        }
+                        None => run(app, "picture.transparentColor", json!({"none": true})),
+                    }
+                }
+            });
         });
         let r = big_button(ui, Icon::Transparency, "Transparency", true);
         egui::Popup::menu(&r).show(|ui| {
@@ -2224,6 +2254,37 @@ fn table_design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
     });
+}
+
+/// A Recolor gallery tile: a dark-to-light ramp as the preset would draw it.
+fn paint_recolor(p: &egui::Painter, r: Rect, id: &str, sc: &deckcraft_color::ColorScheme) {
+    let mut adj = deckcraft_model::style::PictureAdjust::default();
+    deckcraft_engine::cmd::recolor::apply(&mut adj, id);
+    let r = r.shrink(3.0);
+    let n = 8;
+    for k in 0..n {
+        let t = k as f64 / (n - 1) as f64;
+        // A colourful ramp, so "No Recolor" shows colour and the presets show their mapping.
+        let src = [t * 255.0, (0.4 + 0.6 * t) * 200.0, (1.0 - t) * 220.0];
+        let y = 0.299 * src[0] + 0.587 * src[1] + 0.114 * src[2];
+        let mut rgb = if adj.grayscale { [y; 3] } else { src };
+        if adj.brightness != 0.0 || adj.contrast != 0.0 {
+            rgb = rgb.map(|v| (v - 127.5) * (1.0 + adj.contrast) + 127.5 + adj.brightness * 255.0);
+        }
+        if let Some((d, l)) = &adj.duotone {
+            let (d, l) = (d.resolve(sc, None), l.resolve(sc, None));
+            let u = y / 255.0;
+            rgb =
+                [d.r as f64 + (l.r as f64 - d.r as f64) * u, d.g as f64 + (l.g as f64 - d.g as f64) * u, d.b as f64 + (l.b as f64 - d.b as f64) * u];
+        }
+        if let Some(th) = adj.bilevel {
+            rgb = [if y >= th * 255.0 { 255.0 } else { 0.0 }; 3];
+        }
+        let c = Color32::from_rgb(rgb[0].clamp(0.0, 255.0) as u8, rgb[1].clamp(0.0, 255.0) as u8, rgb[2].clamp(0.0, 255.0) as u8);
+        let w = r.width() / n as f32;
+        p.rect_filled(Rect::from_min_size(pos2(r.left() + k as f32 * w, r.top()), vec2(w + 0.5, r.height())), CornerRadius::ZERO, c);
+    }
+    p.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, Color32::from_gray(160)), egui::StrokeKind::Outside);
 }
 
 pub fn paint_table_style(p: &egui::Painter, r: Rect, id: &str, sc: &deckcraft_color::ColorScheme) {
