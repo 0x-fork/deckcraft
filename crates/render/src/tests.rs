@@ -1553,3 +1553,33 @@ fn a_picture_casts_its_shadow_from_its_pixels() {
         assert!(img.pixel(200, 200)[0] > 240, "{as_fill}");
     }
 }
+
+#[test]
+fn text_in_a_scaled_group_keeps_its_point_size() {
+    // A group's child coordinates scale its shapes' boxes, never their type: a 24 pt word in a
+    // group whose child space is 1/1600 of its size (as old decks write them) or 4 times it is
+    // 24 pt on the slide, and inside its box (it used to grow until the slide turned black).
+    let draw = |scale: f64| {
+        let mut p = Presentation::default();
+        let mut body = TextBody::from_text("Hello");
+        body.paragraphs[0].runs[0].props.size = Some(24.0);
+        body.paragraphs[0].runs[0].props.fill = Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::BLACK)));
+        let child = Shape { id: ShapeId(601), xfrm: Some(Xfrm::new(0.0, 0.0, 400.0 / scale, 200.0 / scale)), text: Some(body), ..Default::default() };
+        let g = Shape {
+            id: ShapeId(600),
+            xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
+            kind: ShapeKind::Group { children: vec![child], child: Xfrm::new(0.0, 0.0, 400.0 / scale, 200.0 / scale) },
+            ..Default::default()
+        };
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![g];
+        render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let ((_, y0, _, y1), _) = ink(&draw(1.0));
+    let plain = y1 - y0;
+    assert!(plain > 10 && plain < 30, "24 pt word ink height {plain}");
+    for scale in [1600.0, 4.0, 0.25] {
+        let ((x0, sy0, x1, sy1), _) = ink(&draw(scale));
+        assert!((sy1 - sy0).abs_diff(plain) <= 1, "scale {scale}: ink height {} vs {plain}", sy1 - sy0);
+        assert!(x0 >= 100 && x1 <= 500 && sy0 >= 100 && sy1 <= 300, "scale {scale}: ink inside the box");
+    }
+}
