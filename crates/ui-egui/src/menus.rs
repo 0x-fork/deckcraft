@@ -222,6 +222,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
         (
             "Format",
             vec![
+                ("Font…", "format.fontDialog"),
                 ("Bold", "format.bold"),
                 ("Italic", "format.italic"),
                 ("Underline", "format.underline"),
