@@ -54,7 +54,7 @@ pub struct GlyphRun {
     pub para: usize,
     pub chars: (usize, usize),
     pub link: bool,
-    /// Alpha of the fill (0–1).
+    /// Opacity of the fill on top of `color`'s own alpha (0 for no fill).
     pub alpha: f64,
     pub gradient: Option<deckcraft_model::style::Gradient>,
     /// Shadow and glow behind the glyphs (`a:rPr/a:effectLst`).
@@ -269,7 +269,8 @@ fn make_style(ctx: &Ctx, r: &RunProps, scale: f64, prompt: Option<Rgba>) -> Styl
     let fake_italic = italic && !face.italic;
     let size = (r.size.unwrap_or(18.0) * scale).clamp(0.5, 4000.0);
     let (mut color, alpha, gradient) = match &r.fill {
-        Some(Fill::Solid { color }) => (ctx.color(color, None), color.alpha(), None),
+        // The resolved colour carries the fill's transparency (`a:alpha`): it is applied once.
+        Some(Fill::Solid { color }) => (ctx.color(color, None), 1.0, None),
         Some(Fill::Gradient(g)) => {
             // Colours resolved here (theme, colour map), so the renderer needs no colour scheme.
             let mut g = g.clone();

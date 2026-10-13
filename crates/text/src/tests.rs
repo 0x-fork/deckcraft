@@ -871,3 +871,17 @@ fn capitals_keep_characters_whose_capital_is_a_sequence() {
         assert_eq!(r.glyphs[1].0, face.glyph_for('ß'), "ß is not drawn as S");
     }
 }
+
+#[test]
+fn transparent_text_is_faded_once() {
+    let (p, mut sh) = setup("Faded", 2000.0, 300.0);
+    let run = &mut sh.text.as_mut().unwrap().paragraphs[0].runs[0];
+    run.props.fill = Some(deckcraft_model::Fill::solid(
+        deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0)).with(deckcraft_color::ColorTransform::Alpha(40000)),
+    ));
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let r = l.runs.iter().find(|r| !r.cells.is_empty()).unwrap();
+    // 60 % transparency: 40 % opaque in all, not 40 % of 40 %.
+    let opacity = r.color.a as f64 / 255.0 * r.alpha;
+    assert!((opacity - 0.4).abs() < 0.01, "{opacity}");
+}
