@@ -998,6 +998,13 @@ impl Renderer {
                 ctx.pop_layer();
             }
         }
+        // Some presets' outlines default to sharp corners (PowerPoint's own per-shape default).
+        let line = match (&s.geom, line.join) {
+            (Geom::Preset { name, .. }, None) if preset::mitred_by_default(name) => {
+                Line { join: Some(deckcraft_model::style::LineJoin::Miter), ..line }
+            }
+            _ => line,
+        };
         // A 3-D bevel: the face and a band inside the outline lit as surfaces.
         if let Some(bv) = effects.as_ref().and_then(|e| e.raw3d.as_deref()).and_then(bevel::from_raw) {
             let solid = match &fill {
@@ -1404,7 +1411,8 @@ pub(crate) fn stroke(
     // Hairlines stay visible at any zoom.
     let min_w = 0.5 / scale_of(m).max(1e-6);
     let sw = lw.max(min_w);
-    let mut sk = kurbo::Stroke::new(sw).with_caps(cap).with_join(join);
+    // PowerPoint's default miter limit is 8 widths (`a:miter lim="800000"`).
+    let mut sk = kurbo::Stroke::new(sw).with_caps(cap).with_join(join).with_miter_limit(8.0);
     // Square caps on a dashed line square off only the line's own two ends (where a dash is
     // drawn): each dash itself ends flat, as PowerPoint draws them.
     let mut square_ends = None;

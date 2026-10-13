@@ -662,3 +662,24 @@ fn a_gradient_not_rotating_with_its_shape_keeps_to_the_slide() {
         }
     }
 }
+
+#[test]
+fn stars_and_right_arrows_have_sharp_corners_by_default() {
+    let shape = |name: &str, join: Option<deckcraft_model::style::LineJoin>| Shape {
+        id: ShapeId(29),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 100.0, 100.0)),
+        geom: Geom::preset(name),
+        fill: solid(WHITE),
+        line: Some(Line { join, ..Line::solid(ColorRef::rgb(RED), 10.0) }),
+        ..Default::default()
+    };
+    // A star5's top point mitred reaches about 16 pt above the box; rounded only 5.
+    let img = render(vec![shape("star5", None)]);
+    assert!(close(img.pixel(150, 90), RED, 40), "mitred point {:?}", img.pixel(150, 90));
+    let img = render(vec![shape("star5", Some(deckcraft_model::style::LineJoin::Round))]);
+    assert!(close(img.pixel(150, 90), WHITE, 10), "an explicit round join stays round");
+    // A rectangle keeps PowerPoint's round default: its corner is cut round.
+    let img = render(vec![shape("rect", None)]);
+    assert!(close(img.pixel(95, 95), WHITE, 30), "{:?}", img.pixel(95, 95));
+    assert!(deckcraft_geom::preset::mitred_by_default("rightArrow") && !deckcraft_geom::preset::mitred_by_default("leftArrow"));
+}

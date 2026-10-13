@@ -339,6 +339,45 @@ pub fn info(name: &str) -> Option<&'static PresetInfo> {
     CATALOG.iter().find(|p| p.name == name)
 }
 
+/// Whether PowerPoint joins this preset's outline with sharp (miter) corners when the line names
+/// no join (it rounds them otherwise). Observed per preset on its export: the plus, the right,
+/// up and down block arrows (not the left one), chevrons, stars from five points up, the
+/// equation shapes, curved ribbons and the action buttons are mitred.
+pub fn mitred_by_default(name: &str) -> bool {
+    matches!(
+        name,
+        "plus"
+            | "rightArrow"
+            | "upArrow"
+            | "downArrow"
+            | "upDownArrow"
+            | "leftUpArrow"
+            | "bentUpArrow"
+            | "stripedRightArrow"
+            | "notchedRightArrow"
+            | "chevron"
+            | "leftArrowCallout"
+            | "leftRightArrowCallout"
+            | "upDownArrowCallout"
+            | "quadArrowCallout"
+            | "mathPlus"
+            | "mathMinus"
+            | "mathMultiply"
+            | "mathEqual"
+            | "mathNotEqual"
+            | "star5"
+            | "star6"
+            | "star8"
+            | "star10"
+            | "star12"
+            | "star16"
+            | "star24"
+            | "star32"
+            | "ellipseRibbon"
+            | "ellipseRibbon2"
+    ) || name.starts_with("actionButton")
+}
+
 pub fn is_line_like(name: &str) -> bool {
     matches!(name, "line" | "straightConnector1" | "bentConnector2" | "bentConnector3" | "curvedConnector3" | "arc")
         || name.starts_with("bentConnector")
