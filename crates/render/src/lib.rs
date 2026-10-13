@@ -864,7 +864,9 @@ impl Renderer {
                     _ => 1.0,
                 };
                 let (base, rel) = self.line_space(m, depth);
-                Caster { line: &line, ph: line_ph, alpha: a, base, rel }
+                let lw = line.width.unwrap_or(0.75).max(0.0);
+                let outside = if is_pic { outside_line(&line, lw) } else { None };
+                Caster { line: outside.map_or(std::borrow::Cow::Borrowed(&line), std::borrow::Cow::Owned), ph: line_ph, alpha: a, base, rel }
             });
             self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, fill_alpha, outline, content.as_ref(), m, w, h);
         }
@@ -973,6 +975,22 @@ impl Renderer {
                 }
                 None => std::borrow::Cow::Borrowed(&line),
             };
+            // A picture's border lies outside the picture, as PowerPoint draws it: stroked twice
+            // as wide, outside the outline only.
+            let outside = is_pic.then(|| outside_line(&line, lw)).flatten();
+            let clipped = outside.is_some();
+            let (line, lw) = match outside {
+                Some(o) => {
+                    let mut clip = Rect::new(0.0, 0.0, w, h).inflate(w + h + lw * 8.0, w + h + lw * 8.0).to_path(0.1);
+                    clip.extend(outline.iter());
+                    ctx.set_transform(m);
+                    ctx.set_fill_rule(peniko::Fill::EvenOdd);
+                    ctx.push_clip_layer(&clip);
+                    ctx.set_fill_rule(peniko::Fill::NonZero);
+                    (std::borrow::Cow::Owned(o), lw * 2.0)
+                }
+                None => (line, lw),
+            };
             let first_stroked = geo.paths.iter().position(|p| p.stroke);
             for (i, sp) in geo.paths.iter().enumerate().filter(|(i, p)| p.stroke && fade(*i).stroke > 0.0) {
                 let mut path = if rel == Affine::IDENTITY {
@@ -990,6 +1008,9 @@ impl Renderer {
             }
             if ends {
                 arrowheads(ctx, rctx, &line, line_ph, &geo, rel, base, lw);
+            }
+            if clipped {
+                ctx.pop_layer();
             }
             if see_through.is_some() {
                 ctx.pop_layer();
@@ -1153,7 +1174,7 @@ impl Renderer {
             }
             // … and the outline (a picture's border too).
             if let Some(o) = &outline {
-                let cast = Line { fill: Some(Fill::solid(deckcraft_model::style::ColorRef::rgb(c.with_alpha(255)))), ..o.line.clone() };
+                let cast = Line { fill: Some(Fill::solid(deckcraft_model::style::ColorRef::rgb(c.with_alpha(255)))), ..o.line.as_ref().clone() };
                 let lw = o.line.width.unwrap_or(0.75).max(0.0);
                 for sp in geo.paths.iter().filter(|sp| sp.stroke) {
                     let mut path = sp.path.clone();
@@ -1197,10 +1218,26 @@ impl Renderer {
     }
 }
 
+/// The line that draws `line` (`lw` wide) outside a picture: twice as wide, so the half outside
+/// the outline is the border, with dashes kept their length. `None` for compound lines, whose
+/// bands would not survive the doubling (they stay centred on the outline).
+fn outside_line(line: &Line, lw: f64) -> Option<Line> {
+    if line.compound.is_some_and(|c| c != deckcraft_model::style::Compound::Single) {
+        return None;
+    }
+    let dash = line.dash.as_ref().map(|d| {
+        let p = d.pattern();
+        deckcraft_model::style::Dash::Custom {
+            pattern: p.chunks(2).map(|c| (c.first().copied().unwrap_or(0.0) / 2.0, c.get(1).copied().unwrap_or(0.0) / 2.0)).collect(),
+        }
+    });
+    Some(Line { width: Some(lw * 2.0), dash: dash.or_else(|| line.dash.clone()), ..line.clone() })
+}
+
 /// A shape's outline as it casts a shadow: its line, that line's placeholder colour and opacity,
 /// and the space it is stroked in (see `Renderer::line_space`).
 struct Caster<'a> {
-    line: &'a Line,
+    line: std::borrow::Cow<'a, Line>,
     ph: Option<Rgba>,
     alpha: f64,
     base: Affine,

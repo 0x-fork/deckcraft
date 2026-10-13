@@ -250,3 +250,40 @@ fn shadows_are_cast_by_what_is_drawn() {
     let img = render(vec![ln]);
     assert!(close(img.pixel(310, 100), Rgba::BLACK, 30), "line shadow {:?}", img.pixel(310, 100));
 }
+
+#[allow(clippy::unwrap_used)]
+fn png(w: u32, h: u32, rgb: [u8; 3]) -> Vec<u8> {
+    let mut out = std::io::Cursor::new(vec![]);
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(w, h, image::Rgb(rgb))).write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+fn picture_deck(line: Option<Line>) -> Presentation {
+    let mut p = Presentation::default();
+    let media = p.add_media("image1.png", "image/png", png(8, 8, [0, 0, 255]));
+    let sh = Shape {
+        id: ShapeId(15),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        kind: ShapeKind::Picture { fill: deckcraft_model::style::PictureFill { media, ..Default::default() } },
+        line,
+        ..Default::default()
+    };
+    std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+    p
+}
+
+#[test]
+fn a_pictures_border_lies_outside_the_picture() {
+    let p = picture_deck(Some(Line::solid(ColorRef::rgb(RED), 8.0)));
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let blue = Rgba::rgb(0, 0, 255);
+    // The whole picture shows, up to its edge; the 8 pt border is all outside it.
+    assert!(close(img.pixel(101, 150), blue, 30), "picture at its edge {:?}", img.pixel(101, 150));
+    assert!(close(img.pixel(98, 150), RED, 30) && close(img.pixel(93, 150), RED, 30), "{:?}", img.pixel(93, 150));
+    assert!(close(img.pixel(90, 150), WHITE, 10), "border no wider than the line {:?}", img.pixel(90, 150));
+    // A dashed border keeps its dash lengths (a dash is 4 widths: 32 pt), drawn from the corner.
+    let mut line = Line::solid(ColorRef::rgb(RED), 8.0);
+    line.dash = Some(deckcraft_model::style::Dash::Preset { name: "dash".into() });
+    let img = render_slide(&picture_deck(Some(line)), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert!(close(img.pixel(120, 96), RED, 30) && close(img.pixel(140, 96), WHITE, 10), "{:?}", img.pixel(140, 96));
+}
