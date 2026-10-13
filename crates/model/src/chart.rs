@@ -379,6 +379,17 @@ impl Chart {
             hi = hi.max(p);
             lo = lo.min(m);
         }
+        if !percent {
+            for s in &ser {
+                if self.series_kind(s).stacked() {
+                    continue;
+                }
+                for y in s.trendline_ys(crate::trendline::series_is_scatter(self.series_kind(s))) {
+                    hi = hi.max(y);
+                    lo = lo.min(y);
+                }
+            }
+        }
         if percent {
             hi = hi.max(1.0);
         }
@@ -435,6 +446,14 @@ impl Chart {
         }
         if self.kind.percent() {
             return (0.0, 1.0);
+        }
+        if !self.kind.stacked() {
+            for s in &self.series {
+                for y in s.trendline_ys(crate::trendline::series_is_scatter(self.series_kind(s))) {
+                    hi = hi.max(y);
+                    lo = lo.min(y);
+                }
+            }
         }
         (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi))
     }
@@ -544,6 +563,17 @@ mod tests {
             let (a, b, s) = axis_scale(lo, hi, None, None, Some(0.0), 0, true);
             assert!(a.is_finite() && b.is_finite() && s > 0.0 && b > a, "{lo} {hi}: {a} {b} {s}");
         }
+    }
+
+    #[test]
+    fn a_forecast_grows_the_value_axis() {
+        let mut c = Chart::sample(ChartType::Line);
+        c.series.truncate(1);
+        c.series[0].values = vec![Some(3.0), Some(5.0), Some(7.0), Some(9.0)];
+        let before = c.value_range().1;
+        c.series[0].trendlines.push(Trendline { forward: Some(1.0), ..Default::default() });
+        let after = c.value_range().1;
+        assert!(after > before && after >= 11.0 - 1e-6, "{before} {after}");
     }
 
     #[test]
