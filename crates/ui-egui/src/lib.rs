@@ -30,7 +30,8 @@ pub mod widgets;
 
 use std::sync::mpsc::{Receiver, Sender};
 
-use deckcraft_engine::{Mods, Session, UiRequest};
+use deckcraft_engine::{Mods, Session, Target, UiRequest};
+use deckcraft_model::{LayoutId, MasterId, SlideId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -39,10 +40,144 @@ pub use control::{ControlRequest, ControlResponse};
 pub type ReadFn = Box<dyn Fn(&str) -> Result<Vec<u8>, String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 pub type PickFn = Box<dyn FnMut(&str) -> Option<String>>;
-pub type OpenAsyncFn = Box<dyn FnMut(&str)>;
+/// `(purpose, request id)`. The host shows a picker and later pushes an [`InboxEvent`]
+/// carrying that same id. Completing a cancelled or unknown id does nothing: the file is
+/// not applied to whichever document happens to be active.
+pub type OpenAsyncFn = Box<dyn FnMut(&str, u64)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
-/// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
-pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+/// A file the host finished reading for the request `id` from [`SlideApp::begin_external_file`].
+#[derive(Clone, Debug)]
+pub struct InboxFile {
+    /// Cancellation identity. A file whose id was cancelled, or never started, is ignored.
+    pub id: u64,
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
+/// What the host delivers through [`Inbox`] after an asynchronous read.
+#[derive(Clone, Debug)]
+pub enum InboxEvent {
+    File(InboxFile),
+    /// The picker was dismissed or the file could not be read. `id` will not be applied.
+    Cancelled {
+        id: u64,
+    },
+}
+
+/// Files delivered asynchronously by the host (web file picker, dropped files).
+pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<InboxEvent>>>;
+
+/// The operation the user asked for. Kept with the request so a late completion does not
+/// guess a command from the file name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilePurpose {
+    Open,
+    Picture,
+    Audio,
+    Video,
+    /// A drop, or any other purpose: decide from the name and bytes.
+    Infer,
+}
+
+/// Where in a presentation a file should land. Ids, not indices: slides can move while
+/// the browser is still reading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilePlace {
+    Slide(SlideId),
+    Master(MasterId),
+    Layout {
+        master: MasterId,
+        layout: LayoutId,
+    },
+    /// The document was open but had no current slide, master or layout.
+    Unspecified,
+}
+
+/// The presentation (and place in it) captured when the request started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileTarget {
+    /// Nothing was open. An insert makes its own document rather than using one opened
+    /// while the file was being read.
+    Absent,
+    Document {
+        doc: u64,
+        place: FilePlace,
+    },
+}
+
+struct PendingFile {
+    id: u64,
+    purpose: FilePurpose,
+    target: FileTarget,
+}
+
+struct LocatedPlace {
+    target: Target,
+    slide: Option<usize>,
+}
+
+fn purpose_of(purpose: &str) -> FilePurpose {
+    match purpose {
+        "open" => FilePurpose::Open,
+        "picture" => FilePurpose::Picture,
+        "audio" => FilePurpose::Audio,
+        "video" => FilePurpose::Video,
+        _ => FilePurpose::Infer,
+    }
+}
+
+fn is_presentation_name(lower: &str) -> bool {
+    lower.ends_with(".deckcraft")
+        || lower.ends_with(".slidecraft")
+        || lower.ends_with(".pptx")
+        || lower.ends_with(".potx")
+        || lower.ends_with(".ppsx")
+}
+
+/// File → Open keeps the requested operation: a presentation opens, an outline becomes slides.
+fn open_command(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    if is_presentation_name(&lower) {
+        Some("file.openBytes")
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+        Some("slide.fromOutline")
+    } else {
+        None
+    }
+}
+
+/// A drop has no requested operation, so the name and bytes decide: a presentation opens,
+/// then a recognised picture, sound or video is inserted, then an outline becomes slides.
+fn infer_command(name: &str, bytes: &[u8]) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    if is_presentation_name(&lower) {
+        return Some("file.openBytes");
+    }
+    let ct = deckcraft_engine::cmd::insert::content_type(name, bytes);
+    if ct.starts_with("image/") {
+        Some("insert.picture")
+    } else if ct.starts_with("audio/") {
+        Some("insert.audio")
+    } else if ct.starts_with("video/") {
+        Some("insert.video")
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+        Some("slide.fromOutline")
+    } else {
+        None
+    }
+}
+
+fn command_for(purpose: FilePurpose, name: &str, bytes: &[u8]) -> Result<&'static str, String> {
+    let cmd = match purpose {
+        FilePurpose::Picture => Some("insert.picture"),
+        FilePurpose::Audio => Some("insert.audio"),
+        FilePurpose::Video => Some("insert.video"),
+        FilePurpose::Open => open_command(name),
+        FilePurpose::Infer => infer_command(name, bytes),
+    };
+    cmd.ok_or_else(|| format!("{name}: DeckCraft can't open this kind of file"))
+}
 
 /// Platform services injected by the host (desktop or web).
 #[derive(Default)]
@@ -53,7 +188,8 @@ pub struct Services {
     pub pick_save: Option<PickFn>,
     pub read: Option<ReadFn>,
     pub write: Option<WriteFn>,
-    /// Asynchronous open dialog (web): the chosen file arrives through `inbox`.
+    /// Asynchronous open dialog (web). The callback receives the purpose and the request id
+    /// from [`SlideApp::begin_external_file`]; the chosen file arrives through `inbox`.
     pub open_async: Option<OpenAsyncFn>,
     /// Hand bytes to the user as a named file (browser download).
     pub download: Option<DownloadFn>,
@@ -227,6 +363,10 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    /// Next cancellation identity for a browser pick or a dropped file.
+    next_file_id: u64,
+    /// Picks and drops whose bytes have not arrived yet.
+    pending_files: Vec<PendingFile>,
 }
 
 impl SlideApp {
@@ -267,6 +407,8 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            next_file_id: 1,
+            pending_files: Vec::new(),
         }
     }
 
@@ -566,8 +708,11 @@ impl SlideApp {
             if let Some(path) = pick("open") {
                 let _ = self.open_path(&path);
             }
-        } else if let Some(f) = self.services.open_async.as_mut() {
-            f("open");
+        } else if self.services.open_async.is_some() {
+            let id = self.begin_external_file("open");
+            if let Some(f) = self.services.open_async.as_mut() {
+                f("open", id);
+            }
         }
     }
 
@@ -594,8 +739,11 @@ impl SlideApp {
                     self.set_status(e.to_string());
                 }
             }
-        } else if let Some(f) = self.services.open_async.as_mut() {
-            f(purpose);
+        } else if self.services.open_async.is_some() {
+            let id = self.begin_external_file(purpose);
+            if let Some(f) = self.services.open_async.as_mut() {
+                f(purpose, id);
+            }
         }
     }
 
@@ -678,42 +826,177 @@ impl SlideApp {
 
     fn drain_inbox(&mut self) {
         let Some(inbox) = self.services.inbox.clone() else { return };
-        let files: Vec<(String, Vec<u8>)> = inbox.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-        for (name, bytes) in files {
-            self.open_or_insert_bytes(&name, &bytes);
+        let events = match inbox.lock() {
+            Ok(mut v) => std::mem::take(&mut *v),
+            Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+        };
+        for event in events {
+            match event {
+                InboxEvent::Cancelled { id } => self.pending_files.retain(|r| r.id != id),
+                InboxEvent::File(file) => self.apply_external_file(file.id, &file.name, &file.bytes),
+            }
         }
     }
 
-    /// A dropped or picked file: presentations open, media is inserted.
+    /// Remember the open presentation, the slide (or master/layout) and the operation for a
+    /// file the host will read asynchronously. Returns the cancellation identity the host must
+    /// echo on the [`InboxEvent`]. Call this when the pick or the drop starts, not when the
+    /// bytes arrive.
+    pub fn begin_external_file(&mut self, purpose: &str) -> u64 {
+        let id = self.next_file_id;
+        self.next_file_id = self.next_file_id.wrapping_add(1).max(1);
+        self.pending_files.push(PendingFile { id, purpose: purpose_of(purpose), target: self.capture_file_target() });
+        id
+    }
+
+    /// A dropped or picked file read synchronously: presentations open, media is inserted on
+    /// the slide that is current now.
     pub fn open_or_insert_bytes(&mut self, name: &str, bytes: &[u8]) {
-        let lower = name.to_ascii_lowercase();
-        let data = deckcraft_engine::cmd::base64_encode(bytes);
-        let ct = deckcraft_engine::cmd::insert::content_type(name, bytes);
-        let cmd = if lower.ends_with(".deckcraft")
-            || lower.ends_with(".slidecraft")
-            || lower.ends_with(".pptx")
-            || lower.ends_with(".potx")
-            || lower.ends_with(".ppsx")
-        {
-            "file.openBytes"
-        } else if ct.starts_with("image/") {
-            "insert.picture"
-        } else if ct.starts_with("audio/") {
-            "insert.audio"
-        } else if ct.starts_with("video/") {
-            "insert.video"
-        } else if lower.ends_with(".txt") || lower.ends_with(".md") {
-            "slide.fromOutline"
-        } else {
-            self.set_status(format!("{name}: DeckCraft can't open this kind of file"));
-            return;
+        let id = self.begin_external_file("drop");
+        self.apply_external_file(id, name, bytes);
+    }
+
+    fn capture_file_target(&self) -> FileTarget {
+        let Some(d) = self.session.active() else { return FileTarget::Absent };
+        let place = match d.selection.target {
+            Target::Slides => match d.current_slide() {
+                Some(s) => FilePlace::Slide(s.id),
+                None => FilePlace::Unspecified,
+            },
+            Target::Master { master } => match d.doc.masters.get(master) {
+                Some(m) => FilePlace::Master(m.id),
+                None => FilePlace::Unspecified,
+            },
+            Target::Layout { master, layout } => match d.doc.masters.get(master) {
+                Some(m) => match m.layouts.get(layout) {
+                    Some(l) => FilePlace::Layout { master: m.id, layout: l.id },
+                    None => FilePlace::Unspecified,
+                },
+                None => FilePlace::Unspecified,
+            },
         };
-        let p = if cmd == "slide.fromOutline" { json!({"text": String::from_utf8_lossy(bytes)}) } else { json!({"name": name, "data": data}) };
-        if self.session.active().is_none() && cmd != "file.openBytes" {
-            let _ = self.session.execute("file.new", &json!({}));
+        FileTarget::Document { doc: d.uid, place }
+    }
+
+    /// True when the user is still looking at the place this request captured.
+    fn viewing_target(&self, target: &FileTarget) -> bool {
+        let FileTarget::Document { doc, place } = target else { return false };
+        let Some(d) = self.session.active() else { return false };
+        if d.uid != *doc {
+            return false;
         }
-        if let Err(e) = self.session.execute(cmd, &p) {
-            self.set_status(e.to_string());
+        match place {
+            FilePlace::Slide(id) => d.selection.target == Target::Slides && d.current_slide().is_some_and(|s| s.id == *id),
+            FilePlace::Master(id) => {
+                matches!(d.selection.target, Target::Master { master } if d.doc.masters.get(master).is_some_and(|m| m.id == *id))
+            }
+            FilePlace::Layout { master, layout } => {
+                matches!(d.selection.target, Target::Layout { master: mi, layout: li }
+                    if d.doc.masters.get(mi).is_some_and(|m| m.id == *master && m.layouts.get(li).is_some_and(|l| l.id == *layout)))
+            }
+            FilePlace::Unspecified => false,
+        }
+    }
+
+    fn apply_external_file(&mut self, id: u64, name: &str, bytes: &[u8]) {
+        let Some(pos) = self.pending_files.iter().position(|r| r.id == id) else { return };
+        let req = self.pending_files.remove(pos);
+        let cmd = match command_for(req.purpose, name, bytes) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                self.set_status(e);
+                return;
+            }
+        };
+        let params = if cmd == "slide.fromOutline" {
+            json!({"text": String::from_utf8_lossy(bytes)})
+        } else {
+            json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(bytes)})
+        };
+        let result = if cmd == "file.openBytes" || self.viewing_target(&req.target) {
+            self.session.execute(cmd, &params).map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            self.execute_on_target(&req.target, name, cmd, &params)
+        };
+        if let Err(e) = result {
+            self.set_status(e);
+        }
+        self.drain_requests();
+    }
+
+    /// Run `cmd` on the document and slide captured for the request, then put the view back
+    /// if the user has since moved. A missing document or slide cancels the file.
+    fn execute_on_target(&mut self, target: &FileTarget, name: &str, cmd: &str, params: &Value) -> Result<(), String> {
+        let FileTarget::Document { doc, place } = target else {
+            self.session.execute("file.new", &json!({})).map_err(|e| e.to_string())?;
+            return self.session.execute(cmd, params).map(|_| ()).map_err(|e| e.to_string());
+        };
+        let Some(idx) = self.session.documents().iter().position(|d| d.uid == *doc) else {
+            return Err(format!("{name} was not applied: the presentation it was chosen for is closed"));
+        };
+        let view = self.session.active_index();
+        let saved = self.session.documents().get(idx).map(|d| d.selection.clone());
+        self.session.set_active(idx);
+        let located = match self.locate_place(place) {
+            Ok(located) => located,
+            Err(e) => {
+                self.restore_file_view(view);
+                return Err(format!("{name} was not applied: {e}"));
+            }
+        };
+        if let Some(st) = self.session.active_mut() {
+            st.selection.target = located.target;
+            if let Some(slide) = located.slide {
+                st.selection.slide = slide;
+                st.selection.slides.clear();
+            }
+            st.selection.shapes.clear();
+            st.selection.text = None;
+            st.selection.cells = None;
+        }
+        let result = self.session.execute(cmd, params).map(|_| ()).map_err(|e| e.to_string());
+        if view == Some(idx) {
+            if let (Some(sel), Some(st)) = (saved, self.session.active_mut()) {
+                st.selection = sel;
+            }
+        } else {
+            self.restore_file_view(view);
+        }
+        result
+    }
+
+    fn restore_file_view(&mut self, view: Option<usize>) {
+        if let Some(i) = view
+            && i < self.session.documents().len()
+        {
+            self.session.set_active(i);
+        }
+    }
+
+    fn locate_place(&self, place: &FilePlace) -> Result<LocatedPlace, String> {
+        let d = self.session.doc().map_err(|e| e.to_string())?;
+        match place {
+            FilePlace::Slide(id) => {
+                let slide = d.doc.slide_index(*id).ok_or_else(|| "the slide it was chosen for was deleted".to_string())?;
+                Ok(LocatedPlace { target: Target::Slides, slide: Some(slide) })
+            }
+            FilePlace::Master(id) => {
+                let master =
+                    d.doc.masters.iter().position(|m| m.id == *id).ok_or_else(|| "the slide master it was chosen for was deleted".to_string())?;
+                Ok(LocatedPlace { target: Target::Master { master }, slide: None })
+            }
+            FilePlace::Layout { master, layout } => {
+                let mi =
+                    d.doc.masters.iter().position(|m| m.id == *master).ok_or_else(|| "the slide master it was chosen for was deleted".to_string())?;
+                let li = d
+                    .doc
+                    .masters
+                    .get(mi)
+                    .and_then(|m| m.layouts.iter().position(|l| l.id == *layout))
+                    .ok_or_else(|| "the layout it was chosen for was deleted".to_string())?;
+                Ok(LocatedPlace { target: Target::Layout { master: mi, layout: li }, slide: None })
+            }
+            FilePlace::Unspecified => Err("there was no slide to put it on".into()),
         }
     }
 
@@ -770,7 +1053,7 @@ impl SlideApp {
             }
         }
         // On the web, dropped files can only be read asynchronously: the host reads them and
-        // delivers them through `Services::inbox`.
+        // delivers them through `Services::inbox`, tagged with the request captured at the drop.
         #[cfg(not(target_arch = "wasm32"))]
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped file".into());
@@ -1129,6 +1412,9 @@ fn js_now() -> f64 {
 
 #[cfg(test)]
 mod ime_tests;
+
+#[cfg(test)]
+mod inbox_tests;
 
 #[cfg(test)]
 mod tests {
