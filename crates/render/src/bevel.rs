@@ -34,10 +34,14 @@ pub struct Bevel {
 /// The top bevel of 3-D XML kept from the file (`scene3d` + `sp3d`), when it has both a scene
 /// (without one PowerPoint draws the shape flat) and a `bevelT`.
 pub fn from_raw(raw: &str) -> Option<Bevel> {
-    if !raw.contains("scene3d") {
+    if !raw.contains("scene3d") || !raw.contains("sp3d") {
         return None;
     }
-    let i = raw.find("bevelT")?;
+    // A 3-D shape without a bevel still has its face lit: a bevel of no width.
+    let Some(i) = raw.find("bevelT") else {
+        let b = Bevel { w: 0.0, h: 0.0, preset: "circle".into(), modelled: false };
+        return Some(Bevel { modelled: modelled(raw), ..b });
+    };
     let tag = raw.get(i..)?;
     let tag = tag.get(..tag.find('>')?)?;
     let attr = |name: &str| -> Option<&str> {
@@ -49,7 +53,12 @@ pub fn from_raw(raw: &str) -> Option<Bevel> {
     let emu = |name: &str| attr(name).and_then(|v| v.parse::<f64>().ok()).map(|v| v / 12700.0);
     let w = emu("w").unwrap_or(6.0).clamp(0.0, 2000.0);
     let h = emu("h").unwrap_or(6.0).clamp(0.0, 2000.0);
-    // The light rig and material, from anywhere in the XML (`a:lightRig rig=`, `prstMaterial=`).
+    (w > 0.0).then(|| Bevel { w, h, preset: attr("prst").unwrap_or("circle").to_string(), modelled: modelled(raw) })
+}
+
+/// Whether the light rig and material (from anywhere in the XML: `a:lightRig rig=`,
+/// `prstMaterial=`) are the ones measured: the three-point rig, matte.
+fn modelled(raw: &str) -> bool {
     let value_after = |key: &str| -> Option<&str> {
         let s = raw.find(key)? + key.len();
         let rest = raw.get(s..)?;
@@ -57,8 +66,7 @@ pub fn from_raw(raw: &str) -> Option<Bevel> {
     };
     let rig = value_after("rig=\"").unwrap_or("threePt");
     let material = value_after("prstMaterial=\"").unwrap_or("warmMatte");
-    let modelled = rig == "threePt" && matches!(material, "warmMatte" | "matte");
-    (w > 0.0).then(|| Bevel { w, h, preset: attr("prst").unwrap_or("circle").to_string(), modelled })
+    rig == "threePt" && matches!(material, "warmMatte" | "matte")
 }
 
 /// The light, pointing from the surface towards it (x right, y down, z towards the viewer).
@@ -116,6 +124,18 @@ pub fn draw(ctx: &mut RenderContext, bevel: &Bevel, fill: Option<Rgba>, path: &B
     // Other light rigs and materials light the face and band differently (brighter, darker,
     // shinier); rather than guess, they stay flat as before.
     if !bevel.modelled || bounds.width() <= 0.0 || bounds.height() <= 0.0 || !bounds.is_finite() {
+        return;
+    }
+    // No bevel: only the face, one lit colour (as PowerPoint lights a 3-D shape's front face,
+    // whichever way the camera turns it, within about 10 levels).
+    if bevel.w <= 0.0 {
+        if let Some(c) = fill {
+            let f = AMBIENT + DIFFUSE * light()[2];
+            let ch = |v: u8| (v as f64 * f + SPECULAR).round().clamp(0.0, 255.0) as u8;
+            ctx.set_transform(m);
+            ctx.set_paint(crate::color(Rgba::rgba(ch(c.r), ch(c.g), ch(c.b), c.a), alpha));
+            ctx.fill_path(path);
+        }
         return;
     }
     let k = crate::scale_of(m);
@@ -193,7 +213,9 @@ mod tests {
         assert!(from_raw(raw).is_some_and(|b| !b.modelled));
         // No scene: flat in PowerPoint.
         assert_eq!(from_raw(r#"<a:sp3d><a:bevelT w="50800"/></a:sp3d>"#), None);
-        assert_eq!(from_raw(r#"<a:scene3d/><a:sp3d extrusionH="10"/>"#), None);
+        // A 3-D shape with no bevel: a bevel of no width (its face is lit).
+        assert!(from_raw(r#"<a:scene3d/><a:sp3d extrusionH="10"/>"#).is_some_and(|b| b.w == 0.0 && b.modelled));
+        assert_eq!(from_raw(r#"<a:scene3d/>"#), None);
     }
 
     #[test]

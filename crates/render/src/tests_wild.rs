@@ -725,3 +725,22 @@ fn a_picture_reflects_its_pixels() {
     assert!(below[2] > 200 && below[0] < 200, "{below:?}");
     assert!(close(img.pixel(200, 290), WHITE, 10), "faded out by half its height");
 }
+
+#[test]
+fn a_3d_shapes_face_is_lit_even_without_a_bevel() {
+    let base = Rgba::rgb(237, 125, 49);
+    let shape = |raw: &str| Shape {
+        id: ShapeId(31),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 150.0, 100.0)),
+        fill: solid(base),
+        line: no_line(),
+        effects: Some(deckcraft_model::Effects { raw3d: Some(raw.into()), ..Default::default() }),
+        ..Default::default()
+    };
+    // PowerPoint shows this face as about (251, 135, 56).
+    let img = render(vec![shape(r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d/>"#)]);
+    assert!(close(img.pixel(175, 150), Rgba::rgb(248, 136, 60), 8), "{:?}", img.pixel(175, 150));
+    // No shape properties in 3-D: flat.
+    let img = render(vec![shape(r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d>"#)]);
+    assert!(close(img.pixel(175, 150), base, 1));
+}
