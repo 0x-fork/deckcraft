@@ -1792,6 +1792,19 @@ fn review(app: &mut SlideApp, ui: &mut Ui) {
         big(app, ui, Icon::Language, "Language", "app.dialog", json!({"id": "language"}));
     });
     group(ui, |ui| {
+        big(app, ui, Icon::Compare, "Compare", "app.compareDialog", json!({}));
+        let comparing = enabled(app, "review.endCompare");
+        if big_button(ui, Icon::Check, "Accept\nAll", comparing).clicked() {
+            run(app, "review.accept", json!({"all": true}));
+        }
+        if big_button(ui, Icon::Close, "End\nReview", comparing).clicked() {
+            run(app, "review.endCompare", json!({}));
+            if app.ui.pane.as_deref() == Some("revisions") {
+                app.ui.pane = None;
+            }
+        }
+    });
+    group(ui, |ui| {
         big(app, ui, Icon::NewComment, "New\nComment", "app.dialog", json!({"id": "comment"}));
         big(app, ui, Icon::DeleteComment, "Delete", "comment.delete", json!({}));
         let show = app.ui.pane.as_deref() == Some("comments");

@@ -167,6 +167,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
+    ("app.compareDialog", "Compare…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.links", "Community Links", None, "{}"),
 ];
@@ -541,6 +542,17 @@ impl SlideApp {
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
+            "app.compareDialog" => {
+                if self.session.active().is_none() {
+                    return Err("open the presentation to compare first".into());
+                }
+                if self.services.pick_open.is_some() {
+                    self.pick_and_insert("open", "review.compare");
+                } else {
+                    // The browser's asynchronous picker would open the file as a new document.
+                    self.set_status("Compare needs the desktop app for now".to_string());
+                }
+            }
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
                 self.dialog = Some(dialogs::Dialog::new(d));
@@ -1127,6 +1139,8 @@ fn js_now() -> f64 {
     js_sys::Date::now()
 }
 
+#[cfg(test)]
+mod compare_tests;
 #[cfg(test)]
 mod ime_tests;
 

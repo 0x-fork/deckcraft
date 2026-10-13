@@ -27,6 +27,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 "selection" => "Selection",
                 "comments" => "Comments",
                 "designer" => "Design Ideas",
+                "revisions" => "Revisions",
                 _ => "Pane",
             };
             ui.horizontal(|ui| {
@@ -50,6 +51,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 "selection" => crate::selpane::show(app, ui),
                 "comments" => comments(app, ui),
                 "designer" => designer(app, ui),
+                "revisions" => revisions(app, ui),
                 _ => {}
             });
         });
@@ -547,6 +549,61 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
     }
     let _ = paint_anim_tile;
     let _ = Stroke::NONE;
+}
+
+/// Review › Compare: the revised copy's slide-level changes; click to go there, Accept to take it.
+fn revisions(app: &mut SlideApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let Ok(v) = app.session.execute("review.revisions", &json!({})) else {
+        ui.label(egui::RichText::new("Compare this presentation with a revised copy from Review › Compare.").color(t.text_dim));
+        return;
+    };
+    let changes = v["changes"].as_array().cloned().unwrap_or_default();
+    ui.label(egui::RichText::new(format!("Compared with {}", v["name"].as_str().unwrap_or("?"))).color(t.text_dim));
+    if v["byPosition"].as_bool() == Some(true) {
+        ui.label(egui::RichText::new("Not a copy of this presentation: slides are matched by position.").size(11.0).color(t.text_faint));
+    }
+    ui.add_space(4.0);
+    if changes.is_empty() {
+        ui.label("No differences left.");
+        if ui.button("End Review").clicked() {
+            run(app, "review.endCompare", json!({}));
+            app.ui.pane = None;
+        }
+        return;
+    }
+    if ui.button(format!("Accept All ({})", changes.len())).clicked() {
+        run(app, "review.accept", json!({"all": true}));
+    }
+    ui.separator();
+    for (i, c) in changes.iter().enumerate() {
+        let slide = c["slide"].as_u64().unwrap_or(0);
+        let (head, col) = match c["kind"].as_str().unwrap_or("") {
+            "inserted" => (format!("Slide inserted after {slide}"), Color32::from_rgb(0x2E, 0xA3, 0x6F)),
+            "deleted" => (format!("Slide {} deleted", slide.saturating_add(1)), Color32::from_rgb(0xD8, 0x3F, 0x6B)),
+            _ => (format!("Slide {} changed", slide.saturating_add(1)), Color32::from_rgb(0x2E, 0x6F, 0xD8)),
+        };
+        egui::Frame::NONE.fill(t.chrome).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(4.0, 16.0), Sense::hover());
+                ui.painter().rect_filled(r, CornerRadius::same(2), col);
+                if ui.link(egui::RichText::new(&head).font(theme::bold(12.5))).clicked() {
+                    let max = app.session.active().map(|d| d.doc.slides.len().saturating_sub(1)).unwrap_or(0);
+                    run(app, "slide.go", json!({"index": (slide as usize).min(max)}));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("Accept").clicked() {
+                        run(app, "review.accept", json!({"index": i}));
+                    }
+                });
+            });
+            for d in c["details"].as_array().into_iter().flatten().filter_map(Value::as_str).take(8) {
+                ui.label(egui::RichText::new(format!("• {d}")).size(11.5).color(t.text_dim));
+            }
+        });
+        ui.add_space(4.0);
+    }
 }
 
 fn comments(app: &mut SlideApp, ui: &mut Ui) {
