@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod bevel;
+mod camera;
 mod chart;
 mod colr;
 
@@ -772,6 +773,17 @@ impl Renderer {
                 * Affine::scale_non_uniform(st.scale.0, st.scale.1)
                 * Affine::translate(-c.to_vec2());
             m = parent * Affine::translate(st.offset) * x.affine() * around;
+        }
+        // A 3-D camera turns the shape (approximated by the affine transform that fits it best).
+        if !matches!(s.kind, ShapeKind::Group { .. } | ShapeKind::Table(_) | ShapeKind::Chart(_))
+            && let Some(a) = resolve::effects(rctx, s)
+                .0
+                .as_ref()
+                .and_then(|e| e.raw3d.as_deref())
+                .and_then(camera::from_raw)
+                .and_then(|c| camera::affine(&c, x.w, x.h))
+        {
+            m *= a;
         }
         let layered = st.opacity < 0.999 || st.clip.is_some();
         if layered {
