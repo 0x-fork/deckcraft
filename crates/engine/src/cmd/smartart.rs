@@ -563,6 +563,12 @@ fn layout_items(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 sh.geom = Geom::Custom {
                     paths: vec![deckcraft_model::CustomPath { w, h: bh, d: path, fill: deckcraft_geom::preset::FillMode::Norm, stroke: true }],
                 };
+                // Keep the text inside the sloped sides: inset it to a bit past the band's mid width.
+                let inset = ((it + ib) / 2.0 + (it - ib).abs() / 4.0 + 4.0).min(w * 0.2);
+                if let Some(b) = &mut sh.text {
+                    b.body.inset_l = Some(inset);
+                    b.body.inset_r = Some(inset);
+                }
                 paint(d, &mut sh, i, false);
                 out.push((sh, g.clone()));
             }
