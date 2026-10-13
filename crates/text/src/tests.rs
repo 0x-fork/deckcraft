@@ -1134,3 +1134,19 @@ fn symbols_after_an_emoji_keep_a_text_face() {
         }
     }
 }
+
+#[test]
+fn fallback_faces_do_not_move_the_baseline() {
+    // PowerPoint keeps a line's baseline and pitch from the run's own font when an emoji, a symbol
+    // or a script the font lacks is drawn from another face.
+    let base = |text: &str| {
+        let (p, sh) = bidi_setup(vec![Run::new(text)], 2000.0, false, Align::Left);
+        let l = lay(&p, &sh, 2000.0, 300.0);
+        (l.lines[0].baseline, l.lines[0].bottom)
+    };
+    let plain = base("Hxg Hxg");
+    for text in ["Hxg \u{1F600} Hxg", "Hxg \u{0E2A}\u{0E27}\u{0E31}\u{0E2A}", "Hxg \u{222B}\u{2211}"] {
+        let b = base(text);
+        assert!((b.0 - plain.0).abs() < 0.01 && (b.1 - plain.1).abs() < 0.01, "{text:?}: {b:?} vs {plain:?}");
+    }
+}

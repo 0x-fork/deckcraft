@@ -1684,7 +1684,11 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             for c in p.cells.get(rl.start..rl.end.max(rl.start)).unwrap_or(&[]) {
                 if let (Some(st), Some(face)) = (p.styles.get(c.style), p.faces.get(c.face)) {
                     let sz = st.size;
-                    let (a, d) = line_metrics(face, sz);
+                    // The run's own fonts set the line; a fallback face (emoji, a symbol or a
+                    // script the run's fonts lack) does not move the baseline in PowerPoint.
+                    let own = Arc::ptr_eq(face, &st.face)
+                        || [st.ea.as_deref(), st.cs.as_deref(), st.sym.as_deref()].into_iter().flatten().any(|f| face.family.eq_ignore_ascii_case(f));
+                    let (a, d) = line_metrics(if own { face } else { &st.face }, sz);
                     asc = asc.max(a);
                     desc = desc.max(d);
                     size = size.max(sz);
