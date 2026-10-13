@@ -23,7 +23,7 @@ pub const MAX_LEVEL: u8 = 8;
 const MAX_SHAPES: usize = 40;
 
 /// DeckCraft's layouts, with the names PowerPoint's gallery gives them.
-pub const LAYOUTS: [(&str, &str); 28] = [
+pub const LAYOUTS: [(&str, &str); 35] = [
     ("list", "Vertical Bullet List"),
     ("blockList", "Basic Block List"),
     ("hBulletList", "Horizontal Bullet List"),
@@ -52,6 +52,13 @@ pub const LAYOUTS: [(&str, &str); 28] = [
     ("gridMatrix", "Grid Matrix"),
     ("gear", "Gear"),
     ("funnel", "Funnel"),
+    ("segmentedCycle", "Segmented Cycle"),
+    ("multidirectionalCycle", "Multidirectional Cycle"),
+    ("orgChart", "Organization Chart"),
+    ("halfCircleOrgChart", "Half Circle Organization Chart"),
+    ("cycleMatrix", "Cycle Matrix"),
+    ("segmentedPyramid", "Segmented Pyramid"),
+    ("pie", "Basic Pie"),
 ];
 /// SmartArt Styles.
 pub const STYLES: [(&str, &str); 9] = [
@@ -115,7 +122,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add Shape",
             ["SmartArt Design", "Create Graphic"],
             None,
-            "{id?, index?, position?: after|before|below|above, text?} → {index} (default: after the last node)",
+            "{id?, index?, position?: after|before|below|above|assistant, text?} → {index} (default: after the last node)",
             has_selection,
             add_node
         ),
@@ -135,7 +142,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Layout",
             ["SmartArt Design", "Layouts"],
             None,
-            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target|textCycle|continuousCycle|horizontalHierarchy|gridMatrix|gear|funnel}",
+            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target|textCycle|continuousCycle|horizontalHierarchy|gridMatrix|gear|funnel|segmentedCycle|multidirectionalCycle|orgChart|halfCircleOrgChart|cycleMatrix|segmentedPyramid|pie}",
             has_selection,
             change_layout
         ),
@@ -176,7 +183,7 @@ pub fn nodes_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> Vec<Dia
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
             let tabs = l.chars().take_while(|c| *c == '\t').count();
-            DiagramNode { text: l.trim().to_string(), level: u8::try_from(tabs).unwrap_or(MAX_LEVEL).min(MAX_LEVEL), picture: None }
+            DiagramNode { text: l.trim().to_string(), level: u8::try_from(tabs).unwrap_or(MAX_LEVEL).min(MAX_LEVEL), picture: None, assistant: false }
         })
         .collect()
 }
@@ -208,7 +215,7 @@ fn subtree_end(nodes: &[DiagramNode], i: usize) -> usize {
 /// new node's index.
 pub fn add(nodes: &mut Vec<DiagramNode>, index: Option<usize>, position: &str, text: &str) -> usize {
     let Some(i) = index.filter(|i| *i < nodes.len()) else {
-        nodes.push(DiagramNode { text: text.into(), level: 0, picture: None });
+        nodes.push(DiagramNode { text: text.into(), level: 0, picture: None, assistant: false });
         return nodes.len() - 1;
     };
     let lv = nodes[i].level;
@@ -222,9 +229,10 @@ pub fn add(nodes: &mut Vec<DiagramNode>, index: Option<usize>, position: &str, t
             }
             (i, lv)
         }
+        "assistant" => (i + 1, (lv + 1).min(MAX_LEVEL)),
         _ => (subtree_end(nodes, i), lv),
     };
-    nodes.insert(at, DiagramNode { text: text.into(), level, picture: None });
+    nodes.insert(at, DiagramNode { text: text.into(), level, picture: None, assistant: position == "assistant" });
     at
 }
 
@@ -585,6 +593,7 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
     match d.kind.as_str() {
         "hierarchy" => return hierarchy(d, area, false),
         "horizontalHierarchy" => return hierarchy(d, area, true),
+        "orgChart" | "halfCircleOrgChart" => return org_chart(d, area, d.kind == "halfCircleOrgChart"),
         "list" | "hBulletList" => {
             // Vertical / Horizontal Bullet List: a coloured title bar, sub-points in a pale box below.
             let vertical = d.kind == "list";
@@ -842,6 +851,145 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 out.push((sh, g.clone()));
             }
         }
+        "segmentedCycle" | "pie" => {
+            // Segmented Cycle: a ring cut into one arc per node. Basic Pie: a disc cut into wedges.
+            // The text sits in a clear box over each segment's middle.
+            let ring = d.kind == "segmentedCycle";
+            let s = area.h.min(area.w);
+            let (cx, cy) = (area.x + area.w / 2.0, area.y + area.h / 2.0);
+            let gap = if ring { 2.0 } else { 0.0 };
+            for (i, g) in gs.iter().enumerate() {
+                // Angles clockwise from 3 o'clock, starting at the top.
+                let a0 = i as f64 / nf * 360.0 - 90.0 + gap / 2.0;
+                let a1 = (i as f64 + 1.0) / nf * 360.0 - 90.0 - gap / 2.0;
+                let mut sh = deco(if ring { "blockArc" } else { "pie" }, Xfrm::new(cx - s / 2.0, cy - s / 2.0, s, s), 0.0);
+                let ang = |a: f64| (a.rem_euclid(360.0) * 60_000.0).round();
+                // blockArc runs from its first angle to its second clockwise; so does pie.
+                sh.geom = Geom::Preset {
+                    name: if ring { "blockArc" } else { "pie" }.into(),
+                    adj: if ring { vec![ang(a0), ang(a1), 25_000.0] } else { vec![ang(a0), ang(a1)] },
+                };
+                paint(d, &mut sh, i, false);
+                out.push((sh, vec![]));
+                let m = ((a0 + a1) / 2.0).to_radians();
+                let rr = if ring { s * 0.4375 } else { s * 0.3 };
+                let tw = (s * if ring { 0.22 } else { 0.3 }).min(std::f64::consts::PI * 2.0 * rr / nf * 0.9);
+                let th = s * 0.16;
+                let mut t = text_shape("rect", Xfrm::new(cx + rr * m.cos() - tw / 2.0, cy + rr * m.sin() - th / 2.0, tw, th), &nodes(g), true);
+                paint(d, &mut t, i, false);
+                t.fill = Some(Fill::None);
+                t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                t.effects = None;
+                out.push((t, g.clone()));
+            }
+        }
+        "multidirectionalCycle" => {
+            // Multidirectional Cycle: nodes around a circle, double-headed arrows between them.
+            let r = area.h.min(area.w) * 0.36;
+            let (cx, cy) = (area.x + area.w / 2.0, area.y + area.h / 2.0);
+            let dd = (r * 0.75).min(2.0 * std::f64::consts::PI * r / nf * 0.55);
+            for (i, g) in gs.iter().enumerate() {
+                let a = (i as f64 / nf * 360.0 - 90.0).to_radians();
+                titled(&mut out, "roundRect", Xfrm::new(cx + r * a.cos() - dd * 0.65, cy + r * a.sin() - dd * 0.4, dd * 1.3, dd * 0.8), i, g);
+                if n > 1 {
+                    let m = ((i as f64 + 0.5) / nf * 360.0 - 90.0).to_radians();
+                    let s = (dd * 0.5).max(8.0);
+                    let mut sh = deco(
+                        "leftRightArrow",
+                        Xfrm::new(cx + r * m.cos() - s / 2.0, cy + r * m.sin() - s * 0.2, s, s * 0.4),
+                        (i as f64 + 0.5) / nf * 360.0,
+                    );
+                    paint(d, &mut sh, i, true);
+                    out.push((sh, vec![]));
+                }
+            }
+        }
+        "cycleMatrix" => {
+            // Cycle Matrix: four quarters of a circle in the middle with the top-level text, each
+            // quarter's sub-points in a box at its corner.
+            let s = area.h.min(area.w);
+            let (cx, cy) = (area.x + area.w / 2.0, area.y + area.h / 2.0);
+            let c = s * 0.56;
+            for (i, g) in gs.iter().take(4).enumerate() {
+                let (sx, sy) = ([-1.0, 1.0, 1.0, -1.0][i], [-1.0, -1.0, 1.0, 1.0][i]);
+                let b = s * 0.4;
+                let bx = Xfrm::new(cx + if sx < 0.0 { -s / 2.0 } else { s / 2.0 - b }, cy + if sy < 0.0 { -s / 2.0 } else { s / 2.0 - b }, b, b);
+                if g.len() > 1 {
+                    let mut sh = text_shape("roundRect", bx, &nodes(&g[1..]), false);
+                    paint(d, &mut sh, i, true);
+                    if let Some(body) = &mut sh.text {
+                        // Text in the box's outer part, clear of the circle.
+                        body.body.inset_l = Some(if sx > 0.0 { b * 0.35 } else { 6.0 });
+                        body.body.inset_r = Some(if sx < 0.0 { b * 0.35 } else { 6.0 });
+                        body.body.anchor = Some(if sy < 0.0 { deckcraft_model::text::Anchor::Top } else { deckcraft_model::text::Anchor::Bottom });
+                    }
+                    out.push((sh, g[1..].to_vec()));
+                }
+            }
+            for (i, g) in gs.iter().take(4).enumerate() {
+                let (sx, sy) = ([-1.0, 1.0, 1.0, -1.0][i], [-1.0, -1.0, 1.0, 1.0][i]);
+                let a0 = [180.0, 270.0, 0.0, 90.0][i] + 1.5;
+                let mut sh = deco("pie", Xfrm::new(cx - c / 2.0, cy - c / 2.0, c, c), 0.0);
+                sh.geom = Geom::Preset { name: "pie".into(), adj: vec![a0 * 60_000.0, (a0 + 87.0) * 60_000.0] };
+                paint(d, &mut sh, i, false);
+                out.push((sh, vec![]));
+                let q = c * 0.3;
+                let mut t = text_shape("rect", Xfrm::new(cx + sx * c * 0.2 - q / 2.0, cy + sy * c * 0.2 - q / 2.0, q, q), &nodes(&g[..1]), true);
+                paint(d, &mut t, i, false);
+                t.fill = Some(Fill::None);
+                t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                t.effects = None;
+                out.push((t, g[..1].to_vec()));
+            }
+        }
+        "segmentedPyramid" => {
+            // Segmented Pyramid: a triangle cut into rows of triangles (1, 3, 5, …), one per node,
+            // every other one upside down.
+            let rows = (nf.sqrt().ceil() as usize).max(1);
+            let s = area.h.min(area.w / 1.15);
+            let pw = s * 1.15;
+            let (x0, y0) = (area.x + (area.w - pw) / 2.0, area.y + (area.h - s) / 2.0);
+            let (tw, th) = (pw / rows as f64, s / rows as f64);
+            let mut k = 0;
+            'rows: for r in 0..rows {
+                let left = x0 + pw / 2.0 - (r as f64 + 1.0) * tw / 2.0;
+                for c in 0..(2 * r + 1) {
+                    let Some(g) = gs.get(k) else { break 'rows };
+                    let x = Xfrm::new(left + c as f64 * tw / 2.0, y0 + r as f64 * th, tw, th);
+                    let mut sh = text_shape("rect", x, &nodes(g), true);
+                    // Drawn as a polygon (not a flipped preset) so upside-down text stays upright.
+                    let path = if c % 2 == 1 {
+                        format!("M 0 0 L {tw:.2} 0 L {:.2} {th:.2} Z", tw / 2.0)
+                    } else {
+                        format!("M {:.2} 0 L {tw:.2} {th:.2} L 0 {th:.2} Z", tw / 2.0)
+                    };
+                    sh.geom = Geom::Custom {
+                        paths: vec![deckcraft_model::CustomPath {
+                            w: tw,
+                            h: th,
+                            d: path,
+                            fill: deckcraft_geom::preset::FillMode::Norm,
+                            stroke: true,
+                        }],
+                    };
+                    if let Some(b) = &mut sh.text {
+                        // The text in the triangle's wide half.
+                        b.body.inset_l = Some(tw * 0.22);
+                        b.body.inset_r = Some(tw * 0.22);
+                        if c % 2 == 1 {
+                            b.body.anchor = Some(deckcraft_model::text::Anchor::Top);
+                            b.body.inset_b = Some(th * 0.35);
+                        } else {
+                            b.body.anchor = Some(deckcraft_model::text::Anchor::Bottom);
+                            b.body.inset_t = Some(th * 0.35);
+                        }
+                    }
+                    paint(d, &mut sh, k, false);
+                    out.push((sh, g.clone()));
+                    k += 1;
+                }
+            }
+        }
         "gridMatrix" => {
             // Grid Matrix: four quadrants on crossed axes.
             let s = area.h.min(area.w);
@@ -957,7 +1105,7 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 }
                 if let Some(b) = &mut sh.text {
                     // Text towards the circle's outer side, clear of the overlap.
-                    let p = dc * 0.27;
+                    let p = dc * 0.36;
                     let (dx, dy) = (a.cos() * p, a.sin() * p);
                     b.body.inset_l = Some((7.2 + dx).max(2.0));
                     b.body.inset_r = Some((7.2 - dx).max(2.0));
@@ -999,6 +1147,135 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
             }
         }
         _ => {}
+    }
+    out
+}
+
+/// Organization Chart: [`hierarchy`] with elbow connectors, and assistants beside their parent on
+/// a row of their own between the parent and its other children. `half_circle` draws each node as
+/// its text in an open half ring (Half Circle Organization Chart).
+fn org_chart(d: &Diagram, area: Xfrm, half_circle: bool) -> Vec<Item> {
+    let nodes = &d.nodes[..d.nodes.len().min(MAX_SHAPES)];
+    if nodes.is_empty() {
+        return vec![];
+    }
+    let mut parent: Vec<Option<usize>> = vec![None; nodes.len()];
+    let mut stack: Vec<usize> = vec![];
+    for (i, n) in nodes.iter().enumerate() {
+        while stack.last().is_some_and(|&p| nodes[p].level >= n.level) {
+            stack.pop();
+        }
+        parent[i] = stack.last().copied();
+        stack.push(i);
+    }
+    let asst = |i: usize| nodes[i].assistant && parent[i].is_some();
+    let kids = |i: Option<usize>| -> Vec<usize> { (0..nodes.len()).filter(|&k| parent[k] == i && !asst(k)).collect() };
+    let mut leaves = vec![0usize; nodes.len()];
+    for i in (0..nodes.len()).rev() {
+        let k = kids(Some(i));
+        leaves[i] = if k.is_empty() { 1 } else { k.iter().map(|&c| leaves[c]).sum() };
+    }
+    // Row slots: a node's level is 2 per depth; assistants take the odd slot under their parent.
+    let mut slot = vec![0usize; nodes.len()];
+    for i in 0..nodes.len() {
+        slot[i] = match parent[i] {
+            None => 0,
+            Some(p) if asst(i) => slot[p] + 1,
+            Some(p) => slot[p] + 2,
+        };
+    }
+    let mut used: Vec<usize> = slot.clone();
+    used.sort_unstable();
+    used.dedup();
+    let row = |i: usize| used.iter().position(|&s| s == slot[i]).unwrap_or(0);
+    let rows = used.len().max(1);
+    let total: usize = kids(None).iter().map(|&r| leaves[r]).sum::<usize>().max(1);
+    let cell_w = area.w / total as f64;
+    let row_h = area.h / rows as f64;
+    let (bw, bh) = ((cell_w * 0.85).min(area.w * 0.3), row_h * 0.62);
+    let mut left = vec![0usize; nodes.len()];
+    let mut next_root = 0;
+    for i in 0..nodes.len() {
+        if asst(i) {
+            continue;
+        }
+        let mut start = match parent[i] {
+            None => {
+                let s = next_root;
+                next_root += leaves[i];
+                s
+            }
+            Some(p) => left[p],
+        };
+        if let Some(p) = parent[i] {
+            for s in kids(Some(p)) {
+                if s == i {
+                    break;
+                }
+                start += leaves[s];
+            }
+        }
+        left[i] = start;
+    }
+    let mut side = vec![0usize; nodes.len()];
+    let boxes: Vec<Xfrm> = (0..nodes.len())
+        .map(|i| {
+            let y = area.y + row(i) as f64 * row_h + (row_h - bh) / 2.0;
+            match parent[i] {
+                Some(p) if asst(i) => {
+                    // Assistants alternate right and left of the parent's trunk.
+                    let k = (0..i).filter(|&j| parent[j] == Some(p) && asst(j)).count();
+                    side[i] = k;
+                    let pc = area.x + (left[p] as f64 + leaves[p] as f64 / 2.0) * cell_w;
+                    let off = bw * 0.15 + (k / 2) as f64 * bw * 1.1;
+                    let x = if k % 2 == 0 { pc + off } else { pc - off - bw };
+                    Xfrm::new(x.clamp(area.x, area.x + area.w - bw), y, bw, bh)
+                }
+                _ => {
+                    let cx = area.x + (left[i] as f64 + leaves[i] as f64 / 2.0) * cell_w;
+                    Xfrm::new(cx - bw / 2.0, y, bw, bh)
+                }
+            }
+        })
+        .collect();
+    let mut out: Vec<Item> = vec![];
+    for i in 0..nodes.len() {
+        let Some(p) = parent[i] else { continue };
+        let (a, b) = (boxes[p], boxes[i]);
+        let pc = a.x + a.w / 2.0;
+        if asst(i) {
+            let my = b.y + b.h / 2.0;
+            out.push((line_shape((pc, a.y + a.h), (pc, my)), vec![]));
+            let ex = if b.x > pc { b.x } else { b.x + b.w };
+            out.push((line_shape((pc, my), (ex, my)), vec![]));
+        } else {
+            let mid = b.y - (row_h - bh) / 2.0;
+            let cc = b.x + b.w / 2.0;
+            out.push((line_shape((pc, a.y + a.h), (pc, mid)), vec![]));
+            out.push((line_shape((pc.min(cc), mid), (pc.max(cc), mid)), vec![]));
+            out.push((line_shape((cc, mid), (cc, b.y)), vec![]));
+        }
+    }
+    let _ = side;
+    for (i, n) in nodes.iter().enumerate() {
+        let depth = slot[i] / 2;
+        if half_circle {
+            let s = boxes[i].h.min(boxes[i].w);
+            let x = boxes[i];
+            let mut arc = deco("blockArc", Xfrm::new(x.x + (x.w - s) / 2.0, x.y, s, s), 0.0);
+            arc.geom = Geom::Preset { name: "blockArc".into(), adj: vec![180.0 * 60_000.0, 0.0, 8_000.0] };
+            paint(d, &mut arc, depth, false);
+            out.push((arc, vec![]));
+            let mut t = text_shape("rect", x, &[n], true);
+            paint(d, &mut t, depth, true);
+            t.fill = Some(Fill::None);
+            t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+            out.push((t, vec![i]));
+        } else {
+            let mut sh = text_shape("rect", boxes[i], &[n], true);
+            paint(d, &mut sh, depth, false);
+            out.push((sh, vec![i]));
+        }
     }
     out
 }
@@ -1167,7 +1444,7 @@ fn index(p: &Value, cmd: &str) -> Result<usize> {
 pub fn insert(s: &mut Session, kind: &str, mut nodes: Vec<DiagramNode>) -> Result<Value> {
     let kind = if is_kind(kind) { kind } else { "process" };
     if nodes.is_empty() {
-        nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0, picture: None }).collect();
+        nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0, picture: None, assistant: false }).collect();
     }
     normalize(&mut nodes);
     let d = Diagram { kind: kind.into(), nodes, ..Default::default() };
@@ -1316,7 +1593,7 @@ mod tests {
         n.iter().map(|x| x.level).collect()
     }
     fn mk(levels: &[u8]) -> Vec<DiagramNode> {
-        levels.iter().enumerate().map(|(i, l)| DiagramNode { text: format!("n{i}"), level: *l, picture: None }).collect()
+        levels.iter().enumerate().map(|(i, l)| DiagramNode { text: format!("n{i}"), level: *l, picture: None, assistant: false }).collect()
     }
 
     #[test]
@@ -1412,5 +1689,18 @@ mod tests {
         );
         assert_eq!(accent(&d("accent3Grad"), 4), SchemeSlot::Accent3);
         assert!(shade(&d("accent3Grad"), 1).is_some() && shade(&d("accent3"), 1).is_none());
+    }
+
+    #[test]
+    fn assistants_sit_beside_their_parent() {
+        let mut v = mk(&[0, 1, 1]);
+        let a = add(&mut v, Some(0), "assistant", "Aide");
+        assert_eq!((a, v[1].level, v[1].assistant), (1, 1, true));
+        let d = Diagram { kind: "orgChart".into(), nodes: v, ..Default::default() };
+        let items = layout_items(&d, Xfrm::new(0.0, 0.0, 600.0, 400.0));
+        let boxed = |k: usize| items.iter().find(|(_, m)| m == &vec![k]).and_then(|(s, _)| s.xfrm).unwrap_or_default();
+        let (ceo, aide, kid) = (boxed(0), boxed(1), boxed(2));
+        assert!(aide.y > ceo.y && aide.y < kid.y, "the assistant's row is between its parent and the children");
+        assert!(aide.x > ceo.x, "beside the parent's trunk");
     }
 }
