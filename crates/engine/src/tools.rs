@@ -265,6 +265,10 @@ impl Session {
         if !(p.x.is_finite() && p.y.is_finite()) {
             return Ok(Value::Null);
         }
+        // A press (not a hover) settles an input method's composition, as clicking does in PowerPoint.
+        if !matches!(ev.kind, PointerKind::Move) {
+            self.end_composition();
+        }
         match ev.kind {
             PointerKind::Move => {
                 if let Some(Drag::Freeform { points, mode, .. }) = &self.tool.drag {

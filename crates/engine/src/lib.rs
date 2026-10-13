@@ -131,6 +131,24 @@ pub struct Interaction {
     pub selection: Selection,
 }
 
+/// Text an input method is composing (#101): its preedit sits in the edited text body, at `start`
+/// for `len` characters, until it is committed, replaced or cancelled. The presentation from
+/// before it began makes the whole composition one undo step.
+#[derive(Clone, Debug)]
+pub struct Composition {
+    /// Where the composed text starts: (paragraph, char).
+    pub start: (usize, usize),
+    /// Its length in characters (it never spans paragraphs).
+    pub len: usize,
+    /// The part the input method is converting, relative to `start` (drawn with a thicker line).
+    pub active: Option<(usize, usize)>,
+    /// The formatting the composed text is typed with (as `text.insert` would choose).
+    pub props: Option<deckcraft_model::text::RunProps>,
+    /// The presentation and selection before the composition began.
+    pub before: Arc<Presentation>,
+    pub before_selection: Selection,
+}
+
 #[derive(Clone, Debug)]
 pub struct DocState {
     pub doc: Arc<Presentation>,
@@ -145,6 +163,8 @@ pub struct DocState {
     /// Fonts the file's text uses that aren't installed, found when it was opened (empty for new
     /// documents); the app mentions them once.
     pub missing_fonts: Vec<String>,
+    /// An input method's composition in progress ([`Composition`]).
+    pub composition: Option<Composition>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -163,6 +183,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             title,
             missing_fonts: Vec::new(),
+            composition: None,
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -403,6 +424,10 @@ impl Session {
 
     fn execute_unguarded(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        // Any other edit (or a click, a key, undo) settles an input method's composition first.
+        if self.depth == 0 && (spec.journal || spec.undoable) && !matches!(id, "text.compose" | "text.commit") {
+            self.end_composition();
+        }
         if let Err(e) = (spec.enabled)(self) {
             let named = (e == cmd::NOTHING_SELECTED || e == cmd::SELECT_TWO) && (params.get("ids").is_some() || params.get("id").is_some());
             if !named {
@@ -451,6 +476,16 @@ impl Session {
         st.selection = sel;
         st.revision += 1;
         Ok(r)
+    }
+
+    /// Keep an input method's composition as it stands (#101): its text stays and the whole
+    /// composition becomes one undo step. Nothing happens without one.
+    pub fn end_composition(&mut self) {
+        let Some(st) = self.active_mut() else { return };
+        let Some(c) = st.composition.take() else { return };
+        if !Arc::ptr_eq(&c.before, &st.doc) {
+            push_undo(st, HistoryEntry { label: "Type Text".into(), doc: c.before, selection: c.before_selection });
+        }
     }
 
     /// Change only the selection (no undo step).

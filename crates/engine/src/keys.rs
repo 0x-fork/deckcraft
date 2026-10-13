@@ -25,6 +25,7 @@ impl Session {
     /// `ArrowLeft`…, `Home`, `End`, `PageUp`, `PageDown`, `F5`) or a character (`b`, `]`).
     /// Returns `{handled: bool, …}`.
     pub fn key(&mut self, key: &str, mods: Mods) -> Result<Value> {
+        self.end_composition();
         let editing = self.active().is_some_and(|d| d.selection.text.is_some());
         let has_shapes = self.active().is_some_and(|d| !d.selection.shapes.is_empty());
         let k = key.to_ascii_lowercase();
@@ -149,6 +150,45 @@ impl Session {
             self.execute("text.selectAll", &json!({}))?;
         }
         self.execute("text.insert", &json!({"text": text}))
+    }
+
+    /// An input method's preedit (#101). On a selected shape that isn't being edited, the first
+    /// one starts editing its text and replaces it, as typing does ([`Session::type_text`]).
+    /// `active` is the part being converted, in characters of `text`.
+    pub fn compose_text(&mut self, text: &str, active: Option<(usize, usize)>) -> Result<Value> {
+        if !self.start_typing(text)? {
+            return Ok(json!({"handled": false}));
+        }
+        let mut p = json!({"text": text});
+        if let Some((a, b)) = active {
+            p["active"] = json!([a, b]);
+        }
+        self.execute("text.compose", &p)
+    }
+
+    /// An input method's result (#101): replaces the composition as one undo step.
+    pub fn commit_text(&mut self, text: &str) -> Result<Value> {
+        if !self.start_typing(text)? {
+            return Ok(json!({"handled": false}));
+        }
+        self.execute("text.commit", &json!({"text": text}))
+    }
+
+    /// Ready to take typed `text`: editing text already, or one selected shape whose text editing
+    /// starts with everything selected. False when there is nowhere to type (or nothing to type
+    /// and nothing being edited).
+    fn start_typing(&mut self, text: &str) -> Result<bool> {
+        let st = self.doc()?;
+        if st.selection.text.is_some() {
+            return Ok(true);
+        }
+        let Some(id) = st.selection.shapes.first().copied() else { return Ok(false) };
+        if st.selection.shapes.len() != 1 || text.is_empty() {
+            return Ok(false);
+        }
+        self.execute("text.edit", &json!({"id": id}))?;
+        self.execute("text.selectAll", &json!({}))?;
+        Ok(true)
     }
 
     fn cycle_selection(&mut self, forward: bool) -> Result<()> {

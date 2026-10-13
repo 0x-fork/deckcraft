@@ -164,6 +164,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     pointer(app, ui, &resp, xf);
     overlays(app, ui, &painter, xf, &t);
+    ime_output(app, ui, xf);
     media_bar(app, ui, xf);
     gif_buttons(app, ui, xf, &gifs);
     context_menu(app, &resp);
@@ -183,6 +184,47 @@ fn visible_region(avail: Rect, slide: Rect, pixel: egui::Vec2) -> deckcraft_rend
         w: (x1 - x0).clamp(1.0, u32::MAX as f64) as u32,
         h: (y1 - y0).clamp(1.0, u32::MAX as f64) as u32,
     }
+}
+
+/// Where an input method composes for the slide (#101), on screen: at the insertion point while
+/// editing text, or over the one selected shape (typing on it starts editing). `None` when there is
+/// nothing to type into.
+pub fn ime_area(app: &SlideApp, xf: Xf) -> Option<Rect> {
+    let st = app.session.active()?;
+    if let Some(ts) = &st.selection.text {
+        if ts.notes {
+            return None;
+        }
+        if let Some((top, bot)) = deckcraft_engine::cmd::text::caret_line(st, ts) {
+            return Some(Rect::from_two_pos(xf.to_screen(top), xf.to_screen(bot)).expand2(vec2(1.0, 0.0)));
+        }
+        let sh = st.shape(ts.shape)?;
+        return Some(screen_rect(xf, &deckcraft_engine::cmd::xfrm_of(&st.doc, &st.selection, sh)));
+    }
+    if st.selection.shapes.len() != 1 {
+        return None;
+    }
+    let sh = st.shape(*st.selection.shapes.first()?)?;
+    if sh.is_line() {
+        return None;
+    }
+    Some(screen_rect(xf, &deckcraft_engine::cmd::xfrm_of(&st.doc, &st.selection, sh)))
+}
+
+/// Turn the input method on for the slide while it takes typing, with its candidate window at
+/// the insertion point (#101). Without this egui leaves it off, and a Korean keyboard types
+/// separate jamo (ㅇ ㅏ ㄴ) instead of syllables. A focused text field sets its own.
+fn ime_output(app: &SlideApp, ui: &Ui, xf: Xf) {
+    let ctx = ui.ctx();
+    if ctx.memory(|m| m.focused().is_some()) || app.dialog.as_ref().is_some_and(|d| d.modal()) || app.palette.is_some() || app.home_open() {
+        return;
+    }
+    let Some(r) = ime_area(app, xf) else { return };
+    let to_global = ctx.layer_transform_to_global(ui.layer_id()).unwrap_or_default();
+    let r = to_global * r;
+    ctx.output_mut(|o| {
+        o.ime = Some(egui::output::IMEOutput { purpose: egui::IMEPurpose::Normal, rect: r, cursor_rect: r, should_interrupt_composition: false });
+    });
 }
 
 /// Play/pause on an animated GIF under the pointer or selected on its own.
@@ -453,12 +495,16 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             let pts = [Point::new(r.x0, r.y0), Point::new(r.x1, r.y0), Point::new(r.x1, r.y1), Point::new(r.x0, r.y1)].map(|q| xf.to_screen(m * q));
             painter.add(egui::Shape::convex_polygon(pts.to_vec(), t.text_selection, Stroke::NONE));
         }
+        // An input method's composition: underlined in place, thicker under the part being converted.
+        for (a, b, thick) in deckcraft_engine::cmd::text::composition_underlines(st) {
+            painter.line_segment([xf.to_screen(a), xf.to_screen(b)], Stroke::new(if thick { 2.0 } else { 1.0 }, t.caret));
+        }
         if !ts.is_range() {
             let blink = (ui.input(|i| i.time) * 1.6).fract() < 0.6;
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
-            if blink && let Some((cx, top, bot)) = l.caret(deckcraft_text::Pos { para: ts.caret.0, ch: ts.caret.1 }) {
-                let (p0, p1) = (xf.to_screen(m * Point::new(cx, top)), xf.to_screen(m * Point::new(cx, bot)));
-                painter.line_segment([p0, p1], Stroke::new(1.5, t.caret));
+            // An empty placeholder shows the caret where typing begins too.
+            if blink && let Some((top, bot)) = deckcraft_engine::cmd::text::caret_line(st, ts) {
+                painter.line_segment([xf.to_screen(top), xf.to_screen(bot)], Stroke::new(1.5, t.caret));
             }
         }
     }

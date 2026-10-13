@@ -1831,6 +1831,33 @@ impl TextLayout {
         }
         out
     }
+    /// Underlines for text an input method is composing, from `a` to `b` (#101): `(x0, x1, y)` per
+    /// visual span, a little below each line's baseline (PowerPoint underlines the composition
+    /// in place). A composition that wraps gets one underline per line.
+    pub fn composition_underlines(&self, a: Pos, b: Pos) -> Vec<(f64, f64, f64)> {
+        let (s, e) = if a <= b { (a, b) } else { (b, a) };
+        let mut out = vec![];
+        if s == e {
+            return out;
+        }
+        for l in &self.lines {
+            let lp = Pos { para: l.para, ch: l.start };
+            let le = Pos { para: l.para, ch: l.end };
+            if le <= s || lp >= e {
+                continue;
+            }
+            let from = if s > lp { s.ch } else { l.start };
+            let to = if e < le { e.ch } else { l.end };
+            // Under the baseline, in the descent, never below the line.
+            let y = (l.baseline + (l.bottom - l.baseline) * 0.35).min(l.bottom);
+            for (x0, x1) in l.spans(from, to) {
+                if x1 > x0 {
+                    out.push((x0, x1, y));
+                }
+            }
+        }
+        out
+    }
     /// Vertical caret movement: the position on the line above/below closest to `x`.
     pub fn vertical(&self, pos: Pos, down: bool, x: f64) -> Pos {
         let Some(li) = self.line_of(pos) else { return pos };

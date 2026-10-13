@@ -17,6 +17,27 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "text.exit", "Stop Editing Text", [], None, "{}", has_doc, exit),
         cmd!("text.insert", "Type Text", [], None, "{text} (\\n = new paragraph, \\u000b = line break)", has_text, insert),
         cmd!("text.delete", "Delete Text", [], Some("Backspace"), "{dir?: backward|forward|wordBackward|wordForward}", has_text, delete),
+        // The input method's composition: shown in place, an undo step only once committed.
+        CommandSpec {
+            id: "text.compose",
+            label: "Compose Text",
+            menu: &[],
+            shortcut: None,
+            params: "{text, active?: [start, end]} — an input method's composition (preedit) at the insertion point; empty text cancels it",
+            enabled: has_text,
+            run: compose,
+            journal: false,
+            undoable: false,
+        },
+        cmd!(
+            noundo "text.commit",
+            "Commit Composition",
+            [],
+            None,
+            "{text} — the input method's result replaces its composition, as one undo step",
+            has_text,
+            commit
+        ),
         cmd!(noundo "text.move", "Move Insertion Point", [], None, "{to: left|right|up|down|wordLeft|wordRight|lineStart|lineEnd|paraStart|paraEnd|start|end, extend?: bool}", has_text, move_caret),
         cmd!(noundo "text.select", "Select Text", [], None, "{anchor: [p, c], caret: [p, c]}", has_text, select),
         cmd!(noundo "text.selectAll", "Select All Text", [], None, "{}", has_text, select_all),
@@ -142,6 +163,33 @@ pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayo
         body,
         &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
     ))
+}
+
+/// The insertion point on the slide: its line from top to bottom, in slide coordinates (flips and
+/// vertical text as drawn). Text with no paragraph yet (a placeholder about to be typed in) is
+/// measured as one empty paragraph, so the caret shows where typing begins. `None` for notes and
+/// table cells, which aren't laid out on the slide here.
+pub fn caret_line(st: &DocState, t: &TextSel) -> Option<(deckcraft_geom::Point, deckcraft_geom::Point)> {
+    if t.notes || t.cell.is_some() {
+        return None;
+    }
+    let sh = st.shape(t.shape)?;
+    let ctx = ctx_for(&st.doc, &st.selection)?;
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
+    let mut body = sh.text.clone().unwrap_or_default();
+    if body.paragraphs.is_empty() {
+        body.paragraphs.push(deckcraft_model::text::Paragraph::default());
+    }
+    let l = deckcraft_text::layout(
+        &ctx,
+        sh,
+        &body,
+        &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
+    );
+    let (cx, top, bot) = l.caret(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 })?;
+    let m = deckcraft_render::text_transform(x.affine(), geo.text_rect, l.rotation);
+    Some((m * deckcraft_geom::Point::new(cx, top), m * deckcraft_geom::Point::new(cx, bot)))
 }
 
 fn pos_param(p: &Value, key: &str) -> Option<Pos> {
@@ -338,6 +386,112 @@ pub(crate) fn insert_field(s: &mut Session, field: &str, text: &str) -> Result<V
         t.caret = c;
     })?;
     ok()
+}
+
+/// Text an input method sends: no paragraph or line breaks (Enter is a key of its own).
+fn ime_text(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// Is the composition still where it was put (the paragraph holds all of it)?
+fn composition_fits(st: &DocState, c: &crate::Composition) -> bool {
+    let Some(t) = &st.selection.text else { return false };
+    let Some(body) = body_of(st, t) else { return false };
+    body.paragraphs.get(c.start.0).is_some_and(|p| c.start.1.saturating_add(c.len) <= p.char_len())
+}
+
+/// `text.compose`: put an input method's preedit at the insertion point (replacing the selection)
+/// or replace the composition with the new preedit. An empty preedit cancels: the presentation
+/// goes back to how it was before the composition began.
+fn compose(s: &mut Session, p: &Value) -> Result<Value> {
+    let text = ime_text(str_param(p, "text").ok_or_else(|| bad("text.compose", "missing `text`"))?);
+    let n = text.chars().count();
+    let active = p.get("active").and_then(Value::as_array).and_then(|a| {
+        let (x, y) = (a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize);
+        (x < y).then_some((x.min(n), y.min(n)))
+    });
+    let current = s.doc()?.composition.clone();
+    // A composition whose text was changed under it is kept as it is; a new one starts.
+    let current = match current {
+        Some(c) if !composition_fits(s.doc()?, &c) => {
+            s.end_composition();
+            None
+        }
+        c => c,
+    };
+    match current {
+        None if text.is_empty() => Ok(json!({"composing": false})),
+        None => {
+            let st = s.doc()?;
+            let (before, before_selection) = (st.doc.clone(), st.selection.clone());
+            let (start, props) = edit_text(s, |body, t| {
+                let (a, b) = t.ordered();
+                let at = ed::delete(body, a, b);
+                let props = if a != b { Some(ed::props_at(body, at)) } else { unlinked_at_link_end(body, at) };
+                let c = ed::insert(body, at, &text, props.clone());
+                t.anchor = c;
+                t.caret = c;
+                (at, props)
+            })?;
+            s.doc_mut()?.composition = Some(crate::Composition { start, len: n, active, props, before, before_selection });
+            Ok(json!({"composing": true, "start": [start.0, start.1], "len": n}))
+        }
+        Some(c) if text.is_empty() => {
+            let st = s.doc_mut()?;
+            st.doc = c.before;
+            st.selection = c.before_selection;
+            st.composition = None;
+            st.revision += 1;
+            Ok(json!({"composing": false}))
+        }
+        Some(c) => {
+            let (start, len, props) = (c.start, c.len, c.props.clone());
+            edit_text(s, |body, t| {
+                ed::delete(body, start, (start.0, start.1 + len));
+                let e = ed::insert(body, start, &text, props);
+                t.anchor = e;
+                t.caret = e;
+            })?;
+            s.doc_mut()?.composition = Some(crate::Composition { len: n, active, ..c });
+            Ok(json!({"composing": true, "start": [start.0, start.1], "len": n}))
+        }
+    }
+}
+
+/// `text.commit`: the input method's result replaces the composition (or is typed at the
+/// insertion point when there is none) and the whole composition becomes one undo step.
+fn commit(s: &mut Session, p: &Value) -> Result<Value> {
+    let text = ime_text(str_param(p, "text").ok_or_else(|| bad("text.commit", "missing `text`"))?);
+    if s.doc()?.composition.is_some() || !text.is_empty() {
+        compose(s, &json!({"text": text}))?;
+    }
+    s.end_composition();
+    let caret = s.doc()?.selection.text.as_ref().map(|t| t.caret).unwrap_or_default();
+    Ok(json!({"caret": [caret.0, caret.1]}))
+}
+
+/// Underlines under an input method's composition (#101), in slide coordinates: `(from, to,
+/// thick)` per line, thick under the part being converted. Empty without a composition or when
+/// the edited text isn't laid out on the slide (notes, table cells).
+pub fn composition_underlines(st: &DocState) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point, bool)> {
+    let (Some(c), Some(t)) = (&st.composition, &st.selection.text) else { return vec![] };
+    let Some(sh) = st.shape(t.shape) else { return vec![] };
+    let Some(l) = layout_for(st, t) else { return vec![] };
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
+    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    let pos = |ch: usize| deckcraft_text::Pos { para: c.start.0, ch: c.start.1 + ch };
+    let mut out = vec![];
+    let mut add = |a: usize, b: usize, thick: bool| {
+        for (x0, x1, y) in l.composition_underlines(pos(a), pos(b)) {
+            out.push((m * deckcraft_geom::Point::new(x0, y), m * deckcraft_geom::Point::new(x1, y), thick));
+        }
+    };
+    add(0, c.len, false);
+    if let Some((a, b)) = c.active {
+        add(a, b.min(c.len), true);
+    }
+    out
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {

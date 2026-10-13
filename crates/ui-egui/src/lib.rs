@@ -23,6 +23,7 @@ pub mod textures;
 pub mod theme;
 pub mod thumbs;
 pub mod toast;
+pub mod uifonts;
 pub mod widgets;
 
 use std::sync::mpsc::{Receiver, Sender};
@@ -214,6 +215,8 @@ pub struct SlideApp {
     /// Quit was confirmed (changes saved or discarded): let the window close.
     pub quit_confirmed: bool,
     pub(crate) notes_buf: (u64, usize, String),
+    /// Faces borrowed from the font database for text the interface fonts can't draw (#101).
+    pub ui_fonts: uifonts::UiFonts,
     /// Thumbnail pane drag (slide index, current drop index).
     pub(crate) thumb_drag: Option<(usize, usize)>,
 }
@@ -253,6 +256,7 @@ impl SlideApp {
             last_recovery: 0.0,
             quit_confirmed: false,
             notes_buf: (0, usize::MAX, String::new()),
+            ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
         }
     }
@@ -545,7 +549,7 @@ impl SlideApp {
             ctx.set_zoom_factor(scale);
         }
         if !self.styled {
-            theme::install_fonts(ctx);
+            theme::install_fonts_with(ctx, &self.ui_fonts.faces);
             self.styled = true;
             self.restyle = true;
         } else {
@@ -567,6 +571,9 @@ impl SlideApp {
         }
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
+        }
+        if self.fonts_ready {
+            self.note_ui_text(ctx);
         }
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
@@ -596,6 +603,52 @@ impl SlideApp {
                 Ok(bytes) => self.open_or_insert_bytes(&name, &bytes),
                 Err(e) => self.set_status(e),
             }
+        }
+    }
+
+    /// Borrow faces for interface text in scripts the interface fonts lack (#101): the open
+    /// presentations' names and text, recent files, and what is typed or composed this frame.
+    fn note_ui_text(&mut self, ctx: &egui::Context) {
+        let typed: String = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|e| match e {
+                    egui::Event::Text(t) | egui::Event::Paste(t) => Some(t.as_str()),
+                    egui::Event::Ime(egui::ImeEvent::Preedit { text, .. } | egui::ImeEvent::Commit(text)) => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect()
+        });
+        self.ui_fonts.note(ctx, &typed);
+        for d in self.session.documents() {
+            self.ui_fonts.note(ctx, &d.title());
+        }
+        for r in &self.ui.recent {
+            self.ui_fonts.note(ctx, r);
+        }
+        if let Some(st) = self.session.active() {
+            self.ui_fonts.note_doc(ctx, st);
+        }
+        self.ui_fonts.apply(ctx);
+    }
+
+    /// An input method's event for the slide's text (#101): the preedit is shown in the text and
+    /// replaced on each update; the commit replaces it as one undo step.
+    fn ime_event(&mut self, e: &egui::ImeEvent) {
+        let r = match e {
+            egui::ImeEvent::Preedit { text, active_range_chars } => {
+                self.session.compose_text(text, active_range_chars.as_ref().map(|r| (r.start, r.end)))
+            }
+            egui::ImeEvent::Commit(text) => self.session.commit_text(text),
+            #[allow(deprecated)]
+            egui::ImeEvent::Disabled => {
+                self.session.end_composition();
+                Ok(Value::Null)
+            }
+            _ => Ok(Value::Null),
+        };
+        if let Err(e) = r {
+            self.set_status(e.to_string());
         }
     }
 
@@ -646,6 +699,7 @@ impl SlideApp {
                         self.set_status(e.to_string());
                     }
                 }
+                egui::Event::Ime(ime) => self.ime_event(&ime),
                 egui::Event::Copy => {
                     if let Ok(v) = self.session.execute("edit.copy", &json!({}))
                         && let Some(t) = v.get("text").and_then(Value::as_str)
@@ -888,6 +942,9 @@ pub fn now_ms() -> f64 {
 fn js_now() -> f64 {
     js_sys::Date::now()
 }
+
+#[cfg(test)]
+mod ime_tests;
 
 #[cfg(test)]
 mod tests {
