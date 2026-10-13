@@ -51,3 +51,27 @@ fn text_pane_types_adds_and_demotes() {
     h.run_steps(4);
     assert_eq!(levels(&h), [("Plan".into(), 0), ("Build it".into(), 0), ("Test".into(), 1)]);
 }
+
+#[test]
+fn home_convert_to_smartart_gallery_converts_the_text() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.textBox", &json!({"text": "Goals\nRevenue\nGrowth"})).unwrap();
+    let app = SlideApp::new(s, Services::default());
+    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut SlideApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(3);
+    h.get_by_label("Convert to SmartArt").click();
+    h.run_steps(3);
+    h.get_by_label("Basic Block List").click();
+    h.run_steps(3);
+    let st = h.state().session.active().unwrap();
+    let (_, d) = deckcraft_engine::cmd::smartart::selected(st).expect("the text became a SmartArt graphic");
+    assert_eq!(d.kind, "blockList");
+    assert_eq!(d.nodes.len(), 3);
+}
