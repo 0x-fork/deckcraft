@@ -371,3 +371,19 @@ fn a_linear_gradient_spans_its_tile_rect() {
     assert!(img.pixel(102, 150)[0] > 240);
     assert!(img.pixel(305, 150)[0] < 15 && img.pixel(495, 150)[0] < 15, "{:?}", img.pixel(305, 150));
 }
+
+#[test]
+fn a_3d_pictures_border_stays_centred_on_its_edge() {
+    let mut p = picture_deck(Some(Line::solid(ColorRef::rgb(RED), 8.0)));
+    let s = std::sync::Arc::make_mut(&mut p.slides[0]);
+    if let Some(sh) = s.shapes.first_mut() {
+        sh.effects = Some(deckcraft_model::Effects {
+            bevel: Some("circle".into()),
+            raw3d: Some("<a:scene3d><a:camera prst=\"orthographicFront\"/></a:scene3d><a:sp3d><a:bevelT/></a:sp3d>".into()),
+            ..Default::default()
+        });
+    }
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert!(close(img.pixel(102, 150), RED, 30), "covers the picture's edge {:?}", img.pixel(102, 150));
+    assert!(close(img.pixel(94, 150), WHITE, 10), "reaches half the width out {:?}", img.pixel(94, 150));
+}

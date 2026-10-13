@@ -875,7 +875,7 @@ impl Renderer {
                 };
                 let (base, rel) = self.line_space(m, depth);
                 let lw = line.width.unwrap_or(0.75).max(0.0);
-                let outside = if is_pic { outside_line(&line, lw) } else { None };
+                let outside = if border_outside(is_pic, effects.as_ref()) { outside_line(&line, lw) } else { None };
                 Caster { line: outside.map_or(std::borrow::Cow::Borrowed(&line), std::borrow::Cow::Owned), ph: line_ph, alpha: a, base, rel }
             });
             self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, fill_alpha, outline, content.as_ref(), m, w, h);
@@ -1000,8 +1000,8 @@ impl Renderer {
                 None => std::borrow::Cow::Borrowed(&line),
             };
             // A picture's border lies outside the picture, as PowerPoint draws it: stroked twice
-            // as wide, outside the outline only.
-            let outside = is_pic.then(|| outside_line(&line, lw)).flatten();
+            // as wide, outside the outline only (see `border_outside`).
+            let outside = border_outside(is_pic, effects.as_ref()).then(|| outside_line(&line, lw)).flatten();
             let clipped = outside.is_some();
             let (line, lw) = match outside {
                 Some(o) => {
@@ -1240,6 +1240,13 @@ impl Renderer {
             ctx.pop_layer();
         }
     }
+}
+
+/// Whether a shape's border is drawn outside its outline: a picture's is, unless the picture is
+/// drawn in 3-D (a bevel seen through a 3-D scene), where PowerPoint centres it on the edge as on
+/// any shape (observed: an 18 pt border covers 9 pt of the picture then).
+fn border_outside(is_pic: bool, effects: Option<&Effects>) -> bool {
+    is_pic && !effects.is_some_and(|e| e.bevel.is_some() && e.raw3d.as_deref().is_some_and(|r| r.contains("scene3d")))
 }
 
 /// The line that draws `line` (`lw` wide) outside a picture: twice as wide, so the half outside
