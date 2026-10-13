@@ -535,3 +535,25 @@ fn a_groups_shadow_is_cast_by_its_children() {
     assert!(close(img.pixel(310, 150), Rgba::BLACK, 30), "{:?}", img.pixel(310, 150));
     assert!(close(img.pixel(150, 150), RED, 10), "children drawn over it");
 }
+
+#[test]
+fn patterns_between_whole_pixel_cells_blend_neighbouring_cells() {
+    use deckcraft_model::style::PatternFill;
+    // narVert (alternate cells) at 0.75 output pixels per cell: PowerPoint's export reads
+    // 255, 128, 0 repeating across; drawing the nearest cell gave only black and white. Bilinear
+    // sampling gives about 213, 128, 42 (closer on average over all presets, not exact).
+    let g = |v: u8| ColorRef::rgb(Rgba::rgb(v, v, v));
+    let sh = Shape {
+        id: ShapeId(25),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 60.0, 60.0)),
+        fill: Some(Fill::Pattern(PatternFill { preset: "narVert".into(), fg: g(0), bg: g(255) })),
+        line: no_line(),
+        ..Default::default()
+    };
+    let img = render(vec![sh]);
+    let row: Vec<u8> = (12..24).map(|x| img.pixel(x, 20)[0]).collect();
+    assert!(row.iter().any(|v| (100..=156).contains(v)), "a blended column: {row:?}");
+    assert!(row.iter().any(|v| *v < 60) && row.iter().any(|v| *v > 200), "{row:?}");
+    // The pattern repeats every 6 px (8 cells).
+    assert!(row.iter().zip(row.iter().skip(6)).all(|(a, b)| (*a as i32 - *b as i32).abs() <= 2), "{row:?}");
+}
