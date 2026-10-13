@@ -511,3 +511,27 @@ fn gradient_lines_and_their_heads_take_the_gradient() {
     let (top, bottom) = (img.pixel(200, 91), img.pixel(200, 109));
     assert!(top[0] > 200 && top[2] < 60 && bottom[2] > 200 && bottom[0] < 60, "{top:?} {bottom:?}");
 }
+
+#[test]
+fn a_groups_shadow_is_cast_by_its_children() {
+    let child = |id: u32, x: f64| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 0.0, 80.0, 100.0)),
+        fill: solid(RED),
+        line: no_line(),
+        ..Default::default()
+    };
+    let g = Shape {
+        id: ShapeId(22),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        kind: ShapeKind::Group { children: vec![child(23, 0.0), child(24, 120.0)], child: Xfrm::new(0.0, 0.0, 200.0, 100.0) },
+        effects: Some(offset_shadow()),
+        ..Default::default()
+    };
+    let img = render(vec![g]);
+    // 20 pt to the right of each child: the shadow; in the gap only the left child's shadow shows.
+    assert!(close(img.pixel(190, 150), Rgba::BLACK, 30), "{:?}", img.pixel(190, 150));
+    assert!(close(img.pixel(210, 150), WHITE, 10), "{:?}", img.pixel(210, 150));
+    assert!(close(img.pixel(310, 150), Rgba::BLACK, 30), "{:?}", img.pixel(310, 150));
+    assert!(close(img.pixel(150, 150), RED, 10), "children drawn over it");
+}

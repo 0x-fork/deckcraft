@@ -788,6 +788,33 @@ impl Renderer {
                     Some(fl) => Some((fl.clone(), m, Rect::new(0.0, 0.0, x.w, x.h))),
                 };
                 let outer = std::mem::replace(&mut self.group_fill, own);
+                // A group's outer shadow is cast by everything in it, as PowerPoint draws it: the
+                // children drawn once more under the shadow's offset, scale and skew, recoloured to
+                // the shadow colour and blurred, below the group.
+                if let Some(sh) = s.effects.as_ref().and_then(|e| e.outer_shadow.as_ref()) {
+                    let c = rctx.color(&sh.color, None);
+                    let k = scale_of(m);
+                    let d = Vec2::new(sh.dir.to_radians().cos(), sh.dir.to_radians().sin()) * sh.dist;
+                    let local = shadow_local(sh, x.w, x.h);
+                    let (own, pre) =
+                        if sh.rotate_with_shape { (Affine::translate(d) * local, Affine::IDENTITY) } else { (local, Affine::translate(d * k)) };
+                    let det = m.determinant();
+                    if det.is_finite() && det.abs() > 1e-12 {
+                        let shift = pre * m * own * m.inverse();
+                        ctx.set_transform(Affine::IDENTITY);
+                        ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur / 3.0 * k)));
+                        for ch in children {
+                            self.shape(ctx, f, rctx, ch, shift * gm, depth + 1);
+                        }
+                        ctx.set_transform(Affine::IDENTITY);
+                        ctx.push_layer(None, Some(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::SrcIn)), None, None, None);
+                        ctx.set_paint(color(c.with_alpha(255), 1.0));
+                        let (w, h) = (f.opts.scale * f.pres.slide_size.width, f.opts.scale * f.pres.slide_size.height);
+                        ctx.fill_rect(&Rect::new(-w, -h, 3.0 * w, 3.0 * h).inflate(1e4, 1e4));
+                        ctx.pop_layer();
+                        ctx.pop_layer();
+                    }
+                }
                 for c in children {
                     self.shape(ctx, f, rctx, c, gm, depth + 1);
                 }
