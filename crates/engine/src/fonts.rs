@@ -6,6 +6,21 @@ use deckcraft_model::resolve::{self, Ctx};
 use deckcraft_model::text::{Bullet, TextBody};
 use deckcraft_model::{Presentation, Shape, ShapeKind};
 
+/// Load each embedded face into the font database, so text in that family draws with the file's
+/// font on a machine that doesn't have it. A face already loaded (bundled or installed) stays;
+/// the part bytes are kept either way. MicroType Express subsets have no TrueType or OpenType
+/// font to load and are left for the round trip.
+pub fn install_embedded_fonts(p: &Presentation) {
+    let db = FontDb::global();
+    for font in &p.embedded_fonts {
+        for id in font.faces().into_iter().flatten() {
+            let Some(item) = p.media(id) else { continue };
+            let Some(sfnt) = deckcraft_fonts::embedded_sfnt(&item.data) else { continue };
+            db.add_font(sfnt.to_vec());
+        }
+    }
+}
+
 /// The font families the slides' text is drawn in (theme fonts resolved, bullet fonts included)
 /// that aren't installed or bundled, sorted, without duplicates (case-insensitive).
 pub fn missing_fonts(p: &Presentation) -> Vec<String> {

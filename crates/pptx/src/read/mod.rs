@@ -14,8 +14,8 @@ use std::sync::Arc;
 use deckcraft_geom::{Size, emu_to_pt};
 use deckcraft_model::text::TextBody;
 use deckcraft_model::{
-    Background, Comment, CustomShow, Geom, HeaderFooter, Layout, LayoutId, LayoutType, Master, MasterId, MediaId, MediaItem, PhType, Presentation,
-    Properties, Section, ShowSettings, Slide, SlideId, defaults,
+    Background, Comment, CustomShow, EmbeddedFont, Geom, HeaderFooter, Layout, LayoutId, LayoutType, Master, MasterId, MediaId, MediaItem, PhType,
+    Presentation, Properties, Section, ShowSettings, Slide, SlideId, defaults,
 };
 
 use crate::PptxError;
@@ -399,10 +399,65 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
 
     inherit_placeholder_geometry(&mut p);
     p.header_footer = header_footer(&p);
+    p.embedded_fonts = read_embedded_fonts(&mut imp, &pres_part, pres_el);
     p.media = std::mem::take(&mut imp.media);
     p.next_id = imp.next;
     p.fix_next_id();
     Ok(p)
+}
+
+/// Embedded font faces in one file. Past this, further typefaces are dropped.
+const MAX_EMBEDDED_FONTS: usize = 64;
+/// One font part. A larger part is skipped; the rest of the file is still read.
+const MAX_FONT_BYTES: usize = 32 * 1024 * 1024;
+
+/// `p:embeddedFontLst`: each typeface and the font parts its four face slots point at.
+fn read_embedded_fonts(imp: &mut Imp, pres: &Part, root: &El) -> Vec<EmbeddedFont> {
+    let Some(list) = root.child("embeddedFontLst") else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in list.children_named("embeddedFont").take(MAX_EMBEDDED_FONTS) {
+        let Some(font) = e.child("font") else { continue };
+        let Some(typeface) = font.attr("typeface").map(str::trim).filter(|t| !t.is_empty()) else { continue };
+        let typeface: String = typeface.chars().take(255).collect();
+        let slot = |imp: &mut Imp, name: &str| -> Option<MediaId> {
+            let id = e.child(name)?.attr("r:id")?;
+            let part = pres.rels.target(id)?;
+            let data = imp.pkg.get(part)?;
+            if data.is_empty() || data.len() > MAX_FONT_BYTES {
+                log::warn!("pptx: embedded font {part} skipped ({} bytes)", data.len());
+                return None;
+            }
+            imp.media_for(part)
+        };
+        let regular = slot(imp, "regular");
+        let bold = slot(imp, "bold");
+        let italic = slot(imp, "italic");
+        let bold_italic = slot(imp, "boldItalic");
+        if regular.is_none() && bold.is_none() && italic.is_none() && bold_italic.is_none() {
+            continue;
+        }
+        out.push(EmbeddedFont {
+            typeface,
+            panose: panose_attr(font),
+            pitch_family: byte_attr(font, "pitchFamily"),
+            charset: byte_attr(font, "charset"),
+            regular,
+            bold,
+            italic,
+            bold_italic,
+        });
+    }
+    out
+}
+
+fn byte_attr(el: &El, name: &str) -> Option<u8> {
+    u8::try_from(el.u32(name)?).ok()
+}
+
+/// `panose` is 20 hex digits (ST_Panose). Anything else is dropped.
+fn panose_attr(el: &El) -> Option<String> {
+    let v = el.attr("panose")?.trim();
+    (v.len() == 20 && v.chars().all(|c| c.is_ascii_hexdigit())).then(|| v.to_string())
 }
 
 fn sane_len(v: f64, dflt: f64) -> f64 {

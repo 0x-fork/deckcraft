@@ -88,6 +88,7 @@ pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
 
 pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presentation) -> usize {
     let title = std::path::Path::new(name).file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
+    crate::fonts::install_embedded_fonts(&p);
     let missing_fonts = crate::fonts::missing_fonts(&p);
     let mut st = DocState::new(p, path, title);
     st.missing_fonts = missing_fonts;

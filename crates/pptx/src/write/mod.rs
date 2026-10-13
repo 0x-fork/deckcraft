@@ -665,11 +665,99 @@ fn section_slides(p: &Presentation) -> Vec<(String, Vec<usize>)> {
     out
 }
 
+/// One embedded typeface, with the relationship id of each face that had bytes.
+struct WrittenFont {
+    typeface: String,
+    panose: Option<String>,
+    pitch_family: Option<u8>,
+    charset: Option<u8>,
+    regular: Option<String>,
+    bold: Option<String>,
+    italic: Option<String>,
+    bold_italic: Option<String>,
+}
+
+impl WrittenFont {
+    fn any(&self) -> bool {
+        self.regular.is_some() || self.bold.is_some() || self.italic.is_some() || self.bold_italic.is_some()
+    }
+}
+
+/// Font parts for `p:embeddedFontLst`. One part per distinct media item, named `ppt/fonts/fontN.fntdata`.
+fn write_embedded_fonts(x: &mut Exp, o: &mut Out) -> Vec<WrittenFont> {
+    struct Plan {
+        typeface: String,
+        panose: Option<String>,
+        pitch_family: Option<u8>,
+        charset: Option<u8>,
+        regular: Option<MediaId>,
+        bold: Option<MediaId>,
+        italic: Option<MediaId>,
+        bold_italic: Option<MediaId>,
+    }
+    let mut plans = Vec::new();
+    for font in x.p.embedded_fonts.iter().take(64) {
+        let typeface = font.typeface.trim();
+        if typeface.is_empty() {
+            continue;
+        }
+        plans.push(Plan {
+            typeface: typeface.chars().take(255).collect(),
+            panose: font.panose.clone().filter(|s| s.len() == 20 && s.chars().all(|c| c.is_ascii_hexdigit())),
+            pitch_family: font.pitch_family,
+            charset: font.charset,
+            regular: font.regular,
+            bold: font.bold,
+            italic: font.italic,
+            bold_italic: font.bold_italic,
+        });
+    }
+    let mut seen_part: HashMap<MediaId, String> = HashMap::new();
+    let mut n = 0u32;
+    let mut rel = |x: &mut Exp, o: &mut Out, id: Option<MediaId>| -> Option<String> {
+        let id = id?;
+        if let Some(rid) = seen_part.get(&id) {
+            return Some(rid.clone());
+        }
+        let m = x.p.media(id)?;
+        if m.data.is_empty() || m.data.len() > 32 * 1024 * 1024 {
+            return None;
+        }
+        let bytes = m.data.as_ref().clone();
+        n = n.saturating_add(1);
+        let name = format!("ppt/fonts/font{n}.fntdata");
+        x.pkg.binary(&name, "application/x-fontdata", bytes);
+        let rid = o.rels.add("font", &opc::relative("ppt/presentation.xml", &name), false);
+        seen_part.insert(id, rid.clone());
+        Some(rid)
+    };
+    let mut seen_face = Vec::new();
+    let mut out = Vec::new();
+    for font in plans {
+        let written = WrittenFont {
+            typeface: font.typeface,
+            panose: font.panose,
+            pitch_family: font.pitch_family,
+            charset: font.charset,
+            regular: rel(x, o, font.regular),
+            bold: rel(x, o, font.bold),
+            italic: rel(x, o, font.italic),
+            bold_italic: rel(x, o, font.bold_italic),
+        };
+        if written.any() && !seen_face.iter().any(|s| s == &written.typeface) {
+            seen_face.push(written.typeface.clone());
+            out.push(written);
+        }
+    }
+    out
+}
+
 fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, slides: &[String]) -> Vec<u8> {
+    let fonts = write_embedded_fonts(x, o);
     let p = x.p;
     let mut w = W::new();
     let first = (p.first_slide_number != 1).then_some(p.first_slide_number.min(9999));
-    root_open(&mut w, "p:presentation", A::new().a("saveSubsetFonts", 1).o("firstSlideNum", first));
+    root_open(&mut w, "p:presentation", A::new().a("saveSubsetFonts", 1).t("embedTrueTypeFonts", !fonts.is_empty()).o("firstSlideNum", first));
     w.open0("p:sldMasterIdLst");
     for (id, rid) in masters {
         w.empty("p:sldMasterId", A::new().a("id", id).a("r:id", rid));
@@ -690,6 +778,23 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
     let clamp = |v: f64| dml::emu(v).clamp(914_400, 51_206_400);
     w.empty("p:sldSz", A::new().a("cx", clamp(p.slide_size.width)).a("cy", clamp(p.slide_size.height)));
     w.empty("p:notesSz", A::new().a("cx", dml::emu_pos(p.notes_size.width).max(1)).a("cy", dml::emu_pos(p.notes_size.height).max(1)));
+    if !fonts.is_empty() {
+        w.open0("p:embeddedFontLst");
+        for f in &fonts {
+            w.open0("p:embeddedFont");
+            w.empty(
+                "p:font",
+                A::new().a("typeface", &f.typeface).o("panose", f.panose.clone()).o("pitchFamily", f.pitch_family).o("charset", f.charset),
+            );
+            for (tag, rid) in [("p:regular", &f.regular), ("p:bold", &f.bold), ("p:italic", &f.italic), ("p:boldItalic", &f.bold_italic)] {
+                if let Some(rid) = rid {
+                    w.empty(tag, A::new().a("r:id", rid));
+                }
+            }
+            w.close("p:embeddedFont");
+        }
+        w.close("p:embeddedFontLst");
+    }
     if !p.custom_shows.is_empty() {
         w.open0("p:custShowLst");
         for (i, cs) in p.custom_shows.iter().enumerate() {

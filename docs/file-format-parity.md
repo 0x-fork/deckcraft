@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** trivial (Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); previously major: created; formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (embedded fonts read, written and drawn; MicroType Express subsets kept but not drawn; previously trivial: groups with a small legacy child coordinate space, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -48,7 +48,7 @@ PowerPoint opens and saves; Viewer = opens only).
 | Online video (YouTube embeds) | yes | no | Cloud feature |
 | Embedded OLE objects | yes | kept on round trip (opaque), not insertable or editable | `ShapeKind::Opaque` |
 | 3-D models (`.glb`) | yes | no | |
-| Embedded fonts | yes | no | `p:embeddedFontLst` ignored |
+| Embedded fonts | yes | yes | `p:embeddedFontLst` read and written. TrueType, OpenType and Embedded OpenType faces are used to draw; MicroType Express subsets are kept and written back, not drawn |
 
 ## PPTX coverage (PresentationML / DrawingML)
 
@@ -84,7 +84,7 @@ the round trip even though DeckCraft doesn't model it.
 | Comments: modern threaded (`p188`) | yes | no (written as legacy) | Replies and resolved state lost (#70) |
 | Unknown slide-level elements (`graphicFrame` OLE, extensions, `mc:AlternateContent`) | kept | kept | Rendered as a labelled placeholder with the preview picture when present |
 | Tags, custom XML, VBA | no / no / no | | |
-| Embedded fonts | no | no | |
+| Embedded fonts | yes | yes | MicroType Express subsets kept, not drawn |
 | Encryption (password to open) | no | no | |
 
 ### What would move the PPTX number
@@ -99,6 +99,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Embedded fonts read and written; TrueType, OpenType and Embedded OpenType faces drawn |
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |
