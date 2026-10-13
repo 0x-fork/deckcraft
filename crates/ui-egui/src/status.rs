@@ -109,6 +109,11 @@ fn labeled(ui: &mut Ui, icon: Icon, label: &str, on: bool) -> egui::Response {
 }
 
 /// The speaker notes editor under the slide.
+/// The language of a slide's notes: the first notes run that has one.
+fn notes_lang(s: &deckcraft_model::Slide) -> Option<String> {
+    s.notes.paragraphs.iter().flat_map(|p| &p.runs).find_map(|r| r.props.lang.clone())
+}
+
 pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(st) = app.session.active() else { return };
@@ -145,15 +150,27 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
                 app.notes_buf.2 = current.clone();
             }
             let mut buf = app.notes_buf.2.clone();
-            let r = ui.add(
-                egui::TextEdit::multiline(&mut buf)
-                    .id(id)
-                    .hint_text("Click to add notes")
-                    .frame(egui::Frame::NONE)
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(2)
-                    .font(theme::font(13.0)),
-            );
+            let out = egui::TextEdit::multiline(&mut buf)
+                .id(id)
+                .hint_text("Click to add notes")
+                .frame(egui::Frame::NONE)
+                .desired_width(f32::INFINITY)
+                .desired_rows(2)
+                .font(theme::font(13.0))
+                .show(ui);
+            let r = out.response.clone();
+            // Spelling squiggles under misspelt words of the notes.
+            let lang = app.session.active().and_then(|d| d.doc.slides.get(idx)).and_then(|s| notes_lang(s)).unwrap_or_else(|| "en-US".into());
+            let caret = out.cursor_range.map(|c| c.primary.index.0);
+            for (a, b) in app.squiggles.notes(&buf, &lang, caret, Some(ui.ctx())) {
+                let (ra, rb) = (out.galley.pos_from_cursor(egui::text::CCursor::new(a)), out.galley.pos_from_cursor(egui::text::CCursor::new(b)));
+                // One underline per row the word is on (a word doesn't wrap, so normally one).
+                if (ra.bottom() - rb.bottom()).abs() < 1.0 {
+                    let y = ra.bottom() - 1.0;
+                    let o = out.galley_pos.to_vec2();
+                    crate::squiggles::paint(ui.painter(), egui::pos2(ra.left(), y) + o, egui::pos2(rb.left(), y) + o, 1.0);
+                }
+            }
             app.notes_buf.2 = buf.clone();
             if r.lost_focus() && buf != current {
                 let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));

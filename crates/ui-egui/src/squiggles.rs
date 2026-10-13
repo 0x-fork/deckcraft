@@ -1,9 +1,12 @@
-//! Spelling squiggles: misspelt words on the current slide get a red wavy underline, checked on a
-//! worker thread so typing never waits for a dictionary. Results are for one version of the
-//! document; while a newer check runs, nothing stale is drawn. The word being typed (the caret at
-//! or inside it) isn't marked, as in PowerPoint. The web build has no worker and shows none.
+//! Spelling squiggles: misspelt words on the current slide (shapes and table cells) and in the
+//! speaker notes get a red wavy underline. Checks run on a worker thread so typing never waits for
+//! a dictionary; the web build has no threads, so there the same checker runs on the UI thread a
+//! few milliseconds per frame until it is done. Results are for one version of the text; while a
+//! newer check runs nothing stale is drawn. The word the caret is in isn't marked, as in
+//! PowerPoint.
 
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
@@ -11,85 +14,146 @@ use deckcraft_engine::DocState;
 use deckcraft_geom::Point;
 use deckcraft_model::{Paragraph, ShapeId};
 
-/// What a check is for: the document version, the slide and the user dictionary version.
+/// Milliseconds of checking per frame on the UI thread (the web build).
+pub const FRAME_BUDGET_MS: f64 = 4.0;
+
+/// Where a checked paragraph is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Tag {
+    Shape {
+        id: ShapeId,
+        para: usize,
+    },
+    Cell {
+        id: ShapeId,
+        row: usize,
+        col: usize,
+        para: usize,
+    },
+    /// A line of the notes, starting at character `start` of the notes text.
+    Notes {
+        start: usize,
+    },
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Key {
-    doc: usize,
-    rev: u64,
-    slide: usize,
+enum Kind {
+    Slide,
+    Notes,
+}
+
+/// What a check is for: a hash of the text's identity, and the user dictionary version.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Key {
+    of: u64,
     user: u64,
 }
 
 struct Job {
+    kind: Kind,
     key: Key,
     default_lang: String,
-    paras: Vec<(ShapeId, usize, Paragraph)>,
+    paras: Vec<(Tag, Paragraph)>,
     repaint: Option<egui::Context>,
 }
 
-/// Misspelt ranges for one key: `(shape, para, start, end)`.
+/// Misspelt character ranges, per paragraph.
 struct Done {
+    kind: Kind,
     key: Key,
-    ranges: Vec<(ShapeId, usize, usize, usize)>,
+    ranges: Vec<(Tag, usize, usize)>,
 }
 
+fn now_ms() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        T0.get_or_init(std::time::Instant::now).elapsed().as_secs_f64() * 1000.0
+    }
+}
+
+/// The checking itself, step by step: the newest job of each kind, a paragraph at a time, with
+/// results cached by paragraph content (typing re-checks only the paragraph typed in).
 #[derive(Default)]
-pub struct Squiggles {
-    tx: Option<Sender<Job>>,
-    rx: Option<Receiver<Done>>,
-    /// The check in flight, if any.
-    pending: Option<Key>,
-    done: Option<Done>,
-    /// Underlines in slide coordinates for `done`, with each one's word: `(shape, para, start, end)`.
-    lines: Vec<((ShapeId, usize, usize, usize), Point, Point)>,
-    /// Off (tests or the setting).
-    pub disabled: bool,
-    /// The misspelt word a context menu is open on.
-    pub menu_word: Option<MenuWord>,
-    /// Words skipped with Ignore All this session (lower-case).
-    ignored: Vec<String>,
+struct Checker {
+    cache: HashMap<u64, Vec<(usize, usize)>>,
+    user: Option<u64>,
+    /// Jobs with how far they got and what they found so far.
+    jobs: Vec<(Job, usize, Vec<(Tag, usize, usize)>)>,
 }
 
-/// A misspelt word under the pointer, with corrections.
-#[derive(Clone, Debug)]
-pub struct MenuWord {
-    pub shape: ShapeId,
-    pub para: usize,
-    pub start: usize,
-    pub word: String,
-    pub suggestions: Vec<String>,
+fn hash_of(v: &impl Hash) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.hash(&mut h);
+    h.finish()
+}
+
+impl Checker {
+    fn push(&mut self, job: Job) {
+        self.jobs.retain(|(j, _, _)| j.kind != job.kind);
+        self.jobs.push((job, 0, vec![]));
+    }
+
+    fn idle(&self) -> bool {
+        self.jobs.is_empty()
+    }
+
+    /// Check until `budget_ms` is spent (or everything is done); finished jobs.
+    fn step(&mut self, budget_ms: f64) -> Vec<(Done, Option<egui::Context>)> {
+        let t0 = now_ms();
+        let mut out = vec![];
+        while let Some((job, at, found)) = self.jobs.first_mut() {
+            if self.user != Some(job.key.user) {
+                self.cache.clear();
+                self.user = Some(job.key.user);
+            }
+            while *at < job.paras.len() {
+                let (tag, p) = &job.paras[*at];
+                let k = hash_of(&(serde_json::to_string(&p.runs).unwrap_or_default(), &job.default_lang));
+                let r = self
+                    .cache
+                    .entry(k)
+                    .or_insert_with(|| deckcraft_engine::spell::misspelt(p, &job.default_lang, &[]).into_iter().map(|w| (w.start, w.end)).collect());
+                found.extend(r.iter().map(|(a, b)| (*tag, *a, *b)));
+                *at += 1;
+                if now_ms() - t0 > budget_ms {
+                    return out;
+                }
+            }
+            let (job, _, ranges) = self.jobs.remove(0);
+            out.push((Done { kind: job.kind, key: job.key, ranges }, job.repaint));
+        }
+        if self.cache.len() > 20_000 {
+            self.cache.clear();
+        }
+        out
+    }
 }
 
 fn worker(rx: Receiver<Job>, tx: Sender<Done>) {
-    // Paragraph results by content, so typing in one paragraph re-checks only that one.
-    let mut cache: HashMap<(String, u64), Vec<(usize, usize)>> = HashMap::new();
-    let mut user = None;
-    while let Ok(mut job) = rx.recv() {
-        // Only the newest job matters.
+    let mut c = Checker::default();
+    loop {
+        if c.idle() {
+            match rx.recv() {
+                Ok(j) => c.push(j),
+                Err(_) => return,
+            }
+        }
         while let Ok(j) = rx.try_recv() {
-            job = j;
+            c.push(j);
         }
-        if user != Some(job.key.user) {
-            cache.clear();
-            user = Some(job.key.user);
-        }
-        let mut ranges = vec![];
-        for (id, pi, p) in &job.paras {
-            let k = (serde_json::to_string(&p.runs).unwrap_or_default(), job.key.user);
-            let k = (format!("{}\u{0}{}", job.default_lang, k.0), k.1);
-            let r = cache
-                .entry(k)
-                .or_insert_with(|| deckcraft_engine::spell::misspelt(p, &job.default_lang, &[]).into_iter().map(|w| (w.start, w.end)).collect());
-            ranges.extend(r.iter().map(|(a, b)| (*id, *pi, *a, *b)));
-        }
-        if cache.len() > 20_000 {
-            cache.clear();
-        }
-        if tx.send(Done { key: job.key, ranges }).is_err() {
-            return;
-        }
-        if let Some(c) = &job.repaint {
-            c.request_repaint();
+        // In slices, so a newer job can replace one being checked.
+        for (d, repaint) in c.step(20.0) {
+            if tx.send(d).is_err() {
+                return;
+            }
+            if let Some(r) = repaint {
+                r.request_repaint();
+            }
         }
     }
 }
@@ -111,22 +175,103 @@ fn default_lang(st: &DocState) -> String {
     "en-US".into()
 }
 
+/// A word under a squiggle: `(tag, start, end)`.
+type Mark = (Tag, usize, usize);
+
+#[derive(Default)]
+pub struct Squiggles {
+    tx: Option<Sender<Job>>,
+    rx: Option<Receiver<Done>>,
+    /// No worker thread (the web build, or forced for tests): check on the UI thread.
+    inline: Option<Checker>,
+    /// Check on the UI thread even where threads exist (tests of the web path).
+    pub force_inline: bool,
+    pending: [Option<Key>; 2],
+    done: [Option<Done>; 2],
+    /// Underlines in slide coordinates for the slide's `done`, and the key they were laid out for.
+    lines: Vec<(Mark, Point, Point)>,
+    lines_for: Option<Key>,
+    /// Off (tests or the setting).
+    pub disabled: bool,
+    /// The misspelt word a context menu is open on.
+    pub menu_word: Option<MenuWord>,
+    /// Words skipped with Ignore All this session (lower-case).
+    ignored: Vec<String>,
+}
+
+/// A misspelt word under the pointer, with corrections.
+#[derive(Clone, Debug)]
+pub struct MenuWord {
+    pub tag: Tag,
+    pub start: usize,
+    pub word: String,
+    pub suggestions: Vec<String>,
+}
+
+fn slot(k: Kind) -> usize {
+    match k {
+        Kind::Slide => 0,
+        Kind::Notes => 1,
+    }
+}
+
 impl Squiggles {
     fn start(&mut self) -> bool {
-        if self.tx.is_some() {
+        if self.tx.is_some() || self.inline.is_some() {
             return true;
         }
-        if cfg!(target_arch = "wasm32") {
-            return false;
+        if !cfg!(target_arch = "wasm32") && !self.force_inline {
+            let (jtx, jrx) = channel();
+            let (dtx, drx) = channel();
+            if std::thread::Builder::new().name("spelling".into()).spawn(move || worker(jrx, dtx)).is_ok() {
+                self.tx = Some(jtx);
+                self.rx = Some(drx);
+                return true;
+            }
         }
-        let (jtx, jrx) = channel();
-        let (dtx, drx) = channel();
-        let ok = std::thread::Builder::new().name("spelling".into()).spawn(move || worker(jrx, dtx)).is_ok();
-        if ok {
-            self.tx = Some(jtx);
-            self.rx = Some(drx);
+        self.inline = Some(Checker::default());
+        true
+    }
+
+    /// Take in finished checks (and, on the UI thread, spend this frame's budget).
+    fn receive(&mut self, budget_ms: f64) {
+        let mut got = vec![];
+        if let Some(rx) = &self.rx {
+            while let Ok(d) = rx.try_recv() {
+                got.push(d);
+            }
         }
-        ok
+        if let Some(c) = self.inline.as_mut() {
+            got.extend(c.step(budget_ms).into_iter().map(|(d, _)| d));
+        }
+        for d in got {
+            let i = slot(d.kind);
+            if self.pending[i] == Some(d.key) {
+                self.pending[i] = None;
+            }
+            self.done[i] = Some(d);
+        }
+    }
+
+    fn ask(&mut self, kind: Kind, key: Key, default_lang: String, paras: impl FnOnce() -> Vec<(Tag, Paragraph)>, repaint: Option<&egui::Context>) {
+        let i = slot(kind);
+        if self.done[i].as_ref().is_some_and(|d| d.key == key) || self.pending[i] == Some(key) {
+            return;
+        }
+        let job = Job { kind, key, default_lang, paras: paras(), repaint: repaint.cloned() };
+        if let Some(c) = self.inline.as_mut() {
+            c.push(job);
+            self.pending[i] = Some(key);
+            if let Some(r) = repaint {
+                r.request_repaint();
+            }
+        } else if self.tx.as_ref().is_some_and(|tx| tx.send(job).is_ok()) {
+            self.pending[i] = Some(key);
+        }
+    }
+
+    fn is_ignored(&self, word: &str) -> bool {
+        !self.ignored.is_empty() && self.ignored.contains(&word.to_lowercase())
     }
 
     /// Ask for a check of the current slide if it changed, take in finished checks, and return the
@@ -135,66 +280,98 @@ impl Squiggles {
         if self.disabled || !self.start() {
             return vec![];
         }
+        self.receive(FRAME_BUDGET_MS);
         let key =
-            Key { doc: Arc::as_ptr(&st.doc) as usize, rev: st.revision, slide: st.selection.slide, user: deckcraft_engine::spell::user_generation() };
-        if let Some(rx) = &self.rx {
-            while let Ok(d) = rx.try_recv() {
-                if self.pending == Some(d.key) {
-                    self.pending = None;
-                }
-                self.lines.clear();
-                self.done = Some(d);
-                if let Some(d) = &self.done
-                    && d.key == key
-                {
-                    let mut by_shape: HashMap<ShapeId, Vec<(usize, usize, usize)>> = HashMap::new();
-                    for (id, p, a, b) in &d.ranges {
-                        by_shape.entry(*id).or_default().push((*p, *a, *b));
-                    }
-                    for (id, rs) in by_shape {
-                        for r in rs {
-                            for (a, b) in deckcraft_engine::cmd::text::range_underlines(st, id, &[r]) {
-                                self.lines.push(((id, r.0, r.1, r.2), a, b));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let fresh = self.done.as_ref().is_some_and(|d| d.key == key);
-        if !fresh && self.pending != Some(key) {
+            Key { of: hash_of(&(Arc::as_ptr(&st.doc) as usize, st.revision, st.selection.slide)), user: deckcraft_engine::spell::user_generation() };
+        let paras = || {
             let mut paras = vec![];
             if let Some(sl) = st.doc.slides.get(st.selection.slide) {
                 deckcraft_model::walk(&sl.shapes, &mut |sh, _| {
                     if let Some(t) = &sh.text {
                         for (i, p) in t.paragraphs.iter().enumerate() {
-                            paras.push((sh.id, i, p.clone()));
+                            paras.push((Tag::Shape { id: sh.id, para: i }, p.clone()));
+                        }
+                    }
+                    if let deckcraft_model::ShapeKind::Table(tb) = &sh.kind {
+                        for (r, row) in tb.rows.iter().enumerate() {
+                            for (c, cell) in row.cells.iter().enumerate() {
+                                if cell.is_covered() {
+                                    continue;
+                                }
+                                for (i, p) in cell.text.paragraphs.iter().enumerate() {
+                                    paras.push((Tag::Cell { id: sh.id, row: r, col: c, para: i }, p.clone()));
+                                }
+                            }
                         }
                     }
                 });
             }
-            let job = Job { key, default_lang: default_lang(st), paras, repaint: repaint.cloned() };
-            if self.tx.as_ref().is_some_and(|tx| tx.send(job).is_ok()) {
-                self.pending = Some(key);
+            paras
+        };
+        self.ask(Kind::Slide, key, default_lang(st), paras, repaint);
+        let Some(d) = self.done[0].as_ref().filter(|d| d.key == key) else { return vec![] };
+        if self.lines_for != Some(key) {
+            self.lines.clear();
+            for &(tag, a, b) in &d.ranges {
+                let under = match tag {
+                    Tag::Shape { id, para } => deckcraft_engine::cmd::text::range_underlines(st, id, &[(para, a, b)]),
+                    Tag::Cell { id, row, col, para } => deckcraft_engine::cmd::text::cell_range_underlines(st, id, row, col, &[(para, a, b)]),
+                    Tag::Notes { .. } => vec![],
+                };
+                self.lines.extend(under.into_iter().map(|(p, q)| ((tag, a, b), p, q)));
             }
-        }
-        if !fresh {
-            return vec![];
+            self.lines_for = Some(key);
         }
         // Not under the word the caret is in.
-        let typing = st.selection.text.as_ref().filter(|t| !t.notes && t.cell.is_none()).map(|t| (t.shape, t.caret));
+        let typing = st.selection.text.as_ref().filter(|t| !t.notes).map(|t| (t.shape, t.cell, t.caret));
+        let under_caret = |tag: &Tag, a: usize, b: usize| {
+            typing.is_some_and(|(s, cell, (cp, cc))| {
+                let here = match *tag {
+                    Tag::Shape { id, para } => cell.is_none() && id == s && para == cp,
+                    Tag::Cell { id, row, col, para } => cell == Some((row, col)) && id == s && para == cp,
+                    Tag::Notes { .. } => false,
+                };
+                here && cc >= a && cc <= b
+            })
+        };
         self.lines
             .iter()
-            .filter(|((id, p, a, b), _, _)| !typing.is_some_and(|(s, (cp, cc))| s == *id && cp == *p && cc >= *a && cc <= *b))
-            .filter(|((id, p, a, b), _, _)| {
-                self.ignored.is_empty() || {
-                    let w = st
-                        .shape(*id)
-                        .and_then(|sh| sh.text.as_ref()?.paragraphs.get(*p).map(|pp| pp.text().chars().skip(*a).take(b - a).collect::<String>()));
-                    !w.is_some_and(|w| self.ignored.contains(&w.to_lowercase()))
-                }
-            })
+            .filter(|((tag, a, b), _, _)| !under_caret(tag, *a, *b))
+            .filter(|((tag, a, b), _, _)| self.ignored.is_empty() || !word_of(st, *tag, *a, *b).is_some_and(|w| self.is_ignored(&w)))
             .map(|(_, a, b)| (*a, *b))
+            .collect()
+    }
+
+    /// The misspelt character ranges of the notes text being shown (`caret` is the cursor's
+    /// character index, whose word isn't marked); empty until the check is in.
+    pub fn notes(&mut self, text: &str, lang: &str, caret: Option<usize>, repaint: Option<&egui::Context>) -> Vec<(usize, usize)> {
+        if self.disabled || !self.start() {
+            return vec![];
+        }
+        self.receive(FRAME_BUDGET_MS);
+        let key = Key { of: hash_of(&(text, lang)), user: deckcraft_engine::spell::user_generation() };
+        let paras = || {
+            let mut out = vec![];
+            let mut start = 0;
+            for line in text.split('\n') {
+                out.push((Tag::Notes { start }, Paragraph::new(line)));
+                start += line.chars().count() + 1;
+            }
+            out
+        };
+        self.ask(Kind::Notes, key, lang.to_string(), paras, repaint);
+        let Some(d) = self.done[1].as_ref().filter(|d| d.key == key) else { return vec![] };
+        let chars: Vec<char> = text.chars().collect();
+        d.ranges
+            .iter()
+            .filter_map(|&(tag, a, b)| match tag {
+                Tag::Notes { start } => Some((start + a, start + b)),
+                _ => None,
+            })
+            .filter(|(a, b)| !caret.is_some_and(|c| c >= *a && c <= *b))
+            .filter(|(a, b)| {
+                self.ignored.is_empty() || !self.is_ignored(&chars.get(*a..*b).map(|c| c.iter().collect::<String>()).unwrap_or_default())
+            })
             .collect()
     }
 
@@ -205,37 +382,57 @@ impl Squiggles {
 
     /// The squiggled word at slide point `p` (within `tol` points of its underline).
     pub fn word_at(&self, st: &DocState, p: Point, tol: f64) -> Option<MenuWord> {
-        let ((shape, para, start, end), _, _) = *self.lines.iter().find(|(_, a, b)| {
+        let ((tag, start, end), _, _) = *self.lines.iter().find(|(_, a, b)| {
             let (x0, x1) = (a.x.min(b.x), a.x.max(b.x));
             // From the line's top (a word is about a line high above its underline) to just below it.
             p.x >= x0 - tol && p.x <= x1 + tol && p.y <= a.y.max(b.y) + tol && p.y >= a.y.min(b.y) - 24.0
         })?;
-        let pp = st
-            .doc
-            .slides
-            .get(st.selection.slide)
-            .and_then(|sl| deckcraft_model::find_shape(&sl.shapes, shape))?
-            .text
-            .as_ref()?
-            .paragraphs
-            .get(para)?;
+        let pp = paragraph_of(st, tag)?;
         let word: String = pp.text().chars().skip(start).take(end - start).collect();
-        let lang = deckcraft_engine::spell::paragraph_words(pp, &default_lang(st)).into_iter().find(|w| w.start == start).map(|w| w.lang)?;
+        let lang = deckcraft_engine::spell::paragraph_words(&pp, &default_lang(st)).into_iter().find(|w| w.start == start).map(|w| w.lang)?;
         let suggestions = deckcraft_engine::spell::dictionary(&lang).map(|d| d.suggest(&word, 5)).unwrap_or_default();
-        Some(MenuWord { shape, para, start, word, suggestions })
+        Some(MenuWord { tag, start, word, suggestions })
     }
 
-    /// Wait (tests) until the check for the current state is in.
+    /// Wait (tests) until the slide's check for `st` is in.
     pub fn settle(&mut self, st: &DocState) -> Vec<(Point, Point)> {
-        for _ in 0..500 {
+        for _ in 0..2000 {
             let v = self.update(st, None);
-            if self.done.as_ref().is_some_and(|d| self.pending.is_none() && d.key.doc == Arc::as_ptr(&st.doc) as usize) {
+            if self.pending[0].is_none() && self.done[0].is_some() {
                 return v;
             }
-            std::thread::sleep(std::time::Duration::from_millis(2));
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
         vec![]
     }
+
+    /// Wait (tests) until the notes check for `text` is in.
+    pub fn settle_notes(&mut self, text: &str, lang: &str) -> Vec<(usize, usize)> {
+        for _ in 0..2000 {
+            let v = self.notes(text, lang, None, None);
+            if self.pending[1].is_none() && self.done[1].is_some() {
+                return v;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        vec![]
+    }
+}
+
+fn paragraph_of(st: &DocState, tag: Tag) -> Option<Paragraph> {
+    let sl = st.doc.slides.get(st.selection.slide)?;
+    match tag {
+        Tag::Shape { id, para } => deckcraft_model::find_shape(&sl.shapes, id)?.text.as_ref()?.paragraphs.get(para).cloned(),
+        Tag::Cell { id, row, col, para } => match &deckcraft_model::find_shape(&sl.shapes, id)?.kind {
+            deckcraft_model::ShapeKind::Table(tb) => tb.cell(row, col)?.text.paragraphs.get(para).cloned(),
+            _ => None,
+        },
+        Tag::Notes { .. } => None,
+    }
+}
+
+fn word_of(st: &DocState, tag: Tag, a: usize, b: usize) -> Option<String> {
+    Some(paragraph_of(st, tag)?.text().chars().skip(a).take(b - a).collect())
 }
 
 /// A red wavy line from `a` to `b` (screen points).
