@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** trivial (Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); previously major: created; formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus round-trip; notes-master header and footer text kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -16,7 +16,7 @@ PowerPoint opens and saves; Viewer = opens only).
 
 | Format | PowerPoint | DeckCraft read | DeckCraft write | Fidelity / notes | Tested by |
 |---|---|---|---|---|---|
-| `.pptx` presentation | Editor | yes | yes | Broad (see below); never measured on real decks | `crates/pptx/tests/roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs` (30 tests); opened in PowerPoint by hand 2026-10-06 |
+| `.pptx` presentation | Editor | yes | yes | Broad (see below); corpus is decks we author, not measured against PowerPoint renders | `crates/pptx/tests/corpus.rs`, `roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
 | `.potx` template | Editor | yes (as a presentation) | no: written with the `.pptx` content type | `file.saveTemplate` is Save As under another name | none |
 | `.ppsx` slide show | Editor | yes (as a presentation) | no: written as `.pptx` content | Doesn't start in show mode | none |
 | `.pptm` / `.potm` / `.ppsm` macro-enabled | Editor | no | no | Should open and keep `vbaProject.bin` without running it | none |
@@ -61,7 +61,7 @@ the round trip even though DeckCraft doesn't model it.
 | Presentation, slide size, sections (p14), custom shows | yes | yes | |
 | Slide masters, layouts, placeholders and inheritance | yes | yes | |
 | Themes: colour, font (Latin/EA/CS), effect schemes, background styles | yes | yes | Unknown theme parts kept |
-| Notes slides and notes master | yes | yes | No notes-master editing view |
+| Notes slides and notes master | yes | yes | Header, footer, date and slide-number text on the notes master is kept. No notes-master editing view |
 | Handout master | no | no | |
 | Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group, and text, keep their size in points whatever the group's child-coordinate scale (#233). |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
@@ -89,9 +89,10 @@ the round trip even though DeckCraft doesn't model it.
 
 ### What would move the PPTX number
 
-1. An owned corpus of real-world-shaped decks (corporate templates, SmartArt, chartex charts, EMF,
-   embedded fonts, every transition and animation) in a corpus repo, with import → render → export
-   → re-import checks in CI and a PowerPoint reference render for each (owner runs PowerPoint).
+1. A larger owned corpus (corporate templates, SmartArt, chartex charts, EMF, embedded fonts,
+   every transition and animation) in a corpus repo. `crates/pptx/tests/corpus.rs` already checks
+   open → save → reopen (parts and text) for decks we author. Still needed: render checks and a
+   PowerPoint reference render for each (owner runs PowerPoint).
 2. The round-trip losses above (#70, #74, #77).
 3. SVG rendering, and clip regions inside EMF/WMF.
 
@@ -99,6 +100,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Owned corpus round-trip (parts and text). Notes-master header, footer, date and slide-number text is written back |
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |
