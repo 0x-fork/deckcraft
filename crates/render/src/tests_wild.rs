@@ -437,3 +437,44 @@ fn a_tiles_first_copy_sits_on_the_point_its_alignment_names() {
     assert_eq!(paint::tile_origin(b, "br", (20.0, 10.0), (5.0, -5.0)), Point::new(85.0, 35.0));
     assert_eq!(paint::tile_origin(b, "nonsense", (20.0, 10.0), (f64::NAN, 1.0)), Point::new(0.0, 1.0));
 }
+
+/// `png` with a pHYs chunk saying `dpi` inserted after its header.
+fn with_dpi(png: &[u8], dpi: f64) -> Vec<u8> {
+    fn crc32(data: &[u8]) -> u32 {
+        let mut c = 0xFFFF_FFFFu32;
+        for b in data {
+            c ^= *b as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+        }
+        !c
+    }
+    let ppm = (dpi / 0.0254).round() as u32;
+    let mut chunk = b"pHYs".to_vec();
+    chunk.extend_from_slice(&ppm.to_be_bytes());
+    chunk.extend_from_slice(&ppm.to_be_bytes());
+    chunk.push(1);
+    let mut out = png[..33].to_vec(); // signature (8) + IHDR chunk (25)
+    out.extend_from_slice(&9u32.to_be_bytes());
+    out.extend_from_slice(&chunk);
+    out.extend_from_slice(&crc32(&chunk).to_be_bytes());
+    out.extend_from_slice(&png[33..]);
+    out
+}
+
+#[test]
+fn picture_resolution_sizes_tiles() {
+    let png = half_red_half_blue();
+    assert_eq!(images::dpi(&png), None);
+    let p48 = with_dpi(&png, 48.0);
+    let d = images::dpi(&p48).unwrap_or_default();
+    assert!((d.0 - 48.0).abs() < 0.01 && (d.1 - 48.0).abs() < 0.01, "{d:?}");
+    // 8 × 4 px at 48 dpi is as big as 16 × 8 at 96.
+    assert_eq!(images::natural_size(&p48), Some((16.0, 8.0)));
+    assert_eq!(images::natural_size(&png), Some((8.0, 4.0)));
+    // JFIF density in dots per inch.
+    let mut jpeg = vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 16];
+    jpeg.extend_from_slice(b"JFIF\0\x01\x01\x01\x00\x48\x00\x48");
+    assert_eq!(images::dpi(&jpeg), Some((72.0, 72.0)));
+}

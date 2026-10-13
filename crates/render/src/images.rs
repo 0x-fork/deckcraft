@@ -121,14 +121,54 @@ fn decode_at(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     Some(img.to_rgba8())
 }
 
-/// A raster picture's own size in pixels, read from its header (`None` for metafiles and
-/// anything unreadable).
+/// A raster picture's own size in 96-dpi pixels (so 0.75 pt each), read from its header: its
+/// pixel size, scaled by the resolution it records (PNG `pHYs`, JPEG JFIF density) when that
+/// isn't 96 dpi, as PowerPoint sizes pictures. `None` for metafiles and anything unreadable.
 pub fn natural_size(bytes: &[u8]) -> Option<(f64, f64)> {
     if crate::metafile::is_metafile(bytes) {
         return None;
     }
     let (w, h) = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
-    (w > 0 && h > 0).then_some((w as f64, h as f64))
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let (dx, dy) = dpi(bytes).unwrap_or((96.0, 96.0));
+    Some((w as f64 * 96.0 / dx, h as f64 * 96.0 / dy))
+}
+
+/// The resolution (whole dots per inch across and down) a PNG or JPEG records, when it records
+/// one in a plausible range.
+pub fn dpi(bytes: &[u8]) -> Option<(f64, f64)> {
+    // Whole dots per inch: PNGs store dots per metre, so 96 dpi reads as 95.9866.
+    let ok = |d: f64| (d.is_finite() && (10.0..=10000.0).contains(&d)).then_some(d.round());
+    let be32 = |b: &[u8], i: usize| b.get(i..i + 4).map(|s| u32::from_be_bytes([s[0], s[1], s[2], s[3]]));
+    let be16 = |b: &[u8], i: usize| b.get(i..i + 2).map(|s| u16::from_be_bytes([s[0], s[1]]));
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let mut i = 8usize;
+        for _ in 0..64 {
+            let len = be32(bytes, i)? as usize;
+            let kind = bytes.get(i + 4..i + 8)?;
+            if kind == b"pHYs" {
+                let (x, y, unit) = (be32(bytes, i + 8)?, be32(bytes, i + 12)?, *bytes.get(i + 16)?);
+                return if unit == 1 { Some((ok(x as f64 * 0.0254)?, ok(y as f64 * 0.0254)?)) } else { None };
+            }
+            if kind == b"IDAT" || kind == b"IEND" {
+                return None;
+            }
+            i = i.checked_add(12)?.checked_add(len)?;
+        }
+        return None;
+    }
+    if bytes.starts_with(&[0xFF, 0xD8]) && bytes.get(6..11) == Some(b"JFIF\0".as_slice()) {
+        let unit = *bytes.get(13)?;
+        let (x, y) = (be16(bytes, 14)? as f64, be16(bytes, 16)? as f64);
+        return match unit {
+            1 => Some((ok(x)?, ok(y)?)),
+            2 => Some((ok(x * 2.54)?, ok(y * 2.54)?)),
+            _ => None,
+        };
+    }
+    None
 }
 
 /// A premultiplied pixmap of the picture, downsampled so its longer side is near `want` px.
