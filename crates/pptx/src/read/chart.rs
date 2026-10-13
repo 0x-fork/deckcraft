@@ -225,3 +225,59 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     }
     Some(c)
 }
+
+const MAX_KEPT_PARTS: usize = 256;
+const MAX_KEPT_DEPTH: usize = 8;
+
+/// Relationships and parts a chart points at, so a later save can write them back.
+pub(crate) fn capture_kept(pkg: &crate::opc::Package, chart_part: &str) -> deckcraft_model::chart::ChartKept {
+    use deckcraft_model::chart::{ChartKept, ChartRel};
+
+    let mut kept = ChartKept::default();
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(crate::opc::norm(chart_part));
+    for r in pkg.rels(chart_part).items {
+        kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, external: r.external });
+        if !r.external {
+            copy_part(pkg, &r.target, &mut kept.parts, &mut seen, 0);
+        }
+    }
+    kept
+}
+
+fn copy_part(
+    pkg: &crate::opc::Package,
+    part: &str,
+    out: &mut Vec<deckcraft_model::chart::ChartPart>,
+    seen: &mut std::collections::HashSet<String>,
+    depth: usize,
+) {
+    use deckcraft_model::chart::ChartPart;
+
+    if depth > MAX_KEPT_DEPTH || out.len() >= MAX_KEPT_PARTS {
+        log::warn!("pptx: chart part closure stopped at {part}");
+        return;
+    }
+    let key = crate::opc::norm(part);
+    if !seen.insert(key) {
+        return;
+    }
+    let Some(bytes) = pkg.get(part) else {
+        log::warn!("pptx: chart relationship target {part} is missing");
+        return;
+    };
+    let name = pkg.original_name(part).unwrap_or(part).trim_start_matches('/').to_string();
+    let content_type = pkg.content_type(part).unwrap_or_default();
+    out.push(ChartPart { name, content_type, bytes: bytes.to_vec() });
+    let rels_name = crate::opc::rels_path(part);
+    if seen.insert(crate::opc::norm(&rels_name))
+        && let Some(rels_bytes) = pkg.get(&rels_name)
+    {
+        let name = pkg.original_name(&rels_name).unwrap_or(&rels_name).trim_start_matches('/').to_string();
+        out.push(ChartPart { name, content_type: "application/vnd.openxmlformats-package.relationships+xml".into(), bytes: rels_bytes.to_vec() });
+        let targets: Vec<String> = pkg.rels(part).items.into_iter().filter(|r| !r.external).map(|r| r.target).collect();
+        for target in targets {
+            copy_part(pkg, &target, out, seen, depth + 1);
+        }
+    }
+}

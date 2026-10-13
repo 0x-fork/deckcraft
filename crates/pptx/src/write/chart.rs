@@ -1,4 +1,5 @@
-//! Chart parts: a `c:chartSpace` with cached categories and values (no embedded workbook).
+//! Chart parts: a `c:chartSpace` with cached categories and values.
+//! An unchanged chart also keeps the embedded workbook and the other parts it points at.
 
 use deckcraft_model::chart::{Chart, ChartType, Series};
 use deckcraft_model::style::Fill;
@@ -362,8 +363,8 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
     w.close(tag);
 }
 
-/// The chart part XML.
-pub fn chart_xml(c: &Chart) -> Vec<u8> {
+/// The chart part XML, and whether it is the original part (so its relationships still apply).
+pub fn chart_xml(c: &Chart) -> (Vec<u8>, bool) {
     // Reuse the kept part when the chart is unchanged since it was read.
     if let Some(raw) = &c.raw
         && let Ok(doc) = crate::xml::parse(raw.as_bytes())
@@ -374,12 +375,17 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
         if let Some(back) = crate::read::chart_from_el(&root) {
             let mut me = c.clone();
             me.raw = None;
+            // The sidecar is not modelled chart state. Comparing it would throw away an unchanged chart.
+            me.kept = Default::default();
             if back == me {
                 let mut keep = doc.root;
-                keep.remove_all(&["externalData", "userShapes"]);
+                // Without the parts those elements point at, PowerPoint repairs the file.
+                if c.kept.rels.is_empty() {
+                    keep.remove_all(&["externalData", "userShapes"]);
+                }
                 let mut w = W::new();
                 w.raw(&keep.to_xml());
-                return w.finish();
+                return (w.finish(), true);
             }
         }
     }
@@ -477,5 +483,39 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
         sp_pr(&mut w, Some(f), None);
     }
     w.close("c:chartSpace");
-    w.finish()
+    (w.finish(), false)
+}
+
+/// Write the chart's own relationships and the parts they reach.
+pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart) {
+    if c.kept.rels.is_empty() && c.kept.parts.is_empty() {
+        return;
+    }
+    let mut rels = crate::opc::RelsOut::default();
+    for r in &c.kept.rels {
+        rels.items.push((r.id.clone(), r.rel_type.clone(), r.target.clone(), r.external));
+    }
+    pkg.rels(chart_name, &rels);
+    for p in &c.kept.parts {
+        match pkg.part_data(&p.name) {
+            Some(existing) if existing != p.bytes.as_slice() => {
+                log::warn!("pptx: chart part {} already written with different bytes; keeping the first", p.name);
+                continue;
+            }
+            Some(_) => continue,
+            None => {}
+        }
+        if !crate::opc::sidecar_part(&p.name) {
+            log::warn!("pptx: not writing chart part {}", p.name);
+            continue;
+        }
+        let owned;
+        let ct = if !p.content_type.is_empty() {
+            p.content_type.as_str()
+        } else {
+            owned = crate::mime_for(&p.name).to_string();
+            owned.as_str()
+        };
+        pkg.binary(&p.name, ct, p.bytes.clone());
+    }
 }
