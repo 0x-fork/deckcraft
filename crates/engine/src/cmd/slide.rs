@@ -108,7 +108,12 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(b) = str_param(p, "body")
             && let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| !k.is_title()))
         {
-            sh.text = Some(TextBody::from_text(b));
+            // Same outline rule as text.set: a leading tab is the next bullet level.
+            let mut text = TextBody::from_text(b);
+            for para in &mut text.paragraphs {
+                para.promote_leading_tabs();
+            }
+            sh.text = Some(text);
         }
         let at = usize_param(p, "at").unwrap_or(if doc.slides.is_empty() { 0 } else { sel.slide + 1 }).min(doc.slides.len());
         let id = slide.id;
