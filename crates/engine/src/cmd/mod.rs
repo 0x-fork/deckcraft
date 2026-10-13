@@ -16,6 +16,7 @@ pub mod shape;
 pub mod slide;
 pub mod table;
 pub mod text;
+pub mod three_d;
 pub mod transition;
 
 use deckcraft_geom::Xfrm;
