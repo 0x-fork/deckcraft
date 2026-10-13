@@ -19,48 +19,130 @@ pub const CT_STYLE: &str = "application/vnd.openxmlformats-officedocument.drawin
 pub const CT_COLORS: &str = "application/vnd.openxmlformats-officedocument.drawingml.diagramColors+xml";
 pub const CT_DRAWING: &str = "application/vnd.ms-office.drawingml.diagramDrawing+xml";
 pub const RT_DRAWING: &str = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing";
-const QS_ID: &str = "urn:microsoft.com/office/officeart/2005/8/quickstyle/simple1";
-const CS_ID: &str = "urn:microsoft.com/office/officeart/2005/8/colors/accent1_2";
+const QS_BASE: &str = "urn:microsoft.com/office/officeart/2005/8/quickstyle/";
+const CS_BASE: &str = "urn:microsoft.com/office/officeart/2005/8/colors/";
+
+/// PowerPoint's quick style for a SmartArt Style.
+pub fn qs_id(style: &str) -> String {
+    let s = match style {
+        "subtle" => "simple3",
+        "intense" => "simple5",
+        "outline" => "simple4",
+        _ => "simple1",
+    };
+    format!("{QS_BASE}{s}")
+}
+
+/// The SmartArt Style closest to a quick style id.
+pub fn style_for(qs: &str) -> &'static str {
+    match qs.rsplit('/').next().unwrap_or("") {
+        "simple1" | "" => "",
+        "simple4" => "outline",
+        "simple2" | "simple3" => "subtle",
+        _ => "intense",
+    }
+}
+
+/// PowerPoint's colour definition for Change Colors.
+pub fn cs_id(colors: &str) -> String {
+    match colors.strip_prefix("accent").and_then(|n| n.parse::<u8>().ok()) {
+        Some(n @ 1..=6) => format!("{CS_BASE}accent{n}_2"),
+        _ => format!("{CS_BASE}colorful1"),
+    }
+}
+
+/// Change Colors from a colour definition id: `accentN_…` keeps accent N, anything else is colourful.
+pub fn colors_for(cs: &str) -> String {
+    let last = cs.rsplit('/').next().unwrap_or("");
+    match last.strip_prefix("accent").and_then(|r| r.split('_').next()).and_then(|n| n.parse::<u8>().ok()) {
+        Some(n @ 1..=6) => format!("accent{n}"),
+        _ => String::new(),
+    }
+}
 /// Most nodes read from one diagram.
 const MAX_NODES: usize = 2000;
 
 /// PowerPoint's built-in layout DeckCraft's layout `kind` is written as.
 pub fn layout_id(kind: &str) -> &'static str {
     match kind {
+        "blockList" => "urn:microsoft.com/office/officeart/2005/8/layout/default",
+        "hBulletList" => "urn:microsoft.com/office/officeart/2005/8/layout/hList1",
         "process" => "urn:microsoft.com/office/officeart/2005/8/layout/process1",
+        "chevron" => "urn:microsoft.com/office/officeart/2005/8/layout/chevron1",
+        "verticalProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/process2",
+        "stepUp" => "urn:microsoft.com/office/officeart/2009/3/layout/StepUpProcess",
         "cycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle2",
+        "blockCycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle5",
+        "radial" => "urn:microsoft.com/office/officeart/2005/8/layout/radial1",
         "hierarchy" => "urn:microsoft.com/office/officeart/2005/8/layout/hierarchy1",
         "pyramid" => "urn:microsoft.com/office/officeart/2005/8/layout/pyramid1",
+        "invertedPyramid" => "urn:microsoft.com/office/officeart/2005/8/layout/pyramid3",
         "matrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix3",
+        "titledMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix1",
         _ => "urn:microsoft.com/office/officeart/2005/8/layout/vList2",
     }
 }
 
 /// The DeckCraft layout closest to a PowerPoint layout (by its id and category).
 pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
-    let s = format!("{layout_id} {category}").to_ascii_lowercase();
+    let last = layout_id.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+    // Exact ids first: the layouts DeckCraft writes, and their closest siblings.
+    for k in [
+        "blockList",
+        "hBulletList",
+        "process",
+        "chevron",
+        "verticalProcess",
+        "stepUp",
+        "cycle",
+        "blockCycle",
+        "radial",
+        "hierarchy",
+        "pyramid",
+        "invertedPyramid",
+        "matrix",
+        "titledMatrix",
+        "list",
+    ] {
+        if layout_id == layout_id_of(k) {
+            return k;
+        }
+    }
+    let s = format!("{last} {}", category.to_ascii_lowercase());
     if s.contains("hierarchy") || s.contains("orgchart") {
         "hierarchy"
-    } else if s.contains("cycle") || s.contains("radial") {
+    } else if s.contains("radial") {
+        "radial"
+    } else if s.contains("cycle") {
         "cycle"
     } else if s.contains("pyramid") {
         "pyramid"
     } else if s.contains("matrix") {
         "matrix"
-    } else if s.contains("process") || s.contains("chevron") || s.contains("arrow") {
+    } else if s.contains("chevron") {
+        "chevron"
+    } else if s.contains("process") || s.contains("arrow") {
         "process"
+    } else if last == "default" {
+        "blockList"
+    } else if last.starts_with("hlist") {
+        "hBulletList"
     } else {
         "list"
     }
 }
 
+fn layout_id_of(kind: &str) -> &'static str {
+    layout_id(kind)
+}
+
 fn category(kind: &str) -> &'static str {
     match kind {
-        "process" => "process",
-        "cycle" => "cycle",
+        "process" | "chevron" | "verticalProcess" | "stepUp" => "process",
+        "cycle" | "blockCycle" | "radial" => "cycle",
         "hierarchy" => "hierarchy",
-        "pyramid" => "pyramid",
-        "matrix" => "matrix",
+        "pyramid" | "invertedPyramid" => "pyramid",
+        "matrix" | "titledMatrix" => "matrix",
         _ => "list",
     }
 }
@@ -101,10 +183,10 @@ pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str) -> Vec<u8> {
         A::new()
             .a("loTypeId", &lo)
             .a("loCatId", category(&d.kind))
-            .a("qsTypeId", QS_ID)
+            .a("qsTypeId", qs_id(&d.style))
             .a("qsCatId", "simple")
-            .a("csTypeId", CS_ID)
-            .a("csCatId", "accent1")
+            .a("csTypeId", cs_id(&d.colors))
+            .a("csCatId", if d.colors.starts_with("accent") { d.colors.as_str() } else { "colorful" })
             .a("phldr", "1"),
     );
     w.empty0("dgm:spPr");
@@ -230,10 +312,20 @@ fn paragraphs(t: &El) -> String {
 /// The layout algorithm and node shape of a DeckCraft layout.
 fn alg(kind: &str) -> (&'static str, Vec<(&'static str, &'static str)>, &'static str) {
     match kind {
-        "process" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "roundRect"),
-        "cycle" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
-        "pyramid" => ("pyra", vec![("linDir", "fromT"), ("txDir", "fromT"), ("pyraAcctPos", "bef")], "trapezoid"),
-        "matrix" => ("snake", vec![("grDir", "tL"), ("flowDir", "row"), ("contDir", "sameDir"), ("off", "ctr")], "roundRect"),
+        "process" | "stepUp" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "roundRect"),
+        "chevron" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "chevron"),
+        "verticalProcess" => ("lin", vec![("linDir", "fromT"), ("nodeHorzAlign", "ctr")], "roundRect"),
+        "cycle" | "radial" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
+        "blockCycle" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "roundRect"),
+        "pyramid" | "invertedPyramid" => {
+            ("pyra", vec![("linDir", if kind == "pyramid" { "fromT" } else { "fromB" }), ("txDir", "fromT"), ("pyraAcctPos", "bef")], "trapezoid")
+        }
+        "matrix" | "titledMatrix" | "blockList" => (
+            "snake",
+            vec![("grDir", "tL"), ("flowDir", "row"), ("contDir", "sameDir"), ("off", "ctr")],
+            if kind == "blockList" { "rect" } else { "roundRect" },
+        ),
+        "hBulletList" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "t")], "roundRect"),
         _ => ("lin", vec![("linDir", "fromT"), ("vertAlign", "mid")], "roundRect"),
     }
 }
@@ -348,7 +440,7 @@ pub fn layout_xml(kind: &str) -> Vec<u8> {
         w.empty0("dgm:ruleLst");
         w.open("dgm:forEach", A::new().a("name", "nodes").a("axis", "ch").a("ptType", "node"));
         node_layout(&mut w, shape, true);
-        if kind != "cycle" {
+        if !matches!(kind, "cycle" | "blockCycle" | "radial") {
             space(&mut w);
         }
         w.close("dgm:forEach");
@@ -359,9 +451,9 @@ pub fn layout_xml(kind: &str) -> Vec<u8> {
 }
 
 /// `ppt/diagrams/quickStyleN.xml`: flat shapes drawn from the theme's first styles.
-pub fn style_xml() -> Vec<u8> {
+pub fn style_xml(style: &str) -> Vec<u8> {
     let mut w = W::new();
-    w.open("dgm:styleDef", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("uniqueId", QS_ID));
+    w.open("dgm:styleDef", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("uniqueId", qs_id(style)));
     w.empty("dgm:title", A::new().a("val", ""));
     w.empty("dgm:desc", A::new().a("val", ""));
     w.open0("dgm:catLst");
@@ -394,20 +486,30 @@ pub fn style_xml() -> Vec<u8> {
 }
 
 /// `ppt/diagrams/colorsN.xml`: accent 1 fills with light text.
-pub fn colors_xml() -> Vec<u8> {
+pub fn colors_xml(colors: &str) -> Vec<u8> {
     let mut w = W::new();
-    w.open("dgm:colorsDef", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("uniqueId", CS_ID));
+    w.open("dgm:colorsDef", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("uniqueId", cs_id(colors)));
     w.empty("dgm:title", A::new().a("val", ""));
     w.empty("dgm:desc", A::new().a("val", ""));
+    let single = colors.starts_with("accent");
     w.open0("dgm:catLst");
-    w.empty("dgm:cat", A::new().a("type", "accent1").a("pri", "11200"));
+    w.empty("dgm:cat", A::new().a("type", if single { colors } else { "colorful" }).a("pri", "11200"));
     w.close("dgm:catLst");
     w.open("dgm:styleLbl", A::new().a("name", "node1"));
-    for (tag, clr) in [("dgm:fillClrLst", "accent1"), ("dgm:linClrLst", "lt1")] {
-        w.open(tag, A::new().a("meth", "repeat"));
-        w.empty("a:schemeClr", A::new().a("val", clr));
-        w.close(tag);
+    if single {
+        w.open("dgm:fillClrLst", A::new().a("meth", "repeat"));
+        w.empty("a:schemeClr", A::new().a("val", colors));
+        w.close("dgm:fillClrLst");
+    } else {
+        w.open("dgm:fillClrLst", A::new().a("meth", "repeat"));
+        for k in 1..=6 {
+            w.empty("a:schemeClr", A::new().a("val", format!("accent{k}")));
+        }
+        w.close("dgm:fillClrLst");
     }
+    w.open("dgm:linClrLst", A::new().a("meth", "repeat"));
+    w.empty("a:schemeClr", A::new().a("val", "lt1"));
+    w.close("dgm:linClrLst");
     w.empty0("dgm:effectClrLst");
     w.empty0("dgm:txLinClrLst");
     w.empty0("dgm:txFillClrLst");
@@ -434,7 +536,7 @@ mod tests {
         assert_eq!(outline(&doc.root), d.nodes);
         let s = String::from_utf8(xml).unwrap();
         assert!(s.contains("hierarchy1") && s.contains("relId=\"rId9\""));
-        for x in [layout_xml("hierarchy"), layout_xml("cycle"), style_xml(), colors_xml()] {
+        for x in [layout_xml("hierarchy"), layout_xml("cycle"), style_xml("subtle"), colors_xml(""), colors_xml("accent3")] {
             assert!(crate::xml::parse(&x).is_ok());
         }
     }
@@ -445,7 +547,11 @@ mod tests {
         let doc = crate::xml::parse(xml).unwrap();
         assert_eq!(outline(&doc.root), nodes(&[("A", 0), ("", 1)]));
         assert_eq!(kind_for("urn:microsoft.com/office/officeart/2005/8/layout/orgChart1", ""), "hierarchy");
-        assert_eq!(kind_for("urn:x/layout/chevron2", "process"), "process");
-        assert_eq!(kind_for("urn:x/layout/default", "list"), "list");
+        assert_eq!(kind_for("urn:x/layout/chevron2", "process"), "chevron");
+        assert_eq!(kind_for("urn:x/layout/hProcess9", "process"), "process");
+        assert_eq!(kind_for("urn:x/layout/default", "list"), "blockList");
+        assert_eq!(colors_for(&cs_id("accent4")), "accent4");
+        assert_eq!(colors_for(&cs_id("")), "");
+        assert_eq!(style_for(&qs_id("outline")), "outline");
     }
 }

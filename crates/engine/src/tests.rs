@@ -839,7 +839,7 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
 #[test]
 fn smartart_text_pane_edits_regenerate_the_diagram() {
     let mut s = session();
-    let r = s.execute("insert.smartArt", &json!({"kind": "list", "items": ["Plan", "\tScope", "Build"]})).unwrap();
+    let r = s.execute("insert.smartArt", &json!({"kind": "blockList", "items": ["Plan", "\tScope", "Build"]})).unwrap();
     let gid = r["id"].as_u64().unwrap();
     let kids = |s: &Session| match s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).map(|x| &x.kind) {
         Some(deckcraft_model::ShapeKind::Group { children, .. }) => children.clone(),
@@ -890,6 +890,8 @@ fn smartart_round_trips_through_pptx_as_a_diagram() {
     let mut s = session();
     s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
     s.execute("insert.smartArt", &json!({"kind": "hierarchy", "items": ["CEO", "\tCTO", "\t\tDev", "\tCFO"]})).unwrap();
+    s.execute("smartArt.style", &json!({"style": "intense"})).unwrap();
+    s.execute("smartArt.colors", &json!({"colors": "accent3"})).unwrap();
     let doc = s.doc().unwrap().doc.as_ref().clone();
     let bytes = deckcraft_pptx::export(&doc).unwrap();
     let names: Vec<String> = {
@@ -904,6 +906,7 @@ fn smartart_round_trips_through_pptx_as_a_diagram() {
     let g = back.slides[1].shapes.iter().find(|x| x.diagram.is_some()).expect("a SmartArt group");
     let d = g.diagram.as_ref().unwrap();
     assert_eq!(d.kind, "hierarchy");
+    assert_eq!((d.style.as_str(), d.colors.as_str()), ("intense", "accent3"), "SmartArt style and colours come back");
     assert!(d.imported);
     let outline: Vec<(&str, u8)> = d.nodes.iter().map(|n| (n.text.as_str(), n.level)).collect();
     assert_eq!(outline, [("CEO", 0), ("CTO", 1), ("Dev", 2), ("CFO", 1)]);

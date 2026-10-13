@@ -2326,9 +2326,9 @@ fn chart_design(app: &mut SlideApp, ui: &mut Ui) {
 fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
     let sel = app.session.active().and_then(deckcraft_engine::cmd::smartart::selected);
     let row = app.ui.smartart_row;
-    let (gid, n, kind) = match &sel {
-        Some((id, d)) => (Some(id.0), d.nodes.len(), d.kind.clone()),
-        None => (None, 0, String::new()),
+    let (gid, n, kind, style, colors) = match &sel {
+        Some((id, d)) => (Some(id.0), d.nodes.len(), d.kind.clone(), d.style.clone(), d.colors.clone()),
+        None => (None, 0, String::new(), String::new(), String::new()),
     };
     let at = row.min(n.saturating_sub(1));
     group(ui, |ui| {
@@ -2356,12 +2356,31 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
-        let (r, _) = small_button_ex(ui, Icon::Layout, "Layout", gid.is_some(), false, true);
+        let (r, _) = small_button_ex(ui, Icon::Layout, "Layouts", gid.is_some(), false, true);
         egui::Popup::menu(&r).show(|ui| {
-            for k in deckcraft_engine::cmd::smartart::KINDS {
-                let label = format!("{}{}", k[..1].to_uppercase(), &k[1..]);
+            for (k, label) in deckcraft_engine::cmd::smartart::LAYOUTS {
                 if ui.selectable_label(kind == k, label).clicked() {
                     run(app, "smartArt.layout", json!({"id": gid, "kind": k}));
+                }
+            }
+        });
+    });
+    group(ui, |ui| {
+        let (r, _) = small_button_ex(ui, Icon::ChangeChartType, "Change Colors", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            for (k, label) in deckcraft_engine::cmd::smartart::COLORS {
+                let on = colors == k || (colors.is_empty() && k == "colorful");
+                if ui.selectable_label(on, label).clicked() {
+                    run(app, "smartArt.colors", json!({"id": gid, "colors": k}));
+                }
+            }
+        });
+        let (r, _) = small_button_ex(ui, Icon::SmartArt, "SmartArt Styles", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            for (k, label) in deckcraft_engine::cmd::smartart::STYLES {
+                let on = style == k || (style.is_empty() && k == "flat");
+                if ui.selectable_label(on, label).clicked() {
+                    run(app, "smartArt.style", json!({"id": gid, "style": k}));
                 }
             }
         });
