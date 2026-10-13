@@ -35,6 +35,10 @@ pub fn fill_path(
             if g.stops.is_empty() {
                 return;
             }
+            // A linear gradient spans its tile rectangle (the shape's box unless `tileRect` moves
+            // its edges); a radial one ends on the circle around it, from a focus placed in the
+            // shape's own box (PowerPoint's "from corner" presets centre the tile on the corner).
+            let tile = tile_box(bounds, g.tile);
             let stops: Vec<(f64, Rgba)> = g.stops.iter().map(|s| (s.pos, shade(rctx.color(&s.color, ph), mode))).collect();
             ctx.set_paint(gradient(&g.shape, stops, bounds, alpha));
 
@@ -55,12 +59,12 @@ pub fn fill_path(
                     // Angle measured clockwise from left→right; span the bounds along that direction.
                     let a = angle.to_radians();
                     let (dx, dy) = (a.cos(), a.sin());
-                    let c = bounds.center();
-                    let half = (bounds.width() * dx.abs() + bounds.height() * dy.abs()) / 2.0;
+                    let c = tile.center();
+                    let half = (tile.width() * dx.abs() + tile.height() * dy.abs()) / 2.0;
                     peniko::Gradient::new_linear(Point::new(c.x - dx * half, c.y - dy * half), Point::new(c.x + dx * half, c.y + dy * half))
                         .with_stops(stops.as_slice())
                 }
-                GradientShape::Path { focus, .. } => circle_gradient(*focus, bounds).with_stops(stops.as_slice()),
+                GradientShape::Path { focus, .. } => circle_gradient(*focus, bounds, tile).with_stops(stops.as_slice()),
             };
             ctx.set_paint(grad);
             ctx.fill_path(path);
@@ -88,6 +92,22 @@ pub fn resolved<'a>(rctx: &Ctx, pf: &'a PictureFill, ph: Option<Rgba>) -> std::b
     std::borrow::Cow::Owned(out)
 }
 
+/// `bounds` with its edges moved in by `tile` (left, top, right, bottom insets as fractions of its
+/// size; negative moves them out), as `a:tileRect` and `a:fillRect` lay out a fill.
+pub fn tile_box(bounds: Rect, tile: [f64; 4]) -> Rect {
+    if tile.iter().all(|v| *v == 0.0) || tile.iter().any(|v| !v.is_finite()) {
+        return bounds;
+    }
+    let (w, h) = (bounds.width(), bounds.height());
+    let [l, t, r, b] = tile;
+    let x0 = bounds.x0 + l * w;
+    let x1 = bounds.x1 - r * w;
+    let y0 = bounds.y0 + t * h;
+    let y1 = bounds.y1 - b * h;
+    // An inverted tile (insets past each other) lays out nothing sensible: keep the box.
+    if x1 - x0 <= 1e-9 || y1 - y0 <= 1e-9 { bounds } else { Rect::new(x0, y0, x1, y1) }
+}
+
 /// The paint of a gradient of `shape` with `stops` (position, colour) spanning `bounds`, faded
 /// by `alpha`, ramping between stops as PowerPoint does (see `ramp`).
 pub fn gradient(shape: &GradientShape, mut stops: Vec<(f64, Rgba)>, bounds: Rect, alpha: f64) -> peniko::Gradient {
@@ -107,7 +127,7 @@ pub fn gradient(shape: &GradientShape, mut stops: Vec<(f64, Rgba)>, bounds: Rect
             peniko::Gradient::new_linear(Point::new(c.x - dx * half, c.y - dy * half), Point::new(c.x + dx * half, c.y + dy * half))
                 .with_stops(stops.as_slice())
         }
-        GradientShape::Path { focus, .. } => circle_gradient(*focus, bounds).with_stops(stops.as_slice()),
+        GradientShape::Path { focus, .. } => circle_gradient(*focus, bounds, bounds).with_stops(stops.as_slice()),
     }
 }
 
@@ -117,11 +137,14 @@ pub fn gradient(shape: &GradientShape, mut stops: Vec<(f64, Rgba)>, bounds: Rect
 /// centre, half its diagonal), with circles in between moving from one to the other. A focus off
 /// the centre so bunches the colours on its near side; a gradient "from a corner" reaches its
 /// last colour at that corner too, not only at the far one.
-pub fn circle_gradient(focus: [f64; 4], bounds: Rect) -> peniko::Gradient {
+///
+/// With a tile rectangle (`tile`, otherwise `bounds` itself) the end circle is the one around
+/// the tile, while the focus stays placed in `bounds`.
+pub fn circle_gradient(focus: [f64; 4], bounds: Rect, tile: Rect) -> peniko::Gradient {
     let fx = bounds.x0 + bounds.width() * (focus[0] + (1.0 - focus[2])) / 2.0;
     let fy = bounds.y0 + bounds.height() * (focus[1] + (1.0 - focus[3])) / 2.0;
-    let c = bounds.center();
-    let r = (bounds.width().hypot(bounds.height()) / 2.0).max(1e-6);
+    let c = tile.center();
+    let r = (tile.width().hypot(tile.height()) / 2.0).max(1e-6);
     let f = Point::new(fx, fy);
     if !(f.is_finite() && c.is_finite() && r.is_finite()) {
         return peniko::Gradient::new_radial(c, r as f32);

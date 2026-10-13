@@ -168,7 +168,12 @@ fn radial(focus: [f64; 4]) -> Shape {
     Shape {
         id: ShapeId(13),
         xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
-        fill: Some(Fill::Gradient(Gradient { stops, shape: GradientShape::Path { path: "circle".into(), focus }, rotate_with_shape: true })),
+        fill: Some(Fill::Gradient(Gradient {
+            tile: [0.0; 4],
+            stops,
+            shape: GradientShape::Path { path: "circle".into(), focus },
+            rotate_with_shape: true,
+        })),
         line: no_line(),
         ..Default::default()
     }
@@ -292,7 +297,8 @@ fn a_pictures_border_lies_outside_the_picture() {
 fn children_filled_with_the_group_fill_show_one_fill_across_the_group() {
     use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
     let stops = vec![GradientStop { pos: 0.0, color: ColorRef::rgb(RED) }, GradientStop { pos: 1.0, color: ColorRef::rgb(Rgba::rgb(0, 0, 255)) }];
-    let grad = Fill::Gradient(Gradient { stops, shape: GradientShape::Linear { angle: 0.0, scaled: false }, rotate_with_shape: true });
+    let grad =
+        Fill::Gradient(Gradient { tile: [0.0; 4], stops, shape: GradientShape::Linear { angle: 0.0, scaled: false }, rotate_with_shape: true });
     let child = |id: u32, x: f64| Shape {
         id: ShapeId(id),
         xfrm: Some(Xfrm::new(x, 0.0, 90.0, 100.0)),
@@ -330,4 +336,38 @@ fn open_freeforms_take_arrowheads_even_when_filled() {
     // The line ends at (300, 200) heading down-right at 45°; the 12 pt head's base corner reaches
     // (295.7, 187.3), 3.5 pt off the line's axis: outside the 4 pt line and outside the fill.
     assert!(close(img.pixel(294, 189), RED, 60), "arrowhead drawn {:?}", img.pixel(294, 189));
+}
+
+#[test]
+fn a_corner_radial_centres_on_the_corner_through_its_tile() {
+    // fillToRect on the top-left corner, tileRect reaching a whole box up and left: the circle is
+    // centred on the corner and reaches the far corner (as PowerPoint's "from corner" presets).
+    let mut sh = radial([0.0, 0.0, 1.0, 1.0]);
+    if let Some(Fill::Gradient(g)) = &mut sh.fill {
+        g.tile = [-1.0, -1.0, 0.0, 0.0];
+    }
+    let img = render(vec![sh]);
+    assert!(img.pixel(102, 102)[0] > 240, "white at the corner {:?}", img.pixel(102, 102));
+    let (top_right, bottom_left) = (img.pixel(498, 101)[0], img.pixel(101, 298)[0]);
+    assert!(top_right < bottom_left, "farther is darker {top_right} {bottom_left}");
+    assert!(bottom_left > 120, "the near edge stays light {bottom_left}");
+    assert!(img.pixel(497, 297)[0] < 40, "dark at the far corner {:?}", img.pixel(497, 297));
+}
+
+#[test]
+fn a_linear_gradient_spans_its_tile_rect() {
+    use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
+    // Tile rect the left half of the box: the ramp ends half way and stays black after.
+    let stops = vec![GradientStop { pos: 0.0, color: ColorRef::rgb(WHITE) }, GradientStop { pos: 1.0, color: ColorRef::rgb(Rgba::BLACK) }];
+    let g = Gradient { stops, shape: GradientShape::Linear { angle: 0.0, scaled: false }, rotate_with_shape: true, tile: [0.0, 0.0, 0.5, 0.0] };
+    let sh = Shape {
+        id: ShapeId(20),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 100.0)),
+        fill: Some(Fill::Gradient(g)),
+        line: no_line(),
+        ..Default::default()
+    };
+    let img = render(vec![sh]);
+    assert!(img.pixel(102, 150)[0] > 240);
+    assert!(img.pixel(305, 150)[0] < 15 && img.pixel(495, 150)[0] < 15, "{:?}", img.pixel(305, 150));
 }

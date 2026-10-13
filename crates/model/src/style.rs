@@ -92,6 +92,15 @@ pub struct Gradient {
     pub shape: GradientShape,
     #[serde(default = "crate::yes")]
     pub rotate_with_shape: bool,
+    /// `a:tileRect`: the box the gradient is laid out in, as insets from the shape's box
+    /// (fractions; negative reaches outside it). PowerPoint's "from corner" radial presets use it
+    /// to centre the gradient on the corner.
+    #[serde(default, skip_serializing_if = "is_zero4")]
+    pub tile: [f64; 4],
+}
+
+fn is_zero4(v: &[f64; 4]) -> bool {
+    v.iter().all(|x| *x == 0.0)
 }
 
 /// How a picture fills its box: stretched into a (fractional) inset rect, or tiled.

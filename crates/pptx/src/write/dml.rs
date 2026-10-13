@@ -272,6 +272,10 @@ fn gradient(w: &mut W, g: &deckcraft_model::style::Gradient) {
             w.close("a:path");
         }
     }
+    if g.tile.iter().any(|v| *v != 0.0) {
+        let [l, t, r, b] = g.tile;
+        w.empty("a:tileRect", A::new().a("l", pct(l)).a("t", pct(t)).a("r", pct(r)).a("b", pct(b)));
+    }
     w.close("a:gradFill");
 }
 

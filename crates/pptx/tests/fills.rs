@@ -88,7 +88,7 @@ fn a_gradient_without_stops_is_saved_without_stops() {
     let mut p = defaults::new_presentation(None);
     let id = ShapeId(p.alloc_id());
     let first = p.slides[0].id;
-    let own = Gradient { stops: vec![], shape: GradientShape::Linear { angle: 45.0, scaled: true }, rotate_with_shape: true };
+    let own = Gradient { tile: [0.0; 4], stops: vec![], shape: GradientShape::Linear { angle: 45.0, scaled: true }, rotate_with_shape: true };
     p.slide_mut(first).expect("slide").shapes.push(Shape {
         id,
         name: "Styled".into(),
@@ -112,6 +112,7 @@ fn a_fill_overlay_round_trips() {
     let overlay = FillOverlay {
         blend: "mult".into(),
         fill: Fill::Gradient(Gradient {
+            tile: [0.0; 4],
             stops: vec![
                 GradientStop { pos: 0.0, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent1) },
                 GradientStop { pos: 1.0, color: deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(10, 20, 30)) },
@@ -132,4 +133,40 @@ fn a_fill_overlay_round_trips() {
     let q = deckcraft_pptx::import(&bytes).expect("import");
     let s = q.slides[0].shapes.iter().find(|s| s.name == "Overlaid").expect("shape");
     assert_eq!(s.effects.as_ref().and_then(|e| e.fill_overlay.clone()), Some(overlay));
+}
+
+#[test]
+fn a_gradient_tile_rect_is_read_and_round_trips() {
+    use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
+    // PowerPoint's "from top-left corner" radial: focus on the corner, tile reaching a box up and
+    // to the left so it centres on that corner.
+    let g = Gradient {
+        stops: vec![
+            GradientStop { pos: 0.0, color: deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 128, 255)) },
+            GradientStop { pos: 1.0, color: deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::WHITE) },
+        ],
+        shape: GradientShape::Path { path: "circle".into(), focus: [0.0, 0.0, 1.0, 1.0] },
+        rotate_with_shape: true,
+        tile: [-1.0, -1.0, 0.0, 0.0],
+    };
+    let mut p = defaults::new_presentation(None);
+    let id = ShapeId(p.alloc_id());
+    let first = p.slides[0].id;
+    p.slide_mut(first).expect("slide").shapes.push(Shape {
+        id,
+        name: "Corner".into(),
+        xfrm: Some(Xfrm::new(10.0, 10.0, 200.0, 100.0)),
+        fill: Some(Fill::Gradient(g.clone())),
+        ..Default::default()
+    });
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    let s = q.slides[0].shapes.iter().find(|s| s.name == "Corner").expect("shape");
+    assert_eq!(s.fill, Some(Fill::Gradient(g)));
+    // As written by PowerPoint (attributes it leaves out are 0).
+    let edited =
+        edit_slides(&bytes, |x| x.replace("<a:tileRect l=\"-100000\" t=\"-100000\" r=\"0\" b=\"0\"/>", "<a:tileRect l=\"-100000\" t=\"-100000\"/>"));
+    let q = deckcraft_pptx::import(&edited).expect("import");
+    let s = q.slides[0].shapes.iter().find(|s| s.name == "Corner").expect("shape");
+    assert!(matches!(&s.fill, Some(Fill::Gradient(g)) if g.tile == [-1.0, -1.0, 0.0, 0.0]), "{:?}", s.fill);
 }

@@ -116,7 +116,8 @@ pub fn gradient(f: &El) -> Gradient {
     } else {
         GradientShape::Linear { angle: 90.0, scaled: false }
     };
-    Gradient { stops, shape, rotate_with_shape: f.bool("rotWithShape").unwrap_or(true) }
+    let tile = f.child("tileRect").map(|r| [pct(r, "l"), pct(r, "t"), pct(r, "r"), pct(r, "b")].map(|v| v.unwrap_or(0.0).clamp(-10.0, 10.0)));
+    Gradient { tile: tile.unwrap_or_default(), stops, shape, rotate_with_shape: f.bool("rotWithShape").unwrap_or(true) }
 }
 
 /// `blipFill` (either `a:` or `p:`) → picture fill, registering the image as media.
