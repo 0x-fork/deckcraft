@@ -135,18 +135,10 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     app.perf.render_ms = app.textures.last_render_ms;
     media_frames(app, &painter, xf);
-    if app.ui.gridlines {
-        let step = 72.0 / 2.0 * scale;
-        let mut x = slide_rect.min.x + step;
-        while x < slide_rect.max.x {
-            painter.line_segment([pos2(x, slide_rect.min.y), pos2(x, slide_rect.max.y)], Stroke::new(0.5, Color32::from_black_alpha(40)));
-            x += step;
-        }
-        let mut y = slide_rect.min.y + step;
-        while y < slide_rect.max.y {
-            painter.line_segment([pos2(slide_rect.min.x, y), pos2(slide_rect.max.x, y)], Stroke::new(0.5, Color32::from_black_alpha(40)));
-            y += step;
-        }
+    if app.ui.gridlines
+        && let Some(step) = grid_line_step(app.session.prefs.grid_spacing, scale)
+    {
+        draw_grid(&painter, slide_rect, step);
     }
     if app.ui.guides {
         let c = slide_rect.center();
@@ -696,4 +688,57 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
             }
         }
     });
+}
+
+/// Screen-point distance between grid lines. `spacing` is the grid spacing in slide points;
+/// `scale` maps slide points onto the screen. `None` when the grid would not be a finite set of
+/// lines (bad inputs, or so fine that a line would land on every pixel).
+fn grid_line_step(spacing: f64, scale: f32) -> Option<f32> {
+    if !spacing.is_finite() || !(1.0..=288.0).contains(&spacing) || !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let step = (spacing as f32) * scale;
+    if !step.is_finite() || step < 1.0 {
+        return None;
+    }
+    Some(step)
+}
+
+fn draw_grid(painter: &egui::Painter, slide: Rect, step: f32) {
+    let stroke = Stroke::new(0.5, Color32::from_black_alpha(40));
+    // A denser grid than this paints a grey slab and costs a frame. Skip it.
+    if !grid_fits(slide.width(), step) || !grid_fits(slide.height(), step) {
+        return;
+    }
+    let mut x = slide.min.x + step;
+    while x < slide.max.x {
+        painter.line_segment([pos2(x, slide.min.y), pos2(x, slide.max.y)], stroke);
+        x += step;
+    }
+    let mut y = slide.min.y + step;
+    while y < slide.max.y {
+        painter.line_segment([pos2(slide.min.x, y), pos2(slide.max.x, y)], stroke);
+        y += step;
+    }
+}
+
+fn grid_fits(span: f32, step: f32) -> bool {
+    span.is_finite() && span > 0.0 && step >= 1.0 && span / step <= 800.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::grid_line_step;
+
+    #[test]
+    fn grid_step_follows_spacing_and_rejects_unusable_values() {
+        let step = grid_line_step(72.0, 0.5).unwrap_or(0.0);
+        assert!((step - 36.0).abs() < 1e-3, "{step}");
+        assert!(grid_line_step(6.0, 1.0).is_some());
+        assert!(grid_line_step(0.0, 1.0).is_none());
+        assert!(grid_line_step(f64::NAN, 1.0).is_none());
+        assert!(grid_line_step(1_000.0, 1.0).is_none());
+        assert!(grid_line_step(6.0, 0.0).is_none());
+        assert!(grid_line_step(6.0, 0.1).is_none(), "a 6 pt grid at 10% zoom is finer than one screen point");
+    }
 }
