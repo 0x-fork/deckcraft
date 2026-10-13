@@ -287,3 +287,29 @@ fn a_pictures_border_lies_outside_the_picture() {
     let img = render_slide(&picture_deck(Some(line)), 0, &RenderOpts { scale: 1.0, ..Default::default() });
     assert!(close(img.pixel(120, 96), RED, 30) && close(img.pixel(140, 96), WHITE, 10), "{:?}", img.pixel(140, 96));
 }
+
+#[test]
+fn children_filled_with_the_group_fill_show_one_fill_across_the_group() {
+    use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
+    let stops = vec![GradientStop { pos: 0.0, color: ColorRef::rgb(RED) }, GradientStop { pos: 1.0, color: ColorRef::rgb(Rgba::rgb(0, 0, 255)) }];
+    let grad = Fill::Gradient(Gradient { stops, shape: GradientShape::Linear { angle: 0.0, scaled: false }, rotate_with_shape: true });
+    let child = |id: u32, x: f64| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 0.0, 90.0, 100.0)),
+        fill: Some(Fill::Group),
+        line: no_line(),
+        ..Default::default()
+    };
+    let g = Shape {
+        id: ShapeId(16),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        fill: Some(grad),
+        kind: ShapeKind::Group { children: vec![child(17, 0.0), child(18, 110.0)], child: Xfrm::new(0.0, 0.0, 200.0, 100.0) },
+        ..Default::default()
+    };
+    let img = render(vec![g]);
+    let (l, r) = (img.pixel(105, 150), img.pixel(295, 150));
+    assert!(l[0] > 200 && l[2] < 60, "left end of the group's gradient {l:?}");
+    assert!(r[2] > 200 && r[0] < 60, "right end {r:?}");
+    assert!(close(img.pixel(200, 150), WHITE, 5), "the gap between the children stays empty");
+}

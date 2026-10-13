@@ -244,11 +244,14 @@ pub struct Renderer {
     /// The transform a top-level shape is drawn under (slide to pixels); a group's children draw
     /// under it combined with the group's child-coordinate mapping, which must not scale lines.
     view: Affine,
+    /// The fill of the group being drawn, with the transform and box it is laid out in: children
+    /// filled with the group's fill (`a:grpFill`) show it, as one fill across the whole group.
+    group_fill: Option<(Fill, Affine, Rect)>,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None, drawn: None, view: Affine::IDENTITY }
+        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None, drawn: None, view: Affine::IDENTITY, group_fill: None }
     }
 }
 
@@ -779,9 +782,16 @@ impl Renderer {
             ShapeKind::Group { children, child } => {
                 let ch = Rect::new(child.x, child.y, child.x + child.w, child.y + child.h);
                 let gm = parent * deckcraft_geom::group_child_affine(&x, ch);
+                // A group's own fill (a group filled with its parent's passes that on).
+                let own = match &s.fill {
+                    Some(Fill::Group) | None => self.group_fill.clone(),
+                    Some(fl) => Some((fl.clone(), m, Rect::new(0.0, 0.0, x.w, x.h))),
+                };
+                let outer = std::mem::replace(&mut self.group_fill, own);
                 for c in children {
                     self.shape(ctx, f, rctx, c, gm, depth + 1);
                 }
+                self.group_fill = outer;
             }
             ShapeKind::Table(t) => {
                 // Rows grow with their text: what the cells cover, borders included.
@@ -924,6 +934,15 @@ impl Renderer {
                                 let slide = Rect::new(0.0, 0.0, f.pres.slide_size.width, f.pres.slide_size.height);
                                 let path = (view.inverse() * m) * sp.path.clone();
                                 paint::fill_path(ctx, rctx, bg, *ph, &path, slide, *view, sp.fill, fade(i).fill, f.pres);
+                            }
+                            // `grpFill`: the group's fill, laid out over the whole group.
+                            (Fill::Group, _) => {
+                                if let Some((gf, gm, gbox)) = &self.group_fill
+                                    && gm.determinant().abs() > 1e-12
+                                {
+                                    let path = (gm.inverse() * m) * sp.path.clone();
+                                    paint::fill_path(ctx, rctx, gf, None, &path, *gbox, *gm, sp.fill, fade(i).fill, f.pres);
+                                }
                             }
                             _ => paint::fill_path(ctx, rctx, fl, fill_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, sp.fill, fade(i).fill, f.pres),
                         }
