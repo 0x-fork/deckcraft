@@ -93,6 +93,150 @@ pub struct Deco {
     pub behind: bool,
     /// Paragraph the decoration belongs to (by-paragraph animation).
     pub para: usize,
+    /// How the line fills `rect`.
+    pub line: DecoLine,
+}
+
+/// How an underline fills its box.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum DecoLine {
+    /// The whole box.
+    #[default]
+    Solid,
+    /// Dashes or dots across the box's height, from its left end.
+    Dashed(Dash),
+    /// A zigzag between the box's top and bottom: `stroke` wide, one wave every `period`.
+    Wave { stroke: f64, period: f64 },
+}
+
+/// Dash patterns of the dotted and dashed underlines, in units of the line's thickness. Measured
+/// on PowerPoint's export: dots and their gaps as long as the line is thick, dashes three
+/// thicknesses long with gaps of two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dash {
+    Dot,
+    Dash,
+    Long,
+    DotDash,
+    DotDotDash,
+}
+
+impl Dash {
+    /// On, off, on, off… lengths in thicknesses.
+    fn pattern(self) -> &'static [f64] {
+        match self {
+            Dash::Dot => &[1.0, 1.0],
+            Dash::Dash => &[3.0, 2.0],
+            Dash::Long => &[6.0, 2.0],
+            Dash::DotDash => &[3.0, 2.0, 1.0, 2.0],
+            Dash::DotDotDash => &[3.0, 2.0, 1.0, 2.0, 1.0, 2.0],
+        }
+    }
+}
+
+impl Deco {
+    /// The filled boxes of a solid or dashed line (dashes start at the box's left end). A wavy
+    /// line gives a thin box along its middle, for drawing that can't stroke a path.
+    pub fn pieces(&self) -> Vec<Rect> {
+        let r = self.rect;
+        match self.line {
+            DecoLine::Solid => vec![r],
+            DecoLine::Wave { stroke, .. } => {
+                let c = (r.y0 + r.y1) / 2.0;
+                vec![Rect::new(r.x0, c - stroke / 2.0, r.x1, c + stroke / 2.0)]
+            }
+            DecoLine::Dashed(d) => {
+                let unit = r.height().max(0.1);
+                let pat = d.pattern();
+                let mut out = Vec::new();
+                let mut x = r.x0;
+                let mut k = 0usize;
+                while x < r.x1 && out.len() < 10_000 {
+                    let len = pat.get(k % pat.len()).copied().unwrap_or(1.0) * unit;
+                    if k.is_multiple_of(2) {
+                        out.push(Rect::new(x, r.y0, (x + len).min(r.x1), r.y1));
+                    }
+                    x += len;
+                    k += 1;
+                }
+                out
+            }
+        }
+    }
+
+    /// The zigzag of a wavy underline, left to right from the box's top, and its stroke width;
+    /// None for other lines.
+    pub fn wave(&self) -> Option<(Vec<Point>, f64)> {
+        let DecoLine::Wave { stroke, period } = self.line else { return None };
+        let r = self.rect;
+        let half = (period / 2.0).max(0.1);
+        let n = ((r.width().max(0.0) / half).ceil() as usize).min(20_000);
+        let pts = (0..=n)
+            .map(|i| {
+                let x = (r.x0 + i as f64 * half).min(r.x1);
+                Point::new(x, if i % 2 == 0 { r.y0 } else { r.y1 })
+            })
+            .collect();
+        Some((pts, stroke))
+    }
+}
+
+/// An underline style (`a:rPr/@u`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Underline {
+    Single,
+    Double,
+    Heavy,
+    /// Dotted or dashed, heavy or not.
+    Dashed(Dash, bool),
+    /// Wavy, heavy or not.
+    Wavy(bool),
+}
+
+impl Underline {
+    fn from_xml(u: &str) -> Option<Self> {
+        Some(match u {
+            "none" => return None,
+            // PowerPoint underlines the spaces of a "words" underline too.
+            "words" => Underline::Single,
+            // At text sizes PowerPoint's double wave reads as two straight lines.
+            "dbl" | "wavyDbl" => Underline::Double,
+            "heavy" => Underline::Heavy,
+            "dotted" => Underline::Dashed(Dash::Dot, false),
+            "dottedHeavy" => Underline::Dashed(Dash::Dot, true),
+            "dash" => Underline::Dashed(Dash::Dash, false),
+            "dashHeavy" => Underline::Dashed(Dash::Dash, true),
+            "dashLong" => Underline::Dashed(Dash::Long, false),
+            "dashLongHeavy" => Underline::Dashed(Dash::Long, true),
+            "dotDash" => Underline::Dashed(Dash::DotDash, false),
+            "dotDashHeavy" => Underline::Dashed(Dash::DotDash, true),
+            "dotDotDash" => Underline::Dashed(Dash::DotDotDash, false),
+            "dotDotDashHeavy" => Underline::Dashed(Dash::DotDotDash, true),
+            "wavy" => Underline::Wavy(false),
+            "wavyHeavy" => Underline::Wavy(true),
+            _ => Underline::Single,
+        })
+    }
+
+    /// The boxes of this underline below the baseline (top, bottom, fill), from the font's
+    /// underline position `p` and thickness `t` at the run's size. Measured on PowerPoint's export
+    /// (Arial 96 pt: p = 10.2, t = 7.0): single at p..p+t; heavy from p-t to p+0.55t; double as two
+    /// lines 0.55t thick spanning p-t..p+t; wavy a thin zigzag from p-0.6t to p+1.1t, a wave every
+    /// 3.9t.
+    fn boxes(self, p: f64, t: f64) -> Vec<(f64, f64, DecoLine)> {
+        let heavy = (p - t, p + 0.55 * t);
+        match self {
+            Underline::Single => vec![(p, p + t, DecoLine::Solid)],
+            Underline::Heavy => vec![(heavy.0, heavy.1, DecoLine::Solid)],
+            Underline::Double => vec![(p - t, p - 0.45 * t, DecoLine::Solid), (p + 0.45 * t, p + t, DecoLine::Solid)],
+            Underline::Dashed(d, false) => vec![(p, p + t, DecoLine::Dashed(d))],
+            Underline::Dashed(d, true) => vec![(heavy.0, heavy.1, DecoLine::Dashed(d))],
+            Underline::Wavy(h) => {
+                let stroke = (t * 0.15).max(0.4) * if h { 2.0 } else { 1.0 };
+                vec![(p - 0.6 * t, p + 1.1 * t, DecoLine::Wave { stroke, period: t * 3.9 })]
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -187,7 +331,7 @@ struct Style {
     baseline: f64,
     spacing: f64,
     caps: Caps,
-    underline: Option<Rgba>,
+    underline: Option<(Rgba, Underline)>,
     strike: Option<Strike>,
     highlight: Option<Rgba>,
     outline: Option<(Rgba, f64)>,
@@ -293,7 +437,8 @@ fn make_style(ctx: &Ctx, r: &RunProps, scale: f64, prompt: Option<Rgba>) -> Styl
     };
     let ea = slot_family(&r.font_ea, if major { "+mj-ea" } else { "+mn-ea" });
     let cs = slot_family(&r.font_cs, if major { "+mj-cs" } else { "+mn-cs" });
-    let underline = r.underline.as_deref().filter(|u| *u != "none").map(|_| r.underline_color.as_ref().map(|c| ctx.color(c, None)).unwrap_or(color));
+    let underline =
+        r.underline.as_deref().and_then(Underline::from_xml).map(|u| (r.underline_color.as_ref().map(|c| ctx.color(c, None)).unwrap_or(color), u));
     let outline = r.outline.as_ref().and_then(|l| match &l.fill {
         Some(Fill::Solid { color: c }) => Some((ctx.color(c, None), l.width.unwrap_or(0.75))),
         _ => None,
@@ -1580,20 +1725,47 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 continue;
             }
             if let Some(hl) = st.highlight {
-                out.decos.push(Deco { rect: Rect::new(cx, line.top, cx1, line.bottom), color: hl, behind: true, para: line.para });
+                out.decos.push(Deco {
+                    rect: Rect::new(cx, line.top, cx1, line.bottom),
+                    color: hl,
+                    behind: true,
+                    para: line.para,
+                    line: DecoLine::Solid,
+                });
             }
             if !cell.ch.is_whitespace() || st.underline.is_some() {
-                if let Some(uc) = st.underline {
-                    let t = (st.size * 0.06).max(0.5);
-                    let uy = line.baseline + st.size * 0.12;
-                    out.decos.push(Deco { rect: Rect::new(cx, uy, cx1, uy + t), color: uc, behind: false, para: line.para });
+                if let Some((uc, u)) = st.underline {
+                    // At the underline position and thickness of the run's own font.
+                    let k = st.size / st.face.upem.max(1.0);
+                    let (p, t) = (st.face.underline.0 * k, (st.face.underline.1 * k).max(0.5));
+                    for (y0, y1, kind) in u.boxes(p, t) {
+                        out.decos.push(Deco {
+                            rect: Rect::new(cx, line.baseline + y0, cx1, line.baseline + y1),
+                            color: uc,
+                            behind: false,
+                            para: line.para,
+                            line: kind,
+                        });
+                    }
                 }
                 if let Some(sk) = st.strike {
                     let t = (st.size * 0.05).max(0.5);
                     let sy = line.baseline - st.size * 0.3;
-                    out.decos.push(Deco { rect: Rect::new(cx, sy, cx1, sy + t), color: st.color, behind: false, para: line.para });
+                    out.decos.push(Deco {
+                        rect: Rect::new(cx, sy, cx1, sy + t),
+                        color: st.color,
+                        behind: false,
+                        para: line.para,
+                        line: DecoLine::Solid,
+                    });
                     if sk == Strike::Double {
-                        out.decos.push(Deco { rect: Rect::new(cx, sy - t * 2.0, cx1, sy - t), color: st.color, behind: false, para: line.para });
+                        out.decos.push(Deco {
+                            rect: Rect::new(cx, sy - t * 2.0, cx1, sy - t),
+                            color: st.color,
+                            behind: false,
+                            para: line.para,
+                            line: DecoLine::Solid,
+                        });
                     }
                 }
             }
@@ -1622,13 +1794,15 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
 fn merge_decos(v: Vec<Deco>) -> Vec<Deco> {
     let mut out: Vec<Deco> = Vec::with_capacity(v.len());
     for d in v {
-        if let Some(last) = out.last_mut()
-            && last.color == d.color
-            && last.behind == d.behind
-            && (last.rect.y0 - d.rect.y0).abs() < 0.01
-            && (last.rect.y1 - d.rect.y1).abs() < 0.01
-            && (last.rect.x1 - d.rect.x0).abs() < 0.5
-        {
+        // Lines drawn together (a double underline, a strikethrough) interleave: look a few back.
+        if let Some(last) = out.iter_mut().rev().take(4).find(|last| {
+            last.color == d.color
+                && last.behind == d.behind
+                && last.line == d.line
+                && (last.rect.y0 - d.rect.y0).abs() < 0.01
+                && (last.rect.y1 - d.rect.y1).abs() < 0.01
+                && (last.rect.x1 - d.rect.x0).abs() < 0.5
+        }) {
             last.rect.x1 = d.rect.x1;
             continue;
         }

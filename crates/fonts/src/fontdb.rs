@@ -134,6 +134,9 @@ pub struct FontFace {
     /// Windows ascent over the Windows ascent plus descent (OS/2 `usWinAscent`/`usWinDescent`),
     /// the split PowerPoint uses (computed by `line_split`).
     pub line_split: f64,
+    /// Underline position (top edge, below the baseline) and thickness in font units (`post`
+    /// table; 0.1 and 0.05 em when the font has none). PowerPoint draws single underlines there.
+    pub underline: (f64, f64),
     pub shaper: harfrust::ShaperData,
     /// Variable fonts: the named instance's axis settings (user units; empty = default instance),
     /// the normalised location and the shaper's view of it.
@@ -586,6 +589,7 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         cap_height: m.cap_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.72),
         x_height: m.x_height.map(|v| v as f64).filter(|v| *v > 0.0).unwrap_or(m.ascent as f64 * 0.5),
         line_split: line_split(&f, m.ascent as f64, -(m.descent as f64), m.units_per_em.max(1) as f64),
+        underline: underline_metrics(m.underline, m.units_per_em.max(1) as f64),
         shaper,
         coords,
         location,
@@ -595,6 +599,18 @@ fn make_face(bytes: FontBytes, index: u32, family: String, style: String, coords
         bmp: std::sync::OnceLock::new(),
         color: std::sync::OnceLock::new(),
     })
+}
+
+/// The underline's top edge below the baseline and its thickness, font units, from the `post`
+/// table (its position is the top edge: Arial's -217/2048 is where PowerPoint's underline starts,
+/// 10 px below the baseline at 96 pt); fonts without a usable one get 0.1 em and 0.05 em.
+fn underline_metrics(d: Option<skrifa::metrics::Decoration>, upem: f64) -> (f64, f64) {
+    match d {
+        Some(d) if d.thickness > 0.0 && (d.thickness as f64) < upem * 0.3 && (d.offset as f64).abs() < upem * 0.5 => {
+            (-(d.offset as f64), d.thickness as f64)
+        }
+        _ => (upem * 0.1, upem * 0.05),
+    }
 }
 
 /// The named style part of a style with axis settings (`Bold {wght:650}` → `Bold`).

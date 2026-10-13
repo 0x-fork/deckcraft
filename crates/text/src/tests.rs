@@ -934,3 +934,47 @@ fn a_tab_past_the_end_moves_to_the_next_line() {
     assert_eq!(l.lines[1].start, 10, "the tab starts the second line: {:?}", l.lines.iter().map(|x| (x.start, x.end, x.extent)).collect::<Vec<_>>());
     assert!((l.lines[1].edges[1].0 - l.inner.x0 - 72.0).abs() < 0.01);
 }
+
+/// Underline decorations of "ab cd" underlined `u` at 40 pt.
+fn underline_decos(u: &str) -> (TextLayout, Vec<Deco>) {
+    let (p, mut sh) = setup("ab cd", 2000.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.props.bullet = Some(Bullet::None);
+    para.runs[0].props.size = Some(40.0);
+    para.runs[0].props.underline = Some(u.into());
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let d = l.decos.iter().filter(|d| !d.behind).cloned().collect();
+    (l, d)
+}
+
+#[test]
+fn underlines_sit_at_the_font_underline_in_their_style() {
+    let (l, sng) = underline_decos("sng");
+    let r = l.runs.iter().find(|r| !r.cells.is_empty()).unwrap();
+    let k = 40.0 / r.face.upem;
+    let base = l.lines[0].baseline;
+    assert_eq!(sng.len(), 1);
+    assert!((sng[0].rect.y0 - base - r.face.underline.0 * k).abs() < 0.01, "top at the font's underline position");
+    assert!((sng[0].rect.height() - (r.face.underline.1 * k).max(0.5)).abs() < 0.01);
+    let t = sng[0].rect.height();
+    // Double: two thin lines spanning from one thickness above the single line to its bottom.
+    let (_, dbl) = underline_decos("dbl");
+    assert_eq!(dbl.len(), 2);
+    assert!((dbl[0].rect.y0 - (sng[0].rect.y0 - t)).abs() < 0.01 && (dbl[1].rect.y1 - sng[0].rect.y1).abs() < 0.01);
+    // Heavy is thicker; dotted is dots as long as the line is thick.
+    let (_, heavy) = underline_decos("heavy");
+    assert!(heavy[0].rect.height() > t * 1.4);
+    let (_, dotted) = underline_decos("dotted");
+    assert_eq!(dotted[0].line, DecoLine::Dashed(Dash::Dot));
+    let pieces = dotted[0].pieces();
+    assert!(pieces.len() > 3);
+    assert!((pieces[0].width() - t).abs() < 0.01 && (pieces[1].x0 - pieces[0].x1 - t).abs() < 0.01);
+    // Wavy: a zigzag between the box's top and bottom.
+    let (_, wavy) = underline_decos("wavy");
+    let (pts, w) = wavy[0].wave().expect("a wave");
+    assert!(pts.len() > 4 && w > 0.0 && w < t);
+    assert!(pts[0].y < pts[1].y);
+    // "words" underlines the spaces too, as PowerPoint draws it: one line.
+    let (_, words) = underline_decos("words");
+    assert_eq!(words.len(), 1);
+}

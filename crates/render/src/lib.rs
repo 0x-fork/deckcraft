@@ -1399,7 +1399,7 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
         }
         ctx.set_transform(m * Affine::translate(ps.offset));
         ctx.set_paint(color(d.color, ps.opacity));
-        ctx.fill_rect(&d.rect);
+        fill_deco(ctx, d);
     };
     for d in l.decos.iter().filter(|d| d.behind) {
         deco(ctx, d);
@@ -1444,6 +1444,27 @@ pub fn draw_layout_with(ctx: &mut RenderContext, l: &deckcraft_text::TextLayout,
     }
     for d in l.decos.iter().filter(|d| !d.behind) {
         deco(ctx, d);
+    }
+}
+
+/// Fill an underline, strikethrough or highlight with the current paint and transform: its box,
+/// its dashes, or its zigzag stroked.
+pub(crate) fn fill_deco(ctx: &mut RenderContext, d: &deckcraft_text::Deco) {
+    if let Some((pts, w)) = d.wave() {
+        let mut path = BezPath::new();
+        for (i, p) in pts.iter().enumerate() {
+            if i == 0 {
+                path.move_to(*p);
+            } else {
+                path.line_to(*p);
+            }
+        }
+        ctx.set_stroke(kurbo::Stroke::new(w.max(0.01)));
+        ctx.stroke_path(&path);
+        return;
+    }
+    for r in d.pieces() {
+        ctx.fill_rect(&r);
     }
 }
 

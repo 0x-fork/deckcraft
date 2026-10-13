@@ -1644,3 +1644,34 @@ fn a_fill_overlay_blends_over_the_fill() {
     let (over, _) = draw([200, 100, 50], "over");
     assert!((over[0] as i32 - 128).abs() <= 3 && (over[1] as i32 - 128).abs() <= 3, "{over:?}");
 }
+
+#[test]
+fn dotted_and_wavy_underlines_draw_their_pattern() {
+    // Underlined spaces only, so the underline is the only ink: a red line under "      ".
+    let row_runs = |u: &str| {
+        let mut sh = Shape { id: ShapeId(760), xfrm: Some(Xfrm::new(0.0, 0.0, 900.0, 300.0)), text_box: true, ..Default::default() };
+        let mut t = TextBody::from_text("            ");
+        let props = &mut t.paragraphs[0].runs[0].props;
+        props.size = Some(96.0);
+        props.underline = Some(u.into());
+        props.fill = Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))));
+        sh.text = Some(t);
+        let p = deck_with(vec![sh]);
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        let red = |x: u32, y: u32| {
+            let px = img.pixel(x, y);
+            px[0] > 150 && px[1] < 120
+        };
+        // The ink's rows, and the number of separate red stretches along the most inked row.
+        let rows: Vec<u32> = (0..300).filter(|&y| (0..900).any(|x| red(x, y))).collect();
+        let best = rows.iter().copied().max_by_key(|&y| (0..900).filter(|&x| red(x, y)).count()).unwrap_or(0);
+        let stretches = (1..900).filter(|&x| red(x, best) && !red(x - 1, best)).count();
+        (rows.len(), stretches)
+    };
+    let (sng_rows, sng_runs) = row_runs("sng");
+    assert_eq!(sng_runs, 1, "a single line is one stretch");
+    let (_, dotted_runs) = row_runs("dotted");
+    assert!(dotted_runs > 10, "dots: {dotted_runs}");
+    let (wavy_rows, _) = row_runs("wavy");
+    assert!(wavy_rows > sng_rows, "a wave spans more rows ({wavy_rows}) than a single line ({sng_rows})");
+}
