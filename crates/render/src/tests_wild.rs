@@ -225,3 +225,28 @@ fn a_perspective_shadow_lies_along_the_edge_its_alignment_names() {
     let img = render(vec![with_effects(solid(RED), no_line(), fx)]);
     assert!(close(img.pixel(70, 70), Rgba::BLACK, 30) && close(img.pixel(210, 210), WHITE, 10));
 }
+
+fn offset_shadow() -> deckcraft_model::Effects {
+    let mut sh = shadow(1.0, 1.0, 0.0, "b");
+    sh.dist = 20.0;
+    sh.dir = 0.0;
+    deckcraft_model::Effects { outer_shadow: Some(sh), ..Default::default() }
+}
+
+#[test]
+fn shadows_are_cast_by_what_is_drawn() {
+    // An outline-only square: its shadow (20 pt to the right) is a frame, not a solid square.
+    let outline = Some(Line::solid(ColorRef::rgb(RED), 4.0));
+    let img = render(vec![with_effects(Some(Fill::None), outline.clone(), offset_shadow())]);
+    assert!(close(img.pixel(220, 150), Rgba::BLACK, 30), "the frame's shadow {:?}", img.pixel(220, 150));
+    assert!(close(img.pixel(160, 150), WHITE, 10), "no shadow inside the frame {:?}", img.pixel(160, 150));
+    // A half see-through fill casts a half see-through shadow.
+    let img = render(vec![with_effects(solid(Rgba::rgba(255, 0, 0, 128)), no_line(), offset_shadow())]);
+    let px = img.pixel(210, 150);
+    assert!(close(px, Rgba::rgb(127, 127, 127), 8), "half shadow {px:?}");
+    // A line casts a shadow too.
+    let mut ln = arrow_line("none", 6.0, RED);
+    ln.effects = Some(offset_shadow());
+    let img = render(vec![ln]);
+    assert!(close(img.pixel(310, 100), Rgba::BLACK, 30), "line shadow {:?}", img.pixel(310, 100));
+}

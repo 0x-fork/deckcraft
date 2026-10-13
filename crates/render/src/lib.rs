@@ -856,7 +856,17 @@ impl Renderer {
                 (ShapeKind::Picture { fill: pf }, _) | (_, Some(Fill::Picture(pf))) => Some(paint::resolved(rctx, pf, None).into_owned()),
                 _ => None,
             };
-            self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, content.as_ref(), m, w, h);
+            // What casts the shadow: the fill as see-through as it is, and the outline.
+            let fill_alpha = fill_opacity(rctx, &fill, fill_ph);
+            let outline = line.fill.as_ref().filter(|f| !f.is_none()).map(|lf| {
+                let a = match lf {
+                    Fill::Solid { color: c } => rctx.color(c, line_ph).a as f64 / 255.0,
+                    _ => 1.0,
+                };
+                let (base, rel) = self.line_space(m, depth);
+                Caster { line: &line, ph: line_ph, alpha: a, base, rel }
+            });
+            self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, fill_alpha, outline, content.as_ref(), m, w, h);
         }
         let soft = effects.as_ref().and_then(|e| e.soft_edge).filter(|r| *r > 0.0);
         if let Some(r) = soft {
@@ -1087,6 +1097,8 @@ impl Renderer {
         ph: Option<Rgba>,
         geo: &Geometry,
         fill: &Option<Fill>,
+        fill_alpha: Option<f64>,
+        outline: Option<Caster>,
         content: Option<&deckcraft_model::style::PictureFill>,
         m: Affine,
         w: f64,
@@ -1107,7 +1119,8 @@ impl Renderer {
             let d = Vec2::new(sh.dir.to_radians().cos(), sh.dir.to_radians().sin()) * sh.dist;
             let local = shadow_local(sh, w, h);
             // Shadow offset is in slide space (doesn't rotate with the shape unless asked).
-            let sm = if sh.rotate_with_shape { m * Affine::translate(d) * local } else { pre_translate(m, d * k) * local };
+            let (own, pre) = if sh.rotate_with_shape { (Affine::translate(d) * local, Affine::IDENTITY) } else { (local, Affine::translate(d * k)) };
+            let sm = pre * m * own;
             ctx.set_transform(Affine::IDENTITY);
             // Blurred by a third of the blur radius, as PowerPoint's export shows.
             ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur / 3.0 * k)));
@@ -1125,9 +1138,27 @@ impl Renderer {
                     ctx.pop_layer();
                     ctx.pop_layer();
                 }
+                // The shadow is cast by what is drawn, as PowerPoint casts it: the filled part as
+                // see-through as its fill (none for an outline-only shape) …
                 None => {
-                    ctx.set_paint(color(c.with_alpha(255), 1.0));
-                    ctx.fill_path(&silhouette);
+                    if let Some(a) = fill_alpha {
+                        let mut filled = BezPath::new();
+                        for sp in geo.paths.iter().filter(|sp| sp.fill != FillMode::None) {
+                            filled.extend(sp.path.iter());
+                        }
+                        ctx.set_paint(color(c.with_alpha(255), a));
+                        ctx.fill_path(&filled);
+                    }
+                }
+            }
+            // … and the outline (a picture's border too).
+            if let Some(o) = &outline {
+                let cast = Line { fill: Some(Fill::solid(deckcraft_model::style::ColorRef::rgb(c.with_alpha(255)))), ..o.line.clone() };
+                let lw = o.line.width.unwrap_or(0.75).max(0.0);
+                for sp in geo.paths.iter().filter(|sp| sp.stroke) {
+                    let mut path = sp.path.clone();
+                    path.apply_affine(o.rel * own);
+                    stroke(ctx, rctx, &cast, o.ph, &path, pre * o.base, lw, o.alpha);
                 }
             }
             ctx.pop_layer();
@@ -1163,6 +1194,29 @@ impl Renderer {
             ctx.pop_layer();
             ctx.pop_layer();
         }
+    }
+}
+
+/// A shape's outline as it casts a shadow: its line, that line's placeholder colour and opacity,
+/// and the space it is stroked in (see `Renderer::line_space`).
+struct Caster<'a> {
+    line: &'a Line,
+    ph: Option<Rgba>,
+    alpha: f64,
+    base: Affine,
+    rel: Affine,
+}
+
+/// How opaque a fill is overall (`None` when nothing is filled): a solid colour's alpha, a
+/// gradient's mean stop alpha, otherwise opaque.
+fn fill_opacity(rctx: &Ctx, fill: &Option<Fill>, ph: Option<Rgba>) -> Option<f64> {
+    match fill {
+        None | Some(Fill::None) => None,
+        Some(Fill::Solid { color: c }) => Some(rctx.color(c, ph).a as f64 / 255.0),
+        Some(Fill::Gradient(g)) if !g.stops.is_empty() => {
+            Some(g.stops.iter().map(|s| rctx.color(&s.color, ph).a as f64 / 255.0).sum::<f64>() / g.stops.len() as f64)
+        }
+        Some(_) => Some(1.0),
     }
 }
 
