@@ -1025,10 +1025,11 @@ impl Renderer {
                     std::borrow::Cow::Owned(moved)
                 };
                 // The line stops inside its arrowheads, so a wide line doesn't poke out of them.
+                let whole = path.clone();
                 if Some(i) == first_stroked && trims != (0.0, 0.0) {
                     path = std::borrow::Cow::Owned(trim_ends(&path, trims.0, trims.1));
                 }
-                stroke(ctx, rctx, &line, line_ph, &path, base, lw, fade(i).stroke);
+                stroke(ctx, rctx, &line, line_ph, &path, Some(&whole), base, lw, fade(i).stroke);
             }
             if ends {
                 arrowheads(ctx, rctx, &line, line_ph, &geo, rel, base, lw);
@@ -1203,7 +1204,7 @@ impl Renderer {
                 for sp in geo.paths.iter().filter(|sp| sp.stroke) {
                     let mut path = sp.path.clone();
                     path.apply_affine(o.rel * own);
-                    stroke(ctx, rctx, &cast, o.ph, &path, pre * o.base, lw, o.alpha);
+                    stroke(ctx, rctx, &cast, o.ph, &path, None, pre * o.base, lw, o.alpha);
                 }
             }
             ctx.pop_layer();
@@ -1326,7 +1327,20 @@ fn blur(sigma: f64) -> Filter {
     Filter::from_primitive(FilterPrimitive::GaussianBlur { std_deviation: sigma.clamp(0.0, 500.0) as f32, edge_mode: EdgeMode::None })
 }
 
-fn stroke(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, path: &BezPath, m: Affine, lw: f64, alpha: f64) {
+/// Stroke `path` with `line`. A gradient line is laid out over `extent` (the untrimmed outline the
+/// line belongs to; `path` itself when `None`).
+#[allow(clippy::too_many_arguments)]
+fn stroke(
+    ctx: &mut RenderContext,
+    rctx: &Ctx,
+    line: &Line,
+    ph: Option<Rgba>,
+    path: &BezPath,
+    extent: Option<&BezPath>,
+    m: Affine,
+    lw: f64,
+    alpha: f64,
+) {
     use deckcraft_model::style::{LineCap, LineJoin};
     let cap = match line.cap.unwrap_or_default() {
         LineCap::Flat => kurbo::Cap::Butt,
@@ -1361,10 +1375,7 @@ fn stroke(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, pa
         Some(Fill::Solid { color: c }) => {
             ctx.set_paint(color(rctx.color(c, ph), alpha));
         }
-        Some(Fill::Gradient(g)) => {
-            let c = g.stops.first().map(|s| rctx.color(&s.color, ph)).unwrap_or(Rgba::BLACK);
-            ctx.set_paint(color(c, alpha));
-        }
+        Some(Fill::Gradient(g)) if !g.stops.is_empty() => ctx.set_paint(line_gradient(rctx, g, ph, extent.unwrap_or(path), lw, alpha)),
         _ => ctx.set_paint(color(Rgba::BLACK, alpha)),
     }
     // Compound lines: each band stroked along the path moved to its place across the width.
@@ -1463,6 +1474,16 @@ fn square_dash_ends(path: &BezPath, pattern: &[f64], width: f64) -> BezPath {
         }
     }
     out
+}
+
+/// A gradient line's paint: laid out, as PowerPoint lays it, over the box the stroke covers (the
+/// path's bounds grown by half the line width), so a horizontal line's vertical gradient runs
+/// across its width.
+fn line_gradient(rctx: &Ctx, g: &deckcraft_model::style::Gradient, ph: Option<Rgba>, path: &BezPath, lw: f64, alpha: f64) -> peniko::Gradient {
+    let bounds = path.bounding_box().inflate(lw / 2.0, lw / 2.0);
+    let bounds = paint::tile_box(bounds, g.tile);
+    let stops: Vec<(f64, Rgba)> = g.stops.iter().map(|s| (s.pos, rctx.color(&s.color, ph))).collect();
+    paint::gradient(&g.shape, stops, bounds, alpha)
 }
 
 /// A dash pattern (on, off, on, off… lengths) for a line drawn `width` wide with `cap`. As
@@ -1641,6 +1662,19 @@ fn arrowheads(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>
         Some(Fill::Solid { color: c }) => rctx.color(c, ph),
         _ => Rgba::BLACK,
     };
+    // A gradient line's heads take the gradient where they are.
+    let grad = match &line.fill {
+        Some(Fill::Gradient(g)) if !g.stops.is_empty() => {
+            let mut moved = sp.path.clone();
+            moved.apply_affine(rel);
+            Some(line_gradient(rctx, g, ph, &moved, lw, 1.0))
+        }
+        _ => None,
+    };
+    let set_paint = |ctx: &mut RenderContext| match &grad {
+        Some(g) => ctx.set_paint(g.clone()),
+        None => ctx.set_paint(color(col, 1.0)),
+    };
     for (end, tip, from) in [(&line.head, a, a2), (&line.tail, b, b2)] {
         let Some(e) = end else { continue };
         if e.kind == "none" {
@@ -1683,7 +1717,7 @@ fn arrowheads(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>
                 o.line_to(tip - back);
                 o.line_to(base - n * wl / 2.0 - back);
                 ctx.set_transform(m);
-                ctx.set_paint(color(col, 1.0));
+                set_paint(ctx);
                 ctx.set_stroke(kurbo::Stroke::new(leg).with_join(kurbo::Join::Miter).with_miter_limit(100.0).with_caps(kurbo::Cap::Round));
                 ctx.stroke_path(&o);
                 continue;
@@ -1696,7 +1730,7 @@ fn arrowheads(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>
             }
         }
         ctx.set_transform(m);
-        ctx.set_paint(color(col, 1.0));
+        set_paint(ctx);
         ctx.fill_path(&p);
     }
 }

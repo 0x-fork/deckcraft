@@ -478,3 +478,36 @@ fn picture_resolution_sizes_tiles() {
     jpeg.extend_from_slice(b"JFIF\0\x01\x01\x01\x00\x48\x00\x48");
     assert_eq!(images::dpi(&jpeg), Some((72.0, 72.0)));
 }
+
+#[test]
+fn gradient_lines_and_their_heads_take_the_gradient() {
+    use deckcraft_model::style::{Gradient, GradientShape, GradientStop};
+    let blue = Rgba::rgb(0, 0, 255);
+    let grad = |angle: f64| {
+        Fill::Gradient(Gradient {
+            stops: vec![GradientStop { pos: 0.0, color: ColorRef::rgb(RED) }, GradientStop { pos: 1.0, color: ColorRef::rgb(blue) }],
+            shape: GradientShape::Linear { angle, scaled: false },
+            rotate_with_shape: true,
+            tile: [0.0; 4],
+        })
+    };
+    // Left to right along a 20 pt line: red at its start, blue at its end, and the arrowhead at
+    // the end blue too.
+    let mut sh = arrow_line("triangle", 20.0, RED);
+    if let Some(l) = &mut sh.line {
+        l.fill = Some(grad(0.0));
+    }
+    let img = render(vec![sh]);
+    let (start, mid, head) = (img.pixel(102, 100), img.pixel(200, 100), img.pixel(296, 100));
+    assert!(start[0] > 200 && start[2] < 60, "{start:?}");
+    assert!(mid[0] > 60 && mid[2] > 60, "{mid:?}");
+    assert!(head[2] > 200 && head[0] < 60, "head {head:?}");
+    // Top to bottom across a horizontal line: the gradient runs over the line's width.
+    let mut sh = arrow_line("none", 20.0, RED);
+    if let Some(l) = &mut sh.line {
+        l.fill = Some(grad(90.0));
+    }
+    let img = render(vec![sh]);
+    let (top, bottom) = (img.pixel(200, 91), img.pixel(200, 109));
+    assert!(top[0] > 200 && top[2] < 60 && bottom[2] > 200 && bottom[0] < 60, "{top:?} {bottom:?}");
+}
