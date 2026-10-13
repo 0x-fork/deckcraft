@@ -179,6 +179,21 @@ fn every_page_renders() {
     assert!(h.state_mut().run("app.backstage", json!({"page": "share"})).is_err(), "Share (cloud) isn't offered");
 }
 
+/// A starter template from File › New opens its deck and leaves the File tab.
+#[test]
+fn new_template_opens_a_starter_deck() {
+    let mut h = harness(new_app());
+    h.state_mut().run("app.backstage", json!({"page": "new"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Briefing").click();
+    h.run_steps(3);
+    let doc = &h.state().session.active().unwrap().doc;
+    assert_eq!(doc.masters[0].theme.name, "Harbor");
+    assert_eq!(doc.slides[0].title(), "Weekly briefing");
+    assert_eq!(doc.slides.len(), 5);
+    assert!(h.state().backstage.is_none(), "the starter deck shows");
+}
+
 /// New and Home create presentations, which leaves the File tab.
 #[test]
 fn new_creates_a_presentation() {

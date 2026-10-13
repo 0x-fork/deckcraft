@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks on File › New; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -242,8 +242,11 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Ecosystem
 
-- **8 original themes, no template gallery.** PowerPoint offers dozens of designs online and
-  offline. 8–14 h for a larger original set (asset policy: our own designs only).
+- **Six original starter decks; PowerPoint's large template gallery remains.** File › New and the
+  start screen offer Briefing, Lesson, Pitch, Field Notes, Quarterly and Evening Talk
+  (`file.new {template}`), each a few slides on one of our themes. Dozens of further offline
+  designs, and any online gallery, are still absent. 4–8 h for a larger original set (asset policy:
+  our own designs only).
 - **No add-ins or VBA.** Out of scope by policy; MCP/CLI automation is the alternative.
 
 ## AI features
@@ -256,6 +259,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | File › New has six original starter decks; a large template gallery is still open |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |
