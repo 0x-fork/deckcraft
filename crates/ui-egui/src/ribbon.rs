@@ -999,6 +999,12 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
     });
     drawing_group(app, ui);
     group(ui, |ui| {
+        ui.vertical(|ui| {
+            small(app, ui, Icon::Search, "Find", "app.find", json!({}));
+            small(app, ui, Icon::Spelling, "Replace", "app.replace", json!({}));
+        });
+    });
+    group(ui, |ui| {
         big(app, ui, Icon::DesignIdeas, "Design\nIdeas", "view.pane", json!({"pane": "designer"}));
     });
 }

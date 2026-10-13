@@ -64,7 +64,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
 | Comments pane (threads) | yes | yes |
 | Design Ideas (Designer) | yes (cloud) | no |
-| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Find and Replace, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 
 ## Direct manipulation
 
@@ -137,7 +137,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 |---|---|
 | Native macOS menu bar from `menu_tree()`, filled out to PowerPoint's menu items | 3–5 |
 | Format Shape pane depth | 6–10 |
-| Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
+| Missing dialogs (Font, Bullets and Numbering, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
 | Window chrome, system appearance, palette fixes (#41, #71, #79) | 3–5 |
 | Grid Options, edit points UI, crop depth | 4–7 |
 | Multiple windows | 3–5 |
