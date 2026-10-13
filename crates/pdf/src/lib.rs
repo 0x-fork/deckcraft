@@ -233,6 +233,54 @@ pub fn master_text_style(pres: &Presentation, m: &deckcraft_model::Master, sh: &
     TextStyle { family, size: r.size.unwrap_or(12.0).clamp(1.0, 400.0), bold: r.bold == Some(true), italic: r.italic == Some(true), color }
 }
 
+/// One laid-out piece of master text on a page of `paper` points: a run's text on one line, its
+/// baseline start and its size, colour, weight and slant.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextPiece {
+    pub at: (f64, f64),
+    pub text: String,
+    pub size: f64,
+    pub color: deckcraft_model::Rgba,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+/// The header, date, footer and page number of `m` for page `n`, laid out by the text engine
+/// (wrapped, mixed formatting) and scaled to `paper`, for drawing without glyph access (the
+/// Notes Page view).
+pub fn master_text_pieces(pres: &Presentation, m: &deckcraft_model::Master, paper: (f64, f64), n: usize) -> Vec<TextPiece> {
+    let (kx, ky) = (paper.0 / pres.notes_size.width.max(1.0), paper.1 / pres.notes_size.height.max(1.0));
+    let mut out = vec![];
+    for pt in deckcraft_render::place_master_texts(pres, m, n) {
+        for run in &pt.layout.runs {
+            let Some(g) = run.glyphs.first() else { continue };
+            let text: String = pt
+                .body
+                .paragraphs
+                .get(run.para)
+                .map(|p| p.runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                .unwrap_or_default()
+                .chars()
+                .skip(run.chars.0)
+                .take(run.chars.1.saturating_sub(run.chars.0))
+                .collect();
+            if text.trim().is_empty() {
+                continue;
+            }
+            let p = pt.transform * kurbo::Point::new(g.1, g.2);
+            out.push(TextPiece {
+                at: (p.x * kx, p.y * ky),
+                text,
+                size: run.size * ky,
+                color: run.color,
+                bold: run.fake_bold || run.face.weight >= 600.0,
+                italic: run.fake_italic || run.face.italic,
+            });
+        }
+    }
+    out
+}
+
 /// The header, date, footer and page-number text a master puts on page `n`, with where it goes,
 /// whether it's right-aligned and its style. Placeholders with no text are left out; the page
 /// number is always `n`.

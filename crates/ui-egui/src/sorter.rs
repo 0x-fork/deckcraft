@@ -132,11 +132,12 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     let srect = to_screen((slide_box.x0, slide_box.y0, slide_box.x1, slide_box.y1));
     let sw = srect.width();
     if let Some(m) = doc.notes_master.as_deref() {
-        for (r, text, right, st) in deckcraft_engine::pdf::master_texts(&doc, m, paper, idx + 1) {
-            let r = to_screen((r.x0, r.y0, r.x1, r.y1));
-            let (at, align) = if right { (r.right_center(), egui::Align2::RIGHT_CENTER) } else { (r.left_center(), egui::Align2::LEFT_CENTER) };
-            let c = Color32::from_rgba_unmultiplied(st.color.r, st.color.g, st.color.b, st.color.a);
-            ui.painter().text(at, align, text.lines().next().unwrap_or(""), theme::font((st.size as f32 * k).max(6.0)), c);
+        // Laid out by the text engine as on the PDF page: wrapped, each run in its size and colour.
+        for piece in deckcraft_engine::pdf::master_text_pieces(&doc, m, paper, idx + 1) {
+            let size = (piece.size as f32 * k).max(4.0);
+            let at = page.min + vec2(piece.at.0 as f32 * k, piece.at.1 as f32 * k - size * 0.8);
+            let c = Color32::from_rgba_unmultiplied(piece.color.r, piece.color.g, piece.color.b, piece.color.a);
+            ui.painter().text(at, egui::Align2::LEFT_TOP, &piece.text, theme::font(size), c);
         }
     }
     let ppp = ui.ctx().pixels_per_point();

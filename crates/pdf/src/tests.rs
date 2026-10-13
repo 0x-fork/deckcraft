@@ -176,6 +176,14 @@ fn master_text_wraps_and_keeps_mixed_formatting() {
     assert!(h.runs.iter().any(|r| r.color == Rgba::rgb(200, 0, 0)));
     let num: String = placed[1].body.text();
     assert_eq!(num, "4");
+    // The same layout as pieces for the Notes Page view: on more than one line, scaled to paper.
+    let pieces = master_text_pieces(&p, &m, (306.0, 396.0), 4);
+    let mut ys: Vec<i64> = pieces.iter().map(|x| x.at.1.round() as i64).collect();
+    ys.dedup();
+    assert!(ys.len() >= 3, "two header lines and the number: {pieces:?}");
+    assert!(pieces.iter().any(|x| x.bold && (x.size - 9.0).abs() < 0.5), "18 pt bold at half size");
+    assert!(pieces.iter().any(|x| x.color == Rgba::rgb(200, 0, 0) && !x.bold));
+    assert!(pieces.iter().any(|x| x.text == "4"));
     p.notes_master = Some(Arc::new(m));
     assert!(export(&p, &PdfOptions { layout: PageLayout::Notes, ..Default::default() }).unwrap().starts_with(b"%PDF"));
 }
