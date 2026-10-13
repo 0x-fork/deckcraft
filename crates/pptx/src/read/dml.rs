@@ -579,7 +579,7 @@ pub fn paragraph(imp: &mut Imp, part: &Part, p: &El) -> Paragraph {
                 for t in ts {
                     text.push_str(&t.text());
                 }
-                let omml = e.elements().map(|c| c.to_xml()).collect::<String>();
+                let omml = e.elements().map(|c| part.keep_inner(c)).collect::<String>();
                 para.runs.push(Run { text, props: RunProps::default(), kind: RunKind::Math { omml } });
             }
             "endParaRPr" => para.end_props = rpr(imp, part, e),

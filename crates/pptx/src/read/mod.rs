@@ -71,16 +71,52 @@ pub struct Part {
     pub name: String,
     pub rels: Rels,
     pub ns: Vec<(String, String)>,
+    /// Prefixes bound below the root only (on a wrapper such as `mc:Choice`), each to one namespace.
+    pub inner_ns: Vec<(String, String)>,
 }
 
 impl Part {
     pub fn new(pkg: &Package, name: &str, doc: &Doc) -> Self {
-        Part { name: name.to_string(), rels: pkg.rels(name), ns: doc.ns_decls() }
+        let ns = doc.ns_decls();
+        Part { name: name.to_string(), rels: pkg.rels(name), inner_ns: inner_decls(&doc.root, &ns), ns }
     }
     /// Serialize an element with the namespace declarations it needs from the part root.
     pub fn keep(&self, el: &El) -> String {
         keep_xml(el, &self.ns)
     }
+    /// Like [`Part::keep`], also declaring prefixes that only an enclosing wrapper binds.
+    pub fn keep_inner(&self, el: &El) -> String {
+        let ns: Vec<(String, String)> = self.ns.iter().chain(&self.inner_ns).cloned().collect();
+        keep_xml(el, &ns)
+    }
+}
+
+/// Prefixes declared below the root but not on it, skipping any bound to different namespaces.
+fn inner_decls(root: &El, ns: &[(String, String)]) -> Vec<(String, String)> {
+    fn rec(e: &El, out: &mut Vec<(String, String)>, clash: &mut HashSet<String>, depth: usize) {
+        if depth > crate::xml::MAX_DEPTH {
+            return;
+        }
+        for (k, v) in e.attrs.iter().filter(|(k, _)| k.starts_with("xmlns:")) {
+            match out.iter().find(|(o, _)| o == k).map(|(_, u)| u != v) {
+                Some(true) => {
+                    clash.insert(k.clone());
+                }
+                Some(false) => {}
+                None => out.push((k.clone(), v.clone())),
+            }
+        }
+        for c in e.elements() {
+            rec(c, out, clash, depth + 1);
+        }
+    }
+    let mut out = vec![];
+    let mut clash = HashSet::new();
+    for c in root.elements() {
+        rec(c, &mut out, &mut clash, 1);
+    }
+    out.retain(|(k, _)| !clash.contains(k) && !ns.iter().any(|(r, _)| r == k));
+    out
 }
 
 /// Serialize `el`, declaring every prefix it uses that the source root declared.
