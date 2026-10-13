@@ -452,7 +452,23 @@ impl Session {
         self.depth += 1;
         let r = (spec.run)(self, params);
         self.depth -= 1;
-        let r = r?;
+        let r = match r {
+            Ok(r) => r,
+            Err(e) => {
+                // A command made of several edits can fail after some of them went through; the
+                // outermost one puts the presentation back, so a failed command changes nothing.
+                if outer
+                    && let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
+                    && st.uid == uid
+                    && !Arc::ptr_eq(&old, &st.doc)
+                {
+                    st.doc = old;
+                    st.selection = sel;
+                    st.revision += 1;
+                }
+                return Err(e);
+            }
+        };
         if let Some(st) = self.active_mut() {
             clamp_selection(st);
         }
