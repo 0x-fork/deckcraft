@@ -129,7 +129,6 @@ app's JSON control channel (`deckcraft --control PORT`).
 | Date | What landed |
 |---|---|
 | 2026-10-13 | Slide transitions like PowerPoint: every transition and option measured frame by frame against PowerPoint's video export and retuned (curves, directions, soft edges, 3-D perspective, contents moving over backgrounds); PowerPoint's own XML elements and defaults read and written (diagonal Wipe, Zoom, Shape In/Out, Glitter Hexagons, Shred In/Out, Page Curl Single); `deckcraft-cli render-transition` renders frames headless |
-
 | 2026-10-13 | Wild text cases measured against PowerPoint (102 synthetic slides): bidi by run language, East Asian vertical text upright, mongolianVert/wordArtVert/wordArtVertRtl, underline styles and strikethrough at the font's metrics, centre/right/decimal tabs, East Asian, Thai, Hindi, Arabic and Hebrew numbering, small caps, all-caps "ß", transparent text, soft hyphens, kinsoku, rtlCol and just/dist anchoring, emoji presentation, fallback faces that no longer move the baseline |
 | 2026-10-12 | Objects off the slide show and can be selected and moved around it in Normal view, as in PowerPoint; the show, exports and thumbnails still clip to the slide (#270) |
 | 2026-10-12 | Korean, Japanese and Chinese input: IME composition shown in place and underlined, one undo step per composition, candidate window at the caret (slide text, notes, fields); interface text (title, notes, outline, sections, comments) borrows installed fonts for scripts the interface fonts lack (#101) |
