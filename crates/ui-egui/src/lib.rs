@@ -227,6 +227,8 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    /// Slide Sorter: folded sections, inline rename, dragging a whole section.
+    pub sorter: sorter::State,
 }
 
 impl SlideApp {
@@ -267,6 +269,7 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            sorter: sorter::State::default(),
         }
     }
 
