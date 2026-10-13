@@ -103,7 +103,7 @@ fn export_tool_lists_pdf_and_its_options() {
     }
     assert_eq!(props["layout"]["enum"], json!(["slides", "notes", "handouts"]));
     assert_eq!(props["perPage"]["enum"], json!([1, 2, 3, 4, 6, 9]));
-    for p in ["dpi", "slides", "includeHidden", "textLayer", "frame"] {
+    for p in ["dpi", "slides", "includeHidden", "textLayer", "frame", "paper", "orientation"] {
         assert!(props.get(p).is_some(), "{p}: {export}");
     }
     // What the schema describes is accepted.
@@ -112,7 +112,11 @@ fn export_tool_lists_pdf_and_its_options() {
     tool(&mut s, "new_presentation", json!({}));
     for layout in ["slides", "notes", "handouts"] {
         let path = dir.join(format!("{layout}.pdf"));
-        tool(&mut s, "export", json!({"path": path.to_string_lossy(), "format": "pdf", "layout": layout, "perPage": 3}));
+        tool(
+            &mut s,
+            "export",
+            json!({"path": path.to_string_lossy(), "format": "pdf", "layout": layout, "perPage": 3, "paper": "a4", "orientation": "landscape"}),
+        );
         assert!(std::fs::read(&path).unwrap().starts_with(b"%PDF"), "{layout}");
     }
     let _ = std::fs::remove_dir_all(&dir);

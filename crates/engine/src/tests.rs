@@ -835,3 +835,16 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// The Print page's paper and orientation reach the PDF options; Letter portrait by default.
+#[test]
+fn pdf_options_take_paper_and_orientation() {
+    let o = cmd::file::pdf_options(&json!({}), 1).unwrap();
+    assert_eq!(o.paper, (612.0, 792.0));
+    let o = cmd::file::pdf_options(&json!({"paper": "A4", "orientation": "landscape"}), 1).unwrap();
+    assert_eq!(o.paper, (841.89, 595.28));
+    let o = cmd::file::pdf_options(&json!({"paper": "legal"}), 1).unwrap();
+    assert_eq!(o.paper, (612.0, 1008.0));
+    assert!(cmd::file::pdf_options(&json!({"paper": "tabloid"}), 1).is_err());
+    assert!(cmd::file::pdf_options(&json!({"orientation": "sideways"}), 1).is_err());
+}

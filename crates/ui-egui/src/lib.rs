@@ -157,7 +157,12 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.home", "Home", None, "{on?}"),
     ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
-    ("app.print", "Print", Some("Cmd+P"), "{layout?, perPage?, slides?, includeHidden?, frame?}"),
+    (
+        "app.print",
+        "Print",
+        Some("Cmd+P"),
+        "{layout?, perPage?, slides?, includeHidden?, frame?, paper?: letter|a4|legal|a3, orientation?: portrait|landscape}",
+    ),
     ("app.about", "About DeckCraft", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),

@@ -129,7 +129,9 @@ pub fn tool_definitions() -> Vec<Value> {
                     "slides": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "PDF: slide indices to export (default all)"},
                     "includeHidden": boolean("PDF: include hidden slides (default false)"),
                     "textLayer": boolean("PDF: invisible text layer for search, select and copy (default true)"),
-                    "frame": boolean("PDF notes/handouts: thin frame around each slide (default true)")
+                    "frame": boolean("PDF notes/handouts: thin frame around each slide (default true)"),
+                    "paper": {"type": "string", "enum": ["letter", "a4", "legal", "a3"], "description": "PDF notes/handouts: paper size (default letter)"},
+                    "orientation": {"type": "string", "enum": ["portrait", "landscape"], "description": "PDF notes/handouts: page orientation (default portrait)"}
                 }),
                 &["path"],
             ),
