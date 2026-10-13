@@ -402,4 +402,17 @@ mod tests {
         assert_eq!(relative("ppt/presentation.xml", "ppt/slides/slide1.xml"), "slides/slide1.xml");
         assert_eq!(relative("ppt/slides/slide1.xml", "ppt/slides/slide2.xml"), "slide2.xml");
     }
+
+    #[test]
+    fn sidecar_parts_stay_inside_chart_folders() {
+        assert!(sidecar_part("ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx"));
+        assert!(sidecar_part("ppt/charts/style1.xml"));
+        assert!(sidecar_part("ppt/drawings/chartDrawing1.xml"));
+        assert!(sidecar_part("ppt/media/image1.png"));
+        assert!(!sidecar_part("ppt/charts/chart1.xml"));
+        assert!(!sidecar_part("ppt/charts/_rels/chart1.xml.rels"));
+        assert!(!sidecar_part("ppt/slides/slide1.xml"));
+        assert!(!sidecar_part("ppt/embeddings/../../ppt/slides/slide1.xml"));
+        assert!(!sidecar_part("/etc/passwd"));
+    }
 }

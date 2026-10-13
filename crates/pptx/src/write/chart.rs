@@ -509,13 +509,7 @@ pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart)
             log::warn!("pptx: not writing chart part {}", p.name);
             continue;
         }
-        let owned;
-        let ct = if !p.content_type.is_empty() {
-            p.content_type.as_str()
-        } else {
-            owned = crate::mime_for(&p.name).to_string();
-            owned.as_str()
-        };
-        pkg.binary(&p.name, ct, p.bytes.clone());
+        let ct = if !p.content_type.is_empty() { p.content_type.clone() } else { crate::mime_for(&p.name).to_string() };
+        pkg.binary(&p.name, &ct, p.bytes.clone());
     }
 }

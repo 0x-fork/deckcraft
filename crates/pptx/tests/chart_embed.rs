@@ -56,7 +56,7 @@ fn with_workbook(bytes: &[u8]) -> Vec<u8> {
     let chart_part = chart_part.expect("chart part");
     let rels = format!("ppt/charts/_rels/{}.rels", chart_part.rsplit('/').next().unwrap_or("chart1.xml"));
     let rels_xml = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/Microsoft_Excel_Worksheet1.xlsx"/></Relationships>"#;
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/Microsoft_Excel_Worksheet1.xlsx"/><Relationship Id="rIdBad" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide1.xml"/></Relationships>"#;
     out.start_file(rels, opts).expect("rels");
     out.write_all(rels_xml).expect("rels bytes");
     out.start_file(EMBED, opts).expect("embed");
@@ -106,6 +106,14 @@ fn an_unchanged_chart_keeps_its_embedded_workbook() {
         .map(|(_, d)| String::from_utf8_lossy(d).into_owned())
         .expect("chart relationships");
     assert!(rels.contains("../embeddings/Microsoft_Excel_Worksheet1.xlsx"), "{rels}");
+    assert!(!rels.contains("slide1.xml"), "a chart relationship must not replace the slide: {rels}");
+    let slide = saved_parts
+        .iter()
+        .find(|(n, _)| n == "ppt/slides/slide1.xml")
+        .map(|(_, d)| String::from_utf8_lossy(d).into_owned())
+        .expect("slide");
+    assert!(slide.contains("sld"), "{slide}");
+    assert!(!slide.as_bytes().windows(WORKBOOK.len()).any(|w| w == WORKBOOK));
     let xml = saved_parts
         .iter()
         .find(|(n, _)| n.starts_with("ppt/charts/chart") && n.ends_with(".xml"))

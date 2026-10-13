@@ -234,45 +234,71 @@ pub(crate) fn capture_kept(pkg: &crate::opc::Package, chart_part: &str) -> deckc
     use deckcraft_model::chart::{ChartKept, ChartRel};
 
     let mut kept = ChartKept::default();
-    let mut seen = std::collections::HashSet::new();
-    seen.insert(crate::opc::norm(chart_part));
+    // The chart document itself is rewritten; don't store a second copy of it.
+    let mut seen = std::collections::HashMap::from([(crate::opc::norm(chart_part), true)]);
     for r in pkg.rels(chart_part).items {
-        kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, external: r.external });
-        if !r.external {
-            copy_part(pkg, &r.target, &mut kept.parts, &mut seen, 0);
+        if !safe_rel(&r.id, &r.ty, &r.target_raw) {
+            log::warn!("pptx: skipping chart relationship {}", r.id);
+            continue;
+        }
+        if r.external {
+            kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, external: true });
+            continue;
+        }
+        if copy_part(pkg, &r.target, &mut kept.parts, &mut seen, 0) {
+            kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, external: false });
         }
     }
     kept
 }
 
+fn safe_rel(id: &str, ty: &str, target: &str) -> bool {
+    [id, ty, target].iter().all(|s| !s.is_empty() && s.len() <= 4096 && !s.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | '"' | '\'')))
+}
+
+/// `true` when `part` is stored (now or from an earlier relationship).
 fn copy_part(
     pkg: &crate::opc::Package,
     part: &str,
     out: &mut Vec<deckcraft_model::chart::ChartPart>,
-    seen: &mut std::collections::HashSet<String>,
+    seen: &mut std::collections::HashMap<String, bool>,
     depth: usize,
-) {
+) -> bool {
     use deckcraft_model::chart::ChartPart;
 
     if depth > MAX_KEPT_DEPTH || out.len() >= MAX_KEPT_PARTS {
         log::warn!("pptx: chart part closure stopped at {part}");
-        return;
+        return false;
     }
     let key = crate::opc::norm(part);
-    if !seen.insert(key) {
-        return;
+    if let Some(ok) = seen.get(&key) {
+        return *ok;
+    }
+    if !crate::opc::sidecar_part(part) {
+        log::warn!("pptx: chart relationship target {part} is not kept");
+        seen.insert(key, false);
+        return false;
     }
     let Some(bytes) = pkg.get(part) else {
         log::warn!("pptx: chart relationship target {part} is missing");
-        return;
+        seen.insert(key, false);
+        return false;
     };
     let name = pkg.original_name(part).unwrap_or(part).trim_start_matches('/').to_string();
+    if !crate::opc::sidecar_part(&name) {
+        log::warn!("pptx: chart part name {name} is not kept");
+        seen.insert(key, false);
+        return false;
+    }
     let content_type = pkg.content_type(part).unwrap_or_default();
     out.push(ChartPart { name, content_type, bytes: bytes.to_vec() });
+    seen.insert(key, true);
     let rels_name = crate::opc::rels_path(part);
-    if seen.insert(crate::opc::norm(&rels_name))
+    if crate::opc::sidecar_part(&rels_name)
+        && seen.get(&crate::opc::norm(&rels_name)).is_none()
         && let Some(rels_bytes) = pkg.get(&rels_name)
     {
+        seen.insert(crate::opc::norm(&rels_name), true);
         let name = pkg.original_name(&rels_name).unwrap_or(&rels_name).trim_start_matches('/').to_string();
         out.push(ChartPart { name, content_type: "application/vnd.openxmlformats-package.relationships+xml".into(), bytes: rels_bytes.to_vec() });
         let targets: Vec<String> = pkg.rels(part).items.into_iter().filter(|r| !r.external).map(|r| r.target).collect();
@@ -280,4 +306,5 @@ fn copy_part(
             copy_part(pkg, &target, out, seen, depth + 1);
         }
     }
+    true
 }
