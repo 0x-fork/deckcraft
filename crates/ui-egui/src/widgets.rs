@@ -39,6 +39,9 @@ pub fn big_button_ex(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, split:
     let text_w = lines.iter().map(|l| ui.fonts_mut(|f| f.layout_no_wrap(l.to_string(), font.clone(), t.text).size().x)).fold(0.0f32, f32::max);
     let w = (text_w + 10.0 + if split && lines.len() == 1 { 10.0 } else { 0.0 }).max(40.0);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, RIBBON_H - 2.0), if enabled { Sense::click() } else { Sense::hover() });
+    // Named for screen readers and UI tests ("Ink to\nShape" reads "Ink to Shape").
+    let spoken = label.replace('\n', " ");
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &spoken));
     let painter = ui.painter_at(rect.expand(1.0));
     let (main_rect, arrow_rect) = if split {
         (Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + 38.0)), Some(Rect::from_min_max(pos2(rect.min.x, rect.min.y + 38.0), rect.max)))

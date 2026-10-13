@@ -61,6 +61,24 @@ pub fn specs() -> Vec<CommandSpec> {
         )),
         cmd!("table.columnWidth", "Width", ["Table Layout", "Cell Size"], None, "{col, width: pt, id?}", has_selection, column_width),
         cmd!("table.rowHeight", "Height", ["Table Layout", "Cell Size"], None, "{row, height: pt, id?}", has_selection, row_height),
+        cmd!(
+            "table.drawLine",
+            "Draw Table",
+            ["Table Design", "Draw Borders"],
+            None,
+            "{from: [x, y], to: [x, y] slide pt, id?: table (default: the one under `from`)} splits the cells the line crosses",
+            has_slide,
+            draw_line
+        ),
+        cmd!(
+            "table.eraseLine",
+            "Table Eraser",
+            ["Table Design", "Draw Borders"],
+            None,
+            "{at: [x, y] slide pt, id?, tol?: pt (default 6)} merges the two cells on either side of the nearest border",
+            has_slide,
+            erase_line
+        ),
         cmd!(noundo "table.selectCells", "Select Cells", [], None, "{from: [r,c], to: [r,c], id?}", has_selection, select_cells),
     ]
 }
@@ -265,4 +283,42 @@ fn select_cells(s: &mut Session, p: &Value) -> Result<Value> {
         sel.text = None;
     })?;
     ok()
+}
+
+fn point_param(p: &Value, key: &str) -> Option<(f64, f64)> {
+    let a = p.get(key)?;
+    let (x, y) = (a.get(0)?.as_f64()?, a.get(1)?.as_f64()?);
+    (x.is_finite() && y.is_finite()).then_some((x, y))
+}
+
+/// The table under slide point `at` (frontmost), or the one named by `id`, with its origin.
+pub(crate) fn table_at(s: &Session, p: &Value, at: (f64, f64)) -> Option<(deckcraft_model::ShapeId, (f64, f64))> {
+    let st = s.doc().ok()?;
+    let want = id_param(p, "id");
+    st.shapes().iter().rev().find_map(|sh| {
+        let x = sh.xfrm?;
+        let ShapeKind::Table(t) = &sh.kind else { return None };
+        let inside = at.0 >= x.x && at.1 >= x.y && at.0 <= x.x + t.width() && at.1 <= x.y + t.height();
+        (want.map_or(inside, |w| w == sh.id)).then_some((sh.id, (x.x, x.y)))
+    })
+}
+
+fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
+    let from = point_param(p, "from").ok_or_else(|| bad("table.drawLine", "missing `from`"))?;
+    let to = point_param(p, "to").ok_or_else(|| bad("table.drawLine", "missing `to`"))?;
+    let (id, o) = table_at(s, p, from).ok_or_else(|| bad("table.drawLine", "no table there"))?;
+    let (a, b) = ((from.0 - o.0, from.1 - o.1), (to.0 - o.0, to.1 - o.1));
+    with_table(s, &json!({"id": id.0}), "table.drawLine", move |t| {
+        if crate::drawtable::draw_line(t, a, b) { Ok(()) } else { Err(bad("table.drawLine", "the line doesn't divide any cell")) }
+    })
+}
+
+fn erase_line(s: &mut Session, p: &Value) -> Result<Value> {
+    let at = point_param(p, "at").ok_or_else(|| bad("table.eraseLine", "missing `at`"))?;
+    let tol = p.get("tol").and_then(Value::as_f64).filter(|v| v.is_finite()).unwrap_or(6.0).clamp(0.5, 50.0);
+    let (id, o) = table_at(s, p, at).ok_or_else(|| bad("table.eraseLine", "no table there"))?;
+    let q = (at.0 - o.0, at.1 - o.1);
+    with_table(s, &json!({"id": id.0}), "table.eraseLine", move |t| {
+        if crate::drawtable::erase_at(t, q, tol) { Ok(()) } else { Err(bad("table.eraseLine", "no border to erase there")) }
+    })
 }

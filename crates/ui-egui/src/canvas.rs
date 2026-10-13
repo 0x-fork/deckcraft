@@ -608,6 +608,16 @@ fn draw_preview(app: &SlideApp, p: &egui::Painter, xf: Xf, x: Xfrm, t: &Tokens) 
         ToolKind::Shape { preset } => preset.clone(),
         _ => "rect".into(),
     };
+    if preset == deckcraft_engine::tools::DRAW_TABLE {
+        // A border inside a table (flat), or the outline of a new table.
+        let (a, b) = (xf.to_screen(Point::new(x.x, x.y)), xf.to_screen(Point::new(x.x + x.w, x.y + x.h)));
+        if x.w < 0.5 || x.h < 0.5 {
+            p.line_segment([a, b], Stroke::new(1.5, t.accent));
+        } else {
+            p.rect_stroke(Rect::from_two_pos(a, b), 0.0, Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+        }
+        return;
+    }
     if deckcraft_geom::preset::is_line_like(&preset) {
         let a = x.affine();
         p.line_segment([xf.to_screen(a * Point::new(0.0, 0.0)), xf.to_screen(a * Point::new(x.w, x.h))], Stroke::new(1.5, t.accent));

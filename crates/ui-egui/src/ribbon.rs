@@ -1027,6 +1027,10 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
                 app.dialog = Some(crate::dialogs::Dialog::new("table"));
                 ui.close();
             }
+            if ui.button("Draw Table").clicked() {
+                app.session.set_tool(deckcraft_engine::ToolKind::Shape { preset: deckcraft_engine::tools::DRAW_TABLE.into() });
+                ui.close();
+            }
         });
     });
     group(ui, |ui| {
@@ -2224,6 +2228,18 @@ fn table_design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
     });
+    // Draw Borders: the pencil splits cells along a line, the eraser merges across a border.
+    group(ui, |ui| {
+        use deckcraft_engine::ToolKind;
+        use deckcraft_engine::tools::{DRAW_TABLE, TABLE_ERASER};
+        let cur = app.session.tool.kind.clone();
+        for (icon, label, preset) in [(Icon::Pencil, "Draw Table", DRAW_TABLE), (Icon::Eraser, "Table Eraser", TABLE_ERASER)] {
+            let on = matches!(&cur, ToolKind::Shape { preset: p } if p == preset);
+            if big_button_ex(ui, icon, label, true, false, on).0.clicked() {
+                app.session.set_tool(if on { ToolKind::Select } else { ToolKind::Shape { preset: preset.into() } });
+            }
+        }
+    });
 }
 
 pub fn paint_table_style(p: &egui::Painter, r: Rect, id: &str, sc: &deckcraft_color::ColorScheme) {
@@ -2420,3 +2436,7 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
 }
+
+#[cfg(test)]
+#[path = "drawtable_tests.rs"]
+mod drawtable_tests;
