@@ -3,12 +3,12 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
+| P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
 
 | Area | Parity |
@@ -17,7 +17,7 @@ The summary between `<!-- SUMMARY -->
 | Files | 71% |
 | Slides | 90% |
 | Views | 90% |
-| Masters & themes | 85% |
+| Masters & themes | 88% |
 | Shapes | 88% |
 | Format | 83% |
 | Arrange | 100% |
@@ -94,7 +94,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Masters & themes | Insert/rename/delete layouts, insert placeholders | P1 | D |
 | Masters & themes | Handout and Notes masters | P2 | M |
 | Masters & themes | Built-in themes (original designs) | P0 | D |
-| Masters & themes | Theme variants | P1 | P |
+| Masters & themes | Theme variants | P1 | D |
 | Masters & themes | Colour schemes (built-in and custom) | P0 | D |
 | Masters & themes | Font schemes (built-in and custom) | P0 | D |
 | Masters & themes | Effect schemes / background styles | P2 | P |
