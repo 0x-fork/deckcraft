@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (View › New Window opens a second window on the same presentation; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -23,7 +23,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 | Status bar: slide counter, language, notes, comments, views, zoom slider | yes | yes | |
 | Command search (Tell Me) | yes | command palette | #79 default entry fails |
 | Light / dark appearance | follows the system | light or dark; doesn't follow the system (#41) | 1–2 h |
-| One window per presentation, New Window, Arrange All | yes | tabs in one window; no New Window | 3–5 h |
+| One window per presentation, New Window, Arrange All | yes | New Window opens one more window on the same presentation (its own slide, live with edits); tabs stay in the first window; no Arrange All | Arrange All |
 | Quick Access Toolbar customization | yes | no | P1 partial |
 
 ## File tab (Backstage)
@@ -140,7 +140,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
 | Window chrome, system appearance, palette fixes (#41, #71, #79) | 3–5 |
 | Grid Options, edit points UI, crop depth | 4–7 |
-| Multiple windows | 3–5 |
+| Arrange All (New Window is one extra window) | 2–3 |
 | A screenshot comparison pass on the most-used tabs | 2–4 |
 | **Total** | **~30–52** |
 
@@ -148,6 +148,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | View › New Window: a second window on the same presentation, with its own slide; Arrange All is still missing |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

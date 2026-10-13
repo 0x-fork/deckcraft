@@ -11,6 +11,7 @@ pub mod canvas;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+pub mod doc_window;
 pub mod fillui;
 pub mod icons;
 pub mod media;
@@ -151,6 +152,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
     ("view.grayscale", "Grayscale", None, "{on?: bool}"),
+    ("view.newWindow", "New Window", None, "{on?: bool, slide?: index, delta?: int}"),
     ("show.start", "Slide Show", Some("F5"), "{from?: index}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
@@ -227,6 +229,8 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    /// View › New Window: a second window on one presentation. `None` when it is closed.
+    pub doc_window: Option<doc_window::DocWindow>,
 }
 
 impl SlideApp {
@@ -267,6 +271,7 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            doc_window: None,
         }
     }
 
@@ -493,6 +498,7 @@ impl SlideApp {
                 self.restyle = true;
             }
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
+            "view.newWindow" => return doc_window::command(self, p),
             "show.start" => {
                 let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
                 self.start_show(from, false);
@@ -937,6 +943,7 @@ impl SlideApp {
         self.tick_media(&ctx);
         if self.show.is_some() {
             show::ui(self, ui);
+            doc_window::show(self, &ctx);
             self.perf.frame_ms = now_ms() - t0;
             return;
         }
@@ -986,6 +993,7 @@ impl SlideApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         self.drain_requests();
+        doc_window::show(self, &ctx);
         self.perf.frame_ms = now_ms() - t0;
     }
 
@@ -1304,6 +1312,42 @@ mod tests {
         let mut app = SlideApp::new(Session::new(), Services::default());
         app.run("app.home", json!({})).unwrap();
         assert!(!app.backstage_open(), "with nothing open the start screen shows anyway");
+    }
+
+    /// View › New Window is a second window on the open presentation. Its slide is its own;
+    /// the editor's selection stays where it was. Closing the window leaves the document open.
+    #[test]
+    fn new_window_shows_the_same_document_on_its_own_slide() {
+        let mut app = SlideApp::new(Session::with_new(), Services::default());
+        app.session.execute("slide.new", &json!({})).unwrap();
+        app.session.execute("slide.go", &json!({"index": 1})).unwrap();
+        let err = {
+            let mut empty = SlideApp::new(Session::new(), Services::default());
+            empty.run("view.newWindow", json!({})).unwrap_err()
+        };
+        assert!(err.contains("presentation"), "{err}");
+
+        let name = app.session.active().unwrap().title();
+        let opened = app.run("view.newWindow", json!({})).unwrap();
+        assert_eq!(opened["open"], true);
+        assert_eq!(opened["window"], 2);
+        assert_eq!(opened["slide"], 1);
+        assert_eq!(opened["title"], format!("{name}:2"));
+        assert_eq!(app.session.active().unwrap().selection.slide, 1);
+
+        let moved = app.run("view.newWindow", json!({"delta": -1})).unwrap();
+        assert_eq!(moved["slide"], 0);
+        assert_eq!(app.doc_window.as_ref().unwrap().slide, 0);
+        assert_eq!(app.session.active().unwrap().selection.slide, 1, "the editor stays on its slide");
+
+        let again = app.run("view.newWindow", json!({})).unwrap();
+        assert_eq!(again["window"], 2);
+        assert_eq!(again["slide"], 0, "opening again keeps the window's slide");
+
+        app.session.execute("file.close", &json!({})).unwrap();
+        doc_window::show(&mut app, &egui::Context::default());
+        assert!(app.doc_window.is_none(), "closing the presentation closes the extra window");
+        assert!(app.session.active().is_none());
     }
     fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
         let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(

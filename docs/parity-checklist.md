@@ -9,14 +9,14 @@ The summary between `<!-- SUMMARY -->
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
+| P2 | 54 | 13 | 16 | 25 | 39% |
 
 | Area | Parity |
 |---|---|
 | Application shell | 77% |
 | Files | 71% |
 | Slides | 90% |
-| Views | 90% |
+| Views | 93% |
 | Masters & themes | 85% |
 | Shapes | 88% |
 | Format | 83% |
@@ -89,7 +89,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Views | Rulers, gridlines, guides | P1 | P |
 | Views | Smart guides | P1 | D |
 | Views | Grayscale / black and white view | P2 | D |
-| Views | New window / arrange windows | P2 | M |
+| Views | New window / arrange windows | P2 | P |
 | Masters & themes | Slide Master view (edit master and layouts) | P0 | D |
 | Masters & themes | Insert/rename/delete layouts, insert placeholders | P1 | D |
 | Masters & themes | Handout and Notes masters | P2 | M |
