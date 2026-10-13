@@ -1224,6 +1224,9 @@ impl Renderer {
                 Some(pf) => {
                     ctx.push_clip_layer(&silhouette);
                     paint::picture(ctx, rctx.pres, pf, Rect::new(0.0, 0.0, w, h), sm, None);
+                    // Drawing the picture leaves its own pixel transform set: back to the shape's,
+                    // or the recolouring below covers only part of a large picture's shadow.
+                    ctx.set_transform(sm);
                     ctx.push_layer(None, Some(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::SrcIn)), None, None, None);
                     ctx.set_paint(color(c.with_alpha(255), 1.0));
                     ctx.fill_rect(&Rect::new(0.0, 0.0, w, h).inflate(1.0, 1.0));

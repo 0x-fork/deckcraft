@@ -598,3 +598,37 @@ fn table_borders_take_their_dashes_and_diagonals_are_drawn() {
     // The diagonal from top-left to bottom-right passes through the middle.
     assert!(close(img.pixel(200, 150), Rgba::rgb(0, 0, 255), 40), "{:?}", img.pixel(200, 150));
 }
+
+#[test]
+fn a_large_pictures_shadow_is_whole() {
+    // A 400 px picture shown at 240 pt: its shadow was recoloured in the picture's pixel space and
+    // covered only part of it.
+    let mut counts = vec![];
+    for side in [8u32, 400] {
+        let mut p = Presentation::default();
+        let media = p.add_media("image1.png", "image/png", png(side, side * 3 / 4, [0, 0, 255]));
+        let mut fx = offset_shadow();
+        if let Some(o) = &mut fx.outer_shadow {
+            o.blur = 8.0;
+        }
+        let sh = Shape {
+            id: ShapeId(15),
+            xfrm: Some(Xfrm { rot: 20.0, ..Xfrm::new(360.0, 300.0, 240.0, 160.0) }),
+            kind: ShapeKind::Picture { fill: deckcraft_model::style::PictureFill { media, ..Default::default() } },
+            effects: Some(fx),
+            ..Default::default()
+        };
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        counts.push(
+            (0..img.height)
+                .flat_map(|y| (0..img.width).map(move |x| (x, y)))
+                .filter(|(x, y)| {
+                    let q = img.pixel(*x, *y);
+                    q[0] < 200 && q[2] < 200
+                })
+                .count(),
+        );
+    }
+    assert!(counts[1] > 3000 && (counts[0] as i64 - counts[1] as i64).abs() < 300, "{counts:?}");
+}
