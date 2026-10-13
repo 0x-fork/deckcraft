@@ -148,10 +148,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, Pareto,
   box & whisker) are read, drawn, inserted, edited and saved as `chartEx` (kept unchanged, else
   written from the model, with a plain chart fallback). Waterfalls float and total, funnels,
-  treemaps (squarified) and sunbursts (innermost ring only) have their own layouts, histograms and
-  Paretos bin their data (count, width or Scott's rule), and box & whisker charts use exclusive
-  quartiles with 1.5 IQR whiskers. Multi-level treemap and sunburst hierarchies, inclusive
-  quartiles and region maps remain.
+  treemaps (squarified, nested by level with group banners) and sunbursts (one ring per level)
+  have their own layouts, histograms and Paretos bin their data (count, width or Scott's rule),
+  and box & whisker charts use exclusive or inclusive quartiles with 1.5 IQR whiskers. Region maps
+  remain.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 

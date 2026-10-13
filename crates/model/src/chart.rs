@@ -206,6 +206,13 @@ pub struct Chart {
     /// the running total, instead of floating.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subtotals: Vec<usize>,
+    /// Outer category levels of a treemap or sunburst, innermost first (the leaves' parents,
+    /// then theirs…), each with one label per category. A blank label continues the one above it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub category_levels: Vec<Vec<String>>,
+    /// Box and whisker quartiles by the inclusive method (QUARTILE.INC) instead of exclusive.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub inclusive_quartiles: bool,
     /// A histogram's bin count (`cx:binCount`); with neither this nor `bin_size` the bins are
     /// automatic (Scott's rule, as Excel does).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -253,6 +260,8 @@ impl Default for Chart {
             y2_hidden: false,
             lang: None,
             subtotals: vec![],
+            category_levels: vec![],
+            inclusive_quartiles: false,
             bin_count: None,
             bin_size: None,
             raw: None,
@@ -266,6 +275,15 @@ impl Chart {
         let cats = ["Q1", "Q2", "Q3", "Q4"];
         let data = [[4.2, 2.6, 2.1], [2.8, 4.1, 2.4], [3.6, 1.9, 3.3], [4.7, 3.0, 5.1]];
         let mut c = Chart { kind, categories: cats.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+        if matches!(kind, ChartType::Treemap | ChartType::Sunburst) {
+            // A two-level hierarchy: months inside quarters.
+            c.categories = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"].iter().map(|s| s.to_string()).collect();
+            c.category_levels = vec![["Q1", "Q1", "Q1", "Q2", "Q2", "Q2", "Q3", "Q3"].iter().map(|s| s.to_string()).collect()];
+            let v = [4.2, 2.8, 3.6, 4.7, 2.6, 4.1, 1.9, 3.0];
+            c.series.push(Series { name: "Series 1".into(), values: v.iter().map(|x| Some(*x)).collect(), ..Default::default() });
+            c.vary_colors = true;
+            return c;
+        }
         if matches!(kind, ChartType::Histogram | ChartType::Pareto | ChartType::BoxWhisker) {
             // These plot raw observations: a histogram bins one series, a box chart summarises
             // each category's points.
@@ -743,7 +761,7 @@ impl Chart {
                             .filter_map(|(_, v)| *v)
                             .filter(|v| v.is_finite())
                             .collect();
-                        box_stats(pts)
+                        box_stats_by(pts, self.inclusive_quartiles)
                     })
                     .collect()
             })
@@ -763,13 +781,29 @@ fn quantile_exc(v: &[f64], p: f64) -> f64 {
     a + (b - a) * frac
 }
 
-/// The summary of one group's points.
-pub fn box_stats(mut pts: Vec<f64>) -> Option<BoxStats> {
+/// Excel's QUARTILE.INC position `p·(n-1)` (0-based) on sorted data.
+fn quantile_inc(v: &[f64], p: f64) -> f64 {
+    let n = v.len();
+    let pos = (p * (n as f64 - 1.0)).clamp(0.0, (n - 1) as f64);
+    let i = pos.floor() as usize;
+    let a = v[i.min(n - 1)];
+    let b = v[(i + 1).min(n - 1)];
+    a + (b - a) * (pos - i as f64)
+}
+
+/// The summary of one group's points, with exclusive quartiles.
+pub fn box_stats(pts: Vec<f64>) -> Option<BoxStats> {
+    box_stats_by(pts, false)
+}
+
+/// The summary of one group's points; `inclusive` picks QUARTILE.INC over QUARTILE.EXC.
+pub fn box_stats_by(mut pts: Vec<f64>, inclusive: bool) -> Option<BoxStats> {
     if pts.is_empty() {
         return None;
     }
     pts.sort_by(f64::total_cmp);
-    let (q1, median, q3) = (quantile_exc(&pts, 0.25), quantile_exc(&pts, 0.5), quantile_exc(&pts, 0.75));
+    let q = |p: f64| if inclusive { quantile_inc(&pts, p) } else { quantile_exc(&pts, p) };
+    let (q1, median, q3) = (q(0.25), q(0.5), q(0.75));
     let iqr = q3 - q1;
     let (lo_fence, hi_fence) = (q1 - 1.5 * iqr, q3 + 1.5 * iqr);
     let inside: Vec<f64> = pts.iter().copied().filter(|v| *v >= lo_fence && *v <= hi_fence).collect();
@@ -778,6 +812,75 @@ pub fn box_stats(mut pts: Vec<f64>) -> Option<BoxStats> {
     let mean = pts.iter().sum::<f64>() / pts.len() as f64;
     let outliers = pts.iter().copied().filter(|v| *v < lo_fence || *v > hi_fence).collect();
     Some(BoxStats { low, q1, median, q3, high, mean, outliers })
+}
+
+/// A node of a treemap or sunburst hierarchy: its label, the total of the leaves under it, and
+/// its children (none for a leaf, which names its category index).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TreeNode {
+    pub name: String,
+    pub value: f64,
+    pub leaf: Option<usize>,
+    pub children: Vec<TreeNode>,
+}
+
+/// Levels of hierarchy a chart may have (a hostile file cannot nest deeper).
+pub const MAX_LEVELS: usize = 16;
+
+impl Chart {
+    /// The first series as a hierarchy: top-level nodes, each holding the consecutive
+    /// categories that share its label, down to the leaves. Without outer levels every
+    /// category is a top-level leaf. Negative and missing values count as zero.
+    pub fn category_tree(&self) -> Vec<TreeNode> {
+        let Some(s) = self.series.first() else { return vec![] };
+        let n = self.categories.len().max(s.values.len());
+        let levels: Vec<&Vec<String>> = self.category_levels.iter().take(MAX_LEVELS).collect();
+        // Each leaf's path from the top level down, blanks filled from the row above.
+        let mut last: Vec<String> = vec![String::new(); levels.len()];
+        let paths: Vec<Vec<String>> = (0..n)
+            .map(|i| {
+                let mut path = Vec::with_capacity(levels.len() + 1);
+                for (d, lv) in levels.iter().enumerate().rev() {
+                    let l = lv.get(i).map(|x| x.trim()).unwrap_or("");
+                    if !l.is_empty() {
+                        last[d] = l.to_string();
+                        // A new outer label starts fresh inner groups.
+                        for inner in last.iter_mut().take(d) {
+                            inner.clear();
+                        }
+                    }
+                    path.push(last[d].clone());
+                }
+                path.push(self.categories.get(i).cloned().unwrap_or_default());
+                path
+            })
+            .collect();
+        let value = |i: usize| s.values.get(i).copied().flatten().filter(|v| v.is_finite()).unwrap_or(0.0).max(0.0);
+        fn build(rows: &[(usize, &[String])], value: &dyn Fn(usize) -> f64) -> Vec<TreeNode> {
+            let mut out: Vec<TreeNode> = Vec::new();
+            let mut i = 0;
+            while i < rows.len() {
+                let (idx, path) = rows[i];
+                if path.len() <= 1 {
+                    out.push(TreeNode { name: path.first().cloned().unwrap_or_default(), value: value(idx), leaf: Some(idx), children: vec![] });
+                    i += 1;
+                    continue;
+                }
+                let head = &path[0];
+                let mut j = i;
+                while j < rows.len() && rows[j].1.len() > 1 && &rows[j].1[0] == head {
+                    j += 1;
+                }
+                let sub: Vec<(usize, &[String])> = rows[i..j].iter().map(|(k, p)| (*k, &p[1..])).collect();
+                let children = build(&sub, value);
+                out.push(TreeNode { name: head.clone(), value: children.iter().map(|c| c.value).sum(), leaf: None, children });
+                i = j;
+            }
+            out
+        }
+        let rows: Vec<(usize, &[String])> = paths.iter().enumerate().map(|(i, p)| (i, p.as_slice())).collect();
+        build(&rows, &value)
+    }
 }
 
 #[cfg(test)]
@@ -838,6 +941,35 @@ mod chartex_tests {
         assert!(box_stats(vec![]).is_none());
         let one = box_stats(vec![5.0]).unwrap();
         assert_eq!((one.low, one.q1, one.median, one.q3, one.high), (5.0, 5.0, 5.0, 5.0, 5.0));
+    }
+
+    #[test]
+    fn inclusive_quartiles_follow_quartile_inc() {
+        let b = box_stats_by(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0], true).unwrap();
+        // QUARTILE.INC on 8 points: positions 1.75, 3.5, 5.25 (0-based).
+        assert_eq!((b.q1, b.median, b.q3), (2.75, 4.5, 6.25));
+    }
+
+    #[test]
+    fn category_tree_groups_runs_and_fills_blank_parents() {
+        let mut c = Chart::sample(ChartType::Treemap);
+        let t = c.category_tree();
+        assert_eq!(t.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["Q1", "Q2", "Q3"]);
+        assert_eq!(t[0].children.len(), 3);
+        assert_eq!(t[0].children[1].leaf, Some(1));
+        assert!((t[0].value - (4.2 + 2.8 + 3.6)).abs() < 1e-9);
+        // Blank parents continue the label above; two outer levels nest.
+        c.category_levels = vec![
+            vec!["a".into(), "".into(), "b".into(), "".into(), "c".into(), "".into(), "".into(), "".into()],
+            vec!["H1".into(), "".into(), "".into(), "".into(), "H2".into(), "".into(), "".into(), "".into()],
+        ];
+        let t = c.category_tree();
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(t[1].children[0].children.len(), 4);
+        // No levels: every category is a leaf.
+        c.category_levels.clear();
+        assert!(c.category_tree().iter().all(|n| n.leaf.is_some()));
     }
 
     #[test]

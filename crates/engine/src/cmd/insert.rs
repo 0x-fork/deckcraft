@@ -64,7 +64,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Data",
             ["Chart Design", "Data"],
             None,
-            "{categories?: [..], series?: [{name, values}], id?}",
+            "{categories?: [..], levels?: [[..]] (outer category levels, innermost first), series?: [{name, values}], id?}",
             has_selection,
             chart_data
         ),
@@ -73,7 +73,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Chart Elements",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], id?}",
+            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, id?}",
             has_selection,
             chart_options
         ),
@@ -669,9 +669,20 @@ fn chart_data(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     });
+    let levels: Option<Vec<Vec<String>>> = p.get("levels").and_then(Value::as_array).map(|a| {
+        a.iter()
+            .take(deckcraft_model::chart::MAX_LEVELS)
+            .map(|l| {
+                l.as_array().map(|v| v.iter().map(|x| x.as_str().map(String::from).unwrap_or_else(|| x.to_string())).collect()).unwrap_or_default()
+            })
+            .collect()
+    });
     with_chart(s, p, "chart.data", |c| {
         if let Some(cs) = &cats {
             c.categories = cs.clone();
+        }
+        if let Some(l) = &levels {
+            c.category_levels = l.clone();
         }
         if let Some(se) = &series {
             // Keep series formatting by position.
@@ -721,6 +732,10 @@ fn chart_options(s: &mut Session, p: &Value) -> Result<Value> {
             t.sort_unstable();
             t.dedup();
             c.subtotals = t;
+        }
+        if let Some(q) = p.get("quartiles").and_then(Value::as_str) {
+            c.inclusive_quartiles = q.eq_ignore_ascii_case("inclusive");
+            c.raw = None;
         }
         if bin_count.is_some() || bin_size.is_some() || subtotals.is_some() {
             c.raw = None;

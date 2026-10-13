@@ -1160,3 +1160,40 @@ fn chartex_new_charts_save_as_their_own_type() {
         assert_eq!((after.bin_count, after.subtotals.clone()), (before.bin_count, before.subtotals.clone()), "{ty}");
     }
 }
+
+/// A two-level treemap keeps its parent level, and a box chart its inclusive quartiles, through
+/// a save and reopen.
+#[test]
+fn chartex_levels_and_quartiles_round_trip() {
+    use deckcraft_engine::Session;
+    let chart = |d: &Presentation| -> Option<Chart> {
+        d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+            ShapeKind::Chart(c) => Some((**c).clone()),
+            _ => None,
+        })
+    };
+    for ty in ["treemap", "sunburst", "boxwhisker"] {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+        s.execute("insert.chart", &serde_json::json!({"type": ty})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0].0;
+        if ty == "boxwhisker" {
+            s.execute("chart.options", &serde_json::json!({"id": id, "quartiles": "inclusive"})).unwrap();
+        } else {
+            s.execute(
+                "chart.data",
+                &serde_json::json!({"id": id, "levels": [["Q1", "", "", "Q2", "", "", "Q3", ""], ["H1", "", "", "", "", "", "H2", ""]]}),
+            )
+            .unwrap();
+        }
+        let before = chart(&s.doc().unwrap().doc).unwrap();
+        let out = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+        let after = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(after.category_levels, before.category_levels, "{ty}");
+        assert_eq!(after.inclusive_quartiles, before.inclusive_quartiles, "{ty}");
+        assert_eq!(after.category_tree(), before.category_tree(), "{ty}");
+        // Unchanged since import, the part is written back as read.
+        let again = deckcraft_pptx::export(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(chart(&deckcraft_pptx::import(&again).unwrap()).unwrap().category_levels, before.category_levels, "{ty}");
+    }
+}
