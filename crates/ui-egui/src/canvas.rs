@@ -371,7 +371,8 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     let m = mods(ui);
     let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) else { return };
     let p = xf.to_slide(pos);
-    let ev = |kind| PointerEvent { kind, x: p.x, y: p.y, mods: m, tol };
+    let pressure = reported_pressure(ui);
+    let ev = |kind| PointerEvent { kind, x: p.x, y: p.y, mods: m, tol, pressure };
     let primary = ui.input(|i| i.pointer.primary_pressed());
     if resp.hovered() && !app.session.tool.dragging() {
         let _ = app.session.pointer(ev(PointerKind::Move));
@@ -581,11 +582,33 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
     if app.session.tool.ink_preview.len() > 1
         && let ToolKind::Ink { color, width, mode } = &app.session.tool.kind
     {
-        let pts: Vec<Pos2> = app.session.tool.ink_preview.iter().map(|(x, y, _)| xf.to_screen(Point::new(*x, *y))).collect();
+        let pts = &app.session.tool.ink_preview;
+        let legacy = deckcraft_engine::model::ink_pressure_is_legacy(pts);
         let c = theme::to_color32(*color);
         let c = if mode == "highlighter" { c.gamma_multiply(0.45) } else { c };
-        painter.add(egui::Shape::line(pts, Stroke::new((*width as f32 * xf.scale).max(1.0), c)));
+        for pair in pts.windows(2) {
+            let a = deckcraft_engine::model::ink_sample_width(*width, pair[0].2, legacy);
+            let b = deckcraft_engine::model::ink_sample_width(*width, pair[1].2, legacy);
+            let sw = ((a + b) * 0.5 * f64::from(xf.scale)).max(1.0) as f32;
+            let p0 = xf.to_screen(Point::new(pair[0].0, pair[0].1));
+            let p1 = xf.to_screen(Point::new(pair[1].0, pair[1].1));
+            painter.add(egui::Shape::line(vec![p0, p1], Stroke::new(sw, c)));
+        }
     }
+}
+
+/// Pressure from a touch or pen this frame (`0..=1`). A mouse reports none.
+fn reported_pressure(ui: &Ui) -> Option<f32> {
+    ui.input(|i| {
+        i.events.iter().rev().find_map(|e| match e {
+            egui::Event::Touch { force: Some(f), phase, .. }
+                if matches!(phase, egui::TouchPhase::Start | egui::TouchPhase::Move) && f.is_finite() =>
+            {
+                Some(f.clamp(0.0, 1.0))
+            }
+            _ => None,
+        })
+    })
 }
 
 fn rotate_handle(p: &egui::Painter, c: Pos2, t: &Tokens) {

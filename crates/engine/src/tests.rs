@@ -126,7 +126,7 @@ fn align_and_distribute() {
 fn pointer_draw_move_resize() {
     let mut s = session();
     s.set_tool(ToolKind::Shape { preset: "rect".into() });
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::Down, 100.0, 100.0)).unwrap();
     s.pointer(ev(PointerKind::Drag, 200.0, 180.0)).unwrap();
     let r = s.pointer(ev(PointerKind::Up, 200.0, 180.0)).unwrap();
@@ -157,7 +157,7 @@ fn pointer_draw_move_resize() {
 #[test]
 fn click_into_placeholder_starts_editing() {
     let mut s = session();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::Down, 480.0, 200.0)).unwrap();
     s.pointer(ev(PointerKind::Up, 480.0, 200.0)).unwrap();
     assert!(s.doc().unwrap().selection.text.is_some());
@@ -290,7 +290,7 @@ fn drawing_a_line_between_shapes_glues_it() {
     let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 100, 100, 100]})).unwrap()["id"].as_u64().unwrap();
     s.execute("edit.deselect", &json!({})).unwrap();
     s.tool.kind = tools::ToolKind::Shape { preset: "straightConnector1".into() };
-    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0 };
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0, pressure: None };
     // Right site of the ellipse (200,150) → left site of the rect (400,150), a little off.
     s.pointer(ev(tools::PointerKind::Down, 202.0, 151.0)).unwrap();
     s.pointer(ev(tools::PointerKind::Drag, 300.0, 150.0)).unwrap();
@@ -323,7 +323,7 @@ fn freeform_tools_and_command() {
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().shapes().len(), before + 1);
 
-    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 3.0 };
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 3.0, pressure: None };
     // Polygon: click, click, click, click on the start → closed, filled.
     s.set_tool(tools::ToolKind::Shape { preset: "freeform".into() });
     for (x, y) in [(300.0, 300.0), (400.0, 300.0), (400.0, 400.0)] {
@@ -376,7 +376,7 @@ fn double_click_in_table_uses_grown_row_heights() {
     for row in 0..3 {
         s.execute("table.rowHeight", &json!({"id": id, "row": row, "height": 4.0})).unwrap();
     }
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::DoubleClick, 120.0, 106.0)).unwrap();
     assert_eq!(s.doc().unwrap().selection.text.as_ref().and_then(|t| t.cell), Some((0, 0)));
 }
@@ -580,7 +580,7 @@ fn shapes_off_the_slide_can_be_selected_and_moved() {
     // Inserting off the slide keeps the box where it was asked for.
     assert_eq!(s.execute("shape.inspect", &json!({"id": off})).unwrap()["box"]["x"], 1000.0);
     s.execute("edit.select", &json!({"ids": []})).unwrap();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     // Hover and click wholly off the slide.
     assert!(matches!(s.hit_test(deckcraft_geom::Point::new(1060.0, 140.0), 3.0), Some(tools::Hit::Shape { id, .. }) if id.0 as u64 == off));
     s.pointer(ev(PointerKind::Down, 1060.0, 140.0)).unwrap();
@@ -698,9 +698,9 @@ fn ime_composition_is_kept_by_a_key_a_click_or_another_command() {
     assert_eq!(s.doc().unwrap().history.undo.len(), undo0 + 1);
 
     s.compose_text("녕", None).unwrap();
-    s.pointer(PointerEvent { kind: PointerKind::Move, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Move, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
     assert!(s.doc().unwrap().composition.is_some(), "hovering keeps composing");
-    s.pointer(PointerEvent { kind: PointerKind::Down, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Down, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
     assert!(s.doc().unwrap().composition.is_none(), "a click settles it");
     assert_eq!(title_text(&s), "안녕");
 
@@ -834,4 +834,29 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     assert!(cmd::file::pdf_bytes(&doc, &json!({"slides": "5"})).is_err());
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
+}
+
+#[test]
+fn pen_pressure_is_kept_and_a_mouse_draws_at_full_width() {
+    let mut s = session();
+    s.set_tool(tools::ToolKind::Ink { mode: "pen".into(), color: deckcraft_model::Rgba::rgb(20, 20, 20), width: 4.0 });
+    let ev = |kind, x, y, pressure| tools::PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure };
+    s.pointer(ev(PointerKind::Down, 40.0, 80.0, Some(0.2))).unwrap();
+    s.pointer(ev(PointerKind::Drag, 80.0, 80.0, Some(1.0))).unwrap();
+    s.pointer(ev(PointerKind::Drag, 120.0, 80.0, Some(0.4))).unwrap();
+    s.pointer(ev(PointerKind::Up, 120.0, 80.0, Some(0.4))).unwrap();
+    s.pointer(ev(PointerKind::Down, 40.0, 160.0, None)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 100.0, 160.0, Some(f32::NAN))).unwrap();
+    s.pointer(ev(PointerKind::Up, 100.0, 160.0, None)).unwrap();
+    let got = ink_pressures(&s);
+    assert_eq!(got, vec![vec![0.2, 1.0, 0.4], vec![1.0, 1.0]]);
+}
+
+fn ink_pressures(s: &Session) -> Vec<Vec<f32>> {
+    let st = s.doc().unwrap();
+    let Some(sh) = st.shapes().iter().rev().find(|sh| matches!(sh.kind, deckcraft_model::ShapeKind::Ink { .. })) else {
+        return vec![];
+    };
+    let deckcraft_model::ShapeKind::Ink { strokes } = &sh.kind else { return vec![] };
+    strokes.iter().map(|stroke| stroke.points.iter().map(|p| p.2).collect()).collect()
 }
