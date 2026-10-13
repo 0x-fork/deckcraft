@@ -594,6 +594,9 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                     if ui.button("Line Spacing Options…").clicked() {
                         app.dialog = Some(crate::dialogs::Dialog::new("paragraph"));
                     }
+                    if ui.button("Tabs…").clicked() {
+                        app.dialog = Some(crate::dialogs::Dialog::new("tabs"));
+                    }
                 });
                 let r = icon_toggle(ui, Icon::Columns, "Columns", en, false);
                 egui::Popup::menu(&r).show(|ui| {

@@ -145,7 +145,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Tabs…",
             ["Home", "Paragraph"],
             None,
-            "{add?: {pos, align?: l|ctr|r|dec}, move?: {from, to}, remove?: pos, clear?: bool, defaultTab?: pt} on the selected paragraphs (pos in pt from the text area's left)",
+            "{set?: [{pos, align?}] (replaces all), add?: {pos, align?: l|ctr|r|dec}, move?: {from, to}, remove?: pos, clear?: bool, defaultTab?: pt} on the selected paragraphs (pos in pt from the text area's left)",
             has_text_or_shapes,
             tabs
         ),
@@ -738,16 +738,22 @@ fn tabs(s: &mut Session, p: &Value) -> Result<Value> {
     let add = p.get("add").and_then(|a| fin(a.get("pos").and_then(Value::as_f64)).map(|pos| (pos, align_of(a).to_string())));
     let mv = p.get("move").and_then(|m| Some((fin(m.get("from").and_then(Value::as_f64))?, fin(m.get("to").and_then(Value::as_f64))?)));
     let remove = fin(p.get("remove").and_then(Value::as_f64));
+    let set: Option<Vec<deckcraft_model::text::TabStop>> = p.get("set").and_then(Value::as_array).map(|a| {
+        a.iter()
+            .take(MAX_TABS * 4)
+            .filter_map(|t| Some(deckcraft_model::text::TabStop { pos: fin(t.get("pos").and_then(Value::as_f64))?, align: align_of(t).to_string() }))
+            .collect()
+    });
     let clear = bool_or(p, "clear", false);
     let default_tab = fin(p.get("defaultTab").and_then(Value::as_f64)).filter(|v| *v >= 1.0);
-    if add.is_none() && mv.is_none() && remove.is_none() && !clear && default_tab.is_none() {
+    if set.is_none() && add.is_none() && mv.is_none() && remove.is_none() && !clear && default_tab.is_none() {
         return Err(bad("format.tabs", "nothing to change"));
     }
     // The stops as the caret's paragraph shows them (inherited ones included), so editing a
     // placeholder's tab that came from its layout works like editing one set on the paragraph.
     let base = current_para(s).tabs.unwrap_or_default();
     let near = |a: f64, b: f64| (a - b).abs() < 0.5;
-    let mut stops = if clear { vec![] } else { base };
+    let mut stops = if clear { vec![] } else { set.unwrap_or(base) };
     if let Some(at) = remove {
         stops.retain(|t| !near(t.pos, at));
     }

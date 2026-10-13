@@ -56,4 +56,7 @@ fn tabs_add_move_remove_clear_and_undo() {
         s.execute("format.tabs", &json!({"add": {"pos": i as f64 * 3.0}})).unwrap();
     }
     assert!(tabs(&mut s).len() <= 32);
+    s.execute("format.tabs", &json!({"set": [{"pos": 90, "align": "dec"}, {"pos": 30, "align": "right"}, {"pos": "x"}], "defaultTab": 36})).unwrap();
+    assert_eq!(tabs(&mut s), vec![(30.0, "r".into()), (90.0, "dec".into())], "set replaces all, sorted, bad entries dropped");
+    assert_eq!(s.execute("format.ruler", &json!({})).unwrap()["defaultTab"].as_f64(), Some(36.0));
 }

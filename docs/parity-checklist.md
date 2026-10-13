@@ -9,7 +9,7 @@ The summary between `<!-- SUMMARY -->
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
 | P1 | 65 | 39 | 20 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
+| P2 | 54 | 14 | 14 | 26 | 39% |
 
 | Area | Parity |
 |---|---|
@@ -21,7 +21,7 @@ The summary between `<!-- SUMMARY -->
 | Shapes | 88% |
 | Format | 83% |
 | Arrange | 100% |
-| Text | 80% |
+| Text | 81% |
 | Tables | 89% |
 | Charts | 65% |
 | SmartArt | 33% |
@@ -148,7 +148,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Bullets and numbering | P0 | D |
 | Text | Picture bullets, custom bullet symbols | P2 | P |
 | Text | List levels (Tab / Shift+Tab) | P0 | D |
-| Text | Tab stops | P2 | P |
+| Text | Tab stops | P2 | D |
 | Text | Columns | P2 | D |
 | Text | Vertical anchor, margins, wrap | P0 | D |
 | Text | Autofit (shrink on overflow, resize shape) | P0 | D |
