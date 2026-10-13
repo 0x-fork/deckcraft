@@ -137,8 +137,9 @@ impl Trendline {
         Some(TrendFit { kind: self.kind, model, r2: r_squared(&used_y, &yhat), x_min, x_max })
     }
 
-    /// The equation and R² lines this trendline asks to show. Empty when neither is on, and a
-    /// moving average has no equation.
+    /// The equation and R² lines this trendline asks to show. Empty when neither is on. A moving
+    /// average has no equation, and PowerPoint does not show its R², so that label is left off
+    /// even when the file asks for it.
     pub fn caption(&self, fit: &TrendFit) -> String {
         let mut lines = Vec::new();
         if self.disp_eq
@@ -146,7 +147,7 @@ impl Trendline {
         {
             lines.push(eq);
         }
-        if self.disp_r_sqr {
+        if self.disp_r_sqr && self.kind != TrendlineType::MovingAvg {
             lines.push(fit.r2_label());
         }
         lines.join("\n")
@@ -597,6 +598,14 @@ mod tests {
         let linear = line(TrendlineType::Linear).fit(&[1.0, 2.0], &[1.0, 2.0]).expect("line");
         assert_eq!(linear.span(Some(1.5), Some(-3.0)), (1.0, 3.5));
         assert_eq!(fit.span(Some(4.0), Some(4.0)), (2.0, 4.0));
+    }
+
+    #[test]
+    fn moving_average_shows_neither_equation_nor_r2() {
+        let t = Trendline { kind: TrendlineType::MovingAvg, period: Some(2), disp_eq: true, disp_r_sqr: true, ..Default::default() };
+        let fit = t.fit(&[1.0, 2.0, 3.0, 4.0], &[2.0, 8.0, 4.0, 10.0]).expect("ma");
+        assert!(fit.r2_label().starts_with("R² ="));
+        assert!(t.caption(&fit).is_empty(), "{}", t.caption(&fit));
     }
 
     #[test]

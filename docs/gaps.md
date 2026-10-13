@@ -150,7 +150,8 @@ Detail in [file-format-parity.md](file-format-parity.md).
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
   whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are drawn: linear,
   exponential, logarithmic, polynomial, power and moving average, with forecast and the equation
-  and R² label. A combo chart's secondary value axis is read (`y2_*`, `Series.secondary_axis`) and
+  and R² label. A moving average is drawn with neither label. A combo chart's secondary value axis
+  is read (`y2_*`, `Series.secondary_axis`) and
   is not written back when the chart is rebuilt.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
@@ -261,6 +262,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | A moving average trendline is drawn without an equation or an R² label |
 | 2026-10-14 | minor | Chart trendlines are drawn (six types, forecast, equation and R²). The charts gap stays open for the data grid, chartex and secondary-axis export; the real-deck corpus gap stays open |
 | 2026-10-14 | minor | Chart trendlines round-trip. The real-deck corpus gap stays open; secondary-axis export and drawing trendlines stay in the charts gap |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
