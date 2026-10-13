@@ -560,7 +560,9 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
     let mut byte_of: Vec<usize> = text.char_indices().map(|(b, _)| b).collect();
     byte_of.push(text.len());
     let char_at_byte: HashMap<usize, usize> = byte_of.iter().enumerate().map(|(i, b)| (*b, i)).collect();
-    let levels = bidi::levels(text, &chars, rtl);
+    let style_rtl: Vec<bool> = styles.iter().map(|st| st.lang.as_deref().is_some_and(bidi::is_rtl_lang)).collect();
+    let rtl_lang: Vec<bool> = char_style.iter().map(|&si| style_rtl.get(si).copied().unwrap_or(false)).collect();
+    let levels = bidi::levels_lang(text, &chars, rtl, &rtl_lang);
     let scripts = script::resolve(&chars);
     let mut boundary = vec![false; n];
     let mut graphemes: Vec<(usize, usize)> = Vec::new();

@@ -264,7 +264,11 @@ fn arabic_face() -> Option<Arc<FontFace>> {
 
 #[test]
 fn rtl_mixed_string_is_reordered_per_line() {
-    let (p, sh) = bidi_setup(vec![Run::new(MIXED)], 2000.0, true, Align::Right);
+    // An Arabic run (PowerPoint tags typed Arabic `ar-…`): its digits and brackets go with the
+    // right-to-left text.
+    let mut run = Run::new(MIXED);
+    run.props.lang = Some("ar-SA".into());
+    let (p, sh) = bidi_setup(vec![run], 2000.0, true, Align::Right);
     let l = lay(&p, &sh, 2000.0, 300.0);
     assert_eq!(l.lines.len(), 1);
     let line = &l.lines[0];
@@ -291,6 +295,20 @@ fn rtl_mixed_string_is_reordered_per_line() {
     assert_eq!(line.levels[0], 1);
     assert_eq!(line.levels[4], 2);
     assert_eq!(line.levels[10], 2);
+}
+
+#[test]
+fn an_english_run_keeps_digits_and_brackets_left_to_right() {
+    // The same text in a run without a right-to-left language: PowerPoint keeps "2024 (Retrait) "
+    // one left-to-right stretch, its number on the left.
+    let (p, sh) = bidi_setup(vec![Run::new(MIXED)], 2000.0, true, Align::Right);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let line = &l.lines[0];
+    let mid = |k: usize| (line.edges[k].0 + line.edges[k].1) / 2.0;
+    assert!(mid(0) > mid(10), "first Arabic word right of the Latin");
+    assert!(mid(4) < mid(10), "number left of the Latin word");
+    assert!(mid(9) < mid(10) && mid(17) > mid(16), "brackets around Retrait, unmirrored");
+    assert!(mid(19) < mid(4), "last Arabic word on the left");
 }
 
 #[test]
