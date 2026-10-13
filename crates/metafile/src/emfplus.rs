@@ -328,6 +328,39 @@ impl Plus {
                 self.painter().stroke(cv, &ops, pen);
                 Some(())
             }
+            // Cardinal splines: FillClosedCurve, DrawClosedCurve, DrawCurve.
+            0x4016 => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let tension = finite(r.f32(4)?)?;
+                let pts = points(r, 12, r.u32(8)? as usize, compressed)?;
+                self.painter().fill(cv, &curve_ops(&pts, tension, true, 0, usize::MAX), &fill);
+                Some(())
+            }
+            0x4017 => {
+                let pen = self.pen(id)?;
+                let tension = finite(r.f32(0)?)?;
+                let pts = points(r, 8, r.u32(4)? as usize, compressed)?;
+                self.painter().stroke(cv, &curve_ops(&pts, tension, true, 0, usize::MAX), pen);
+                Some(())
+            }
+            0x4018 => {
+                let pen = self.pen(id)?;
+                let tension = finite(r.f32(0)?)?;
+                let (offset, segments) = (r.u32(4)? as usize, r.u32(8)? as usize);
+                let pts = points(r, 16, r.u32(12)? as usize, compressed)?;
+                self.painter().stroke(cv, &curve_ops(&pts, tension, false, offset, segments), pen);
+                Some(())
+            }
+            // FillRegion: the region's area (as the clip reads it).
+            0x4013 => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let Some(Some(Obj::Region(Some(area)))) = self.objects.get(id).cloned() else { return None };
+                if area.len() < 3 {
+                    return None;
+                }
+                self.painter().fill(cv, &poly_ops(&area, true), &fill);
+                Some(())
+            }
             0x401A => {
                 let img = self.image(id)?;
                 let dst = *rects(r, 24, 1, compressed)?.first()?;
@@ -1244,6 +1277,38 @@ fn rects(r: Bytes, off: usize, n: usize, compressed: bool) -> Option<Vec<[f64; 4
 
 fn rect_ops([l, t, r, b]: [f64; 4]) -> Vec<Op> {
     crate::geom::rect(l, t, r, b)
+}
+
+fn finite(v: f32) -> Option<f64> {
+    v.is_finite().then_some(f64::from(v))
+}
+
+/// A GDI+ cardinal spline through `pts` as cubic Béziers: each segment's control points lie a
+/// third of `tension` (GDI+'s default 0.5) along the neighbouring chords. `closed` joins the
+/// last point back to the first; an open curve draws `segments` segments from point `offset`.
+fn curve_ops(pts: &[P], tension: f64, closed: bool, offset: usize, segments: usize) -> Vec<Op> {
+    let n = pts.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let k = tension.clamp(0.0, 10.0) / 3.0;
+    let at = |i: isize| -> P {
+        let i = if closed { i.rem_euclid(n as isize) as usize } else { i.clamp(0, n as isize - 1) as usize };
+        pts.get(i).copied().unwrap_or((0.0, 0.0))
+    };
+    let (first, count) = if closed { (0, n) } else { (offset.min(n - 1), segments.min(n - 1 - offset.min(n - 1))) };
+    let mut ops = vec![Op::M(at(first as isize))];
+    for s in first..first + count {
+        let i = s as isize;
+        let (p0, p1, p2, p3) = (at(i - 1), at(i), at(i + 1), at(i + 2));
+        let c1 = (p1.0 + (p2.0 - p0.0) * k, p1.1 + (p2.1 - p0.1) * k);
+        let c2 = (p2.0 - (p3.0 - p1.0) * k, p2.1 - (p3.1 - p1.1) * k);
+        ops.push(Op::C(c1, c2, p2));
+    }
+    if closed {
+        ops.push(Op::Z);
+    }
+    ops
 }
 
 fn poly_ops(pts: &[P], close: bool) -> Vec<Op> {
