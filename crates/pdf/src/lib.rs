@@ -241,7 +241,9 @@ impl Exporter<'_> {
         let scale = (b.width() / 72.0 * self.opts.dpi.clamp(36.0, 600.0)) / sw;
         let img = deckcraft_render::render_slide(pres, i, &RenderOpts { scale, threads: 4, ..Default::default() });
         if img.width > 0 && img.height > 0 {
-            let mut rgba = img.pixels.clone();
+            let (w, h) = (img.width, img.height);
+            // Taken, not copied: a print-resolution slide is ~16 MB.
+            let mut rgba = img.pixels;
             for px in rgba.as_chunks_mut::<4>().0 {
                 // Composite onto white (slides are normally opaque).
                 let a = px[3] as u32;
@@ -250,7 +252,7 @@ impl Exporter<'_> {
                 }
                 px[3] = 255;
             }
-            let image = Image::from_rgba8(rgba, img.width, img.height);
+            let image = Image::from_rgba8(rgba, w, h);
             if let Some(size) = Size::from_wh(b.width() as f32, b.height() as f32) {
                 s.push_transform(&Transform::from_translate(b.x0 as f32, b.y0 as f32));
                 s.draw_image(image, size);
