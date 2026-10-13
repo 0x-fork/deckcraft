@@ -116,6 +116,87 @@ impl ChartType {
     }
 }
 
+/// `c:trendlineType`: the six trendlines DrawingML charts store.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TrendlineType {
+    Exp,
+    #[default]
+    Linear,
+    Log,
+    MovingAvg,
+    Poly,
+    Power,
+}
+
+impl TrendlineType {
+    pub fn xml(self) -> &'static str {
+        match self {
+            TrendlineType::Exp => "exp",
+            TrendlineType::Linear => "linear",
+            TrendlineType::Log => "log",
+            TrendlineType::MovingAvg => "movingAvg",
+            TrendlineType::Poly => "poly",
+            TrendlineType::Power => "power",
+        }
+    }
+    pub fn from_xml(s: &str) -> Option<Self> {
+        Some(match s {
+            "exp" => TrendlineType::Exp,
+            "linear" => TrendlineType::Linear,
+            "log" => TrendlineType::Log,
+            "movingAvg" => TrendlineType::MovingAvg,
+            "poly" => TrendlineType::Poly,
+            "power" => TrendlineType::Power,
+            _ => return None,
+        })
+    }
+}
+
+/// One `c:trendline` on a series. Polynomials use `order` (2–6); moving averages use `period`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Trendline {
+    pub kind: TrendlineType,
+    /// `c:name`, when the file sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Polynomial order (`c:order`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
+    /// Moving-average period (`c:period`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period: Option<u32>,
+    /// Forecast forward and backward, in category units (`c:forward`, `c:backward`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backward: Option<f64>,
+    /// Cross the value axis at this value (`c:intercept`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intercept: Option<f64>,
+    /// Show the equation (`c:dispEq`).
+    pub disp_eq: bool,
+    /// Show R² (`c:dispRSqr`).
+    pub disp_r_sqr: bool,
+}
+
+impl Default for Trendline {
+    fn default() -> Self {
+        Trendline {
+            kind: TrendlineType::Linear,
+            name: None,
+            order: None,
+            period: None,
+            forward: None,
+            backward: None,
+            intercept: None,
+            disp_eq: false,
+            disp_r_sqr: false,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Series {
@@ -138,6 +219,9 @@ pub struct Series {
     /// source data's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number_format: Option<String>,
+    /// Trendlines (`c:trendline`), in file order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub trendlines: Vec<Trendline>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

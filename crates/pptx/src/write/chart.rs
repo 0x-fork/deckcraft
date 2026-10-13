@@ -1,6 +1,6 @@
 //! Chart parts: a `c:chartSpace` with cached categories and values (no embedded workbook).
 
-use deckcraft_model::chart::{Chart, ChartType, Series};
+use deckcraft_model::chart::{Chart, ChartType, Series, Trendline, TrendlineType};
 use deckcraft_model::style::Fill;
 
 use crate::opc::{NS_A, NS_C, NS_R};
@@ -174,6 +174,12 @@ fn series(w: &mut W, c: &Chart, s: &Series, i: usize, kind: ChartType, g: Group)
     if let Some(d) = s.data_labels {
         data_labels(w, d);
     }
+    // After labels, before the category and value caches (ECMA-376 series content order).
+    if matches!(g, Group::Bar | Group::Line | Group::Area | Group::Scatter) {
+        for t in s.trendlines.iter().take(16) {
+            trendline(w, t);
+        }
+    }
     let n = c.categories.len().max(s.values.len());
     let last = n + 1;
     if matches!(g, Group::Scatter | Group::Bubble) {
@@ -205,6 +211,51 @@ fn series(w: &mut W, c: &Chart, s: &Series, i: usize, kind: ChartType, g: Group)
         }
     }
     w.close("c:ser");
+}
+
+fn trend_num(v: Option<f64>) -> Option<f64> {
+    v.filter(|v| v.is_finite() && v.abs() <= 1.0e12)
+}
+
+fn trend_name(s: &str) -> Option<String> {
+    let cleaned: String =
+        s.chars().filter(|c| matches!(c, '\t' | '\n' | '\r') || (*c >= ' ' && *c != '\u{FFFE}' && *c != '\u{FFFF}')).take(255).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() { None } else { Some(cleaned.to_string()) }
+}
+
+fn trendline(w: &mut W, t: &Trendline) {
+    w.open0("c:trendline");
+    if let Some(name) = t.name.as_deref().and_then(trend_name) {
+        w.elt("c:name", &name);
+    }
+    w.val("c:trendlineType", t.kind.xml());
+    if t.kind == TrendlineType::Poly
+        && let Some(o) = t.order
+    {
+        w.val("c:order", o.clamp(2, 6));
+    }
+    if t.kind == TrendlineType::MovingAvg
+        && let Some(p) = t.period
+    {
+        w.val("c:period", p.clamp(2, 255));
+    }
+    if let Some(v) = trend_num(t.forward) {
+        w.val("c:forward", fmt_num(v));
+    }
+    if let Some(v) = trend_num(t.backward) {
+        w.val("c:backward", fmt_num(v));
+    }
+    if let Some(v) = trend_num(t.intercept) {
+        w.val("c:intercept", fmt_num(v));
+    }
+    if t.disp_r_sqr {
+        w.val("c:dispRSqr", 1);
+    }
+    if t.disp_eq {
+        w.val("c:dispEq", 1);
+    }
+    w.close("c:trendline");
 }
 
 fn data_labels(w: &mut W, show: bool) {

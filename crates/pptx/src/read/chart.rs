@@ -1,6 +1,6 @@
 //! Chart parts (`c:chartSpace`) → [`Chart`]. The original XML is kept in `Chart.raw`.
 
-use deckcraft_model::chart::{Chart, ChartType, Series};
+use deckcraft_model::chart::{Chart, ChartType, Series, Trendline, TrendlineType};
 use deckcraft_model::style::Fill;
 
 use crate::xml::El;
@@ -202,6 +202,11 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
             if let Some(d) = s.child("dLbls").and_then(|d| d.child("showVal")).and_then(|v| v.bool("val")) {
                 ser.data_labels = Some(d);
             }
+            for t in s.children_named("trendline").take(16) {
+                if let Some(t) = trendline(t) {
+                    ser.trendlines.push(t);
+                }
+            }
             // Data labels' number format: the series' labels', the group's, else the source data's.
             let label_fmt = |d: Option<&El>| {
                 d.and_then(|d| d.child("numFmt"))
@@ -283,6 +288,33 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     c.text_size = [val_ax, cat_ax, ch.child("legend")].into_iter().flatten().find_map(|e| text_size(e.child("txPr"))).or(chart_size);
     c.title_size = ch.child("title").and_then(|t| text_size(t.child("tx").and_then(|x| x.child("rich"))).or_else(|| text_size(t.child("txPr"))));
     Some(c)
+}
+
+fn trend_num(e: &El, k: &str) -> Option<f64> {
+    e.child_val(k).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite() && v.abs() <= 1.0e12)
+}
+
+fn trend_name(s: &str) -> Option<String> {
+    let cleaned: String =
+        s.chars().filter(|c| matches!(c, '\t' | '\n' | '\r') || (*c >= ' ' && *c != '\u{FFFE}' && *c != '\u{FFFF}')).take(255).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() { None } else { Some(cleaned.to_string()) }
+}
+
+/// One `c:trendline`. Unknown types are skipped.
+fn trendline(e: &El) -> Option<Trendline> {
+    let kind = TrendlineType::from_xml(e.child_val("trendlineType")?)?;
+    Some(Trendline {
+        kind,
+        name: e.child("name").map(|n| n.text()).as_deref().and_then(trend_name),
+        order: if kind == TrendlineType::Poly { e.child("order").and_then(|o| o.u32("val")).map(|v| v.clamp(2, 6)) } else { None },
+        period: if kind == TrendlineType::MovingAvg { e.child("period").and_then(|o| o.u32("val")).map(|v| v.clamp(2, 255)) } else { None },
+        forward: trend_num(e, "forward"),
+        backward: trend_num(e, "backward"),
+        intercept: trend_num(e, "intercept"),
+        disp_eq: e.child("dispEq").and_then(|d| d.bool("val")).unwrap_or(false),
+        disp_r_sqr: e.child("dispRSqr").and_then(|d| d.bool("val")).unwrap_or(false),
+    })
 }
 
 /// The size in points of the first `a:defRPr` or `a:rPr` with one under `e` (`sz` in hundredths).
@@ -387,5 +419,24 @@ mod tests {
             r#"<c:chartSpace {ns}><c:chart><c:plotArea><c:barChart><c:barDir val="col"/></c:barChart></c:plotArea></c:chart></c:chartSpace>"#
         );
         assert_eq!(read_chart_xml(xml.as_bytes()).unwrap().text_size, None, "no sizes: the renderer picks one");
+    }
+
+    #[test]
+    fn trendlines_are_read() {
+        let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:lineChart><c:grouping val="standard"/><c:ser><c:idx val="0"/><c:tx><c:v>Spend</c:v></c:tx>
+<c:trendline><c:name>Fit &amp; forecast</c:name><c:trendlineType val="linear"/><c:forward val="1"/><c:backward val="0.5"/><c:intercept val="0"/><c:dispRSqr val="1"/><c:dispEq val="1"/></c:trendline>
+<c:trendline><c:trendlineType val="poly"/><c:order val="9"/></c:trendline>
+<c:trendline><c:trendlineType val="movingAvg"/><c:period val="3"/></c:trendline>
+<c:trendline><c:trendlineType val="notAType"/></c:trendline>
+<c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numLit></c:val></c:ser></c:lineChart></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml).unwrap();
+        let t = &c.series[0].trendlines;
+        assert_eq!(t.len(), 3);
+        assert_eq!(t[0].name.as_deref(), Some("Fit & forecast"));
+        assert_eq!(t[0].kind, TrendlineType::Linear);
+        assert_eq!((t[0].forward, t[0].backward, t[0].intercept), (Some(1.0), Some(0.5), Some(0.0)));
+        assert!(t[0].disp_eq && t[0].disp_r_sqr);
+        assert_eq!((t[1].kind, t[1].order), (TrendlineType::Poly, Some(6)));
+        assert_eq!((t[2].kind, t[2].period), (TrendlineType::MovingAvg, Some(3)));
     }
 }
