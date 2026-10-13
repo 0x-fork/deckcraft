@@ -175,7 +175,14 @@ pub struct DocState {
     pub composition: Option<Composition>,
 }
 
-static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A document id unique across processes, not just within this one: recovery entries are named
+/// by it in a folder every running instance shares. Ids are this process's random base (see
+/// [`recovery::instance_id`]) plus a counter.
+fn next_uid() -> u64 {
+    recovery::instance_id().wrapping_add(NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) & recovery::UID_MASK
+}
 
 impl DocState {
     pub fn new(doc: Presentation, path: Option<String>, title: String) -> Self {
@@ -188,7 +195,7 @@ impl DocState {
             path,
             revision: 1,
             interaction: None,
-            uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            uid: next_uid(),
             title,
             missing_fonts: Vec::new(),
             composition: None,
