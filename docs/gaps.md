@@ -151,14 +151,16 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
 ### SmartArt editing is shallow
-- **Evidence:** a SmartArt graphic inserted in DeckCraft keeps its outline (`Shape.diagram`) and
-  has a Text Pane, Add Shape (after, before, above, below), Promote, Demote, Remove and layout
-  switching between DeckCraft's six layouts (`crates/engine/src/cmd/smartart.rs`). But
-  `crates/pptx/src/read/shapes.rs` reads a PowerPoint diagram's drawing part as a plain group (no
-  outline, so no Text Pane), the outline isn't written to `.pptx` (`dgm` data), and there are six
-  layouts rather than PowerPoint's ~200.
-- **Impact:** editing a SmartArt diagram from PowerPoint breaks it.
-- **Estimate:** 8–14 h.
+- **Evidence:** a SmartArt graphic keeps its outline (`Shape.diagram`) and has a Text Pane, Add
+  Shape, Promote, Demote, Remove and layout switching (`crates/engine/src/cmd/smartart.rs`). On
+  `.pptx` the outline is written as a real diagram (data, layout, quick style, colours and the
+  cached drawing; `crates/pptx/src/dgm.rs`), and PowerPoint diagrams read their outline from the
+  data model, so they get the Text Pane too. Still missing: DeckCraft's own layout definitions are
+  simple (not yet checked in PowerPoint itself); there are six layouts rather than ~200; editing an
+  imported diagram's outline redraws it with DeckCraft's layout; a diagram with no cached drawing
+  isn't drawn.
+- **Impact:** a PowerPoint diagram edited in DeckCraft changes look.
+- **Estimate:** 6–10 h.
 
 ### Animation Pane, effect count and preview
 Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a **beta blocker**.
