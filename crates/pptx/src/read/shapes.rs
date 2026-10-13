@@ -1,5 +1,5 @@
 //! Shape trees: `p:sp`, `p:pic`, `p:grpSp`, `p:cxnSp`, `p:graphicFrame` (tables, charts, SmartArt,
-//! OLE and other objects).
+//! OLE and other objects) and `p:contentPart` (3-D models).
 
 use std::collections::{HashMap, HashSet};
 
@@ -70,10 +70,11 @@ pub fn sp_tree(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, tree: &El, depth: us
             "grpSp" => Some(grp(imp, part, ctx, e, depth)),
             "cxnSp" => Some(cxn(imp, part, ctx, e)),
             "graphicFrame" => Some(frame(imp, part, ctx, e, depth)),
-            "contentPart" => {
-                log::warn!("pptx: ink content part in {} not imported", part.name);
+            "contentPart" => content_part(imp, part, ctx, e).or_else(|| {
+                log::warn!("pptx: content part in {} not imported", part.name);
                 None
-            }
+            }),
+            "AlternateContent" => read_model_alternate(imp, part, ctx, e),
             _ => None,
         };
         if let Some(s) = s {
@@ -277,6 +278,58 @@ fn sp(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Shape {
 
 fn ms(v: Option<&str>) -> u32 {
     v.and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite()).map(|v| v.clamp(0.0, u32::MAX as f64) as u32).unwrap_or(0)
+}
+
+fn find_content_part(el: &El) -> Option<&El> {
+    fn rec(el: &El, depth: usize) -> Option<&El> {
+        if depth > 16 {
+            return None;
+        }
+        if el.is("contentPart") {
+            return Some(el);
+        }
+        el.elements().find_map(|c| rec(c, depth + 1))
+    }
+    rec(el, 0)
+}
+
+/// `p:contentPart` whose relationship is a 3-D model. Other content parts (ink) are left out.
+fn content_part(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Option<Shape> {
+    let id = e.attr("r:id").filter(|s| !s.is_empty())?;
+    let rel = part.rels.get(id)?;
+    if !super::is_model3d(rel) {
+        return None;
+    }
+    let target = rel.target.clone();
+    let media = imp.media_for(&target).or_else(|| {
+        log::warn!("pptx: 3-D model part missing in {}", part.name);
+        None
+    })?;
+    let mut s = base(imp, part, ctx, e.child("nvContentPartPr"));
+    if let Some(x) = e.child("xfrm") {
+        s.xfrm = Some(dml::xfrm(x).0);
+    }
+    s.kind = ShapeKind::Model3d { media, poster: None };
+    Some(s)
+}
+
+/// A 3-D model wrapped in `mc:AlternateContent`: the model choice, plus the fallback picture.
+/// If the model part is missing, the fallback picture is the shape.
+fn read_model_alternate(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Option<Shape> {
+    if let Some(content) = e.children_named("Choice").find_map(find_content_part)
+        && let Some(mut s) = content_part(imp, part, ctx, content)
+    {
+        let poster = e.child("Fallback").and_then(|fb| {
+            let mut pics = vec![];
+            fb.find_all("blip", &mut pics);
+            pics.into_iter().find_map(|b| dml::media_ref(imp, part, b))
+        });
+        if let ShapeKind::Model3d { media, .. } = s.kind {
+            s.kind = ShapeKind::Model3d { media, poster };
+        }
+        return Some(s);
+    }
+    e.child("Fallback").and_then(|fb| fb.elements().find(|c| c.is("pic")).map(|p| pic(imp, part, ctx, p)))
 }
 
 fn pic(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El) -> Shape {

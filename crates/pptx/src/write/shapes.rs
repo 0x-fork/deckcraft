@@ -1,4 +1,4 @@
-//! Shape trees: autoshapes, pictures, groups, connectors, tables, charts, media, ink and kept objects.
+//! Shape trees: autoshapes, pictures, groups, connectors, tables, charts, media, ink, 3-D models and kept objects.
 
 use std::collections::{HashMap, HashSet};
 
@@ -376,6 +376,7 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
             let id = cx.id_for(s);
             media(w, x, o, id, s, m);
         }
+        ShapeKind::Model3d { media, poster } => write_model(w, x, o, cx, s, *media, *poster),
         ShapeKind::Ink { strokes } => {
             // Ink becomes a group of freeform lines.
             let id = cx.id_for(s);
@@ -398,6 +399,64 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
         }
         ShapeKind::Opaque { xml, preview, label } => opaque(w, x, o, cx, s, xml, *preview, label),
     }
+}
+
+fn model_rel(x: &mut Exp, o: &mut Out, media: deckcraft_model::MediaId) -> Option<String> {
+    if x.p.media(media).is_none_or(|m| m.data.is_empty()) {
+        return None;
+    }
+    x.media_rel(o, media, crate::opc::RT_MODEL3D)
+}
+
+fn write_model_part(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, rid: &str) {
+    w.open("p:contentPart", A::new().a("r:id", rid));
+    w.open0("p:nvContentPartPr");
+    cnvpr(w, x, o, id, s);
+    w.empty0("p:cNvContentPartPr");
+    w.empty0("p:nvPr");
+    w.close("p:nvContentPartPr");
+    if let Some(xf) = &s.xfrm {
+        dml::xfrm(w, "p:xfrm", xf, None);
+    }
+    w.close("p:contentPart");
+}
+
+fn write_model(
+    w: &mut W,
+    x: &mut Exp,
+    o: &mut Out,
+    cx: &mut Ctx,
+    s: &Shape,
+    media: deckcraft_model::MediaId,
+    poster: Option<deckcraft_model::MediaId>,
+) {
+    let Some(rid) = model_rel(x, o, media) else {
+        log::warn!("pptx: 3-D model '{}' has no embedded part", s.name);
+        return;
+    };
+    let id = cx.id_for(s);
+    let poster = poster.filter(|p| x.p.media(*p).is_some_and(|m| !m.data.is_empty()));
+    let Some(poster) = poster else {
+        write_model_part(w, x, o, id, s, &rid);
+        return;
+    };
+    // Older readers draw the fallback picture; readers that know `am3d` use the model.
+    w.open("mc:AlternateContent", A::new().a("xmlns:mc", NS_MC));
+    w.open("mc:Choice", A::new().a("xmlns:am3d", "http://schemas.microsoft.com/office/drawing/2017/model3d").a("Requires", "am3d"));
+    write_model_part(w, x, o, id, s, &rid);
+    w.close("mc:Choice");
+    w.open0("mc:Fallback");
+    let pic = Shape {
+        id: ShapeId(0),
+        name: s.name.clone(),
+        xfrm: s.xfrm,
+        kind: ShapeKind::Picture { fill: deckcraft_model::style::PictureFill { media: poster, ..Default::default() } },
+        ..Default::default()
+    };
+    let pid = cx.ids.fresh();
+    shape_with_id(w, x, o, cx, &pic, pid);
+    w.close("mc:Fallback");
+    w.close("mc:AlternateContent");
 }
 
 fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {

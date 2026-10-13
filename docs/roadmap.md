@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** minor (core-workflow alpha gate added; stage stays alpha; previous: major, created; milestones carried from the local execution plan, the beta plan built from gaps.md) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (`corpus_media.rs` keeps 3-D models and animation bounce end; real-deck corpus still open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -26,8 +26,10 @@ points and lead the beta plan.
 
 1. **Stop losing work and crashing:** land Close's save prompt (#60, PR #75), the Windows GPU
    startup crashes (#40, #59), image paste on Windows/Linux (#53). 6–12 h.
-2. **PPTX on real decks:** build an owned corpus, round-trip checks in CI, fix what breaks;
-   comment threads, media options and rewind on save (#70, #74, #77); EMF/WMF and SVG. 31–55 h.
+2. **PPTX on real decks:** build an owned corpus, round-trip checks in CI, fix what breaks.
+   `corpus_media.rs` keeps SmartArt and OLE XML, media bookmarks and trims, sections, fields, ink,
+   3-D models and animation bounce end. Comment threads, media options and rewind on save
+   (#70, #74, #77), relationship-bearing SmartArt and OLE (#203), and EMF/WMF and SVG are still open. 31–55 h.
 3. **Review the open PRs:** equations (#55), browser print (#66), Morph alignment (#67), macOS
    open-with (#68), font lookup (#80), Ukrainian (#34, after the catalog exists). 4–8 h.
 
@@ -109,5 +111,6 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Current focus: `corpus_media.rs` keeps 3-D models and animation bounce end; the real-deck corpus stays open |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

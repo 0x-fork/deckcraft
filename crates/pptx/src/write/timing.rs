@@ -433,6 +433,9 @@ fn effect_par(w: &mut W, x: &mut Exp, ids: &mut Ids, e: &Eff, first_in_click: bo
     };
     let accel = (a.smooth_start > 0.0).then(|| (a.smooth_start.clamp(0.0, 1.0) * 100_000.0).round() as i64);
     let decel = (a.smooth_end > 0.0).then(|| (a.smooth_end.clamp(0.0, 1.0) * 100_000.0).round() as i64);
+    // `bounceEnd` is a positive percentage (100000 = 100%), same scale as accel/decel. The model stores 0–1.
+    let bounce =
+        (a.bounce_end.is_finite() && a.bounce_end > 0.0).then(|| (a.bounce_end.clamp(0.0, 1.0) * 100_000.0).round() as i64).filter(|n| *n > 0);
     w.open0("p:par");
     w.open(
         "p:cTn",
@@ -444,6 +447,7 @@ fn effect_par(w: &mut W, x: &mut Exp, ids: &mut Ids, e: &Eff, first_in_click: bo
             .o("repeatCount", repeat)
             .o("accel", accel)
             .o("decel", decel)
+            .o("bounceEnd", bounce)
             .t("autoRev", a.auto_reverse)
             .a("fill", "hold")
             .a("grpId", e.grp)
