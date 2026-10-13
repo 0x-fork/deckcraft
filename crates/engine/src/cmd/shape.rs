@@ -284,7 +284,7 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
     } else if p.get("picture").is_some() {
         let (name, bytes) = super::insert::media_bytes(&with_param(p, "data", p.get("picture").cloned().unwrap_or_default()), "shape.fill")?;
         let ct = super::insert::content_type(&name, &bytes);
-        let media = s.edit(|doc, _| Ok(doc.add_media(&name, ct, bytes)))?;
+        let media = s.edit(|doc, _| doc.add_media(&name, ct, bytes).ok_or_else(|| bad("shape.fill", NO_ID_SPACE)))?;
         Some(Some(Fill::Picture(PictureFill { media, ..Default::default() })))
     } else {
         None
@@ -674,7 +674,7 @@ fn picture_reset(s: &mut Session, p: &Value) -> Result<Value> {
 fn picture_change(s: &mut Session, p: &Value) -> Result<Value> {
     let (name, bytes) = super::insert::media_bytes(p, "picture.change")?;
     let ct = super::insert::content_type(&name, &bytes);
-    let media = s.edit(|doc, _| Ok(doc.add_media(&name, ct, bytes)))?;
+    let media = s.edit(|doc, _| doc.add_media(&name, ct, bytes).ok_or_else(|| bad("picture.change", NO_ID_SPACE)))?;
     edit_shapes(s, p, "picture.change", |sh| {
         if let deckcraft_model::ShapeKind::Picture { fill } = &mut sh.kind {
             fill.media = media;

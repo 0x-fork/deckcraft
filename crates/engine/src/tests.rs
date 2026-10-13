@@ -835,3 +835,28 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// A deck whose ids are used up (a hostile file can arrive with next_id at the top of the
+/// range) refuses to grow instead of handing out duplicate ids (#407).
+#[test]
+fn an_exhausted_id_space_refuses_growth() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc).next_id = u32::MAX;
+    let before = s.doc().unwrap().doc.clone();
+    assert!(s.execute("slide.new", &json!({})).is_err(), "a new slide is refused");
+    assert!(s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 100, 50]})).is_err());
+    assert!(s.execute("slide.duplicate", &json!({})).is_err());
+    assert!(s.execute("edit.duplicate", &json!({})).is_err());
+    // What the deck holds is untouched: same slides, same ids, no duplicates.
+    let after = s.doc().unwrap().doc.clone();
+    assert_eq!(after.slides.len(), before.slides.len());
+    let mut ids = vec![];
+    deckcraft_model::walk(&after.slides[0].shapes, &mut |sh, _| ids.push(sh.id.0));
+    ids.push(after.slides[0].id.0);
+    ids.push(after.next_id);
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), ids.len(), "no id repeats");
+}

@@ -7,7 +7,7 @@ fn deck(n: usize) -> Presentation {
     let mut p = deckcraft_model::defaults::new_presentation(None);
     let layout = p.slides[0].layout;
     while p.slides.len() < n {
-        let s = deckcraft_model::defaults::new_slide(&mut p, layout);
+        let s = deckcraft_model::defaults::new_slide(&mut p, layout).expect("slide");
         p.slides.push(Arc::new(s));
     }
     for (i, s) in p.slides.iter_mut().enumerate() {

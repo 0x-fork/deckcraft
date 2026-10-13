@@ -7,7 +7,7 @@ use deckcraft_model::{LayoutType, Presentation, Xfrm};
 fn setup(text: &str, w: f64, h: f64) -> (Presentation, Shape) {
     let mut p = Presentation::default();
     let lay = defaults::layout_of_kind(&p, LayoutType::TitleAndContent).unwrap();
-    let mut s = defaults::new_slide(&mut p, lay);
+    let mut s = defaults::new_slide(&mut p, lay).expect("slide");
     let mut body = s.shapes.remove(1);
     body.xfrm = Some(Xfrm::new(0.0, 0.0, w, h));
     body.text = Some(TextBody::from_text(text));

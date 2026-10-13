@@ -99,7 +99,7 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
                 }
             }
         };
-        let mut slide = defaults::new_slide(doc, layout);
+        let mut slide = defaults::new_slide(doc, layout).ok_or_else(|| bad("slide.new", NO_ID_SPACE))?;
         if let Some(t) = str_param(p, "title")
             && let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| k.is_title()))
         {
@@ -165,8 +165,8 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
         for (k, i) in indices.iter().enumerate() {
             let Some(src) = doc.slides.get(*i).map(|x| x.as_ref().clone()) else { continue };
             let mut copy = src;
-            copy.id = SlideId(doc.alloc_id());
-            super::edit::reid(doc, &mut copy.shapes);
+            copy.id = SlideId(doc.alloc_id().ok_or_else(|| bad("slide.duplicate", NO_ID_SPACE))?);
+            super::edit::reid("slide.duplicate", doc, &mut copy.shapes)?;
             // Animations follow the new shape ids by position.
             let old_ids: Vec<_> = doc
                 .slides
@@ -364,7 +364,7 @@ pub fn apply_layout(doc: &mut Presentation, index: usize, layout: LayoutId) -> R
         doc.layout(layout).map(|(_, l)| l.shapes.clone()).ok_or_else(|| bad("slide.layout", "no such layout"))?;
     let mut fresh = vec![];
     for ls in lay_shapes.iter().filter(|x| x.ph.as_ref().is_some_and(|p| !p.kind.is_footer_kind())) {
-        let id = deckcraft_model::ShapeId(doc.alloc_id());
+        let id = deckcraft_model::ShapeId(doc.alloc_id().ok_or_else(|| bad("slide.layout", NO_ID_SPACE))?);
         fresh.push((id, ls.clone()));
     }
     let slide = doc.slides.get_mut(index).ok_or_else(|| bad("slide.layout", "no slide"))?;

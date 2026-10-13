@@ -27,12 +27,12 @@ fn png(w: u32, h: u32, rgb: [u8; 3]) -> Vec<u8> {
 }
 
 fn shape(p: &mut Presentation, name: &str, x: f64, y: f64, w: f64, h: f64) -> Shape {
-    Shape { id: ShapeId(p.alloc_id()), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
+    Shape { id: ShapeId(p.alloc_id().expect("ids")), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
 }
 
 fn new_slide(p: &mut Presentation, title: &str) -> Slide {
     let layout = defaults::layout_of_kind(p, deckcraft_model::LayoutType::TitleOnly).unwrap_or_default();
-    let mut s = defaults::new_slide(p, layout);
+    let mut s = defaults::new_slide(p, layout).expect("slide");
     if let Some(t) = s.shapes.first_mut() {
         t.text = Some(TextBody::from_text(title));
     }
@@ -45,9 +45,9 @@ pub fn rich_deck() -> Presentation {
     p.props.title = "Rich deck".into();
     p.props.author = "DeckCraft tests".into();
     p.props.created = "2025-01-02T03:04:05Z".into();
-    let img = p.add_media("image1.png", "image/png", png(40, 30, [200, 40, 40]));
-    let img2 = p.add_media("image2.png", "image/png", png(8, 8, [20, 140, 220]));
-    let video = p.add_media("clip.mp4", "video/mp4", b"\x00\x00\x00\x18ftypmp42not-a-real-video".to_vec());
+    let img = p.add_media("image1.png", "image/png", png(40, 30, [200, 40, 40])).expect("media");
+    let img2 = p.add_media("image2.png", "image/png", png(8, 8, [20, 140, 220])).expect("media");
+    let video = p.add_media("clip.mp4", "video/mp4", b"\x00\x00\x00\x18ftypmp42not-a-real-video".to_vec()).expect("media");
 
     // Slide 1: title slide with notes and formatted text.
     {
@@ -328,7 +328,7 @@ pub fn rich_deck() -> Presentation {
 
     // Slide 6: bulleted content with a by-paragraph build, a slide link and an equation.
     let layout = defaults::layout_of_kind(&p, deckcraft_model::LayoutType::TitleAndContent).unwrap_or_default();
-    let mut s = defaults::new_slide(&mut p, layout);
+    let mut s = defaults::new_slide(&mut p, layout).expect("slide");
     s.shapes[0].text = Some(TextBody::from_text("Build"));
     s.shapes[1].text = Some(TextBody::from_text("One\nTwo\nThree"));
     let body = s.shapes[1].id;
@@ -589,7 +589,7 @@ fn every_transition_kind_survives() {
     p.slides.clear();
     for (kind, ..) in deckcraft_model::anim::TRANSITIONS {
         let mut s = base.clone();
-        s.id = SlideId(p.alloc_id());
+        s.id = SlideId(p.alloc_id().expect("ids"));
         s.transition = Some(Transition { kind: kind.to_string(), duration_ms: 1200, ..Default::default() });
         p.slides.push(Arc::new(s));
     }
@@ -754,7 +754,7 @@ fn colour_map_overrides_round_trip() {
 #[test]
 fn a_picture_duotone_round_trips() {
     let mut p = defaults::new_presentation(None);
-    let img = p.add_media("image1.png", "image/png", png(4, 4, [128, 128, 128]));
+    let img = p.add_media("image1.png", "image/png", png(4, 4, [128, 128, 128])).expect("media");
     let mut pic = shape(&mut p, "Duotone", 10.0, 10.0, 100.0, 100.0);
     let mut pf = PictureFill { media: img, ..Default::default() };
     pf.adjust.duotone = Some((ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Shade(30000)), ColorRef::rgb(Rgba::rgb(250, 240, 200))));
@@ -867,7 +867,7 @@ fn transition_deck(list: &[(&str, &str, u32, Option<u32>)]) -> (Presentation, Ve
     p.slides.clear();
     for (kind, option, ms, adv) in list {
         let mut s = base.clone();
-        s.id = SlideId(p.alloc_id());
+        s.id = SlideId(p.alloc_id().expect("ids"));
         s.transition = Some(Transition {
             kind: kind.to_string(),
             option: option.to_string(),

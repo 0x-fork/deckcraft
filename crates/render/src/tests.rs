@@ -361,7 +361,7 @@ fn two_frame_gif() -> Vec<u8> {
 #[test]
 fn animated_gif_shows_the_frame_for_its_time() {
     let mut p = Presentation::default();
-    let media = p.add_media("a.gif", "image/gif", two_frame_gif());
+    let media = p.add_media("a.gif", "image/gif", two_frame_gif()).expect("media");
     let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
     let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
     std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
@@ -653,7 +653,7 @@ fn a_background_is_laid_over_white() {
     let mut png = std::io::Cursor::new(Vec::new());
     image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 4, image::Rgb([0, 0, 200]))).write_to(&mut png, image::ImageFormat::Png).unwrap();
     let mut p = deck_with(vec![]);
-    let media = p.add_media("bg.png", "image/png", png.into_inner());
+    let media = p.add_media("bg.png", "image/png", png.into_inner()).expect("media");
     let pf = PictureFill { media, mode: PictureMode::Stretch { fill_rect: [0.5, 0.5, 0.0, 0.0] }, ..Default::default() };
     std::sync::Arc::make_mut(&mut p.slides[0]).background = Some(deckcraft_model::Background::Fill { fill: Fill::Picture(pf) });
     let img = render_slide(&p, 0, &RenderOpts { scale: 0.5, ..Default::default() });
@@ -1149,7 +1149,7 @@ fn half_red_wmf() -> Vec<u8> {
 #[test]
 fn metafile_pictures_draw_their_vectors() {
     let mut p = Presentation::default();
-    let media = p.add_media("image1.wmf", "image/x-wmf", half_red_wmf());
+    let media = p.add_media("image1.wmf", "image/x-wmf", half_red_wmf()).expect("media");
     let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
     let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
     std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
@@ -1174,7 +1174,7 @@ fn broken_metafiles_draw_nothing_and_never_panic() {
     cases.push(huge);
     for bytes in cases {
         let mut p = Presentation::default();
-        let media = p.add_media("image1.emf", "image/x-emf", bytes);
+        let media = p.add_media("image1.emf", "image/x-emf", bytes).expect("media");
         let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
         let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(0.0, 0.0, 400.0, 200.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
         std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
@@ -1195,7 +1195,7 @@ fn an_object_deckcraft_doesnt_model_shows_its_preview_picture() {
     };
     for with_preview in [true, false] {
         let mut p = Presentation::default();
-        let media = p.add_media("image1.png", "image/png", png.clone());
+        let media = p.add_media("image1.png", "image/png", png.clone()).expect("media");
         let sh = Shape {
             id: ShapeId(600),
             xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
@@ -1567,7 +1567,7 @@ fn a_picture_casts_its_shadow_from_its_pixels() {
     };
     for as_fill in [false, true] {
         let mut p = Presentation::default();
-        let media = p.add_media("logo.png", "image/png", png.clone());
+        let media = p.add_media("logo.png", "image/png", png.clone()).expect("media");
         let pf = deckcraft_model::style::PictureFill { media, ..Default::default() };
         let mut sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), ..Default::default() };
         if as_fill {

@@ -37,7 +37,7 @@ fn placeholder_inherits_position_and_styles() {
 fn body_levels_from_master() {
     let mut p = Presentation::default();
     let lay = defaults::layout_of_kind(&p, LayoutType::TitleAndContent).unwrap();
-    let s = defaults::new_slide(&mut p, lay);
+    let s = defaults::new_slide(&mut p, lay).expect("slide");
     let ctx = Ctx::for_slide(&p, &s).unwrap();
     let body = &s.shapes[1];
     assert_eq!(body.ph_type(), Some(PhType::Obj));
@@ -97,16 +97,28 @@ fn serde_roundtrip() {
     assert!(q.slides.is_empty());
 }
 
+/// A deck whose ids are used up (a hostile file can arrive that way) yields no further ids:
+/// allocating never repeats one (#407).
+#[test]
+fn exhausted_id_space_allocates_nothing() {
+    let mut p = Presentation { next_id: u32::MAX, ..Default::default() };
+    assert_eq!(p.alloc_id(), None);
+    assert_eq!(p.alloc_id(), None);
+    assert!(p.add_media("x.png", "image/png", vec![9]).is_none(), "fresh media bytes are refused too");
+    let lay = defaults::layout_of_kind(&p, LayoutType::TitleAndContent).unwrap_or_default();
+    assert!(defaults::new_slide(&mut p, lay).is_none(), "a new slide is refused");
+}
+
 #[test]
 fn ids_are_unique_and_fix_next_id() {
     let mut p = Presentation::default();
-    let a = p.alloc_id();
-    let b = p.alloc_id();
+    let a = p.alloc_id().expect("ids");
+    let b = p.alloc_id().expect("ids");
     assert!(b > a);
     p.next_id = 0;
     p.fix_next_id();
     assert!(p.next_id >= b.min(p.next_id));
-    let c = p.alloc_id();
+    let c = p.alloc_id().expect("ids");
     let mut all = vec![];
     for s in &p.slides {
         all.push(s.id.0);

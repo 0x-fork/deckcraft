@@ -177,7 +177,7 @@ fn background(s: &mut Session, p: &Value) -> Result<Value> {
     } else if p.get("picture").is_some() {
         let (name, bytes) = super::insert::media_bytes(&with_param(p, "data", p.get("picture").cloned().unwrap_or_default()), "design.background")?;
         let ct = super::insert::content_type(&name, &bytes);
-        let media = s.edit(|doc, _| Ok(doc.add_media(&name, ct, bytes)))?;
+        let media = s.edit(|doc, _| doc.add_media(&name, ct, bytes).ok_or_else(|| bad("design.background", NO_ID_SPACE)))?;
         Some(Background::Fill { fill: Fill::Picture(deckcraft_model::style::PictureFill { media, ..Default::default() }) })
     } else {
         return Err(bad("design.background", "give `color`, `gradient`, `pattern`, `picture`, `style` or `reset`"));
@@ -325,7 +325,7 @@ fn header_footer(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let mut new_ids = vec![];
             for _ in 0..3 {
-                new_ids.push(ShapeId(doc.alloc_id()));
+                new_ids.push(ShapeId(doc.alloc_id().ok_or_else(|| bad("design.headerFooter", NO_ID_SPACE))?));
             }
             let Some(sl) = doc.slides.get_mut(i) else { continue };
             let sl = Arc::make_mut(sl);
@@ -459,8 +459,8 @@ fn insert_layout(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").unwrap_or("Custom Layout").to_string();
     s.edit(|doc, sel| {
         let mi = master_index(doc, sel);
-        let id = deckcraft_model::LayoutId(doc.alloc_id());
-        let tid = ShapeId(doc.alloc_id());
+        let id = deckcraft_model::LayoutId(doc.alloc_id().ok_or_else(|| bad("master.insertLayout", NO_ID_SPACE))?);
+        let tid = ShapeId(doc.alloc_id().ok_or_else(|| bad("master.insertLayout", NO_ID_SPACE))?);
         let size = doc.slide_size;
         let m = Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("master.insertLayout", "no master"))?);
         let title = m.shapes.iter().find(|x| x.ph_type() == Some(PhType::Title)).cloned().map(|mut t| {
@@ -552,7 +552,7 @@ fn insert_placeholder(s: &mut Session, p: &Value) -> Result<Value> {
         text: Some(TextBody::default()),
         ..Default::default()
     };
-    let id = super::insert::add_shape(s, shape, true)?;
+    let id = super::insert::add_shape(s, "master.insertPlaceholder", shape, true)?;
     Ok(json!({"id": id}))
 }
 
