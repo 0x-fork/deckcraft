@@ -1715,10 +1715,16 @@ fn emfplus_driver_string_uses_character_codes_and_positions() {
     assert_eq!(t.dx, vec![6.0, 6.0]);
     assert_eq!(t.v_align, VAlign::Baseline);
     assert!(close(t.transform[4] as f32, 5.0) && close(t.transform[5] as f32, 30.0));
-    // Glyph indices (no CmapLookup) are skipped.
-    let gi = prec(0x4036, 0x8000, &cat(vec![h32(0xFF00_0000), h32(0), h32(0), h32(1), h16(36), f32s(&[0.0, 0.0])]));
-    let font = prec(0x4008, 0x0600, &font_obj("Arial", 10.0, 0, 0));
-    assert!(plus_pic(vec![font, gi]).items.is_empty());
+}
+
+#[test]
+fn emfplus_glyph_index_driver_strings_map_back_in_core_fonts_only() {
+    // Glyph indices (no CmapLookup): 36, 69 are "Ab" in Arial's standard glyph order.
+    let gi = || prec(0x4036, 0x8000, &cat(vec![h32(0xFF00_0000), h32(0), h32(0), h32(2), h16(36), h16(69), f32s(&[0.0, 0.0, 6.0, 0.0])]));
+    let p = plus_pic(vec![prec(0x4008, 0x0600, &font_obj("Arial", 10.0, 0, 0)), gi()]);
+    assert!(matches!(&p.items[0], Item::Text(t) if t.text == "Ab"), "{:?}", p.items);
+    // An unknown font's glyph indices cannot be mapped: nothing is drawn.
+    assert!(plus_pic(vec![prec(0x4008, 0x0600, &font_obj("Calibri", 10.0, 0, 0)), gi()]).items.is_empty());
 }
 
 #[test]
@@ -1783,4 +1789,63 @@ fn emfplus_region_clip_intersects_rectangles() {
     let fill = prec(0x400A, 0x8000, &cat(vec![h32(0xFF00_0000), h32(1), f32s(&[0.0, 0.0, 100.0, 100.0])]));
     let p = plus_pic(vec![prec(0x4008, 0x0400 | 6, &region), prec(0x4034, 6, &[]), fill]);
     assert_eq!((p.width, p.height), (20.0, 20.0));
+}
+
+#[test]
+fn emfplus_pie_and_arc() {
+    // A quarter pie from 0 to 90 degrees in a 0..100 circle: centre, then (100, 50) round to (50, 100).
+    let pie = prec(0x4010, 0x8000, &cat(vec![h32(0xFF00_0000), f32s(&[0.0, 90.0]), f32s(&[0.0, 0.0, 100.0, 100.0])]));
+    let p = plus_pic(vec![pie]);
+    let (segs, fill, ..) = path_segs(&p.items[0]);
+    assert_eq!(fill, Some([0, 0, 0, 255]));
+    assert_eq!(segs[0], Seg::Move(0.0, 0.0));
+    assert_eq!(segs[1], Seg::Line(50.0, 0.0));
+    assert!(matches!(segs[2], Seg::Cubic(.., x, y) if close(x, 0.0) && close(y, 50.0)), "{segs:?}");
+    assert_eq!(segs[3], Seg::Close);
+    // A half-circle arc stroke is two cubics.
+    let pen = prec(0x4008, 0x0200, &solid_pen(0xFF00_0000, 1.0));
+    let arc = prec(0x4012, 0, &cat(vec![f32s(&[180.0, -180.0]), f32s(&[0.0, 0.0, 100.0, 100.0])]));
+    let p = plus_pic(vec![pen, arc]);
+    let (segs, ..) = path_segs(&p.items[0]);
+    assert_eq!(segs.len(), 3, "{segs:?}");
+}
+
+#[test]
+fn emfplus_convex_clip_path_cuts_to_the_shape_not_its_box() {
+    // A diamond clip path (0,50) (50,0) (100,50) (50,100): the corner of a full square fill is cut away.
+    let diamond = cat(vec![h32(0xDBC0_1002), h32(4), h32(0), f32s(&[0.0, 50.0, 50.0, 0.0, 100.0, 50.0, 50.0, 100.0]), vec![0, 1, 1, 0x81]]);
+    let fill = prec(0x400A, 0x8000, &cat(vec![h32(0xFF00_0000), h32(1), f32s(&[0.0, 0.0, 100.0, 100.0])]));
+    let p = plus_pic(vec![prec(0x4008, 0x0300 | 9, &diamond), prec(0x4033, 9, &[]), fill]);
+    let (segs, ..) = path_segs(&p.items[0]);
+    let pts: Vec<(f32, f32)> = segs.iter().filter_map(|s| if let Seg::Move(x, y) | Seg::Line(x, y) = s { Some((*x, *y)) } else { None }).collect();
+    assert!(!pts.iter().any(|(x, y)| close(*x, 0.0) && close(*y, 0.0)), "corner kept: {pts:?}");
+    assert!(pts.iter().all(|(x, y)| (x - 50.0).abs() + (y - 50.0).abs() <= 50.0 + 1e-3), "{pts:?}");
+}
+
+#[test]
+fn emfplus_draw_string_wraps_to_the_layout_width() {
+    let font = prec(0x4008, 0x0600, &font_obj("Arial", 10.0, 0, 0));
+    let text = "alpha beta gamma delta";
+    let s = prec(
+        0x401C,
+        0x8000,
+        &cat(vec![h32(0xFF00_0000), h32(9), h32(text.encode_utf16().count() as u32), f32s(&[0.0, 0.0, 60.0, 100.0]), u16s(text)]),
+    );
+    let fill = prec(0x400A, 0x8000, &cat(vec![h32(0xFFFF_FFFF), h32(1), f32s(&[0.0, 0.0, 60.0, 100.0])]));
+    let p = plus_pic(vec![fill, font, s]);
+    let lines: Vec<&str> = p.items.iter().filter_map(|i| if let Item::Text(t) = i { Some(t.text.as_str()) } else { None }).collect();
+    assert_eq!(lines, vec!["alpha beta", "gamma delta"]);
+}
+
+#[test]
+fn emfplus_nested_metafile_image_draws_its_items_into_the_destination() {
+    // The nested picture: a plain EMF with a 10 x 10 rectangle (white brush, black pen).
+    let inner = emf(&[erec(43, &cat(vec![e32(0), e32(0), e32(10), e32(10)]))], [0; 4], [0; 4]);
+    let obj = cat(vec![h32(0xDBC0_1002), h32(2), h32(3), h32(inner.len() as u32), inner]);
+    let p = plus_pic(vec![prec(0x4008, 0x0500 | 3, &obj), draw_image(3, [0.0, 0.0, 40.0, 20.0])]);
+    assert_eq!(p.items.len(), 1);
+    assert_eq!((p.width, p.height), (40.0, 20.0));
+    let (segs, fill, ..) = path_segs(&p.items[0]);
+    assert_eq!(fill, Some([255, 255, 255, 255]));
+    assert!(segs.contains(&Seg::Line(40.0, 20.0)), "{segs:?}");
 }

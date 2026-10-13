@@ -306,8 +306,8 @@ pub(crate) struct Canvas {
     in_path: bool,
     path: Vec<Op>,
     full: bool,
-    /// Device clip rectangle `[l, t, r, b]` applied to everything drawn (EMF+ sets it).
-    clip: Option<[f64; 4]>,
+    /// Convex device clip polygon applied to everything drawn (EMF+ sets it).
+    clip: Option<Vec<P>>,
 }
 
 impl Canvas {
@@ -341,12 +341,13 @@ impl Canvas {
     }
 
     fn push(&mut self, raw: Raw) {
-        match self.clip {
+        match self.clip.take() {
             None => self.push_raw(raw),
             Some(c) => {
-                for r in crate::clip::clip_raw(raw, c) {
+                for r in crate::clip::clip_raw(raw, &c) {
                     self.push_raw(r);
                 }
+                self.clip = Some(c);
             }
         }
     }
@@ -472,8 +473,8 @@ impl Canvas {
         self.brush = brush;
     }
 
-    /// Sets the device clip rectangle `[l, t, r, b]` (None: unclipped).
-    pub fn set_clip(&mut self, clip: Option<[f64; 4]>) {
+    /// Sets the convex device clip polygon (None: unclipped).
+    pub fn set_clip(&mut self, clip: Option<Vec<P>>) {
         self.clip = clip;
     }
 
@@ -492,6 +493,11 @@ impl Canvas {
         self.text.bk_opaque = false;
         self.text.align = align;
         self.text.font = Some(Arc::new(font));
+    }
+
+    /// Pushes an item already in device units (a nested metafile's drawing).
+    pub fn push_device(&mut self, raw: Raw) {
+        self.push(raw);
     }
 
     /// Fills logical `ops` with a ready-made tile, laid from the device origin.

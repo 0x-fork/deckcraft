@@ -9,19 +9,23 @@
 //! - bitmaps (raw pixel formats, and PNG/JPEG/GIF/TIFF/BMP payloads) and strings (DrawString,
 //!   DrawDriverString with character codes);
 //! - world and page transforms, save/restore and containers;
-//! - clipping to rectangles, and to the bounding rectangle of clip paths and regions.
+//! - arcs and pies;
+//! - clipping to rectangles and convex clip paths and regions (others: their bounding rectangle);
+//! - nested metafile images, and glyph-index driver strings in the Windows core fonts.
 //!
-//! Not drawn yet: nested metafile images, glyph-index driver strings, arcs and pies, image
-//! attributes, and region combinations other than intersect and union.
+//! Not drawn yet: image attributes, glyph indices of other fonts, and region combinations other
+//! than intersect and union (XOR, exclude and complement keep the left area).
 
 use std::sync::Arc;
 
 use crate::bytes::Bytes;
+use crate::canvas::Raw;
 use crate::canvas::{BS_NULL, BS_SOLID, Brush, Canvas, LogFont, PS_NULL, Pen, RawTile, Xform, hatch_tile, mul};
-use crate::clip::{intersect, ops_bbox};
+use crate::clip::{clip_polygon, convex, flatten, ops_bbox, pts_bbox, rect_poly};
 use crate::dib::Rgba;
 use crate::geom::{Op, P};
 use crate::text::{ETO_CLIPPED, Font};
+use crate::{Item, Picture, Seg};
 
 /// "EMF+" as the comment identifier of an EMR_COMMENT holding EMF+ records.
 pub(crate) const EMF_PLUS: u32 = 0x2B46_4D45;
@@ -155,6 +159,23 @@ struct Format {
     line_align: u32,
 }
 
+/// A clip area: a convex polygon (empty clips everything), or None for infinite.
+type Area = Option<Vec<P>>;
+
+enum ImageData {
+    Bitmap(Rgba),
+    /// A nested WMF or EMF (EMF+) picture.
+    Meta(Picture),
+}
+
+thread_local! {
+    /// Nesting depth of metafile images being parsed, so a file of nested metafiles cannot run
+    /// the stack out.
+    static NESTING: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// Metafile images inside metafile images, at most.
+const MAX_NESTING: usize = 3;
+
 #[derive(Clone)]
 enum Obj {
     Brush(Fill),
@@ -163,11 +184,11 @@ enum Obj {
         width: f64,
     },
     Path(Vec<Op>),
-    Image(Arc<Rgba>),
+    Image(Arc<ImageData>),
     Font(FontObj),
     Format(Format),
     /// A region's bounding rectangle `[l, t, r, b]` in world units; None is infinite.
-    Region(Option<[f64; 4]>),
+    Region(Area),
 }
 
 /// An object arriving in several records: its id, type, total size and the bytes so far.
@@ -182,7 +203,7 @@ struct Saved {
     id: u32,
     world: Xform,
     page: f64,
-    clip: Option<[f64; 4]>,
+    clip: Area,
 }
 
 pub(crate) struct Plus {
@@ -191,8 +212,8 @@ pub(crate) struct Plus {
     dpi: f64,
     world: Xform,
     page: f64,
-    /// Device clip rectangle `[l, t, r, b]`; None is unclipped.
-    clip: Option<[f64; 4]>,
+    /// Convex device clip polygon; None is unclipped.
+    clip: Area,
     objects: Vec<Option<Obj>>,
     stack: Vec<Saved>,
     partial: Option<Partial>,
@@ -227,7 +248,7 @@ impl Plus {
     }
 
     fn painter(&self) -> Painter {
-        Painter { xf: self.xf(), clip: self.clip }
+        Painter { xf: self.xf(), clip: self.clip.clone() }
     }
 
     fn record(&mut self, cv: &mut Canvas, typ: u16, flags: u16, r: Bytes) -> Option<()> {
@@ -351,26 +372,41 @@ impl Plus {
             }
             0x4032 => {
                 let [x, y, w, h] = floats::<4>(r, 0)?;
-                let dev = self.device_rect(cv, [x, y, x + w, y + h]);
-                self.combine(flags, Some(dev))
+                let area = map_area(Some(rect_poly([x, y, x + w, y + h])), mul(self.xf(), cv.device_affine()));
+                self.combine(flags, area)
             }
             0x4033 => {
-                let b = ops_bbox(&self.path(id)?)?;
-                let dev = self.device_rect(cv, b);
-                self.combine(flags, Some(dev))
+                let area = map_area(Some(area_of_ops(&self.path(id)?)), mul(self.xf(), cv.device_affine()));
+                self.combine(flags, area)
             }
             0x4034 => {
                 let Some(Some(Obj::Region(reg))) = self.objects.get(id).cloned() else { return None };
-                let dev = reg.map(|b| self.device_rect(cv, b));
-                self.combine(flags, dev)
+                let area = map_area(reg, mul(self.xf(), cv.device_affine()));
+                self.combine(flags, area)
             }
             0x4035 => {
                 let [dx, dy] = floats::<2>(r, 0)?;
                 let a = mul(self.xf(), cv.device_affine());
                 let (ox, oy) = (dx * a[0] + dy * a[2], dx * a[1] + dy * a[3]);
                 if let Some(c) = self.clip.as_mut() {
-                    *c = [c[0] + ox, c[1] + oy, c[2] + ox, c[3] + oy];
+                    for p in c.iter_mut() {
+                        *p = (p.0 + ox, p.1 + oy);
+                    }
                 }
+                Some(())
+            }
+            0x4010 => {
+                let fill = self.brush_of(flags, r.u32(0)?)?;
+                let [start, sweep] = floats::<2>(r, 4)?;
+                let rect = *rects(r, 12, 1, compressed)?.first()?;
+                self.painter().fill(cv, &arc_ops(rect, start, sweep, true), &fill);
+                Some(())
+            }
+            0x4011 | 0x4012 => {
+                let pen = self.pen(id)?;
+                let [start, sweep] = floats::<2>(r, 0)?;
+                let rect = *rects(r, 8, 1, compressed)?.first()?;
+                self.painter().stroke(cv, &arc_ops(rect, start, sweep, typ == 0x4011), pen);
                 Some(())
             }
             _ => None,
@@ -385,48 +421,27 @@ impl Plus {
 
     fn push(&mut self, id: u32) {
         if self.stack.len() < MAX_STACK {
-            self.stack.push(Saved { id, world: self.world, page: self.page, clip: self.clip });
+            self.stack.push(Saved { id, world: self.world, page: self.page, clip: self.clip.clone() });
         }
     }
 
     fn pop(&mut self, id: u32) {
         if let Some(i) = self.stack.iter().rposition(|s| s.id == id) {
-            let s = &self.stack[i];
+            let s = self.stack.swap_remove(i);
             (self.world, self.page, self.clip) = (s.world, s.page, s.clip);
             self.stack.truncate(i);
         }
     }
 
-    /// A world rectangle `[l, t, r, b]` as the device rectangle around it.
-    fn device_rect(&self, cv: &Canvas, [l, t, r, b]: [f64; 4]) -> [f64; 4] {
-        let a = mul(self.xf(), cv.device_affine());
-        let pts = [(l, t), (r, t), (l, b), (r, b)].map(|p| apply(a, p));
-        let xs = pts.map(|p| p.0);
-        let ys = pts.map(|p| p.1);
-        let min = |v: [f64; 4]| v.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = |v: [f64; 4]| v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        [min(xs), min(ys), max(xs), max(ys)]
-    }
-
-    /// Combines a new clip area (None: infinite) with the current one under the record's combine
-    /// mode: replace, intersect and union (as the rectangle around both). XOR, exclude and
-    /// complement leave the clip as it was.
-    fn combine(&mut self, flags: u16, new: Option<[f64; 4]>) -> Option<()> {
-        if new.is_some_and(|c| !c.iter().all(|v| v.is_finite())) {
-            return None;
-        }
+    /// Combines a new clip area with the current one under the record's combine mode: replace,
+    /// intersect and union (as the rectangle around both). XOR, exclude and complement leave the
+    /// clip as it was.
+    fn combine(&mut self, flags: u16, new: Area) -> Option<()> {
         self.clip = match (flags >> 8) & 0xF {
             0 => new,
-            1 => match (self.clip, new) {
-                (None, n) => n,
-                (c, None) => c,
-                (Some(a), Some(b)) => Some(intersect(a, b)),
-            },
-            2 => match (self.clip, new) {
-                (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
-                _ => None,
-            },
-            _ => self.clip,
+            1 => area_intersect(self.clip.take(), new),
+            2 => area_union(self.clip.take(), new),
+            _ => self.clip.take(),
         };
         Some(())
     }
@@ -489,7 +504,7 @@ impl Plus {
         }
     }
 
-    fn image(&self, id: usize) -> Option<Arc<Rgba>> {
+    fn image(&self, id: usize) -> Option<Arc<ImageData>> {
         match self.objects.get(id)? {
             Some(Obj::Image(img)) => Some(img.clone()),
             _ => None,
@@ -509,7 +524,14 @@ impl Plus {
 
     /// DrawImage and DrawImagePoints: the source rectangle (pixels) cut from the image, drawn
     /// into world rectangle `dst` = `[x, y, w, h]`.
-    fn draw_image(&self, cv: &mut Canvas, img: &Rgba, r: Bytes, dst: [f64; 4]) -> Option<()> {
+    fn draw_image(&self, cv: &mut Canvas, img: &ImageData, r: Bytes, dst: [f64; 4]) -> Option<()> {
+        let img = match img {
+            ImageData::Bitmap(b) => b,
+            ImageData::Meta(pic) => {
+                self.painter().picture(cv, dst, pic);
+                return Some(());
+            }
+        };
         let [sx, sy, sw, sh] = floats::<4>(r, 8)?;
         let src = if r.u32(4)? == 2 { [sx, sy, sw, sh].map(|v| v.round().clamp(-1.0e9, 1.0e9) as i64) } else { [0; 4] };
         let (part, dst) = crate::dib::clip_blit(img, src, dst)?;
@@ -552,7 +574,14 @@ impl Plus {
         let units: Vec<u16> = (0..len).map(|i| r.u16(28 + i * 2)).collect::<Option<_>>()?;
         let lf = self.log_font(&font);
         let em = f64::from(-lf.font.height);
-        let lines: Vec<&[u16]> = units.split(|u| *u == 0x0A).collect();
+        let wrap = w > 0.0 && fmt.flags & 0x1000 == 0;
+        let lines: Vec<Vec<u16>> = units
+            .split(|u| *u == 0x0A)
+            .flat_map(|l| {
+                let l: Vec<u16> = l.iter().copied().filter(|u| *u != 0x0D).collect();
+                if wrap { wrap_line(&l, w, em) } else { vec![l] }
+            })
+            .collect();
         let line_h = em * 1.2;
         let (ax, ta_h) = match fmt.align {
             1 => (x + w / 2.0, TA_CENTER),
@@ -568,11 +597,10 @@ impl Plus {
         let clip = (w > 0.0 && h > 0.0 && fmt.flags & 0x4000 == 0).then_some([x, y, x + w, y + h]);
         let p = self.painter();
         for (i, line) in lines.iter().enumerate() {
-            let line: Vec<u16> = line.iter().copied().filter(|u| *u != 0x0D).collect();
             if line.is_empty() {
                 continue;
             }
-            let (text, dx) = crate::text::decode_utf16(&line, &[]);
+            let (text, dx) = crate::text::decode_utf16(line, &[]);
             let at = (ax, top + line_h * i as f64);
             let (at, ta) = if fmt.line_align == 2 && lines.len() == 1 { ((ax, y + h), ta_h | TA_BOTTOM) } else { (at, ta_h) };
             p.text(cv, at, text, dx, TextStyle { color, font: lf.clone(), align: ta, clip }, IDENTITY);
@@ -585,12 +613,13 @@ impl Plus {
         let font = self.font(usize::from(flags & 0xFF))?;
         let color = self.brush_of(flags, r.u32(0)?)?.color();
         let opts = r.u32(4)?;
-        if opts & 1 == 0 {
-            // Glyph indices into the font: the metafile crate knows no fonts to map them back.
-            return None;
-        }
         let n = (r.u32(12)? as usize).min(MAX_CHARS);
-        let units: Vec<u16> = (0..n).map(|i| r.u16(16 + i * 2)).collect::<Option<_>>()?;
+        let mut units: Vec<u16> = (0..n).map(|i| r.u16(16 + i * 2)).collect::<Option<_>>()?;
+        if opts & 1 == 0 {
+            // Glyph indices into the font. The crate knows no fonts, but the classic Windows core
+            // fonts keep the standard Macintosh glyph order for ASCII, so those map back.
+            units = glyphs_to_chars(&font.family, &units)?;
+        }
         let pos = points(r, 16 + n * 2, n, false)?;
         let m = if r.u32(8)? != 0 { matrix(r, 16 + n * 10)? } else { IDENTITY };
         let lf = self.log_font(&font);
@@ -631,7 +660,7 @@ struct TextStyle {
 /// canvas's GDI state back.
 struct Painter {
     xf: Xform,
-    clip: Option<[f64; 4]>,
+    clip: Area,
 }
 
 impl Painter {
@@ -639,7 +668,7 @@ impl Painter {
         let world = cv.world();
         cv.save_dc();
         cv.modify_world(mul(mul(pre, self.xf), world), 4);
-        cv.set_clip(self.clip);
+        cv.set_clip(self.clip.clone());
     }
 
     fn end(&self, cv: &mut Canvas) {
@@ -688,6 +717,62 @@ impl Painter {
     fn image(&self, cv: &mut Canvas, dst: [f64; 4], img: Rgba) {
         self.begin(cv, IDENTITY);
         cv.bitmap(dst, img);
+        self.end(cv);
+    }
+
+    /// A nested metafile's picture stretched into world rectangle `dst` = `[x, y, w, h]`.
+    fn picture(&self, cv: &mut Canvas, [x, y, w, h]: [f64; 4], pic: &Picture) {
+        self.begin(cv, IDENTITY);
+        let (sx, sy) = (w / f64::from(pic.width), h / f64::from(pic.height));
+        let m = mul([sx, 0.0, 0.0, sy, x, y], cv.device_affine());
+        let scale = (m[0] * m[3] - m[1] * m[2]).abs().sqrt();
+        let pt = |a: f32, b: f32| apply(m, (f64::from(a), f64::from(b)));
+        let ops = |segs: &[Seg]| -> Vec<Op> {
+            segs.iter()
+                .map(|s| match *s {
+                    Seg::Move(a, b) => Op::M(pt(a, b)),
+                    Seg::Line(a, b) => Op::L(pt(a, b)),
+                    Seg::Cubic(a, b, c, d, e, f) => Op::C(pt(a, b), pt(c, d), pt(e, f)),
+                    Seg::Close => Op::Z,
+                })
+                .collect()
+        };
+        for item in &pic.items {
+            if cv.full() {
+                break;
+            }
+            let raw = match item {
+                Item::Path { segs, fill, stroke, even_odd } => {
+                    Raw::Path { ops: ops(segs), fill: *fill, stroke: stroke.map(|(c, w)| (c, f64::from(w) * scale)), even_odd: *even_odd }
+                }
+                Item::Pattern { segs, even_odd, tile } => Raw::Pattern {
+                    ops: ops(segs),
+                    even_odd: *even_odd,
+                    tile: Arc::new(RawTile {
+                        w: tile.width as usize,
+                        h: tile.height as usize,
+                        px: tile.rgba.clone(),
+                        cell: f64::from(tile.cell[0]) * scale,
+                    }),
+                },
+                Item::Bitmap { rect, width, height, rgba } => {
+                    let (a, b) = (pt(rect[0], rect[1]), pt(rect[0] + rect[2], rect[1] + rect[3]));
+                    let mut img = Rgba { w: *width as usize, h: *height as usize, bottom_up: false, px: rgba.clone() };
+                    crate::dib::flip(&mut img, a.0 > b.0, a.1 > b.1);
+                    Raw::Bitmap { rect: [a.0.min(b.0), a.1.min(b.1), (b.0 - a.0).abs(), (b.1 - a.1).abs()], img }
+                }
+                Item::Text(t) => {
+                    let mut t = t.clone();
+                    t.transform = mul(t.transform, m);
+                    if let Some([x0, y0, x1, y1]) = t.clip {
+                        let (p, q) = (pt(x0, y0), pt(x1, y1));
+                        t.clip = Some([p.0.min(q.0) as f32, p.1.min(q.1) as f32, p.0.max(q.0) as f32, p.1.max(q.1) as f32]);
+                    }
+                    Raw::Text(t)
+                }
+            };
+            cv.push_device(raw);
+        }
         self.end(cv);
     }
 
@@ -756,7 +841,8 @@ fn brush(r: Bytes, off: usize) -> Option<Fill> {
             let bflags = d.u32(0)?;
             let wrap = d.u32(4)?;
             let (xf, off) = if bflags & 0x2 != 0 { (matrix(d, 8)?, 32) } else { (IDENTITY, 8) };
-            Some(Fill::Texture { img: Arc::new(image(d.tail(off)?)?), wrap, xf })
+            let ImageData::Bitmap(img) = image(d.tail(off)?)? else { return None };
+            Some(Fill::Texture { img: Arc::new(img), wrap, xf })
         }
         3 => path_gradient(d),
         4 => linear_gradient(d),
@@ -879,54 +965,131 @@ fn path(r: Bytes) -> Option<Vec<Op>> {
     Some(ops)
 }
 
-/// A region object reduced to its bounding rectangle (None: infinite).
+/// A region object as a convex area in world units (non-convex parts become their bounding
+/// rectangle).
 fn region(r: Bytes) -> Option<Obj> {
-    region_node(r, 8, 0).map(|(b, _)| Obj::Region(b))
+    region_node(r, 8, 0).map(|(a, _)| Obj::Region(a))
 }
 
-/// One region node at `off`: its bounds (None: infinite; an empty node is a zero rectangle) and
-/// its length in bytes.
-fn region_node(r: Bytes, off: usize, depth: usize) -> Option<(Option<[f64; 4]>, usize)> {
+/// One region node at `off`: its area and its length in bytes.
+fn region_node(r: Bytes, off: usize, depth: usize) -> Option<(Area, usize)> {
     if depth > MAX_REGION_DEPTH {
         return None;
     }
     match r.u32(off)? {
         0x1000_0000 => {
             let [x, y, w, h] = floats::<4>(r, off + 4)?;
-            Some((Some([x.min(x + w), y.min(y + h), x.max(x + w), y.max(y + h)]), 20))
+            Some((Some(rect_poly([x.min(x + w), y.min(y + h), x.max(x + w), y.max(y + h)])), 20))
         }
         0x1000_0001 => {
             let size = r.u32(off + 4)? as usize;
-            let b = ops_bbox(&path(r.tail(off + 8)?)?).unwrap_or([0.0; 4]);
-            Some((Some(b), 8usize.checked_add(size)?))
+            let area = path(r.tail(off + 8)?).map(|ops| area_of_ops(&ops)).unwrap_or_default();
+            Some((Some(area), 8usize.checked_add(size)?))
         }
-        0x1000_0002 => Some((Some([0.0; 4]), 4)),
+        0x1000_0002 => Some((Some(Vec::new()), 4)),
         0x1000_0003 => Some((None, 4)),
-        mode @ 1..=5 => {
+        mode @ 0..=5 => {
             let (a, la) = region_node(r, off + 4, depth + 1)?;
             let (b, lb) = region_node(r, off.checked_add(4 + la)?, depth + 1)?;
             let out = match mode {
-                1 => match (a, b) {
-                    (None, x) | (x, None) => x,
-                    (Some(a), Some(b)) => Some(intersect(a, b)),
-                },
-                2 => match (a, b) {
-                    (Some(a), Some(b)) => Some([a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]),
-                    _ => None,
-                },
+                0 => b,
+                1 => area_intersect(a, b),
+                2 => area_union(a, b),
                 // XOR, exclude, complement: the left area bounds the result closely enough.
                 _ => a,
             };
             Some((out, (4 + la).checked_add(lb)?))
         }
-        // Replace: the right-hand area.
-        0 => {
-            let (_, la) = region_node(r, off + 4, depth + 1)?;
-            let (b, lb) = region_node(r, off.checked_add(4 + la)?, depth + 1)?;
-            Some((b, (4 + la).checked_add(lb)?))
+        _ => None,
+    }
+}
+
+/// The area a path encloses: its outline when that is one convex figure, else the rectangle
+/// around it.
+fn area_of_ops(ops: &[Op]) -> Vec<P> {
+    let subs = flatten(ops);
+    if let [(pts, _)] = subs.as_slice()
+        && let Some(c) = convex(pts)
+    {
+        return c;
+    }
+    ops_bbox(ops).map(rect_poly).unwrap_or_default()
+}
+
+fn area_intersect(a: Area, b: Area) -> Area {
+    match (a, b) {
+        (None, x) | (x, None) => x,
+        (Some(a), Some(b)) if a.len() >= 3 && b.len() >= 3 => Some(convex(&clip_polygon(&a, &b)).unwrap_or_default()),
+        _ => Some(Vec::new()),
+    }
+}
+
+fn area_union(a: Area, b: Area) -> Area {
+    match (a, b) {
+        (Some(a), Some(b)) => {
+            if a.len() < 3 {
+                return Some(b);
+            }
+            if b.len() < 3 {
+                return Some(a);
+            }
+            let all: Vec<P> = a.into_iter().chain(b).collect();
+            Some(pts_bbox(&all).map(rect_poly).unwrap_or_default())
         }
         _ => None,
     }
+}
+
+/// An area through an affine map (which keeps it convex; the orientation is put right again).
+fn map_area(a: Area, m: Xform) -> Area {
+    a.map(|pts| {
+        let mapped: Vec<P> = pts.iter().map(|p| apply(m, *p)).collect();
+        if mapped.len() < 3 { Vec::new() } else { convex(&mapped).unwrap_or_default() }
+    })
+}
+
+/// An elliptical arc in `rect` from `start` sweeping `sweep` degrees (clockwise on screen), as
+/// cubics; a pie adds the lines to and from the centre.
+fn arc_ops([l, t, r, b]: [f64; 4], start: f64, sweep: f64, pie: bool) -> Vec<Op> {
+    let (cx, cy, rx, ry) = ((l + r) / 2.0, (t + b) / 2.0, (r - l) / 2.0, (b - t) / 2.0);
+    let sweep = sweep.clamp(-360.0, 360.0);
+    // GDI+ angles are along rays from the centre; turn them into the ellipse's parameter.
+    let param = |deg: f64| {
+        let a = deg.to_radians();
+        (rx * a.sin()).atan2(ry * a.cos())
+    };
+    let t0 = param(start);
+    let mut dt = if sweep.abs() >= 360.0 { sweep.signum() * std::f64::consts::TAU } else { param(start + sweep) - t0 };
+    if sweep.abs() < 360.0 {
+        while sweep > 0.0 && dt < 0.0 {
+            dt += std::f64::consts::TAU;
+        }
+        while sweep < 0.0 && dt > 0.0 {
+            dt -= std::f64::consts::TAU;
+        }
+    }
+    let at = |t: f64| (cx + rx * t.cos(), cy + ry * t.sin());
+    let mut ops = Vec::with_capacity(8);
+    if pie {
+        ops.push(Op::M((cx, cy)));
+        ops.push(Op::L(at(t0)));
+    } else {
+        ops.push(Op::M(at(t0)));
+    }
+    let n = ((dt.abs() / std::f64::consts::FRAC_PI_2).ceil() as usize).clamp(1, 4);
+    let step = dt / n as f64;
+    let k = 4.0 / 3.0 * (step / 4.0).tan();
+    for i in 0..n {
+        let (a, e) = (t0 + step * i as f64, t0 + step * (i + 1) as f64);
+        let (p0, p3) = (at(a), at(e));
+        let c1 = (p0.0 - k * rx * a.sin(), p0.1 + k * ry * a.cos());
+        let c2 = (p3.0 + k * rx * e.sin(), p3.1 - k * ry * e.cos());
+        ops.push(Op::C(c1, c2, p3));
+    }
+    if pie {
+        ops.push(Op::Z);
+    }
+    ops
 }
 
 /// A font object: em size, unit, style flags, then the family name in UTF-16.
@@ -938,12 +1101,31 @@ fn font(r: Bytes) -> Option<Obj> {
     em.is_finite().then_some(Obj::Font(FontObj { em, unit: r.u32(8)?, style: r.u32(12)?, family }))
 }
 
-/// An image object: a bitmap of raw pixels or a compressed (PNG, JPEG, GIF…) file. Metafile
-/// images are not drawn yet.
-fn image(r: Bytes) -> Option<Rgba> {
-    if r.u32(4)? != 1 {
+/// An image object: a bitmap of raw pixels or a compressed (PNG, JPEG, GIF…) file, or a nested
+/// metafile.
+fn image(r: Bytes) -> Option<ImageData> {
+    match r.u32(4)? {
+        1 => bitmap(r).map(ImageData::Bitmap),
+        2 => metafile(r).map(ImageData::Meta),
+        _ => None,
+    }
+}
+
+/// A metafile image: type, size, then a WMF (placeable or not) or EMF file, parsed as a picture.
+fn metafile(r: Bytes) -> Option<Picture> {
+    let size = r.u32(12)? as usize;
+    let data = r.slice(16, size).or_else(|| r.tail(16).map(|t| t.0))?;
+    let depth = NESTING.with(|n| n.get());
+    if depth >= MAX_NESTING {
         return None;
     }
+    NESTING.with(|n| n.set(depth + 1));
+    let pic = crate::parse(data).ok();
+    NESTING.with(|n| n.set(depth));
+    pic.filter(|p| p.width > 0.0 && p.height > 0.0)
+}
+
+fn bitmap(r: Bytes) -> Option<Rgba> {
     let (w, h, stride) = (r.u32(8)? as i32, r.u32(12)? as i32, r.u32(16)? as i32);
     let format = r.u32(20)?;
     let data = r.tail(28)?;
@@ -1085,4 +1267,69 @@ fn ellipse_ops([l, t, r, b]: [f64; 4]) -> Vec<Op> {
         Op::C((cx + ox, cy - ry), (cx + rx, cy - oy), (cx + rx, cy)),
         Op::Z,
     ]
+}
+
+/// Core fonts whose first glyphs follow the standard Macintosh order (glyph 3 is the space,
+/// glyphs 3..=97 are U+0020..=U+007E).
+const MAC_ORDER_FONTS: &[&str] =
+    &["arial", "arial black", "times new roman", "courier new", "verdana", "georgia", "tahoma", "trebuchet ms", "comic sans ms", "impact"];
+
+/// Glyph indices of a known font back to ASCII; None when the font is unknown or a glyph is
+/// outside the ASCII range.
+fn glyphs_to_chars(family: &str, glyphs: &[u16]) -> Option<Vec<u16>> {
+    let family = family.trim().to_ascii_lowercase();
+    if !MAC_ORDER_FONTS.contains(&family.as_str()) {
+        return None;
+    }
+    glyphs.iter().map(|g| (3..=97).contains(g).then_some(g + 29)).collect()
+}
+
+/// A rough advance for a character in ems: the metafile crate has no fonts, so line breaks for
+/// wrapped strings use typical proportional widths.
+fn char_em(u: u16) -> f64 {
+    match char::from_u32(u32::from(u)).unwrap_or('x') {
+        ' ' | 'i' | 'l' | 'j' | '.' | ',' | ':' | ';' | '\'' | '!' | '|' | 'I' | 'f' | 't' | 'r' => 0.3,
+        'm' | 'w' | 'M' | 'W' => 0.85,
+        c if c.is_ascii_uppercase() || c.is_ascii_digit() => 0.62,
+        c if (c as u32) >= 0x2E80 => 1.0,
+        _ => 0.52,
+    }
+}
+
+/// Greedy word wrap of one line to `width` world units at em size `em`; a word longer than the
+/// line breaks between characters.
+fn wrap_line(line: &[u16], width: f64, em: f64) -> Vec<Vec<u16>> {
+    if em <= 0.0 || !width.is_finite() {
+        return vec![line.to_vec()];
+    }
+    let fits = |l: &[u16]| l.iter().map(|u| char_em(*u) * em).sum::<f64>() <= width;
+    let mut out: Vec<Vec<u16>> = Vec::new();
+    let mut cur: Vec<u16> = Vec::new();
+    for word in line.split_inclusive(|u| *u == 0x20) {
+        let mut cand = cur.clone();
+        cand.extend_from_slice(word);
+        let trimmed = |v: &[u16]| v.iter().rposition(|u| *u != 0x20).map_or(0, |i| i + 1);
+        if fits(&cand[..trimmed(&cand)]) || cur.is_empty() && fits(&word[..trimmed(word)]) {
+            cur = cand;
+            continue;
+        }
+        if !cur.is_empty() {
+            let n = trimmed(&cur);
+            cur.truncate(n);
+            out.push(std::mem::take(&mut cur));
+        }
+        // A word wider than the line on its own: break it between characters.
+        for &u in word {
+            cur.push(u);
+            if !fits(&cur[..trimmed(&cur)]) && cur.len() > 1 {
+                cur.pop();
+                out.push(std::mem::take(&mut cur));
+                cur.push(u);
+            }
+        }
+    }
+    let n = cur.iter().rposition(|u| *u != 0x20).map_or(0, |i| i + 1);
+    cur.truncate(n);
+    out.push(cur);
+    out
 }
