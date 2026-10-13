@@ -872,6 +872,25 @@ impl Renderer {
                 }
             }
         }
+        // `a:fillOverlay`: a fill blended over the shape's fill (PowerPoint's "Flow" themes multiply
+        // a gradient over a tiled picture), inside the filled outline, under the line.
+        if let Some(ov) = effects.as_ref().and_then(|e| e.fill_overlay.as_ref())
+            && fill.as_ref().is_some_and(|f| !f.is_none())
+        {
+            let mix = match ov.blend.as_str() {
+                "mult" => peniko::Mix::Multiply,
+                "screen" => peniko::Mix::Screen,
+                "darken" => peniko::Mix::Darken,
+                "lighten" => peniko::Mix::Lighten,
+                _ => peniko::Mix::Normal,
+            };
+            for (i, sp) in geo.paths.iter().enumerate().filter(|(i, sp)| sp.fill != FillMode::None && fade(*i).fill > 0.0) {
+                ctx.set_transform(m);
+                ctx.push_layer(Some(&sp.path), Some(peniko::BlendMode::new(mix, peniko::Compose::SrcOver)), None, None, None);
+                paint::fill_path(ctx, rctx, &ov.fill, fx_ph, &sp.path, Rect::new(0.0, 0.0, w, h), m, FillMode::Norm, fade(i).fill, f.pres);
+                ctx.pop_layer();
+            }
+        }
         // Outline.
         if line.fill.as_ref().is_some_and(|f| !f.is_none()) {
             let lw = line.width.unwrap_or(0.75).max(0.0);

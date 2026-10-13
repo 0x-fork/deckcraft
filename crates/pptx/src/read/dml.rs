@@ -257,6 +257,14 @@ pub fn effects(el: &El) -> Effects {
             "innerShdw" => fx.inner_shadow = Some(shadow(e, true)),
             "glow" => fx.glow = Some(Glow { color: color(e).unwrap_or(ColorRef::rgb(Rgba::BLACK)), radius: pt(e, "rad").unwrap_or(0.0).max(0.0) }),
             "softEdge" => fx.soft_edge = Some(pt(e, "rad").unwrap_or(0.0).max(0.0)),
+            "fillOverlay" => {
+                let fill = e.elements().find_map(|f| match f.local() {
+                    "solidFill" => color(f).map(|c| Fill::Solid { color: c }),
+                    "gradFill" => Some(Fill::Gradient(gradient(f))),
+                    _ => None,
+                });
+                fx.fill_overlay = fill.map(|fill| deckcraft_model::style::FillOverlay { blend: e.attr("blend").unwrap_or("over").to_string(), fill });
+            }
             "reflection" => {
                 fx.reflection = Some(Reflection {
                     blur: pt(e, "blurRad").unwrap_or(0.0),

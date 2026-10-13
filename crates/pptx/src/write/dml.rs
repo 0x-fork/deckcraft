@@ -76,40 +76,7 @@ pub fn fill(w: &mut W, x: &mut Exp, o: &mut Out, f: &Fill) {
     match f {
         Fill::None => w.empty0("a:noFill"),
         Fill::Solid { color: c } => solid(w, c),
-        Fill::Gradient(g) => {
-            w.open("a:gradFill", A::new().a("rotWithShape", if g.rotate_with_shape { "1" } else { "0" }));
-            // No stops: no `a:gsLst`, so the gradient keeps taking them from its style's fill.
-            let mut stops = g.stops.clone();
-            if stops.len() == 1 {
-                let mut s = stops[0].clone();
-                s.pos = 1.0;
-                stops.push(s);
-            }
-            if !stops.is_empty() {
-                w.open0("a:gsLst");
-                for s in &stops {
-                    w.open("a:gs", A::new().a("pos", pct(s.pos.clamp(0.0, 1.0))));
-                    color(w, &s.color);
-                    w.close("a:gs");
-                }
-                w.close("a:gsLst");
-            }
-            match &g.shape {
-                GradientShape::Linear { angle, scaled } => {
-                    w.empty("a:lin", A::new().a("ang", ang(*angle)).a("scaled", if *scaled { "1" } else { "0" }))
-                }
-                GradientShape::Path { path, focus } => {
-                    let p = match path.as_str() {
-                        "rect" | "shape" | "circle" => path.as_str(),
-                        _ => "circle",
-                    };
-                    w.open("a:path", A::new().a("path", p));
-                    w.empty("a:fillToRect", A::new().a("l", pct(focus[0])).a("t", pct(focus[1])).a("r", pct(focus[2])).a("b", pct(focus[3])));
-                    w.close("a:path");
-                }
-            }
-            w.close("a:gradFill");
-        }
+        Fill::Gradient(g) => gradient(w, g),
         Fill::Picture(pf) => blip_fill(w, x, o, "a:blipFill", pf),
         Fill::Pattern(p) => {
             w.open("a:pattFill", A::new().a("prst", if p.preset.is_empty() { "pct5" } else { &p.preset }));
@@ -275,8 +242,55 @@ fn shadow(w: &mut W, tag: &str, s: &deckcraft_model::style::Shadow) {
     w.close(tag);
 }
 
+fn gradient(w: &mut W, g: &deckcraft_model::style::Gradient) {
+    w.open("a:gradFill", A::new().a("rotWithShape", if g.rotate_with_shape { "1" } else { "0" }));
+    // No stops: no `a:gsLst`, so the gradient keeps taking them from its style's fill.
+    let mut stops = g.stops.clone();
+    if stops.len() == 1 {
+        let mut s = stops[0].clone();
+        s.pos = 1.0;
+        stops.push(s);
+    }
+    if !stops.is_empty() {
+        w.open0("a:gsLst");
+        for s in &stops {
+            w.open("a:gs", A::new().a("pos", pct(s.pos.clamp(0.0, 1.0))));
+            color(w, &s.color);
+            w.close("a:gs");
+        }
+        w.close("a:gsLst");
+    }
+    match &g.shape {
+        GradientShape::Linear { angle, scaled } => w.empty("a:lin", A::new().a("ang", ang(*angle)).a("scaled", if *scaled { "1" } else { "0" })),
+        GradientShape::Path { path, focus } => {
+            let p = match path.as_str() {
+                "rect" | "shape" | "circle" => path.as_str(),
+                _ => "circle",
+            };
+            w.open("a:path", A::new().a("path", p));
+            w.empty("a:fillToRect", A::new().a("l", pct(focus[0])).a("t", pct(focus[1])).a("r", pct(focus[2])).a("b", pct(focus[3])));
+            w.close("a:path");
+        }
+    }
+    w.close("a:gradFill");
+}
+
 pub fn effects(w: &mut W, fx: &Effects) {
     w.open0("a:effectLst");
+    // Schema order: blur, fillOverlay, glow, innerShdw, outerShdw, prstShdw, reflection, softEdge.
+    if let Some(ov) = &fx.fill_overlay {
+        let blend = match ov.blend.as_str() {
+            b @ ("over" | "mult" | "screen" | "darken" | "lighten") => b,
+            _ => "over",
+        };
+        w.open("a:fillOverlay", A::new().a("blend", blend));
+        match &ov.fill {
+            Fill::Solid { color: c } => solid(w, c),
+            Fill::Gradient(g) => gradient(w, g),
+            _ => w.empty0("a:noFill"),
+        }
+        w.close("a:fillOverlay");
+    }
     if let Some(g) = &fx.glow {
         w.open("a:glow", A::new().a("rad", emu(g.radius).max(0)));
         color(w, &g.color);

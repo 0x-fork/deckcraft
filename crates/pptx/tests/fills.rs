@@ -102,3 +102,34 @@ fn a_gradient_without_stops_is_saved_without_stops() {
     let s = q.slides[0].shapes.iter().find(|s| s.name == "Styled").expect("shape");
     assert_eq!(s.fill, Some(Fill::Gradient(own)));
 }
+
+#[test]
+fn a_fill_overlay_round_trips() {
+    use deckcraft_model::style::{FillOverlay, Gradient, GradientShape, GradientStop};
+    let mut p = defaults::new_presentation(None);
+    let id = ShapeId(p.alloc_id());
+    let first = p.slides[0].id;
+    let overlay = FillOverlay {
+        blend: "mult".into(),
+        fill: Fill::Gradient(Gradient {
+            stops: vec![
+                GradientStop { pos: 0.0, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent1) },
+                GradientStop { pos: 1.0, color: deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(10, 20, 30)) },
+            ],
+            shape: GradientShape::Linear { angle: 4.5, scaled: true },
+            rotate_with_shape: true,
+        }),
+    };
+    p.slide_mut(first).expect("slide").shapes.push(Shape {
+        id,
+        name: "Overlaid".into(),
+        xfrm: Some(Xfrm::new(10.0, 10.0, 200.0, 100.0)),
+        fill: Some(Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::WHITE))),
+        effects: Some(deckcraft_model::Effects { fill_overlay: Some(overlay.clone()), ..Default::default() }),
+        ..Default::default()
+    });
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    let s = q.slides[0].shapes.iter().find(|s| s.name == "Overlaid").expect("shape");
+    assert_eq!(s.effects.as_ref().and_then(|e| e.fill_overlay.clone()), Some(overlay));
+}

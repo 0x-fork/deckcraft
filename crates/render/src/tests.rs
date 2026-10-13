@@ -1583,3 +1583,34 @@ fn text_in_a_scaled_group_keeps_its_point_size() {
         assert!(x0 >= 100 && x1 <= 500 && sy0 >= 100 && sy1 <= 300, "scale {scale}: ink inside the box");
     }
 }
+
+#[test]
+fn a_fill_overlay_blends_over_the_fill() {
+    // `a:fillOverlay blend="mult"`: a 50% grey multiplied over a light fill darkens it; "screen"
+    // lightens a dark one; the overlay stays inside the shape.
+    use deckcraft_model::style::FillOverlay;
+    let draw = |base: [u8; 3], blend: &str| {
+        let mut p = Presentation::default();
+        let mut sh = Shape {
+            id: ShapeId(600),
+            xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+            fill: Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(base[0], base[1], base[2])))),
+            line: Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() }),
+            ..Default::default()
+        };
+        sh.effects = Some(deckcraft_model::Effects {
+            fill_overlay: Some(FillOverlay { blend: blend.into(), fill: Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(128, 128, 128))) }),
+            ..Default::default()
+        });
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        (img.pixel(200, 150), img.pixel(50, 50))
+    };
+    let (mult, outside) = draw([200, 100, 50], "mult");
+    assert!((mult[0] as i32 - 100).abs() <= 3 && (mult[1] as i32 - 50).abs() <= 3 && (mult[2] as i32 - 25).abs() <= 3, "{mult:?}");
+    assert_eq!(&outside[..3], &[255, 255, 255], "nothing outside the shape");
+    let (screen, _) = draw([0, 0, 0], "screen");
+    assert!((screen[0] as i32 - 128).abs() <= 3, "{screen:?}");
+    let (over, _) = draw([200, 100, 50], "over");
+    assert!((over[0] as i32 - 128).abs() <= 3 && (over[1] as i32 - 128).abs() <= 3, "{over:?}");
+}
