@@ -580,3 +580,21 @@ fn a_bevelled_shape_is_lit_from_the_upper_left() {
     let img = render(vec![bevelled(r#"<a:sp3d><a:bevelT w="152400" h="76200"/></a:sp3d>"#)]);
     assert!(close(img.pixel(165, 104), base, 2) && close(img.pixel(165, 165), base, 2));
 }
+
+#[test]
+fn table_borders_take_their_dashes_and_diagonals_are_drawn() {
+    let mut t = deckcraft_model::Table::new(1, 1, 200.0, 100.0);
+    t.style = "none".into();
+    let mut dashed = Line::solid(ColorRef::rgb(RED), 4.0);
+    dashed.dash = Some(deckcraft_model::style::Dash::Preset { name: "dash".into() });
+    if let Some(c) = t.rows.first_mut().and_then(|r| r.cells.first_mut()) {
+        c.borders[2] = Some(dashed);
+        c.diag_down = Some(Line::solid(ColorRef::rgb(Rgba::rgb(0, 0, 255)), 4.0));
+    }
+    let sh = Shape { id: ShapeId(27), xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)), kind: ShapeKind::Table(t), ..Default::default() };
+    let img = render(vec![sh]);
+    // Dashes of 4 widths (16 pt) on, 3 (12 pt) off along the top edge, from its start.
+    assert!(close(img.pixel(108, 100), RED, 40) && close(img.pixel(122, 100), WHITE, 30) && close(img.pixel(135, 100), RED, 40));
+    // The diagonal from top-left to bottom-right passes through the middle.
+    assert!(close(img.pixel(200, 150), Rgba::rgb(0, 0, 255), 40), "{:?}", img.pixel(200, 150));
+}

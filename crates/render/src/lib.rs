@@ -1376,7 +1376,7 @@ fn blur(sigma: f64) -> Filter {
 /// Stroke `path` with `line`. A gradient line is laid out over `extent` (the untrimmed outline the
 /// line belongs to; `path` itself when `None`).
 #[allow(clippy::too_many_arguments)]
-fn stroke(
+pub(crate) fn stroke(
     ctx: &mut RenderContext,
     rctx: &Ctx,
     line: &Line,
