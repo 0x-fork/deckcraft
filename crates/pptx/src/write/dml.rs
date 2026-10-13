@@ -98,8 +98,14 @@ pub fn blip_fill(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, pf: &PictureFil
     let rid = x.media_rel(o, pf.media, "image").unwrap_or_else(|| x.placeholder_rel(o));
     w.open(tag, A::new().a("rotWithShape", "1"));
     let adj = &pf.adjust;
-    let has_kids =
-        pf.alpha.is_some() || adj.brightness != 0.0 || adj.contrast != 0.0 || adj.grayscale || adj.duotone.is_some() || adj.clear_color.is_some();
+    let has_kids = pf.alpha.is_some()
+        || adj.brightness != 0.0
+        || adj.contrast != 0.0
+        || adj.grayscale
+        || adj.duotone.is_some()
+        || adj.clear_color.is_some()
+        || adj.bilevel.is_some()
+        || adj.alpha_inv;
     let a = A::new().a("r:embed", &rid);
     if has_kids {
         w.open("a:blip", a);
@@ -115,6 +121,12 @@ pub fn blip_fill(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, pf: &PictureFil
         }
         if let Some(al) = pf.alpha {
             w.empty("a:alphaModFix", A::new().a("amt", pct(al.clamp(0.0, 1.0))));
+        }
+        if adj.alpha_inv {
+            w.empty0("a:alphaInv");
+        }
+        if let Some(t) = adj.bilevel {
+            w.empty("a:biLevel", A::new().a("thresh", pct(t.clamp(0.0, 1.0))));
         }
         if let Some((d, l)) = &adj.duotone {
             w.open0("a:duotone");

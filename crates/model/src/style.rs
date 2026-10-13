@@ -157,6 +157,12 @@ pub struct PictureAdjust {
     /// Make a colour transparent (Set Transparent Color).
     pub clear_color: Option<Rgba>,
     pub sharpen: f64,
+    /// `a:biLevel`: black and white, split at this luminance (0–1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bilevel: Option<f64>,
+    /// `a:alphaInv`: opacity inverted.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub alpha_inv: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

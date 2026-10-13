@@ -135,6 +135,8 @@ pub fn blip_fill(imp: &mut Imp, part: &Part, bf: &El) -> Option<PictureFill> {
                     pf.adjust.contrast = pct(e, "contrast").unwrap_or(0.0).clamp(-1.0, 1.0);
                 }
                 "grayscl" => pf.adjust.grayscale = true,
+                "biLevel" => pf.adjust.bilevel = Some(pct(e, "thresh").unwrap_or(0.5).clamp(0.0, 1.0)),
+                "alphaInv" => pf.adjust.alpha_inv = true,
                 "duotone" => {
                     let cs: Vec<ColorRef> = e.elements().filter_map(color_el).collect();
                     if let [a, b] = cs.as_slice() {

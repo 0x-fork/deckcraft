@@ -203,3 +203,28 @@ fn a_table_naming_no_style_is_drawn_with_the_table_grid() {
     });
     assert_eq!(style(&bare), "grid");
 }
+
+#[test]
+fn black_and_white_and_inverted_alpha_pictures_round_trip() {
+    let mut p = defaults::new_presentation(None);
+    let media = p.add_media("tile.png", "image/png", png());
+    let id = ShapeId(p.alloc_id());
+    let first = p.slides[0].id;
+    let mut pf = PictureFill { media, ..Default::default() };
+    pf.adjust.bilevel = Some(0.3);
+    pf.adjust.alpha_inv = true;
+    p.slide_mut(first).expect("slide").shapes.push(Shape {
+        id,
+        name: "BW".into(),
+        xfrm: Some(Xfrm::new(10.0, 10.0, 200.0, 100.0)),
+        fill: Some(Fill::Picture(pf)),
+        ..Default::default()
+    });
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    let s = q.slides[0].shapes.iter().find(|s| s.name == "BW").expect("shape");
+    match &s.fill {
+        Some(Fill::Picture(pf)) => assert_eq!((pf.adjust.bilevel, pf.adjust.alpha_inv), (Some(0.3), true)),
+        other => panic!("{other:?}"),
+    }
+}

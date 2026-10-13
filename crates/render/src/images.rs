@@ -75,6 +75,8 @@ fn adjust_key(a: &PictureAdjust) -> u64 {
     mix(a.contrast.to_bits());
     mix(a.saturation.unwrap_or(1.0).to_bits());
     mix(a.grayscale as u64);
+    mix(a.bilevel.map_or(u64::MAX, f64::to_bits));
+    mix(a.alpha_inv as u64);
     mix(a.sharpen.to_bits());
     if let Some(c) = a.clear_color {
         mix(((c.r as u64) << 16) | ((c.g as u64) << 8) | c.b as u64 | 1 << 40);
@@ -306,7 +308,15 @@ pub(crate) fn gif_pixmap(bytes: &Arc<Vec<u8>>, adj: &PictureAdjust, t: f64) -> O
 
 fn apply_adjust(img: &mut image::RgbaImage, a: &PictureAdjust) {
     let sat = a.saturation.unwrap_or(1.0);
-    if a.brightness == 0.0 && a.contrast == 0.0 && sat == 1.0 && !a.grayscale && a.clear_color.is_none() && a.duotone.is_none() {
+    if a.brightness == 0.0
+        && a.contrast == 0.0
+        && sat == 1.0
+        && !a.grayscale
+        && a.clear_color.is_none()
+        && a.duotone.is_none()
+        && a.bilevel.is_none()
+        && !a.alpha_inv
+    {
         return;
     }
     let duo = duotone_rgb(a);
@@ -323,7 +333,7 @@ fn apply_adjust(img: &mut image::RgbaImage, a: &PictureAdjust) {
             continue;
         }
         let mut rgb = [p[0] as f64, p[1] as f64, p[2] as f64];
-        let y = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+        let y = luma(rgb);
         let s = if a.grayscale { 0.0 } else { sat };
         for v in &mut rgb {
             *v = y + (*v - y) * s;
@@ -334,16 +344,30 @@ fn apply_adjust(img: &mut image::RgbaImage, a: &PictureAdjust) {
         }
         // Duotone: the pixel's luminance picks a colour between the dark and the light one.
         if let Some((d, l)) = duo {
-            let t = ((0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255.0).clamp(0.0, 1.0);
+            let t = (luma(rgb) / 255.0).clamp(0.0, 1.0);
             rgb =
                 [d.r as f64 + (l.r as f64 - d.r as f64) * t, d.g as f64 + (l.g as f64 - d.g as f64) * t, d.b as f64 + (l.b as f64 - d.b as f64) * t];
+        }
+        // Black and white: white where the luminance reaches the threshold.
+        if let Some(t) = a.bilevel {
+            let v = if luma(rgb) >= t * 255.0 { 255.0 } else { 0.0 };
+            rgb = [v; 3];
         }
         for (i, v) in rgb.iter().enumerate() {
             if let Some(ch) = p.0.get_mut(i) {
                 *ch = v.round().clamp(0.0, 255.0) as u8;
             }
         }
+        if a.alpha_inv {
+            p[3] = 255 - p[3];
+        }
     }
+}
+
+/// Luminance as PowerPoint weighs it for grayscale, black-and-white and duotone pictures
+/// (measured: Rec. 709 weights on the stored values; pure red greys to 54, green to 182).
+fn luma(rgb: [f64; 3]) -> f64 {
+    0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 }
 
 #[cfg(test)]
@@ -387,6 +411,29 @@ mod tests {
         assert!(near(run(0.4, -0.4, &[0, 32, 64, 96]), &[133, 152, 171, 190]));
         assert!(near(run(-0.4, 0.4, &[128, 160, 192]), &[0, 45, 97]));
         assert!(near(run(0.0, -0.8, &[0, 128, 255]), &[102, 127, 152]));
+    }
+
+    #[test]
+    fn grayscale_black_and_white_and_inverted_alpha_like_powerpoint() {
+        let swatches = [[255u8, 0, 0], [0, 255, 0], [0, 0, 255], [200, 100, 50], [60, 160, 110], [120, 120, 130]];
+        let run = |adj: PictureAdjust| -> Vec<[u8; 4]> {
+            let mut img = image::RgbaImage::from_fn(swatches.len() as u32, 1, |x, _| {
+                let c = swatches[x as usize];
+                image::Rgba([c[0], c[1], c[2], 200])
+            });
+            apply_adjust(&mut img, &adj);
+            img.pixels().map(|p| p.0).collect()
+        };
+        // PowerPoint's export of these swatches in grayscale: 54, 182, 18, 117, 135, 120.
+        let g = run(PictureAdjust { grayscale: true, ..Default::default() });
+        for (got, want) in g.iter().zip([54u8, 182, 18, 117, 135, 120]) {
+            assert!((got[0] as i32 - want as i32).abs() <= 1 && got[0] == got[1] && got[1] == got[2], "{got:?} vs {want}");
+        }
+        // Black and white at 50%: only green and the light green reach mid-grey.
+        let bw: Vec<u8> = run(PictureAdjust { bilevel: Some(0.5), ..Default::default() }).iter().map(|p| p[0]).collect();
+        assert_eq!(bw, [0, 255, 0, 0, 255, 0]);
+        // Inverted alpha: 200 becomes 55.
+        assert!(run(PictureAdjust { alpha_inv: true, ..Default::default() }).iter().all(|p| p[3] == 55));
     }
 
     #[test]
