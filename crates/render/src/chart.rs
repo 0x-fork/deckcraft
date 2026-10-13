@@ -59,7 +59,18 @@ fn split_label(name: &str) -> String {
     }
 }
 
-fn label(ctx: &mut RenderContext, rctx: &Ctx, m: Affine, text: &str, r: Rect, size: f64, align: Align, anchor: Anchor, col: Rgba, bold: bool) {
+pub(crate) fn label(
+    ctx: &mut RenderContext,
+    rctx: &Ctx,
+    m: Affine,
+    text: &str,
+    r: Rect,
+    size: f64,
+    align: Align,
+    anchor: Anchor,
+    col: Rgba,
+    bold: bool,
+) {
     let mut body = TextBody::from_text(text);
     body.body.inset_l = Some(0.0);
     body.body.inset_r = Some(0.0);
@@ -150,7 +161,14 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     }
     let pie = matches!(c.kind, ChartType::Pie | ChartType::Doughnut);
     // Legend placed by `c:legendPos`.
-    let legend_items: Vec<(String, Rgba)> = if pie {
+    let waterfall = c.kind == ChartType::Waterfall;
+    let legend_items: Vec<(String, Rgba)> = if waterfall {
+        ["Increase", "Decrease", "Total"].iter().enumerate().map(|(i, n)| (n.to_string(), series_color(rctx, c, i))).collect()
+    } else if matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) {
+        c.categories.iter().enumerate().map(|(i, n)| (n.clone(), series_color(rctx, c, i))).collect()
+    } else if c.kind == ChartType::Funnel {
+        vec![]
+    } else if pie {
         c.categories.iter().enumerate().map(|(i, n)| (n.clone(), series_color(rctx, c, i))).collect()
     } else {
         c.series
@@ -240,6 +258,10 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             ctx.set_paint(color(Rgba::WHITE, 1.0));
             ctx.fill_path(&kurbo::Circle::new(cen, r * c.hole_size.clamp(0.1, 0.9)).to_path(0.1));
         }
+        return;
+    }
+    if matches!(c.kind, ChartType::Funnel | ChartType::Treemap | ChartType::Sunburst) {
+        crate::chartex::draw(ctx, rctx, c, m, area, base, text_col);
         return;
     }
     let combo = c.kind == ChartType::Combo;
@@ -399,7 +421,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 let sec = c.on_secondary(s);
                 let v = s.values.get(i).copied().flatten().unwrap_or(0.0) / total;
                 let start = band * i as f64 + (band - group) / 2.0 + if stacked { 0.0 } else { bar * bi as f64 };
-                let (a, b) = if stacked {
+                let (a, b) = if waterfall {
+                    c.waterfall_bars().get(i).copied().unwrap_or_default()
+                } else if stacked {
                     if v >= 0.0 {
                         let r = (pos_acc, pos_acc + v);
                         pos_acc += v;
@@ -416,10 +440,34 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                     Rect::new(to_v(a), plot.y0 + start, to_v(b), plot.y0 + start + bar)
                 } else {
                     Rect::new(plot.x0 + start, to_axis(sec, b), plot.x0 + start + bar, to_axis(sec, a))
+                }
+                .abs();
+                // A waterfall colours increases, decreases and totals, and joins each bar's end
+                // to the next bar's start.
+                let fill = if waterfall {
+                    let slot = if c.subtotals.contains(&i) {
+                        2
+                    } else if b < a {
+                        1
+                    } else {
+                        0
+                    };
+                    series_color(rctx, c, slot)
+                } else {
+                    series_fill(rctx, c, *si, Some(s))
                 };
                 ctx.set_transform(m);
-                ctx.set_paint(color(series_fill(rctx, c, *si, Some(s)), 1.0));
+                ctx.set_paint(color(fill, 1.0));
                 ctx.fill_rect(&r.abs());
+                if waterfall && i + 1 < ncat && !horiz {
+                    let y = to_v(b);
+                    let mut j = BezPath::new();
+                    j.move_to((r.x1, y));
+                    j.line_to((r.x1 + (band - bar), y));
+                    ctx.set_paint(color(Rgba::rgb(0xA6, 0xA6, 0xA6), 1.0));
+                    ctx.set_stroke(kurbo::Stroke::new(0.75));
+                    ctx.stroke_path(&j);
+                }
                 if c.data_labels {
                     let t = c.data_label(s, s.values.get(i).copied().flatten().unwrap_or(0.0));
                     let lr = if horiz {

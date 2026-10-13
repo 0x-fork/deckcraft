@@ -186,6 +186,10 @@ pub struct Chart {
     pub y2_hidden: bool,
     /// The chart's language (`c:lang`, e.g. `ru-RU`): digit grouping and decimal mark.
     pub lang: Option<String>,
+    /// A waterfall's total points (`cx:subtotals`): bars that stand on the axis and restart
+    /// the running total, instead of floating.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subtotals: Vec<usize>,
     /// Original chart XML part kept for round-trip of unmodelled options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
@@ -225,6 +229,7 @@ impl Default for Chart {
             y2_format: None,
             y2_hidden: false,
             lang: None,
+            subtotals: vec![],
             raw: None,
         }
     }
@@ -304,6 +309,28 @@ impl Chart {
     /// A value axis' scale — (min, max, major unit) — with at most `max_intervals` intervals:
     /// the bounds and unit the chart fixes, else PowerPoint's automatic ones (the data plus 5 %
     /// headroom, rounded out to a 1-2-5 unit). `None` when no series uses the axis.
+    /// A waterfall's bars as (from, to) on the value axis: each point floats from the running
+    /// total, a total point stands on zero and sets it.
+    pub fn waterfall_bars(&self) -> Vec<(f64, f64)> {
+        let Some(s) = self.series.first() else { return vec![] };
+        let mut run = 0.0;
+        s.values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let v = v.unwrap_or(0.0);
+                if self.subtotals.contains(&i) {
+                    run = v;
+                    (0.0, v)
+                } else {
+                    let from = run;
+                    run += v;
+                    (from, run)
+                }
+            })
+            .collect()
+    }
+
     pub fn axis_scale(&self, secondary: bool, max_intervals: usize) -> Option<(f64, f64, f64)> {
         let (lo, hi) = self.axis_range(secondary)?;
         let (fmin, fmax, major) = if secondary { (self.y2_min, self.y2_max, self.y2_major) } else { (self.y_min, self.y_max, self.y_major) };
@@ -328,6 +355,13 @@ impl Chart {
     pub fn value_range(&self) -> (f64, f64) {
         let mut lo: f64 = 0.0;
         let mut hi: f64 = 0.0;
+        if self.kind == ChartType::Waterfall {
+            for (a, b) in self.waterfall_bars() {
+                lo = lo.min(a.min(b));
+                hi = hi.max(a.max(b));
+            }
+            return (lo, hi);
+        }
         let n = self.categories.len().max(self.series.iter().map(|s| s.values.len()).max().unwrap_or(0));
         if self.kind.stacked() {
             for i in 0..n {

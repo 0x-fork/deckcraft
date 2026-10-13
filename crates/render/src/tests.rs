@@ -1711,3 +1711,38 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
     let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
     assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
 }
+
+#[test]
+fn office_2016_charts_draw_their_own_layouts() {
+    let chart = |kind: ChartType, vals: &[f64], subtotals: Vec<usize>| {
+        let c = Chart {
+            kind,
+            title: None,
+            legend: None,
+            gridlines: false,
+            subtotals,
+            categories: (0..vals.len()).map(|i| format!("C{i}")).collect(),
+            series: vec![deckcraft_model::chart::Series { values: vals.iter().map(|v| Some(*v)).collect(), ..Default::default() }],
+            ..Default::default()
+        };
+        let sh = Shape { id: ShapeId(621), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let ink = |img: &crate::Image, x: u32, y: u32| {
+        let p = img.pixel(x, y);
+        p[0] < 235 || p[1] < 235 || p[2] < 235
+    };
+    // Waterfall: the decrease floats (nothing under it near the axis), the total stands on it.
+    let img = chart(ChartType::Waterfall, &[100.0, 40.0, -25.0, 115.0], vec![3]);
+    let plot_bottom = (300..530).rev().find(|&y| ink(&img, 120, y)).unwrap_or(500);
+    let band = |i: f64| (80.0 + (900.0 - 80.0) * (i + 0.5) / 4.0) as u32;
+    assert!(!ink(&img, band(2.0), plot_bottom - 20), "the decrease bar reaches the axis");
+    assert!(ink(&img, band(3.0), plot_bottom - 20), "the total bar doesn't stand on the axis");
+    assert!(ink(&img, band(1.0), 100), "the increase bar is missing");
+    // Funnel, treemap and sunburst fill the middle of the chart.
+    for kind in [ChartType::Funnel, ChartType::Treemap, ChartType::Sunburst] {
+        let img = chart(kind, &[50.0, 30.0, 20.0], vec![]);
+        let covered = (0..540).step_by(10).flat_map(|y| (0..960).step_by(10).map(move |x| (x, y))).filter(|&(x, y)| ink(&img, x, y)).count();
+        assert!(covered > 1000, "{kind:?}: {covered} samples inked");
+    }
+}
