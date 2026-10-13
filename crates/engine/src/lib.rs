@@ -247,6 +247,18 @@ pub struct Prefs {
     pub duplicate_offset: f64,
     pub autocorrect: bool,
     pub smart_quotes: bool,
+    /// AutoCorrect options (Tools ▸ AutoCorrect): fix TWo INitial CApitals, capitalize the first
+    /// letter of sentences and the names of days, fix accidental cAPS lOCK, and replace 1/2, 1/4
+    /// and 3/4 with fraction characters.
+    pub ac_two_initials: bool,
+    pub ac_sentence_caps: bool,
+    pub ac_days: bool,
+    pub ac_caps_lock: bool,
+    pub ac_fractions: bool,
+    /// Your own "replace … with …" entries; they win over the built-in list.
+    pub ac_entries: Vec<(String, String)>,
+    /// Built-in entries you deleted.
+    pub ac_removed: Vec<String>,
     pub author: String,
     pub undo_limit: usize,
     /// Minutes between AutoRecover saves of unsaved presentations.
@@ -262,6 +274,13 @@ impl Default for Prefs {
             duplicate_offset: 12.0,
             autocorrect: true,
             smart_quotes: true,
+            ac_two_initials: true,
+            ac_sentence_caps: true,
+            ac_days: true,
+            ac_caps_lock: true,
+            ac_fractions: true,
+            ac_entries: Vec::new(),
+            ac_removed: Vec::new(),
             author: "Presenter".into(),
             undo_limit: 500,
             recovery_minutes: 1.0,

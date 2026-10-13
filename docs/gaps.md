@@ -176,7 +176,9 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks a small built-in list of frequent misspellings
-  (`crates/engine/src/cmd/review.rs`); no dictionaries, no thesaurus, no AutoCorrect.
+  (`crates/engine/src/cmd/review.rs`); no dictionaries, no thesaurus. AutoCorrect has PowerPoint's options (two initial capitals,
+  sentence and day capitals, caps lock, fractions, an editable replace list); no AutoFormat of
+  ordinals or automatic bulleted lists, no undo of a single correction.
 - **Estimate:** 8–14 h (Hunspell-format dictionaries under an open licence per language).
 
 ### Equations
@@ -256,6 +258,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | AutoCorrect options: case rules, fractions, ellipsis, a larger built-in list and your own entries (`text.autocorrect`, Tools ▸ AutoCorrect) |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |

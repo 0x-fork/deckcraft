@@ -835,3 +835,40 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn autocorrect_options_as_you_type() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    let typed = |s: &mut Session, text: &str| -> String {
+        s.execute("text.edit", &json!({"id": title})).unwrap();
+        s.execute("text.selectAll", &json!({})).ok();
+        s.execute("text.delete", &json!({"dir": "backward"})).ok();
+        for c in text.chars() {
+            s.execute("text.insert", &json!({"text": c.to_string()})).unwrap();
+        }
+        s.execute("text.get", &json!({"id": title})).unwrap()["text"].as_str().unwrap().to_string()
+    };
+    assert_eq!(typed(&mut s, "hello world. see you monday, i think. "), "Hello world. See you Monday, I think. ");
+    assert_eq!(typed(&mut s, "THe tHIS 1/2 recieved... "), "The This ½ received… ");
+    // Options turn rules off.
+    s.execute("text.autocorrect", &json!({"sentenceCaps": false, "days": false})).unwrap();
+    assert_eq!(typed(&mut s, "hello monday "), "hello monday ");
+    // Your own entries, and deleting a built-in one.
+    s.execute("text.autocorrect", &json!({"add": ["dc", "DeckCraft"], "remove": "teh"})).unwrap();
+    assert_eq!(typed(&mut s, "dc teh "), "DeckCraft teh ");
+    let v = s.execute("text.autocorrect", &json!({})).unwrap();
+    let entries = v["entries"].as_array().unwrap();
+    assert!(entries.iter().any(|e| e[0] == "dc"));
+    assert!(!entries.iter().any(|e| e[0] == "teh"));
+    assert!(s.execute("text.autocorrect", &json!({"add": ["two words", "x"]})).is_err());
+    // Off entirely.
+    s.execute("text.autocorrect", &json!({"on": false})).unwrap();
+    assert_eq!(typed(&mut s, "dc adn "), "dc adn ");
+    // Pasting a whole string applies only the replacement list, not the case rules.
+    s.execute("text.autocorrect", &json!({"on": true, "sentenceCaps": true})).unwrap();
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.selectAll", &json!({})).ok();
+    s.execute("text.insert", &json!({"text": "monday notes "})).unwrap();
+    assert_eq!(s.execute("text.get", &json!({"id": title})).unwrap()["text"], "monday notes ");
+}

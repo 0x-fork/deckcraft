@@ -156,7 +156,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Find and replace, replace fonts | P1 | P |
 | Text | Spelling check | P1 | P |
 | Text | Thesaurus | P2 | M |
-| Text | AutoCorrect and smart quotes | P2 | M |
+| Text | AutoCorrect and smart quotes | P2 | Y |
 | Text | Symbols and emoji | P1 | D |
 | Text | Equations | P2 | M |
 | Text | Hyperlinks (URL, slide, email) | P1 | D |
