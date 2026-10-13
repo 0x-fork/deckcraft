@@ -11,6 +11,7 @@ mod chart;
 mod colr;
 
 mod compound;
+mod extent;
 mod images;
 mod metafile;
 mod morph_path;
@@ -40,6 +41,7 @@ use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape as _, Vec2};
 use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive};
 use vello_cpu::{RenderContext, Resources, peniko};
 
+pub use extent::{Region, TILE, layout_extent, pasteboard_region, slide_extent};
 pub use images::{decode as decode_image, gif_frame};
 pub use morph_path::PathMorph;
 pub use morph_text::TextMorph;
@@ -233,11 +235,14 @@ pub struct Renderer {
     /// The background of the slide (layout, master) being drawn, its placeholder colour and the
     /// slide's view transform: shapes filled with the background (`useBgFill`) show it through.
     bg: Option<(Fill, Option<Rgba>, Affine)>,
+    /// What the frame being drawn has painted so far, in output pixels: the editor learns from it
+    /// how far a slide's drawing (text spilling out of its box too) reaches off the slide.
+    drawn: Option<Rect>,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None }
+        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None, drawn: None }
     }
 }
 
@@ -285,14 +290,38 @@ fn text_has_effects(rctx: &Ctx, s: &Shape) -> bool {
 /// Render slide `index` at `opts.scale` pixels per point. A panic inside the renderer becomes a
 /// blank image (logged), never a crash.
 pub fn render_slide(pres: &Presentation, index: usize, opts: &RenderOpts) -> Image {
-    let Some(slide) = pres.slides.get(index) else { return Image::default() };
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| RENDERER.with(|r| r.borrow_mut().slide(pres, slide, index, opts)))) {
-        Ok(img) => img,
+    render_slide_drawn(pres, index, opts).0
+}
+
+/// [`render_slide`], also returning how far the drawing reached, in slide space (at least the
+/// slide; off it, what the shapes, their effects and their text drew, the parts outside the output
+/// included). The editor grows its pasteboard to it ([`pasteboard_region`]).
+pub fn render_slide_drawn(pres: &Presentation, index: usize, opts: &RenderOpts) -> (Image, Rect) {
+    let page = Rect::new(0.0, 0.0, pres.slide_size.width, pres.slide_size.height);
+    let Some(slide) = pres.slides.get(index) else { return (Image::default(), page) };
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        RENDERER.with(|r| {
+            let mut r = r.borrow_mut();
+            r.drawn = None;
+            let img = r.slide(pres, slide, index, opts);
+            (img, r.drawn.take())
+        })
+    })) {
+        Ok((img, drawn)) => {
+            let k = opts.scale;
+            let to_slide =
+                |d: Rect| Rect::new((d.x0 - opts.offset.0) / k, (d.y0 - opts.offset.1) / k, (d.x1 - opts.offset.0) / k, (d.y1 - opts.offset.1) / k);
+            let extent = match drawn {
+                Some(d) if k.is_finite() && k > 0.0 && to_slide(d).is_finite() => page.union(to_slide(d)),
+                _ => page,
+            };
+            (img, extent)
+        }
         Err(_) => {
             log::error!("rendering slide {index} panicked; showing a blank slide");
             RENDERER.with(|r| *r.borrow_mut() = Renderer::default());
             let (w, h) = output_size(pres, opts);
-            Image { width: w as u32, height: h as u32, pixels: vec![255; w as usize * h as usize * 4] }
+            (Image { width: w as u32, height: h as u32, pixels: vec![255; w as usize * h as usize * 4] }, page)
         }
     }
 }
@@ -470,6 +499,14 @@ impl Renderer {
         }
         let view = Affine::translate((opts.offset.0, opts.offset.1)) * Affine::scale(opts.scale);
         (ctx, w, h, view)
+    }
+
+    /// Note that `r` (local space, placed by `m`) was drawn.
+    fn track(&mut self, m: Affine, r: Rect) {
+        let b = m.transform_rect_bbox(r);
+        if b.is_finite() {
+            self.drawn = Some(self.drawn.map_or(b, |d| d.union(b)));
+        }
     }
 
     fn fields(pres: &Presentation, index: usize, opts: &RenderOpts) -> SlideFields {
@@ -658,10 +695,21 @@ impl Renderer {
                     self.shape(ctx, f, rctx, c, gm, depth + 1);
                 }
             }
-            ShapeKind::Table(t) => table::draw(ctx, f.pres, rctx, t, m, x.w, x.h, &f.fields),
-            ShapeKind::Chart(c) => chart::draw(ctx, rctx, c, m, x.w, x.h),
+            ShapeKind::Table(t) => {
+                // Rows grow with their text: what the cells cover, borders included.
+                let cells = table::draw(ctx, f.pres, rctx, t, m, x.w, x.h, &f.fields);
+                self.track(m, cells.unwrap_or(Rect::new(0.0, 0.0, x.w, x.h)).inflate(2.0, 2.0));
+            }
+            ShapeKind::Chart(c) => {
+                self.track(m, Rect::new(0.0, 0.0, x.w, x.h));
+                chart::draw(ctx, rctx, c, m, x.w, x.h)
+            }
             ShapeKind::Ink { strokes } => {
                 for sk in strokes {
+                    let w = if sk.width.is_finite() { sk.width.abs() } else { 0.0 };
+                    for (px, py, _) in &sk.points {
+                        self.track(parent, Rect::new(*px, *py, *px, *py).inflate(w, w));
+                    }
                     let mut bp = BezPath::new();
                     for (i, (px, py, _)) in sk.points.iter().enumerate() {
                         if i == 0 {
@@ -692,6 +740,8 @@ impl Renderer {
         let (fill, fill_ph) = resolve::fill(rctx, s);
         let (line, line_ph) = resolve::line(rctx, s);
         let (effects, fx_ph) = resolve::effects(rctx, s);
+        let reach = extent::spill(Some(&line), effects.as_ref(), w, h);
+        self.track(m, Rect::new(0.0, 0.0, w, h).inflate(reach, reach));
         let is_pic = matches!(s.kind, ShapeKind::Picture { .. });
         let outline = geo.outline();
         // Placeholders in the editor: dashed outline and prompt, nothing else when empty.
@@ -825,6 +875,12 @@ impl Renderer {
             let tr = geo.text_rect;
             if !body.is_empty() {
                 let l = deckcraft_text::layout(rctx, s, body, &Opts { rect: tr, fields: &f.fields, prompt_color: None, no_shrink: false });
+                let tm = text_transform(m, tr, l.rotation);
+                for b in l.lines.iter().filter_map(line_bounds) {
+                    // Glyphs reach a little past their carets and line box (italics, swashes).
+                    let pad = b.height() * 0.3;
+                    self.track(tm, b.inflate(pad, pad));
+                }
                 match text_warp(rctx, s, tr).filter(|_| l.rotation == 0.0) {
                     Some(w) => warp::draw(ctx, &l, tr, m, &st.paras, &w),
                     None => draw_layout_with(ctx, &l, tr, m, &st.paras),

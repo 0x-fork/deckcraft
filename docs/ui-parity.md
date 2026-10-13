@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; ribbon, menus, panes, dialogs and interaction compared with PowerPoint 16.113 observations in `plan/powerpoint/`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -41,6 +41,7 @@ AGENTS.md §2). Dimension score: **~60% ready** (estimated), **30–50 h** to pa
 |---|---|---|
 | Selection handles, rotation handle, yellow adjustment handles | yes | yes |
 | Marquee, Shift/Cmd multi-select, Tab to cycle | yes | yes |
+| Objects off the slide: drawn on the area around it in Normal view (full strength, master graphics too), selectable and movable there; clipped in the show, exports and thumbnails | yes | yes (#270) |
 | Smart guides (edges, centres, equal spacing) | yes | yes |
 | Snap to grid, grid options, drawing guides | yes | gridlines, guides and snap to grid (engine setting); no Grid Options dialog or menu toggle |
 | Nudge (arrows), fine nudge (Option+arrows) | yes | yes |
@@ -87,4 +88,5 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-10 | major | Created: shell, panes and dialogs, direct manipulation, shortcuts and visual fidelity against PowerPoint 16.113 |

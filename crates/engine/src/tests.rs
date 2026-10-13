@@ -567,3 +567,42 @@ fn inserted_hyperlinks_look_like_links() {
     s.execute("format.underline", &json!({})).unwrap();
     assert_eq!(s.execute("format.state", &json!({})).unwrap()["underline"], false);
 }
+
+/// #270: shapes off the slide (in the editor's pasteboard) are hit, selected, moved and marqueed
+/// like any other; one can be dragged back onto the slide or out of it.
+#[test]
+fn shapes_off_the_slide_can_be_selected_and_moved() {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    let off = s.execute("shape.insert", &json!({"preset": "rect", "rect": [1000.0, 100.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+    let half = s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [-60.0, 300.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+    // Inserting off the slide keeps the box where it was asked for.
+    assert_eq!(s.execute("shape.inspect", &json!({"id": off})).unwrap()["box"]["x"], 1000.0);
+    s.execute("edit.select", &json!({"ids": []})).unwrap();
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    // Hover and click wholly off the slide.
+    assert!(matches!(s.hit_test(deckcraft_geom::Point::new(1060.0, 140.0), 3.0), Some(tools::Hit::Shape { id, .. }) if id.0 as u64 == off));
+    s.pointer(ev(PointerKind::Down, 1060.0, 140.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 1060.0, 140.0)).unwrap();
+    assert_eq!(s.doc().unwrap().selection.shapes.iter().map(|i| i.0 as u64).collect::<Vec<_>>(), vec![off]);
+    // Drag it further off, then back onto the slide.
+    s.pointer(ev(PointerKind::Down, 1060.0, 140.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 1110.0, 160.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 1110.0, 160.0)).unwrap();
+    let v = s.execute("shape.inspect", &json!({"id": off})).unwrap();
+    assert_eq!((v["box"]["x"].as_f64(), v["box"]["y"].as_f64()), (Some(1050.0), Some(120.0)));
+    s.pointer(ev(PointerKind::Down, 1110.0, 160.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 500.0, 160.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 500.0, 160.0)).unwrap();
+    assert_eq!(s.execute("shape.inspect", &json!({"id": off})).unwrap()["box"]["x"], 440.0);
+    // The off-slide half of a straddling shape is hit too.
+    s.pointer(ev(PointerKind::Down, -30.0, 340.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, -30.0, 340.0)).unwrap();
+    assert_eq!(s.doc().unwrap().selection.shapes.iter().map(|i| i.0 as u64).collect::<Vec<_>>(), vec![half]);
+    // A marquee started on the pasteboard selects what it encloses there.
+    s.pointer(ev(PointerKind::Down, -100.0, 250.0)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 80.0, 420.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, 80.0, 420.0)).unwrap();
+    assert_eq!(s.doc().unwrap().selection.shapes.iter().map(|i| i.0 as u64).collect::<Vec<_>>(), vec![half]);
+}

@@ -1177,3 +1177,94 @@ fn an_object_deckcraft_doesnt_model_shows_its_preview_picture() {
         assert!(img.pixel(520, 200)[1] > 200, "nothing outside the frame");
     }
 }
+
+/// #270: a filled shape half off the slide's left edge, and one wholly below it.
+fn off_slide_deck() -> Presentation {
+    let half = Shape {
+        id: ShapeId(2700),
+        xfrm: Some(Xfrm::new(-100.0, 100.0, 200.0, 100.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        ..Default::default()
+    };
+    let below = Shape {
+        id: ShapeId(2701),
+        xfrm: Some(Xfrm::new(400.0, 600.0, 100.0, 60.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent2)),
+        ..Default::default()
+    };
+    deck_with(vec![half, below])
+}
+
+fn near(px: [u8; 4], c: deckcraft_color::Rgba) -> bool {
+    (px[0] as i32 - c.r as i32).abs() <= 3 && (px[1] as i32 - c.g as i32).abs() <= 3 && (px[2] as i32 - c.b as i32).abs() <= 3 && px[3] == 255
+}
+
+#[test]
+fn shows_exports_and_thumbnails_clip_to_the_slide() {
+    let p = off_slide_deck();
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert_eq!((img.width, img.height), (960, 540));
+    let a1 = p.masters[0].theme.colors.get(deckcraft_color::SchemeSlot::Accent1);
+    // The on-slide half is there, nothing else is drawn outside the slide.
+    assert!(near(img.pixel(50, 150), a1), "{:?}", img.pixel(50, 150));
+    assert_eq!(img.pixel(150, 150), [255, 255, 255, 255]);
+}
+
+#[test]
+fn the_editor_pasteboard_draws_shapes_off_the_slide() {
+    let p = off_slide_deck();
+    let extent = slide_extent(&p, 0);
+    let region = pasteboard_region((960, 540), 1.0, extent, Region { x: -300, y: -200, w: 1560, h: 1000 });
+    assert!(region.x <= -100 && region.y == 0 && region.y as i64 + region.h as i64 >= 660, "{region:?}");
+    let opts = RenderOpts { scale: 1.0, edit: true, offset: region.offset(), size: Some(region.size()), ..Default::default() };
+    let (img, drawn) = render_slide_drawn(&p, 0, &opts);
+    assert_eq!((img.width, img.height), region.size());
+    let at = |x: i32, y: i32| img.pixel((x - region.x) as u32, (y - region.y) as u32);
+    let a1 = p.masters[0].theme.colors.get(deckcraft_color::SchemeSlot::Accent1);
+    let a2 = p.masters[0].theme.colors.get(deckcraft_color::SchemeSlot::Accent2);
+    // Both halves of the straddling shape, at full strength, and the shape below the slide.
+    assert!(near(at(-50, 150), a1), "{:?}", at(-50, 150));
+    assert!(near(at(50, 150), a1), "{:?}", at(50, 150));
+    assert!(near(at(450, 630), a2), "{:?}", at(450, 630));
+    // The pasteboard itself stays clear (the UI's own colour shows through); the slide is white.
+    assert_eq!(at(-50, 50), [0, 0, 0, 0]);
+    assert_eq!(at(200, 300), [255, 255, 255, 255]);
+    // The drawing's reach, in slide space.
+    assert!(drawn.x0 <= -100.0 && drawn.y1 >= 660.0 && drawn.x1 >= 960.0, "{drawn:?}");
+}
+
+#[test]
+fn master_graphics_off_the_slide_show_on_the_pasteboard() {
+    let mut p = Presentation::default();
+    let m = std::sync::Arc::make_mut(&mut p.masters[0]);
+    m.shapes.push(Shape {
+        id: ShapeId(2702),
+        xfrm: Some(Xfrm::new(-150.0, 300.0, 100.0, 60.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent3)),
+        ..Default::default()
+    });
+    let region = pasteboard_region((960, 540), 1.0, slide_extent(&p, 0), Region { x: -300, y: -100, w: 1500, h: 800 });
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, edit: true, offset: region.offset(), size: Some(region.size()), ..Default::default() });
+    let a3 = p.masters[0].theme.colors.get(deckcraft_color::SchemeSlot::Accent3);
+    assert!(near(img.pixel((-100 - region.x) as u32, (330 - region.y) as u32), a3));
+}
+
+#[test]
+fn text_spilling_out_of_its_box_below_the_slide_is_reported() {
+    let mut sh = Shape { id: ShapeId(2703), xfrm: Some(Xfrm::new(100.0, 500.0, 400.0, 20.0)), ..Default::default() };
+    let mut t = TextBody::from_text("one\ntwo\nthree\nfour\nfive");
+    for para in &mut t.paragraphs {
+        for r in &mut para.runs {
+            r.props.size = Some(40.0);
+        }
+    }
+    sh.text = Some(t);
+    let p = deck_with(vec![sh]);
+    // The box estimate doesn't see the text below the slide; the render does.
+    assert!(slide_extent(&p, 0).y1 <= 540.0 + 4.0);
+    let (_, drawn) = render_slide_drawn(&p, 0, &RenderOpts { scale: 0.5, ..Default::default() });
+    assert!(drawn.y1 > 600.0, "{drawn:?}");
+    // A slide with nothing off it reaches just the slide.
+    let (_, drawn) = render_slide_drawn(&Presentation::default(), 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
+    assert_eq!(drawn, Rect::new(0.0, 0.0, 960.0, 540.0));
+}

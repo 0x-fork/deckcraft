@@ -297,9 +297,21 @@ pub fn cell_rects(t: &Table, heights: &[f64]) -> Vec<(usize, usize, Rect)> {
     out
 }
 
-pub fn draw(ctx: &mut RenderContext, pres: &Presentation, rctx: &Ctx, t: &Table, m: Affine, _w: f64, _h: f64, fields: &dyn deckcraft_text::Fields) {
+/// Draws the table; returns the box its cells cover (table space), which grows with their text.
+#[allow(clippy::too_many_arguments)]
+pub fn draw(
+    ctx: &mut RenderContext,
+    pres: &Presentation,
+    rctx: &Ctx,
+    t: &Table,
+    m: Affine,
+    _w: f64,
+    _h: f64,
+    fields: &dyn deckcraft_text::Fields,
+) -> Option<kurbo::Rect> {
     let _ = pres;
     let rects = cell_rects(t, &row_heights(rctx, t, fields));
+    let covered = rects.iter().map(|(_, _, r)| *r).reduce(|a, b| a.union(b));
     // Table backgrounds behind every cell: a file-defined style's, then the table's own fill.
     let style_bg = rctx
         .pres
@@ -379,4 +391,5 @@ pub fn draw(ctx: &mut RenderContext, pres: &Presentation, rctx: &Ctx, t: &Table,
         crate::draw_text(ctx, rctx, &tmp, &body, *rect, m, fields, None);
         let _ = peniko::Fill::NonZero;
     }
+    covered
 }

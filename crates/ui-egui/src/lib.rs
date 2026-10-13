@@ -193,6 +193,8 @@ pub struct SlideApp {
     pub canvas_rect: Option<egui::Rect>,
     pub canvas_scale: f32,
     pub slide_rect: Option<egui::Rect>,
+    /// Where the canvas texture (the slide and the pasteboard drawn around it) is on screen.
+    pub canvas_region: Option<egui::Rect>,
     pub palette: Option<(String, usize)>,
     /// Integrated title bar (macOS traffic lights over our chrome).
     pub integrated_titlebar: bool,
@@ -236,6 +238,7 @@ impl SlideApp {
             canvas_rect: None,
             canvas_scale: 1.0,
             slide_rect: None,
+            canvas_region: None,
             palette: None,
             integrated_titlebar: false,
             home: None,
@@ -977,5 +980,108 @@ mod tests {
         let mut app = SlideApp::new(Session::new(), Services::default());
         app.run("app.home", json!({})).unwrap();
         assert!(!app.home_open() && app.home.is_none(), "with nothing open the start screen shows anyway");
+    }
+    fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let app = harness.state_mut();
+        // Zoomed out, the canvas shows plenty of pasteboard around the slide.
+        app.ui.zoom = Some(0.4);
+        app.session.prefs.snap_to_grid = false;
+        app.session.prefs.smart_guides = false;
+        harness
+    }
+
+    fn selected(app: &SlideApp) -> Vec<u64> {
+        app.session.active().unwrap().selection.shapes.iter().map(|i| i.0 as u64).collect()
+    }
+
+    fn shape_x(app: &SlideApp, id: u64) -> f64 {
+        let st = app.session.active().unwrap();
+        st.shape(deckcraft_model::ShapeId(id as u32)).and_then(|s| s.xfrm).unwrap().x
+    }
+
+    /// #270: PowerPoint's Normal view draws objects off the slide on the area around it, where
+    /// they can be selected and moved.
+    #[test]
+    fn off_slide_objects_show_on_the_pasteboard_and_can_be_selected_and_moved() {
+        let mut harness = canvas_harness();
+        let off =
+            harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [1000.0, 100.0, 120.0, 80.0]})).unwrap()["id"]
+                .as_u64()
+                .unwrap();
+        harness.state_mut().session.execute("edit.select", &json!({"ids": []})).unwrap();
+        harness.run_steps(3);
+
+        let app = harness.state();
+        let (slide, region, k) = (app.slide_rect.unwrap(), app.canvas_region.unwrap(), app.canvas_scale);
+        // The texture reaches past the slide's right edge to the shape's, and no further left/up.
+        assert!(region.max.x >= slide.min.x + 1120.0 * k - 1.0, "{region:?} {slide:?}");
+        assert!((region.min.x - slide.min.x).abs() < 1.0 && (region.min.y - slide.min.y).abs() < 1.0, "{region:?} {slide:?}");
+        let centre = slide.min + egui::vec2(1060.0 * k, 140.0 * k);
+        assert!(app.canvas_rect.unwrap().contains(centre));
+
+        // Drawn at full strength on the pasteboard (when a GPU renderer is available here).
+        if let Ok(img) = harness.render() {
+            let px = |p: egui::Pos2| img.get_pixel(p.x as u32, p.y as u32).0;
+            let shape = px(centre);
+            let board = px(slide.min + egui::vec2(1060.0 * k, 400.0 * k));
+            let doc = &harness.state().session.active().unwrap().doc;
+            let accent = doc.masters[0].theme.colors.get(deckcraft_color::SchemeSlot::Accent1);
+            let close = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 4;
+            assert!(close(shape[0], accent.r) && close(shape[1], accent.g) && close(shape[2], accent.b), "{shape:?} vs {accent:?}");
+            assert_ne!(shape, board);
+        }
+
+        // Click selects it.
+        harness.hover_at(centre);
+        harness.run_steps(1);
+        harness.drag_at(centre);
+        harness.run_steps(1);
+        harness.drop_at(centre);
+        harness.run_steps(2);
+        assert_eq!(selected(harness.state()), vec![off]);
+
+        // Drag moves it, further off the slide.
+        let to = centre + egui::vec2(40.0, 0.0);
+        harness.hover_at(centre);
+        harness.run_steps(1);
+        harness.drag_at(centre);
+        harness.run_steps(1);
+        for i in 1..=4 {
+            harness.hover_at(centre + egui::vec2(10.0 * i as f32, 0.0));
+            harness.run_steps(1);
+        }
+        harness.drop_at(to);
+        harness.run_steps(2);
+        let x = shape_x(harness.state(), off);
+        assert!((x - (1000.0 + 40.0 / k as f64)).abs() < 1.5, "{x}");
+        // The pasteboard followed it.
+        let (slide, region) = (harness.state().slide_rect.unwrap(), harness.state().canvas_region.unwrap());
+        assert!(region.max.x >= slide.min.x + (x as f32 + 120.0) * k - 1.0, "{region:?}");
+
+        // Idle frames don't render the canvas again.
+        let n = harness.state().textures.canvas_renders;
+        harness.run_steps(3);
+        assert_eq!(harness.state().textures.canvas_renders, n);
+    }
+
+    /// A slide with nothing off it renders just the slide, as before.
+    #[test]
+    fn the_canvas_renders_only_the_slide_when_nothing_is_off_it() {
+        let mut harness = canvas_harness();
+        harness.run_steps(3);
+        let app = harness.state();
+        let (slide, region) = (app.slide_rect.unwrap(), app.canvas_region.unwrap());
+        assert!((region.min - slide.min).length() < 0.5 && (region.max - slide.max).length() < 1.0, "{region:?} {slide:?}");
+        let n = app.textures.canvas_renders;
+        harness.run_steps(3);
+        assert_eq!(harness.state().textures.canvas_renders, n, "an unchanged slide isn't rendered again");
     }
 }
