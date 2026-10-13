@@ -78,7 +78,8 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### SVG pictures don't render
 - **Evidence:** `crates/render/src/images.rs` decodes through `image` 0.25 (PNG, JPEG, WebP, GIF,
   TIFF, BMP), and EMF/WMF through `deckcraft-metafile` (ported from WordCraft: paths, fills, pens,
-  pattern and hatch brushes, bitmaps and text; clip regions and EMF+ records are not drawn).
+  pattern and hatch brushes, bitmaps and text; EMF+ only pictures play their EMF+ records;
+  clip regions are not drawn).
   Nothing reads SVG; PowerPoint's Insert Icons stores SVG with a PNG fallback.
 - **Impact:** SVG icons show only their raster fallback, and SVG files can't be inserted. An
   EMF/WMF that clips its drawing (EXTSELECTCLIPRGN, INTERSECTCLIPRECT) draws past its clip.

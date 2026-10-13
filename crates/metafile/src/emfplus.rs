@@ -11,10 +11,17 @@
 //! - world and page transforms, save/restore and containers;
 //! - arcs and pies;
 //! - clipping to rectangles and convex clip paths and regions (others: their bounding rectangle);
-//! - nested metafile images, and glyph-index driver strings in the Windows core fonts.
+//! - nested metafile images, and glyph-index driver strings in the Windows core fonts;
+//! - cardinal splines (DrawCurve, DrawClosedCurve, FillClosedCurve), FillRegion, and Clear
+//!   (over the picture frame).
 //!
-//! Not drawn yet: image attributes, glyph indices of other fonts, and region combinations other
-//! than intersect and union (XOR, exclude and complement keep the left area).
+//! Every drawing record of MS-EMFPLUS §2.3.4 is played. Not drawn: image attributes, glyph
+//! indices of other fonts, and region combinations other than intersect and union (XOR, exclude
+//! and complement keep the left area). Deliberately ignored: rendering hints (antialias, text
+//! hint, interpolation, pixel offset, compositing; the renderer has its own), SetRenderingOrigin
+//! (hatch phase), SerializableObject image effects, the terminal-server records SetTSGraphics and
+//! SetTSClip, and StrokeFillPath (0x4037), which the specification lists but gives no layout for
+//! and GDI+ doesn't write.
 
 use std::sync::Arc;
 
@@ -217,11 +224,23 @@ pub(crate) struct Plus {
     objects: Vec<Option<Obj>>,
     stack: Vec<Saved>,
     partial: Option<Partial>,
+    /// The picture frame in device units (`[x, y, w, h]`), what Clear paints.
+    pub frame: Option<[f64; 4]>,
 }
 
 impl Plus {
     pub fn new() -> Self {
-        Plus { active: false, dpi: 96.0, world: IDENTITY, page: 1.0, clip: None, objects: vec![None; MAX_OBJECTS], stack: Vec::new(), partial: None }
+        Plus {
+            active: false,
+            dpi: 96.0,
+            world: IDENTITY,
+            page: 1.0,
+            clip: None,
+            objects: vec![None; MAX_OBJECTS],
+            stack: Vec::new(),
+            partial: None,
+            frame: None,
+        }
     }
 
     /// Plays the EMF+ records of one EMR_COMMENT payload (after the identifier).
@@ -349,6 +368,19 @@ impl Plus {
                 let (offset, segments) = (r.u32(4)? as usize, r.u32(8)? as usize);
                 let pts = points(r, 16, r.u32(12)? as usize, compressed)?;
                 self.painter().stroke(cv, &curve_ops(&pts, tension, false, offset, segments), pen);
+                Some(())
+            }
+            // Clear: the whole picture in one colour, whatever the clip (a transparent clear
+            // leaves nothing to draw).
+            0x4009 => {
+                let c = argb(r.u32(0)?);
+                let [x, y, w, h] = self.frame?;
+                if c[3] == 0 || !(w > 0.0 && h > 0.0) {
+                    return Some(());
+                }
+                let to_device = invert(mul(cv.world(), cv.device_affine()))?;
+                let p = Painter { xf: to_device, clip: None };
+                p.fill(cv, &rect_ops([x, y, x + w, y + h]), &Fill::Solid(c));
                 Some(())
             }
             // FillRegion: the region's area (as the clip reads it).
