@@ -439,7 +439,9 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
     let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
     let notes_master = "ppt/notesMasters/notesMaster1.xml";
     let mut notes_master_rid = None;
-    if has_notes {
+    // A notes master edited in Notes Master view is written as it is; otherwise the default one.
+    let kept_notes_master = p.notes_master.as_ref().filter(|m| !m.shapes.is_empty());
+    if has_notes || kept_notes_master.is_some() {
         let tname = format!("ppt/theme/theme{}.xml", p.masters.len() + 1);
         let mut no = Out::new(notes_master);
         no.rels.add("theme", &opc::relative(notes_master, &tname), false);
@@ -451,8 +453,16 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
         let mut w = W::new();
         root_open(&mut w, "p:notesMaster", A::new());
         let bg = Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) };
-        csld(&mut w, &mut x, &mut no, "", Some(&bg), &notes_master_shapes(p.notes_size));
-        clr_map(&mut w, &[]);
+        match kept_notes_master {
+            Some(m) => {
+                csld(&mut w, &mut x, &mut no, "", Some(m.background.as_ref().unwrap_or(&bg)), &m.shapes);
+                clr_map(&mut w, &m.color_map);
+            }
+            None => {
+                csld(&mut w, &mut x, &mut no, "", Some(&bg), &notes_master_shapes(p.notes_size));
+                clr_map(&mut w, &[]);
+            }
+        }
         dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &notes_style());
         w.close("p:notesMaster");
         x.pkg.xml_part(notes_master, CT_NOTES_MASTER, w.finish());

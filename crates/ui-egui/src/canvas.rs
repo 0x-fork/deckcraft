@@ -124,7 +124,9 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
-        Some((Target::Handout, d)) => deckcraft_engine::handout_page(&d.doc).and_then(|p| master_tex(ui.ctx(), &p, 0, None, px, visible)),
+        Some((t @ (Target::Handout | Target::NotesMaster), d)) => {
+            deckcraft_engine::master_page(&d.doc, t).and_then(|p| master_tex(ui.ctx(), &p, 0, None, px, visible))
+        }
         None => None,
     };
     if let Some((tex, region)) = tex {

@@ -65,6 +65,24 @@ pub fn specs() -> Vec<CommandSpec> {
             in_handout,
             handout_placeholders
         ),
+        cmd!(
+            "view.notesMaster",
+            "Notes Master",
+            ["View", "Master Views"],
+            None,
+            "{} (creates the notes master with header, date, slide image, notes body, footer and page number if the deck has none)",
+            has_doc,
+            notes_view
+        ),
+        cmd!(
+            "notes.placeholders",
+            "Notes Placeholders",
+            ["Notes Master", "Placeholders"],
+            None,
+            "{header?, date?, slideImage?, body?, footer?, pageNumber?: bool} (show or hide each)",
+            in_notes_master,
+            notes_placeholders
+        ),
         cmd!(noundo "view.closeMaster", "Close Master View", ["Slide Master", "Close"], None, "{}", has_doc, close_master),
         cmd!("master.insertLayout", "Insert Layout", ["Slide Master", "Edit Master"], None, "{name?}", has_doc, insert_layout),
         cmd!("master.renameLayout", "Rename Layout", ["Slide Master", "Edit Master"], None, "{name, master?, layout?}", has_doc, rename_layout),
@@ -100,7 +118,7 @@ fn theme(s: &mut Session, p: &Value) -> Result<Value> {
 fn master_index(doc: &Presentation, sel: &crate::Selection) -> usize {
     match sel.target {
         Target::Master { master } | Target::Layout { master, .. } => master,
-        Target::Slides | Target::Handout => {
+        Target::Slides | Target::Handout | Target::NotesMaster => {
             doc.slides.get(sel.slide).and_then(|s| doc.masters.iter().position(|m| m.layout(s.layout).is_some())).unwrap_or(0)
         }
     }
@@ -216,8 +234,8 @@ fn background(s: &mut Session, p: &Value) -> Result<Value> {
                     l.background = bg.clone();
                 }
             }
-            Target::Handout => {
-                if let Some(m) = doc.handout_master.as_mut() {
+            t @ (Target::Handout | Target::NotesMaster) => {
+                if let Some(m) = crate::page_master_mut(doc, t) {
                     Arc::make_mut(m).background = bg.clone();
                 }
             }
@@ -552,6 +570,110 @@ fn handout_placeholders(s: &mut Session, p: &Value) -> Result<Value> {
     let m = s.doc()?.doc.handout_master.clone();
     let shown = |k: PhType| m.as_ref().is_some_and(|m| m.shapes.iter().any(|x| x.ph_type() == Some(k)));
     Ok(json!({"header": shown(PhType::Header), "date": shown(PhType::Date), "footer": shown(PhType::Footer), "pageNumber": shown(PhType::SlideNum)}))
+}
+
+fn in_notes_master(s: &Session) -> std::result::Result<(), String> {
+    if s.active().is_some_and(|d| d.selection.target == Target::NotesMaster) { Ok(()) } else { Err("open View ▸ Notes Master first".into()) }
+}
+
+const NOTES_KINDS: [(&str, PhType); 6] = [
+    ("header", PhType::Header),
+    ("date", PhType::Date),
+    ("slideImage", PhType::SlideImage),
+    ("body", PhType::Body),
+    ("footer", PhType::Footer),
+    ("pageNumber", PhType::SlideNum),
+];
+
+/// A notes-master placeholder in a page of `size`, laid out as PowerPoint's default notes master.
+pub fn notes_placeholder(kind: PhType, size: Size, id: ShapeId) -> Shape {
+    let (w, h) = (size.width, size.height);
+    match kind {
+        PhType::SlideImage => Shape {
+            id,
+            name: "Slide Image Placeholder 3".into(),
+            xfrm: Some(deckcraft_geom::Xfrm::new(w * 0.125, h * 0.125, w * 0.75, h * 0.375)),
+            ph: Some(deckcraft_model::Placeholder { kind, idx: 2, ..Default::default() }),
+            fill: Some(Fill::None),
+            line: Some(deckcraft_model::Line::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::BLACK), 1.0)),
+            ..Default::default()
+        },
+        PhType::Body => {
+            let mut text = TextBody::default();
+            text.paragraphs = vec![deckcraft_model::text::Paragraph::new("Click to edit Master text styles")];
+            Shape {
+                id,
+                name: "Notes Placeholder 4".into(),
+                xfrm: Some(deckcraft_geom::Xfrm::new(w * 0.1, h * 0.53, w * 0.8, h * 0.36)),
+                ph: Some(deckcraft_model::Placeholder { kind, idx: 3, size: Some("quarter".into()), ..Default::default() }),
+                text: Some(text),
+                ..Default::default()
+            }
+        }
+        _ => {
+            let mut s = handout_placeholder(kind, size, id);
+            if let Some(ph) = s.ph.as_mut() {
+                ph.idx = match kind {
+                    PhType::Header => 0,
+                    PhType::Date => 1,
+                    PhType::Footer => 4,
+                    _ => 5,
+                };
+            }
+            s
+        }
+    }
+}
+
+fn notes_view(s: &mut Session, _p: &Value) -> Result<Value> {
+    let created = s.doc()?.doc.notes_master.as_ref().is_none_or(|m| m.shapes.is_empty());
+    if created {
+        s.edit(|doc, _| {
+            let mut m = doc.notes_master.as_deref().cloned().unwrap_or_else(|| deckcraft_model::Master {
+                name: "Notes Master".into(),
+                theme: doc.masters.first().map(|m| m.theme.clone()).unwrap_or_default(),
+                color_map: doc.masters.first().map(|m| m.color_map.clone()).unwrap_or_default(),
+                ..Default::default()
+            });
+            let size = doc.notes_size;
+            for (_, k) in NOTES_KINDS {
+                let id = ShapeId(doc.alloc_id());
+                m.shapes.push(notes_placeholder(k, size, id));
+            }
+            doc.notes_master = Some(Arc::new(m));
+            Ok(())
+        })?;
+    }
+    s.select(|_, sel| {
+        sel.target = Target::NotesMaster;
+        sel.shapes.clear();
+        sel.text = None;
+    })?;
+    Ok(json!({"created": created}))
+}
+
+fn notes_placeholders(s: &mut Session, p: &Value) -> Result<Value> {
+    s.edit(|doc, _| {
+        let size = doc.notes_size;
+        let ids: Vec<ShapeId> = NOTES_KINDS.iter().map(|_| ShapeId(doc.alloc_id())).collect();
+        let m = Arc::make_mut(doc.notes_master.as_mut().ok_or_else(|| bad("notes.placeholders", "no notes master"))?);
+        for ((key, kind), id) in NOTES_KINDS.into_iter().zip(ids) {
+            let Some(on) = p.get(key).and_then(Value::as_bool) else { continue };
+            let has = m.shapes.iter().any(|x| x.ph_type() == Some(kind));
+            if on && !has {
+                m.shapes.push(notes_placeholder(kind, size, id));
+            } else if !on {
+                m.shapes.retain(|x| x.ph_type() != Some(kind));
+            }
+        }
+        Ok(())
+    })?;
+    let m = s.doc()?.doc.notes_master.clone();
+    let mut out = serde_json::Map::new();
+    for (key, kind) in NOTES_KINDS {
+        out.insert(key.into(), json!(m.as_ref().is_some_and(|m| m.shapes.iter().any(|x| x.ph_type() == Some(kind)))));
+    }
+    Ok(Value::Object(out))
 }
 
 fn close_master(s: &mut Session, _p: &Value) -> Result<Value> {
