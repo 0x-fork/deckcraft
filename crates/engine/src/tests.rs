@@ -835,3 +835,37 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn shape_effects_props_adjust_shadow_glow_and_reflection() {
+    // The Format Shape pane's Effects page: shadow, glow and reflection details.
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let fx = |s: &Session| s.doc().unwrap().selected_shapes()[0].effects.clone().unwrap_or_default();
+    // No shadow yet: the props add an outer one and set it.
+    s.execute("shape.effects", &json!({"shadowProps": {"blur": 10, "dist": 6, "dir": 405, "transparency": 0.25, "color": "accent2"}})).unwrap();
+    let sw = fx(&s).outer_shadow.unwrap();
+    assert_eq!((sw.blur, sw.dist, sw.dir), (10.0, 6.0, 45.0));
+    assert!((sw.color.alpha() - 0.75).abs() < 1e-6);
+    // A new colour keeps the transparency; an inner shadow is adjusted in place.
+    s.execute("shape.effects", &json!({"shadowProps": {"color": "accent3"}})).unwrap();
+    assert!((fx(&s).outer_shadow.unwrap().color.alpha() - 0.75).abs() < 1e-6);
+    s.execute("shape.effects", &json!({"shadow": "inner"})).unwrap();
+    s.execute("shape.effects", &json!({"shadowProps": {"blur": 3}})).unwrap();
+    let f = fx(&s);
+    assert!(f.outer_shadow.is_none());
+    assert_eq!(f.inner_shadow.unwrap().blur, 3.0);
+    // Glow: size, colour, transparency; size 0 removes it.
+    s.execute("shape.effects", &json!({"glowProps": {"radius": 12, "transparency": 0.5}})).unwrap();
+    let g = fx(&s).glow.unwrap();
+    assert_eq!(g.radius, 12.0);
+    assert!((g.color.alpha() - 0.5).abs() < 1e-6);
+    s.execute("shape.effects", &json!({"glowProps": {"radius": 0}})).unwrap();
+    assert!(fx(&s).glow.is_none());
+    // Reflection: transparency, size, distance, blur; hostile values are clamped or ignored.
+    s.execute("shape.effects", &json!({"reflectionProps": {"transparency": 0.3, "size": 2.0, "dist": 5, "blur": "x"}})).unwrap();
+    let r = fx(&s).reflection.unwrap();
+    assert!((r.start_alpha - 0.7).abs() < 1e-9);
+    assert_eq!((r.end_pos, r.dist, r.blur), (1.0, 5.0, 0.5));
+}

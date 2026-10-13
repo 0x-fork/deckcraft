@@ -60,7 +60,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Shape Effects",
             ["Shape Format", "Shape Styles"],
             None,
-            "{shadow?: none|outer|inner|perspective|{color, blur, dist, dir}, glow?: none|{color, radius}, softEdges?: pt, reflection?: none|tight|half|full, bevel?: none|circle|…, reset?, ids?}",
+            "{shadow?: none|outer|inner|perspective|{color, blur, dist, dir}, glow?: none|{color, radius}, softEdges?: pt, reflection?: none|tight|half|full, bevel?: none|circle|…, shadowProps?: {color?, transparency?: 0..1, blur?: pt, dist?: pt, dir?: deg}, glowProps?: {color?, transparency?, radius?: pt}, reflectionProps?: {transparency?, size?: 0..1, dist?: pt, blur?: pt}, reset?, ids?} (the *Props keys adjust the current effect, adding a default one when there is none)",
             has_selection,
             effects
         ),
@@ -450,6 +450,9 @@ fn effects(s: &mut Session, p: &Value) -> Result<Value> {
         _ => Some(Reflection { blur: 0.5, start_alpha: 0.5, end_alpha: 0.0, end_pos: 0.35, dist: 0.0 }),
     });
     let bevel = str_param(p, "bevel").map(|b| if b == "none" { None } else { Some(b.to_string()) });
+    let shadow_props = p.get("shadowProps").filter(|v| v.is_object()).cloned();
+    let glow_props = p.get("glowProps").filter(|v| v.is_object()).cloned();
+    let refl_props = p.get("reflectionProps").filter(|v| v.is_object()).cloned();
     edit_shapes(s, p, "shape.effects", |sh| {
         if reset {
             sh.effects = None;
@@ -484,8 +487,74 @@ fn effects(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(b) = &bevel {
             e.bevel.clone_from(b);
         }
+        if let Some(v) = &shadow_props {
+            let slot = if e.inner_shadow.is_some() { &mut e.inner_shadow } else { &mut e.outer_shadow };
+            let mut x = slot.take().or_else(|| shadow_preset(&json!("outer")).flatten()).ok_or_else(|| bad("shape.effects", "no shadow preset"))?;
+            if let Some(c) = v.get("color").and_then(color_value) {
+                let a = x.color.alpha();
+                x.color = with_alpha(c, a);
+            }
+            if let Some(t) = num(v, "transparency") {
+                x.color = with_alpha(x.color.clone(), 1.0 - t.clamp(0.0, 1.0));
+            }
+            if let Some(b) = num(v, "blur") {
+                x.blur = b.clamp(0.0, 100.0);
+            }
+            if let Some(d) = num(v, "dist") {
+                x.dist = d.clamp(0.0, 200.0);
+            }
+            if let Some(d) = num(v, "dir") {
+                x.dir = d.rem_euclid(360.0);
+            }
+            *slot = Some(x);
+        }
+        if let Some(v) = &glow_props {
+            let mut g =
+                e.glow.take().unwrap_or(Glow { color: ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(40000)), radius: 8.0 });
+            if let Some(c) = v.get("color").and_then(color_value) {
+                let a = g.color.alpha();
+                g.color = with_alpha(c, a);
+            }
+            if let Some(t) = num(v, "transparency") {
+                g.color = with_alpha(g.color.clone(), 1.0 - t.clamp(0.0, 1.0));
+            }
+            if let Some(r) = num(v, "radius") {
+                g.radius = r.clamp(0.0, 150.0);
+            }
+            e.glow = (g.radius > 0.0).then_some(g);
+        }
+        if let Some(v) = &refl_props {
+            let mut r = e.reflection.take().unwrap_or(Reflection { blur: 0.5, start_alpha: 0.5, end_alpha: 0.0, end_pos: 0.35, dist: 0.0 });
+            if let Some(t) = num(v, "transparency") {
+                r.start_alpha = 1.0 - t.clamp(0.0, 1.0);
+            }
+            if let Some(sz) = num(v, "size") {
+                r.end_pos = sz.clamp(0.0, 1.0);
+            }
+            if let Some(d) = num(v, "dist") {
+                r.dist = d.clamp(0.0, 100.0);
+            }
+            if let Some(b) = num(v, "blur") {
+                r.blur = b.clamp(0.0, 100.0);
+            }
+            e.reflection = Some(r);
+        }
         Ok(())
     })
+}
+
+/// A finite number at `key` of an effect's properties.
+fn num(v: &Value, key: &str) -> Option<f64> {
+    v.get(key).and_then(Value::as_f64).filter(|x| x.is_finite())
+}
+
+/// `c` with its alpha set to `a` (0–1); fully opaque drops the transform.
+fn with_alpha(mut c: ColorRef, a: f64) -> ColorRef {
+    c.mods.retain(|m| !matches!(m, ColorTransform::Alpha(_)));
+    if a < 1.0 {
+        c.mods.push(ColorTransform::Alpha((a.clamp(0.0, 1.0) * 100_000.0).round() as i32));
+    }
+    c
 }
 
 /// Theme quick styles: 7 rows (outline only, solid fill variants, intense…) × 6 accents.
