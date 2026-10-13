@@ -990,7 +990,7 @@ fn break_lines(
     first_w: f64,
     rest_w: f64,
     wrap: bool,
-    tab_stops: &[f64],
+    tab_stops: &[Tab],
     default_tab: f64,
     x0_first: f64,
     x0_rest: f64,
@@ -1019,7 +1019,11 @@ fn break_lines(
                 next = i + 1;
                 break;
             }
-            let adv = if c == '\t' { tab_advance(x0 + x, tab_stops, default_tab) } else { p.cells.get(i).map(|c| c.adv).unwrap_or(0.0) };
+            let adv = if c == '\t' {
+                tab_advance(x0 + x, tab_stops, default_tab, tab_segment(&p.cells, i))
+            } else {
+                p.cells.get(i).map(|c| c.adv).unwrap_or(0.0)
+            };
             let breakable = |j: usize| p.cells.get(j).is_none_or(|c| c.breakable(j));
             if i > start && allowed.get(i).copied().unwrap_or(false) && breakable(i) {
                 last_break = Some(i);
@@ -1029,6 +1033,15 @@ fn break_lines(
             if wrap && hang && x + adv > avail + 0.01 && x <= avail + 0.01 && is_hanging_punct(c) && i > start {
                 end = i + 1;
                 next = i + 1;
+                break;
+            }
+            // A tab that would run past the end moves to the next line (and to its first stop there).
+            if wrap && c == '\t' && x + adv > avail + 0.01 && i > start {
+                end = i;
+                next = i;
+                while end > start && p.cells.get(end - 1).is_some_and(|c| c.ch == ' ') {
+                    end -= 1;
+                }
                 break;
             }
             if wrap && x + adv > avail + 0.01 && !c.is_whitespace() && i > start {
@@ -1072,10 +1085,72 @@ fn break_lines(
     lines
 }
 
-fn tab_advance(x: f64, stops: &[f64], default_tab: f64) -> f64 {
+/// How a tab stop aligns the text after it (`a:tab/@algn`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum TabAlign {
+    Left,
+    Center,
+    Right,
+    /// The first "." of the text sits at the stop (text without one ends there).
+    Decimal,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Tab {
+    pos: f64,
+    align: TabAlign,
+}
+
+fn tabs_of(props: &ParaProps) -> Vec<Tab> {
+    props
+        .tabs
+        .as_ref()
+        .map(|t| {
+            t.iter()
+                .map(|s| Tab {
+                    pos: s.pos,
+                    align: match s.align.as_str() {
+                        "ctr" => TabAlign::Center,
+                        "r" => TabAlign::Right,
+                        "dec" => TabAlign::Decimal,
+                        _ => TabAlign::Left,
+                    },
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Width of the text after the tab at cell `i` up to the next tab or line break, and the width of
+/// that text before its first ".".
+fn tab_segment(cells: &[Cell], i: usize) -> (f64, f64) {
+    let mut w = 0.0;
+    let mut dec = None;
+    for c in cells.iter().skip(i + 1) {
+        if matches!(c.ch, '\t' | '\u{b}' | '\n') {
+            break;
+        }
+        if c.ch == '.' && dec.is_none() {
+            dec = Some(w);
+        }
+        w += c.adv;
+    }
+    (w, dec.unwrap_or(w))
+}
+
+/// Advance of a tab at `x` (from the start edge) to the next stop, placing the text after it
+/// (`seg`: its width, and its width before the decimal point) as the stop aligns it but never
+/// moving back, as PowerPoint does; past the last stop, to the next default stop.
+fn tab_advance(x: f64, stops: &[Tab], default_tab: f64, seg: (f64, f64)) -> f64 {
     for s in stops {
-        if *s > x + 0.5 {
-            return s - x;
+        if s.pos > x + 0.5 {
+            let to = s.pos - x;
+            return match s.align {
+                TabAlign::Left => to,
+                TabAlign::Right => (to - seg.0).max(0.0),
+                TabAlign::Center => (to - seg.0 / 2.0).max(0.0),
+                TabAlign::Decimal => (to - seg.1).max(0.0),
+            };
         }
     }
     let d = if default_tab > 1.0 { default_tab } else { 72.0 };
@@ -1197,7 +1272,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             (margin + indent).max(0.0)
         };
         let rest_x = margin;
-        let tabs: Vec<f64> = props.tabs.as_ref().map(|t| t.iter().map(|s| s.pos).collect()).unwrap_or_default();
+        let tabs = tabs_of(props);
         let first_w = (col_w - first_x - mr).max(1.0);
         let rest_w = (col_w - rest_x - mr).max(1.0);
         let raw = break_lines(p, first_w, rest_w, wrap, &tabs, props.default_tab.unwrap_or(72.0), first_x, rest_x);
@@ -1239,8 +1314,12 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             // Logical advances; tabs measure from the start edge.
             let mut adv = Vec::with_capacity(n);
             let mut x = 0.0;
-            for c in line_cells {
-                let a = if c.ch == '\t' { tab_advance(x0 + x, &tabs, props.default_tab.unwrap_or(72.0)) } else { c.adv };
+            for (k, c) in line_cells.iter().enumerate() {
+                let a = if c.ch == '\t' {
+                    tab_advance(x0 + x, &tabs, props.default_tab.unwrap_or(72.0), tab_segment(&p.cells, rl.start + k))
+                } else {
+                    c.adv
+                };
                 adv.push(a);
                 x += a;
             }

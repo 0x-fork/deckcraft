@@ -885,3 +885,52 @@ fn transparent_text_is_faded_once() {
     let opacity = r.color.a as f64 / 255.0 * r.alpha;
     assert!((opacity - 0.4).abs() < 0.01, "{opacity}");
 }
+
+/// One paragraph `text` with tab stops `tabs` (position, `algn`), no bullet or indent.
+fn tabbed(text: &str, tabs: &[(f64, &str)], w: f64) -> TextLayout {
+    let (p, mut sh) = setup(text, w, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    for r in &mut para.runs {
+        r.props.size = Some(18.0);
+    }
+    let pp = &mut para.props;
+    pp.bullet = Some(Bullet::None);
+    pp.margin_left = Some(0.0);
+    pp.indent = Some(0.0);
+    pp.default_tab = Some(72.0);
+    pp.tabs = Some(tabs.iter().map(|(pos, a)| deckcraft_model::text::TabStop { pos: *pos, align: a.to_string() }).collect());
+    lay(&p, &sh, w, 300.0)
+}
+
+#[test]
+fn tab_stops_align_the_text_after_them() {
+    let x0 = |l: &TextLayout| l.inner.x0;
+    // Right: the text ends at the stop. Centre: centred on it. Decimal: the "." at the stop.
+    let l = tabbed("a\tright", &[(200.0, "r")], 600.0);
+    assert!((l.lines[0].extent.1 - x0(&l) - 200.0).abs() < 0.01, "{:?}", l.lines[0].extent);
+    let l = tabbed("a\tmid", &[(200.0, "ctr")], 600.0);
+    let (s, e) = (l.lines[0].edges[2].0, l.lines[0].edges[4].1);
+    assert!(((s + e) / 2.0 - x0(&l) - 200.0).abs() < 0.01);
+    let l = tabbed("x\t1234.567", &[(150.0, "dec")], 600.0);
+    assert!((l.lines[0].edges[6].0 - x0(&l) - 150.0).abs() < 0.01, "the point sits at the stop");
+    // Text without a point ends at a decimal stop.
+    let l = tabbed("x\t12,5", &[(150.0, "dec")], 600.0);
+    assert!((l.lines[0].extent.1 - x0(&l) - 150.0).abs() < 0.01);
+    // Text wider than the room before a right stop starts where the tab is; it never moves back.
+    let l = tabbed("x\twider than the gap", &[(20.0, "r")], 600.0);
+    assert!((l.lines[0].edges[2].0 - l.lines[0].edges[0].1).abs() < 0.01);
+    // A left stop and then default stops every 72 pt.
+    let l = tabbed("a\tb\tc", &[(30.0, "l")], 600.0);
+    assert!((l.lines[0].edges[2].0 - x0(&l) - 30.0).abs() < 0.01);
+    assert!((l.lines[0].edges[4].0 - x0(&l) - 72.0).abs() < 0.01);
+}
+
+#[test]
+fn a_tab_past_the_end_moves_to_the_next_line() {
+    // PowerPoint: "abcdefghij\tk\tl\tm…" in a narrow box puts the tab that doesn't fit on the next
+    // line, so the text after it lands on that line's first stop.
+    let l = tabbed("abcdefghij\tk", &[], 130.0);
+    assert_eq!(l.lines.len(), 2);
+    assert_eq!(l.lines[1].start, 10, "the tab starts the second line: {:?}", l.lines.iter().map(|x| (x.start, x.end, x.extent)).collect::<Vec<_>>());
+    assert!((l.lines[1].edges[1].0 - l.inner.x0 - 72.0).abs() < 0.01);
+}
