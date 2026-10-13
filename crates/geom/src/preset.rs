@@ -520,14 +520,25 @@ fn normalize(pts: &[(f64, f64)], w: f64, h: f64) -> Vec<(f64, f64)> {
     pts.iter().map(|(x, y)| ((x - x0) * sx, (y - y0) * sy)).collect()
 }
 
-fn star(n: usize, w: f64, h: f64, inner: f64, normalized: bool) -> Vec<(f64, f64)> {
+/// An n-pointed star as ECMA-376 draws it: points on an ellipse around (hc, vc · vf) with radii
+/// half the box stretched by the preset's `hf` / `vf` (so a five-pointed star fills its box and
+/// looks regular in a square), the inner corners `inner` of the way out.
+fn star(n: usize, w: f64, h: f64, inner: f64) -> Vec<(f64, f64)> {
+    let (hf, vf) = match n {
+        5 => (1.05146, 1.10557),
+        6 => (1.15470, 1.0),
+        7 => (1.02572, 1.05210),
+        10 => (1.05146, 1.0),
+        _ => (1.0, 1.0),
+    };
+    let (rx, ry, cy) = (w / 2.0 * hf, h / 2.0 * vf, h / 2.0 * vf);
     let mut pts = Vec::with_capacity(n * 2);
     for i in 0..n * 2 {
         let a = (-90.0 + 180.0 * i as f64 / n as f64).to_radians();
         let r = if i % 2 == 0 { 1.0 } else { inner };
-        pts.push((r * a.cos(), r * a.sin()));
+        pts.push((w / 2.0 + r * rx * a.cos(), cy + r * ry * a.sin()));
     }
-    if normalized { normalize(&pts, w, h) } else { pts.iter().map(|(x, y)| (w / 2.0 + x * w / 2.0, h / 2.0 + y * h / 2.0)).collect() }
+    pts
 }
 
 #[derive(Clone, Copy)]
@@ -1576,8 +1587,7 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             let n: usize = name.trim_start_matches("star").parse().unwrap_or(5);
             let v = a(0).clamp(0.0, 50000.0);
             let inner = v / 50000.0;
-            let normalized = matches!(n, 5 | 7);
-            let mut g = simple(b.poly(&star(n, w, h, inner, normalized)).take(), full.inset(-ss * (0.5 - inner * 0.5) * 0.5), w, h);
+            let mut g = simple(b.poly(&star(n, w, h, inner)).take(), full.inset(-ss * (0.5 - inner * 0.5) * 0.5), w, h);
             g.handles.push(Handle::new(0, Point::new(w / 2.0, h / 2.0), Vec2::new(0.0, -h / 2.0 / 50000.0), v, 0.0, 50000.0));
             g
         }
@@ -2266,6 +2276,26 @@ mod tests {
         for (x, y) in [(0.18375, 0.00774), (0.84, 0.2), (1.0, 0.8), (0.16, 0.8)] {
             assert!(on_path(&g, Point::new(300.0 * x, 120.0 * y), 0.05), "shifted wave ({x}, {y})");
         }
+    }
+
+    #[test]
+    fn stars_are_stretched_like_the_standards() {
+        // star5 in a 216 pt square: top point at the top middle, side points at 18 degrees on an
+        // ellipse 5.146% wider and 10.557% taller, centred 10.557% below the middle; its bottom
+        // points reach the box's bottom edge.
+        let k = 216.0;
+        let g = build("star5", k, k, &[]).unwrap();
+        let (rx, ry, cy) = (k / 2.0 * 1.05146, k / 2.0 * 1.10557, k / 2.0 * 1.10557);
+        let a = 18f64.to_radians();
+        assert!(on_path(&g, Point::new(k / 2.0, 0.0), 1e-6));
+        assert!(on_path(&g, Point::new(k / 2.0 + rx * a.cos(), cy - ry * a.sin()), 1e-6));
+        use kurbo::Shape as _;
+        let bb = g.paths[0].path.bounding_box();
+        assert!((bb.x0).abs() < 0.5 && (bb.x1 - k).abs() < 0.5 && (bb.y1 - k).abs() < 0.5, "{bb:?}");
+        // star6 is 15.47% wider than its box's half-width allows (its points touch the sides).
+        let g = build("star6", k, k, &[]).unwrap();
+        let bb = g.paths[0].path.bounding_box();
+        assert!((bb.x0).abs() < 0.5 && (bb.x1 - k).abs() < 0.5, "{bb:?}");
     }
 
     #[test]
