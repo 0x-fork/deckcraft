@@ -999,6 +999,11 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
     });
     drawing_group(app, ui);
     group(ui, |ui| {
+        if small_button(ui, Icon::Fonts, "Replace Fonts…", enabled(app, "font.replace"), false).clicked() {
+            app.dialog = Some(crate::dialogs::Dialog::new("replaceFonts"));
+        }
+    });
+    group(ui, |ui| {
         big(app, ui, Icon::DesignIdeas, "Design\nIdeas", "view.pane", json!({"pane": "designer"}));
     });
 }

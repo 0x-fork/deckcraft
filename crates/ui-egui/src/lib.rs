@@ -1129,6 +1129,8 @@ fn js_now() -> f64 {
 
 #[cfg(test)]
 mod ime_tests;
+#[cfg(test)]
+mod replacefonts_tests;
 
 #[cfg(test)]
 mod tests {

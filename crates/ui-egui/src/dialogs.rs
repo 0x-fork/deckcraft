@@ -47,6 +47,7 @@ fn title(id: &str) -> &'static str {
         "preferences" => "Preferences",
         "export" => "Export",
         "symbol" => "Symbol",
+        "replaceFonts" => "Replace Font",
         "equation" => "Equation",
         "spelling" => "Spelling",
         "accessibility" => "Accessibility Checker",
@@ -465,6 +466,52 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 app.export_as(&fmt, extra);
             }
             ok || cancel
+        }
+        "replaceFonts" => {
+            let used: Vec<String> =
+                app.session.execute("font.used", &json!({})).ok().and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            let mut from = d.get("from", used.first().map(String::as_str).unwrap_or(""));
+            let mut to = d.get("to", "");
+            egui::Grid::new("replace_fonts").num_columns(2).spacing(vec2(10.0, 8.0)).show(ui, |ui| {
+                ui.label("Replace:");
+                egui::ComboBox::from_id_salt("rf_from").width(240.0).selected_text(from.clone()).show_ui(ui, |ui| {
+                    for f in &used {
+                        ui.selectable_value(&mut from, f.clone(), f);
+                    }
+                });
+                ui.end_row();
+                ui.label("With:");
+                ui.vertical(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut to).desired_width(240.0).hint_text("Font name"));
+                    let needle = to.trim().to_lowercase();
+                    egui::ScrollArea::vertical().max_height(140.0).id_salt("rf_list").show(ui, |ui| {
+                        for f in
+                            crate::ribbon::font_families(app).iter().filter(|f| needle.is_empty() || f.to_lowercase().contains(&needle)).take(200)
+                        {
+                            if ui.selectable_label(f.eq_ignore_ascii_case(to.trim()), f).clicked() {
+                                to = f.clone();
+                            }
+                        }
+                    });
+                });
+                ui.end_row();
+            });
+            if let Some(msg) = d.fields.get("result") {
+                ui.label(egui::RichText::new(msg.clone()).color(Tokens::get(ui.ctx()).text_dim));
+            }
+            d.fields.insert("from".into(), from.clone());
+            d.fields.insert("to".into(), to.clone());
+            let (ok, cancel) = buttons(ui, "Replace");
+            if ok && !from.is_empty() && !to.trim().is_empty() {
+                let n = app.run("font.replace", json!({"from": from, "to": to.trim()})).ok().and_then(|v| v["replaced"].as_u64()).unwrap_or(0);
+                let msg =
+                    if n == 0 { format!("“{from}” isn't used explicitly.") } else { format!("Replaced “{from}” with “{}”.", to.trim()) };
+                d.fields.insert("result".into(), msg);
+                d.fields.remove("from");
+                // Stay open, like PowerPoint, so several fonts can be replaced in a row.
+                return cancel;
+            }
+            cancel
         }
         "symbol" => {
             ui.label("Click a symbol to insert it at the insertion point.");
