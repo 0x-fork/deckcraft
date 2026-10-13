@@ -23,6 +23,7 @@ mod pathgrad;
 mod placed;
 mod ramp;
 mod table;
+mod transition;
 mod warp;
 
 use std::collections::HashMap;
@@ -41,12 +42,14 @@ use kurbo::{Affine, BezPath, PathEl, Point, Rect, Shape as _, Vec2};
 use vello_common::filter_effects::{EdgeMode, Filter, FilterPrimitive};
 use vello_cpu::{RenderContext, Resources, peniko};
 
+pub use deckcraft_anim::{transition_frame, transition_layers, uses_slide_parts};
 pub use extent::{Region, TILE, layout_extent, pasteboard_region, slide_extent};
 pub use images::{decode as decode_image, gif_frame};
 pub use morph_path::PathMorph;
 pub use morph_text::TextMorph;
 pub use placed::{Placed, PlacedLink, PlacedText, place_slide};
 pub use table::row_heights as table_row_heights;
+pub use transition::{SlideParts, composite_transition, render_transition};
 
 /// Largest pixmap side we render (vello_cpu uses u16 sizes).
 pub const MAX_SIDE: u32 = 16_000;
@@ -329,6 +332,30 @@ pub fn render_slide_drawn(pres: &Presentation, index: usize, opts: &RenderOpts) 
     }
 }
 
+/// Which part of a slide [`render_slide_part`] draws.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SlidePart {
+    /// The background fill with the master and layout graphics.
+    Backdrop,
+    /// The slide's own shapes over transparency.
+    Content,
+}
+
+/// Render one part of slide `index` (transitions that move the contents over the backgrounds).
+/// A panic inside the renderer becomes a transparent image (logged), never a crash.
+pub fn render_slide_part(pres: &Presentation, index: usize, part: SlidePart, opts: &RenderOpts) -> Image {
+    let Some(slide) = pres.slides.get(index) else { return Image::default() };
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| RENDERER.with(|r| r.borrow_mut().slide_part(pres, slide, index, part, opts)))) {
+        Ok(img) => img,
+        Err(_) => {
+            log::error!("rendering part of slide {index} panicked; showing nothing");
+            RENDERER.with(|r| *r.borrow_mut() = Renderer::default());
+            let (w, h) = output_size(pres, opts);
+            Image { width: w as u32, height: h as u32, pixels: vec![0; w as usize * h as usize * 4] }
+        }
+    }
+}
+
 /// Render a frame between slides `old` and `new` (indices into `pres.slides`), e.g. of Morph: the
 /// backdrop (background, master and layout graphics) of `old` cross-fading into that of `new` by
 /// `mix` (0..1), then `shapes` in order, each resolved against the slide it comes from (`true`:
@@ -545,6 +572,25 @@ impl Renderer {
             self.backdrop(&mut ctx, &f, &rctx, slide, view);
             for s in &slide.shapes {
                 self.shape(&mut ctx, &f, &rctx, s, view, 0);
+            }
+        }
+        self.finish(ctx, w, h)
+    }
+
+    fn slide_part(&mut self, pres: &Presentation, slide: &Slide, index: usize, part: SlidePart, opts: &RenderOpts) -> Image {
+        let (mut ctx, w, h, view) = Self::canvas(pres, opts, needs_filters(pres, slide));
+        let f = Frame { pres, opts, fields: Self::fields(pres, index, opts) };
+        if let Some(rctx) = Ctx::for_slide(pres, slide) {
+            match part {
+                SlidePart::Backdrop => self.backdrop(&mut ctx, &f, &rctx, slide, view),
+                SlidePart::Content => {
+                    // Shapes filled with the background (`useBgFill`) still show it.
+                    let (fill, ph) = resolve::background(&rctx, Some(slide));
+                    self.bg = Some((fill, ph, view));
+                    for s in &slide.shapes {
+                        self.shape(&mut ctx, &f, &rctx, s, view, 0);
+                    }
+                }
             }
         }
         self.finish(ctx, w, h)

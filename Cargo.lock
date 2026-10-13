@@ -1109,6 +1109,7 @@ dependencies = [
 name = "deckcraft-render"
 version = "0.6.1"
 dependencies = [
+ "deckcraft-anim",
  "deckcraft-color",
  "deckcraft-fonts",
  "deckcraft-geom",
