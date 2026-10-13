@@ -1378,12 +1378,14 @@ fn transitions(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
-        let opts: &[&str] = deckcraft_model::anim::TRANSITIONS.iter().find(|x| x.0 == kind).map(|x| x.4).unwrap_or(&[]);
-        let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !opts.is_empty());
+        let selected = cur.as_ref().map(|t| t.option.as_str());
+        let rows = transition_effect_rows(&kind, selected);
+        let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !rows.is_empty());
         egui::Popup::menu(&r).show(|ui| {
-            for o in opts {
-                if ui.button(deckcraft_model::anim::transition_option_label(&kind, o)).clicked() {
+            for &(o, on) in &rows {
+                if ui.selectable_label(on, deckcraft_model::anim::transition_option_label(&kind, o)).clicked() {
                     run(app, "transition.options", json!({"option": o}));
+                    ui.close();
                 }
             }
         });
@@ -2408,6 +2410,11 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
     });
 }
 
+/// One row of Transitions ▸ Effect Options: the stored option and whether it is the current one.
+fn transition_effect_rows(kind: &str, current: Option<&str>) -> Vec<(&'static str, bool)> {
+    deckcraft_model::anim::TRANSITIONS.iter().find(|x| x.0 == kind).map(|x| x.4).unwrap_or(&[]).iter().map(|o| (*o, current == Some(*o))).collect()
+}
+
 /// Gallery glyphs for the freeform tools: a wave (curve), a polygon (freeform), a squiggle (scribble).
 fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
     let at = |x: f32, y: f32| egui::pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
@@ -2419,4 +2426,19 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
         _ => (0..=40).map(|i| i as f32 / 40.0).map(|u| at(u, 0.5 + 0.35 * (u * 19.0).sin() * (1.0 - u * 0.4))).collect(),
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transition_effect_rows;
+
+    #[test]
+    fn effect_options_mark_the_current_transition_option() {
+        let on = |kind, current| transition_effect_rows(kind, current).into_iter().map(|(_, marked)| marked).collect::<Vec<_>>();
+        assert_eq!(on("push", Some("l")), vec![false, false, true, false]);
+        assert_eq!(on("fade", Some("throughBlack")), vec![false, true]);
+        assert_eq!(on("push", Some("missing")), vec![false, false, false, false]);
+        assert!(on("none", None).is_empty());
+        assert_eq!(transition_effect_rows("cut", Some("")).first().map(|(o, marked)| (*o, *marked)), Some(("", true)));
+    }
 }
