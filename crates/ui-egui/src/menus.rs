@@ -85,13 +85,20 @@ pub fn palette(app: &mut SlideApp, ctx: &egui::Context) {
             let r = ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search commands…").desired_width(f32::INFINITY).font(theme::font(15.0)));
             r.request_focus();
             let q = query.to_lowercase();
+            // Commands that need a path or other value fail when the palette runs them with
+            // `{}`. The dialog command (`app.exportDialog`) stays; `file.export` does not.
             let mut items: Vec<(String, String, Option<&'static str>)> = app
                 .session
                 .commands()
                 .into_iter()
-                .filter(|c| c.enabled)
+                .filter(|c| c.enabled && !deckcraft_engine::cmd::needs_arguments(c.params))
                 .map(|c| (c.id.to_string(), c.label.to_string(), c.shortcut))
-                .chain(crate::UI_COMMANDS.iter().map(|c| (c.0.to_string(), c.1.to_string(), c.2)))
+                .chain(
+                    crate::UI_COMMANDS
+                        .iter()
+                        .filter(|c| !deckcraft_engine::cmd::needs_arguments(c.3))
+                        .map(|c| (c.0.to_string(), c.1.to_string(), c.2)),
+                )
                 .filter(|(id, label, _)| q.is_empty() || label.to_lowercase().contains(&q) || id.to_lowercase().contains(&q))
                 .collect();
             items.sort_by_key(|(_, l, _)| !l.to_lowercase().starts_with(&q));
