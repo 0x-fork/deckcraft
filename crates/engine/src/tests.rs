@@ -835,3 +835,23 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// Bullets and Numbering dialog: numbering takes a colour and a size like bullets do, and sizes
+/// stay within PowerPoint's 25–400 %.
+#[test]
+fn numbering_takes_color_and_size() {
+    let mut s = Session::with_new();
+    s.execute("insert.textBox", &json!({"rect": [10, 10, 300, 100], "text": "One\nTwo"})).unwrap();
+    s.execute("format.numbering", &json!({"on": true, "scheme": "romanUcPeriod", "start": 3, "color": "accent2", "size": 150})).unwrap();
+    let para = |s: &Session| {
+        let st = s.doc().unwrap();
+        let id = st.selection.shapes[0];
+        st.shape(id).unwrap().text.as_ref().unwrap().paragraphs[0].props.clone()
+    };
+    let pp = para(&s);
+    assert!(matches!(&pp.bullet, Some(deckcraft_model::text::Bullet::AutoNum { scheme, start_at: 3 }) if scheme == "romanUcPeriod"));
+    assert_eq!(pp.bullet_size, Some(1.5));
+    assert_eq!(pp.bullet_color, Some(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)));
+    s.execute("format.bullets", &json!({"on": true, "char": "★", "size": 9000})).unwrap();
+    assert_eq!(para(&s).bullet_size, Some(4.0));
+}

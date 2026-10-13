@@ -556,6 +556,12 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                                 run(app, "format.bullets", json!({"on": true, "char": ch}));
                             }
                         }
+                        ui.separator();
+                        if ui.button("Bullets and Numbering…").clicked() {
+                            let mut dlg = crate::dialogs::Dialog::new("bullets");
+                            dlg.fields.insert("tab".into(), "bulleted".into());
+                            app.dialog = Some(dlg);
+                        }
                     });
                 }
                 let (m, a) = small_button_ex(ui, Icon::Numbering, "", en, b("numbering"), true);
@@ -579,6 +585,12 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                             if ui.button(label).clicked() {
                                 run(app, "format.numbering", json!({"on": true, "scheme": sch}));
                             }
+                        }
+                        ui.separator();
+                        if ui.button("Bullets and Numbering…").clicked() {
+                            let mut dlg = crate::dialogs::Dialog::new("bullets");
+                            dlg.fields.insert("tab".into(), "numbered".into());
+                            app.dialog = Some(dlg);
                         }
                     });
                 }
