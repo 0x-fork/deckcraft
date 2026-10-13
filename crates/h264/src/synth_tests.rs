@@ -539,3 +539,33 @@ fn poc_type1_reordering() {
         }
     }
 }
+
+fn gap_stream(gaps: bool) -> Vec<u8> {
+    let mut seed = 7u32;
+    let a: Vec<Option<Vec<u8>>> = (0..NMB).map(|_| Some(random_mb(&mut seed))).collect();
+    let mut stream = sps(66, 2, gaps, PocType::T2);
+    stream.extend(pps(false, false));
+    stream.extend(slice_nal(&Pic { idr: true, frame_num: 0, ref_idc: 3, mbs: a, ..Default::default() }, false));
+    // frame_num 1..=9 are missing.
+    stream.extend(slice_nal(&Pic { frame_num: 10, ref_idc: 2, mbs: vec![None; NMB], ..Default::default() }, false));
+    stream
+}
+
+#[test]
+fn frame_num_gap_is_rejected_when_the_sps_forbids_gaps() {
+    let mut dec = Decoder::with_threads(1);
+    let res = dec.decode(&gap_stream(false), 0);
+    let _ = dec.flush();
+    assert!(res.is_err() || dec.take_error().is_some(), "a forbidden gap must be reported");
+    assert_eq!(dec.stats().frame_num_gaps, 0);
+}
+
+#[test]
+fn frame_num_gap_is_filled_when_the_sps_allows_gaps() {
+    let mut dec = Decoder::with_threads(1);
+    let mut out = dec.decode(&gap_stream(true), 0).unwrap();
+    out.extend(dec.flush());
+    assert!(dec.take_error().is_none());
+    assert_eq!(out.len(), 2);
+    assert_eq!(dec.stats().frame_num_gaps, 1);
+}
