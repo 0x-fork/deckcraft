@@ -1,0 +1,53 @@
+//! The SmartArt Text Pane driven like a person would: type in a line, Enter for a new line, Tab
+//! to demote.
+
+use deckcraft_engine::Session;
+use egui_kittest::Harness;
+use egui_kittest::kittest::{NodeT, Queryable};
+use serde_json::json;
+
+use crate::{Services, SlideApp};
+
+fn levels(h: &Harness<'_, SlideApp>) -> Vec<(String, u8)> {
+    let st = h.state().session.active().unwrap();
+    let (_, d) = deckcraft_engine::cmd::smartart::selected(st).unwrap();
+    d.nodes.into_iter().map(|n| (n.text, n.level)).collect()
+}
+
+fn line<'a>(h: &'a Harness<'_, SlideApp>, v: &'a str) -> egui_kittest::Node<'a> {
+    h.get_all_by_value(v).find(|n| n.accesskit_node().role() == egui::accesskit::Role::TextInput).unwrap()
+}
+
+#[test]
+fn text_pane_types_adds_and_demotes() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.smartArt", &json!({"kind": "list", "items": ["Plan", "Build"]})).unwrap();
+    let mut app = SlideApp::new(s, Services::default());
+    app.ui.pane = Some("smartart".into());
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut SlideApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(3);
+    assert!(h.query_by_label("Text Pane").is_some());
+
+    line(&h, "Build").click();
+    h.run_steps(2);
+    h.key_press(egui::Key::End);
+    line(&h, "Build").type_text(" it");
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(4);
+    assert_eq!(levels(&h), [("Plan".into(), 0), ("Build it".into(), 0), (String::new(), 0)]);
+
+    // The new line has the focus: type, then Tab demotes it under "Build it".
+    h.event(egui::Event::Text("Test".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run_steps(4);
+    assert_eq!(levels(&h), [("Plan".into(), 0), ("Build it".into(), 0), ("Test".into(), 1)]);
+}

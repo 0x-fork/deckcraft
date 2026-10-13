@@ -835,3 +835,52 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn smartart_text_pane_edits_regenerate_the_diagram() {
+    let mut s = session();
+    let r = s.execute("insert.smartArt", &json!({"kind": "list", "items": ["Plan", "\tScope", "Build"]})).unwrap();
+    let gid = r["id"].as_u64().unwrap();
+    let kids = |s: &Session| match s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).map(|x| &x.kind) {
+        Some(deckcraft_model::ShapeKind::Group { children, .. }) => children.clone(),
+        _ => panic!("not a group"),
+    };
+    assert_eq!(kids(&s).len(), 2, "Scope is a bullet inside Plan");
+    let box_before = s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).unwrap().xfrm;
+
+    // Type into the second shape directly, then add a node: the typed text is kept.
+    let build = kids(&s)[1].id.0;
+    s.execute("text.edit", &json!({"id": build, "end": true})).unwrap();
+    s.execute("text.insert", &json!({"text": " it"})).unwrap();
+    let r = s.execute("smartArt.addNode", &json!({"id": gid, "index": 2, "position": "after", "text": "Ship"})).unwrap();
+    assert_eq!(r["index"], 3);
+    let n = s.execute("smartArt.nodes", &json!({"id": gid})).unwrap();
+    let texts: Vec<&str> = n["nodes"].as_array().unwrap().iter().map(|x| x["text"].as_str().unwrap()).collect();
+    assert_eq!(texts, ["Plan", "Scope", "Build it", "Ship"]);
+    assert_eq!(kids(&s).len(), 3);
+
+    // Demote Ship under Build, promote Scope, remove Plan.
+    s.execute("smartArt.demote", &json!({"id": gid, "index": 3})).unwrap();
+    assert_eq!(kids(&s).len(), 2);
+    s.execute("smartArt.promote", &json!({"id": gid, "index": 1})).unwrap();
+    assert_eq!(kids(&s).len(), 3);
+    assert!(s.execute("smartArt.promote", &json!({"id": gid, "index": 0})).is_err());
+    s.execute("smartArt.removeNode", &json!({"id": gid, "index": 0})).unwrap();
+    let n = s.execute("smartArt.nodes", &json!({"id": gid})).unwrap();
+    let lv: Vec<u64> = n["nodes"].as_array().unwrap().iter().map(|x| x["level"].as_u64().unwrap()).collect();
+    assert_eq!(lv, [0, 0, 1]);
+
+    // A child shape also finds its diagram; layouts switch; the box stays put; undo works.
+    let child = kids(&s)[0].id.0;
+    s.execute("smartArt.layout", &json!({"id": child, "kind": "hierarchy"})).unwrap();
+    assert_eq!(kids(&s).len(), 3 + 1, "three boxes and one link");
+    assert_eq!(s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).unwrap().xfrm, box_before);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(kids(&s).len(), 2);
+
+    // The outline survives a .deckcraft save.
+    let doc = s.doc().unwrap().doc.as_ref().clone();
+    let bytes = deckcraft_format::save(&doc).unwrap();
+    let back = deckcraft_format::load(&bytes).unwrap();
+    assert!(back.slides[0].shapes.iter().any(|x| x.diagram.as_ref().is_some_and(|d| d.nodes.len() == 3)));
+}

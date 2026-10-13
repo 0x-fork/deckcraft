@@ -86,7 +86,8 @@ pub struct UiState {
     pub notes: bool,
     pub notes_height: f32,
     pub thumbs_width: f32,
-    /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`.
+    /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`,
+    /// `smartart` (Text Pane).
     pub pane: Option<String>,
     pub pane_width: f32,
     pub ruler: bool,
@@ -101,6 +102,12 @@ pub struct UiState {
     pub ui_scale: f32,
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
+    /// The Text Pane's current SmartArt line (Add Shape, Promote and Demote act on it).
+    pub smartart_row: usize,
+    /// A Text Pane line to focus once it is drawn (after Enter, Tab or Backspace rebuilt the list).
+    pub smartart_focus: Option<usize>,
+    /// The Text Pane's line drafts, for the SmartArt group they were read from.
+    pub smartart_drafts: (u32, Vec<String>),
     pub grayscale: bool,
 }
 
@@ -126,6 +133,9 @@ impl Default for UiState {
             presenter_view: true,
             ui_scale: 1.0,
             format_tab: "fill".into(),
+            smartart_row: 0,
+            smartart_focus: None,
+            smartart_drafts: (0, vec![]),
             grayscale: false,
         }
     }
@@ -146,7 +156,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.zoomOut", "Zoom Out", Some("Cmd+-"), "{}"),
     ("view.zoom", "Zoom…", None, "{percent}"),
     ("view.fit", "Fit to Window", None, "{}"),
-    ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|null}"),
+    ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|smartart|null}"),
     ("view.tab", "Ribbon Tab", None, "{tab}"),
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),

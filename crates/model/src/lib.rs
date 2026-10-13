@@ -320,6 +320,26 @@ pub struct Shape {
     /// Unmodelled XML kept for round-trip (extension lists etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
+    /// On a SmartArt group: the diagram's text outline, from which its shapes are regenerated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagram: Option<Diagram>,
+}
+
+/// A SmartArt diagram's data: its layout and its outline of nodes (the Text Pane).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Diagram {
+    /// list, process, cycle, hierarchy, pyramid or matrix.
+    pub kind: String,
+    pub nodes: Vec<DiagramNode>,
+}
+
+/// One line of the Text Pane: its text and outline level (0 = top level).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiagramNode {
+    pub text: String,
+    pub level: u8,
 }
 
 impl Default for Shape {
@@ -345,6 +365,7 @@ impl Default for Shape {
             click: None,
             hover: None,
             raw_ext: None,
+            diagram: None,
         }
     }
 }
