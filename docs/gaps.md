@@ -161,9 +161,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
 Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a **beta blocker**.
 
 ### Notes and Handout masters
-- **Evidence:** checklist row missing the editing view. PPTX writes a notes master, and a handout
-  master's header, footer, date and slide number are kept. There is no view to edit either master.
-- **Estimate:** 4–6 h.
+- **Evidence:** View ▸ Handout Master edits the handout master (header, date, footer and page
+  number placeholders, background, slides-per-page preview) and PPTX keeps it. There's no Notes
+  Master view yet, and PDF handouts don't use the handout master's text.
+- **Estimate:** 2–3 h (Notes Master view), 1 h (handout text in PDF).
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -257,6 +258,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Handout Master view: the masters gap is now the Notes Master view and handout text in PDF |
 | 2026-10-13 | minor | Owned PPTX corpus for tables, charts, animations, media, sections and masters. Handout-master text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

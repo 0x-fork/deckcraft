@@ -190,6 +190,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Slide Show", "show.start"),
                 ("-", ""),
                 ("Slide Master", "view.slideMaster"),
+                ("Handout Master", "view.handoutMaster"),
                 ("-", ""),
                 ("Ruler", "view.ruler"),
                 ("Gridlines", "view.gridlines"),

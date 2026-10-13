@@ -38,7 +38,8 @@ fn mods(ui: &Ui) -> Mods {
 /// The slide's rect on screen for the current zoom.
 pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let Some(d) = app.session.active() else { return (avail, 1.0) };
-    let (sw, sh) = (d.doc.slide_size.width as f32, d.doc.slide_size.height as f32);
+    let page = deckcraft_engine::page_size(d);
+    let (sw, sh) = (page.width as f32, page.height as f32);
     let margin = 28.0;
     let fit = ((avail.width() - margin * 2.0) / sw).min((avail.height() - margin * 2.0) / sh).max(0.05);
     let scale = app.ui.zoom.unwrap_or(fit);
@@ -123,6 +124,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
+        Some((Target::Handout, d)) => deckcraft_engine::handout_page(&d.doc).and_then(|p| master_tex(ui.ctx(), &p, 0, None, px, visible)),
         None => None,
     };
     if let Some((tex, region)) = tex {
@@ -135,6 +137,24 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     app.perf.render_ms = app.textures.last_render_ms;
     media_frames(app, &painter, xf);
+    if let Some(d) = app.session.active().filter(|d| d.selection.target == Target::Handout) {
+        // Where the slides go on a printed handout, as in PowerPoint's preview.
+        let (n, s) = (d.doc.notes_size, d.doc.slide_size);
+        let aspect = s.width / s.height.max(1.0);
+        for b in deckcraft_engine::pdf::handout_boxes(app.ui.handout_per_page, (n.width, n.height), aspect) {
+            let r = Rect::from_min_max(
+                pos2(slide_rect.min.x + b.x0 as f32 * scale, slide_rect.min.y + b.y0 as f32 * scale),
+                pos2(slide_rect.min.x + b.x1 as f32 * scale, slide_rect.min.y + b.y1 as f32 * scale),
+            );
+            let dash = egui::Shape::dashed_line(
+                &[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()],
+                Stroke::new(1.0, Color32::from_gray(140)),
+                4.0,
+                3.0,
+            );
+            painter.extend(dash);
+        }
+    }
     if app.ui.gridlines {
         let step = 72.0 / 2.0 * scale;
         let mut x = slide_rect.min.x + step;
