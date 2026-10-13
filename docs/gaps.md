@@ -165,9 +165,10 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   background, a slides-per-page preview for handouts) and PPTX keeps them. Notes pages (view and
   PDF) place the slide and notes where the notes master does and print its header, date, footer
   and page number in their own fonts, sizes and colours; PDF handouts print the handout master's.
-  Notes Master view previews the slide in its slide-image placeholder. Left: master text is one
-  line per placeholder (no wrapping, no mixed formatting within it).
-- **Estimate:** 1 h.
+  Notes Master view previews the slide in its slide-image placeholder. PDF pages lay master text
+  out with the text engine (wrapping, mixed formatting). Left: the on-screen Notes Page view still
+  draws it as one line per placeholder.
+- **Estimate:** 0.5 h.
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -261,6 +262,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | PDF master header/footer text wraps and keeps mixed formatting |
 | 2026-10-14 | trivial | Notes Master slide preview; master header/footer text keeps its formatting |
 | 2026-10-14 | minor | Notes pages and PDF handouts follow the notes and handout masters |
 | 2026-10-14 | minor | Notes Master view: the masters gap is now notes pages and PDF handouts following the masters |
