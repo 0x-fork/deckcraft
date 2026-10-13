@@ -1062,6 +1062,11 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
                     run(app, "insert.actionButton", json!({"kind": k}));
                 }
             }
+            ui.separator();
+            let has_sel = app.session.active().is_some_and(|s| !s.selection.shapes.is_empty());
+            if ui.add_enabled(has_sel, egui::Button::new("Action Settings…")).clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("action"));
+            }
         });
     });
     group(ui, |ui| {

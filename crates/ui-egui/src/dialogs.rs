@@ -55,6 +55,7 @@ fn title(id: &str) -> &'static str {
         "chartData" => "Chart Data",
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
+        "action" => "Action Settings",
         "quit" => "DeckCraft",
         _ => "DeckCraft",
     }
@@ -341,6 +342,127 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             if ok && !v.trim().is_empty() {
                 run(app, "comment.add", json!({"text": v}));
                 app.ui.pane = Some("comments".into());
+            }
+            ok || cancel
+        }
+        "action" => {
+            use deckcraft_model::text::Action;
+            let tab = d.get("tab", "click");
+            // Start from the selected shape's current setting for this tab.
+            let (cur, slides, shows) = app
+                .session
+                .active()
+                .map(|st| {
+                    let sh = st.selected_shapes().first().map(|x| if tab == "hover" { x.hover.clone() } else { x.click.clone() }).unwrap_or(None);
+                    let slides: Vec<(deckcraft_model::SlideId, String)> =
+                        st.doc.slides.iter().enumerate().map(|(i, sl)| (sl.id, format!("{}. {}", i + 1, sl.title()))).collect();
+                    let shows: Vec<String> = st.doc.custom_shows.iter().map(|c| c.name.clone()).collect();
+                    (sh, slides, shows)
+                })
+                .unwrap_or_default();
+            let (cur_kind, cur_arg) = match cur.as_ref().map(|h| &h.action) {
+                None => ("none", String::new()),
+                Some(Action::NextSlide) => ("next", String::new()),
+                Some(Action::PreviousSlide) => ("previous", String::new()),
+                Some(Action::FirstSlide) => ("first", String::new()),
+                Some(Action::LastSlide) => ("last", String::new()),
+                Some(Action::LastViewed) => ("lastViewed", String::new()),
+                Some(Action::EndShow) => ("endShow", String::new()),
+                Some(Action::PlayMedia) => ("playMedia", String::new()),
+                Some(Action::Url { url }) => ("url", url.clone()),
+                Some(Action::CustomShow { name }) => ("customShow", name.clone()),
+                Some(Action::Program { path }) => ("program", path.clone()),
+                Some(Action::Slide { slide }) => ("slide", slides.iter().position(|(id, _)| id == slide).unwrap_or(0).to_string()),
+            };
+            ui.horizontal(|ui| {
+                for (k, l) in [("click", "Mouse Click"), ("hover", "Mouse Over")] {
+                    if ui.selectable_label(tab == k, l).clicked() && tab != k {
+                        d.fields.clear();
+                        d.fields.insert("tab".into(), k.into());
+                    }
+                }
+            });
+            ui.separator();
+            ui.label(if tab == "hover" { "Action on mouse over" } else { "Action on click" });
+            let kind = d.get("kind", cur_kind);
+            let hyperlink = !matches!(kind.as_str(), "none" | "program" | "playMedia");
+            let pick = |d: &mut Dialog, ui: &mut Ui, k: &str, l: &str| {
+                if ui.radio(d.get("kind", cur_kind) == k, l).clicked() {
+                    d.fields.insert("kind".into(), k.into());
+                }
+            };
+            pick(d, ui, "none", "None");
+            ui.horizontal(|ui| {
+                if ui.radio(hyperlink, "Hyperlink to:").clicked() && !hyperlink {
+                    d.fields.insert("kind".into(), "next".into());
+                }
+                let targets = [
+                    ("next", "Next Slide"),
+                    ("previous", "Previous Slide"),
+                    ("first", "First Slide"),
+                    ("last", "Last Slide"),
+                    ("lastViewed", "Last Slide Viewed"),
+                    ("endShow", "End Show"),
+                    ("customShow", "Custom Show…"),
+                    ("slide", "Slide…"),
+                    ("url", "URL…"),
+                ];
+                let shown = targets.iter().find(|t| t.0 == kind).map_or("Next Slide", |t| t.1);
+                ui.add_enabled_ui(hyperlink, |ui| {
+                    egui::ComboBox::from_id_salt("action-target").selected_text(shown).show_ui(ui, |ui| {
+                        for (k, l) in targets {
+                            if ui.selectable_label(kind == k, l).clicked() {
+                                d.fields.insert("kind".into(), k.into());
+                            }
+                        }
+                    });
+                });
+            });
+            let kind = d.get("kind", cur_kind);
+            match kind.as_str() {
+                "url" => field(ui, d, "Address:", "arg", if cur_kind == "url" { &cur_arg } else { "https://" }),
+                "slide" => {
+                    let sel = d.get("arg", if cur_kind == "slide" { &cur_arg } else { "0" }).parse::<usize>().unwrap_or(0);
+                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                        for (i, (_, t)) in slides.iter().enumerate() {
+                            if ui.selectable_label(sel == i, t).clicked() {
+                                d.fields.insert("arg".into(), i.to_string());
+                            }
+                        }
+                    });
+                }
+                "customShow" => {
+                    if shows.is_empty() {
+                        ui.label("This presentation has no custom shows (Slide Show ▸ Custom Slide Show).");
+                    }
+                    let sel = d.get("arg", if cur_kind == "customShow" { &cur_arg } else { shows.first().map_or("", String::as_str) });
+                    for n in &shows {
+                        if ui.selectable_label(&sel == n, n).clicked() {
+                            d.fields.insert("arg".into(), n.clone());
+                        }
+                    }
+                }
+                _ => {}
+            }
+            pick(d, ui, "program", "Run program:");
+            if d.get("kind", cur_kind) == "program" {
+                field(ui, d, "Program:", "arg", if cur_kind == "program" { &cur_arg } else { "" });
+            }
+            pick(d, ui, "playMedia", "Play the shape's media");
+            let hl = check(ui, d, "Highlight click", "highlight", cur.as_ref().is_none_or(|h| h.highlight_click));
+            let (ok, cancel) = buttons(ui, "OK");
+            if ok {
+                let kind = d.get("kind", cur_kind);
+                let arg = d.get("arg", &cur_arg);
+                let mut p = json!({"on": tab, "action": kind, "highlight": hl});
+                match kind.as_str() {
+                    "url" => p["url"] = json!(arg),
+                    "slide" => p["slide"] = json!(arg.parse::<usize>().unwrap_or(0)),
+                    "customShow" => p["show"] = json!(arg),
+                    "program" => p["path"] = json!(arg),
+                    _ => {}
+                }
+                run(app, "shape.action", p);
             }
             ok || cancel
         }
