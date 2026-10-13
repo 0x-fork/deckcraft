@@ -252,7 +252,8 @@ fn describe(id: Option<&str>) -> Result<(), String> {
     if !answer.trim().is_empty() {
         outln!("Answers with {}.", answer.trim());
     }
-    let call = if params.iter().all(|p| p.optional) { c.id.to_string() } else { format!("'{}={{…}}'", c.id) };
+    let bare = params.is_empty() || params.iter().any(|p| params.iter().filter(|q| q.object == p.object).all(|q| q.optional));
+    let call = if bare { c.id.to_string() } else { format!("'{}={{…}}'", c.id) };
     outln!("\nRun it with: deckcraft-cli run --cmd {call}");
     Ok(())
 }
