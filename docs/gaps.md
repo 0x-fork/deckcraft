@@ -185,7 +185,7 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 
 ### Smaller missing rows
 Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), laser pointer (1–2 h), transition
-sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; needs a model or a classical
+sounds (1–2 h), artistic effects (3–6 h for the other 15 of 22; 7 approximated and round-tripped), remove background (6–10 h; needs a model or a classical
 matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
 encryption), ink to shape/text (6–10 h), icons and 3-D models (8–14 h, needs an open icon set).
@@ -256,6 +256,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |

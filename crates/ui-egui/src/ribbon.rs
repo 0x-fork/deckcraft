@@ -2076,6 +2076,17 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
                 run(app, "picture.adjust", json!({"grayscale": true}));
             }
         });
+        let r = big_button(ui, Icon::ArtisticEffects, "Artistic\nEffects", enabled(app, "picture.artisticEffect"));
+        egui::Popup::menu(&r).show(|ui| {
+            if ui.button("None").clicked() {
+                run(app, "picture.artisticEffect", json!({"effect": "none"}));
+            }
+            for (e, l) in deckcraft_engine::cmd::artistic::EFFECTS {
+                if ui.button(*l).clicked() {
+                    run(app, "picture.artisticEffect", json!({"effect": e}));
+                }
+            }
+        });
         let r = big_button(ui, Icon::Transparency, "Transparency", true);
         egui::Popup::menu(&r).show(|ui| {
             for tr in [0.0, 0.15, 0.3, 0.5, 0.65, 0.8, 0.95] {

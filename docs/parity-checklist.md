@@ -182,7 +182,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Pictures | SVG pictures | P1 | M |
 | Pictures | Crop (and crop to shape, aspect ratio) | P0 | P |
 | Pictures | Corrections, colour, transparency | P1 | P |
-| Pictures | Artistic effects | P2 | M |
+| Pictures | Artistic effects | P2 | P |
 | Pictures | Remove background | P2 | M |
 | Pictures | Picture styles and borders | P1 | P |
 | Pictures | Change / reset picture | P1 | D |
