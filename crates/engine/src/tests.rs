@@ -835,3 +835,13 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn font_add_refuses_non_fonts_and_rescan_reports_the_catalog() {
+    let mut s = session();
+    let not_font = crate::cmd::base64_encode(b"definitely not a font file");
+    assert!(s.execute("font.add", &json!({"data": not_font})).is_err());
+    assert!(s.execute("font.add", &json!({})).is_err());
+    let r = s.execute("font.rescan", &json!({})).unwrap();
+    assert!(r["families"].as_u64().unwrap() >= 1, "{r}");
+}
