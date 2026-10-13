@@ -1076,6 +1076,79 @@ impl FontDb {
         None
     }
 
+    /// A loaded plain (not colour) face drawing all of `cluster`, loading an installed plain font
+    /// that covers `key` if none is loaded yet. Misses are remembered.
+    pub(crate) fn plain_face_for(&self, key: char, cluster: &[char]) -> Option<Arc<FontFace>> {
+        // Symbol fonts first (PowerPoint draws ⚠ ♥ ⬆ from the system's symbol font), then the
+        // usual fallback families in order, then any other.
+        let rank = |f: &FontFace| {
+            if f.family.contains("Symbol") {
+                return 0;
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(i) = SYSTEM_FALLBACKS.iter().position(|s| s.eq_ignore_ascii_case(&f.family)) {
+                return i + 1;
+            }
+            1000
+        };
+        let pick = |db: &FontDb| {
+            let faces = db.read_faces();
+            let mut v: Vec<&Arc<FontFace>> = faces.iter().filter(|f| !f.is_color() && crate::covers_cluster(f, cluster)).collect();
+            v.sort_by_key(|f| (rank(f), f.italic, (f.weight - 400.0).abs() as i32));
+            v.first().map(|f| (*f).clone())
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let cataloged: Vec<String> = self.read_catalog().iter().map(|e| e.family.clone()).collect();
+            for fam in SYSTEM_FALLBACKS.iter().filter(|f| f.contains("Symbol")) {
+                if !self.is_loaded(fam) && cataloged.iter().any(|f| f.eq_ignore_ascii_case(fam)) {
+                    self.load_cataloged(fam);
+                }
+            }
+        }
+        if let Some(f) = pick(self) {
+            return Some(f);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.system_plain_fallback(key) {
+            return pick(self);
+        }
+        let _ = key;
+        None
+    }
+
+    /// Load an installed font without colour tables covering `c`. True if one was loaded.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn system_plain_fallback(&self, c: char) -> bool {
+        static MISSES: Mutex<Option<std::collections::HashSet<char>>> = Mutex::new(None);
+        if c.is_control() || c.is_whitespace() {
+            return false;
+        }
+        if !self.sys.lock().unwrap_or_else(|e| e.into_inner()).enabled {
+            return false;
+        }
+        if MISSES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).contains(&c) {
+            return false;
+        }
+        let mut paths: Vec<std::path::PathBuf> = self.read_catalog().iter().map(|e| e.path.clone()).collect();
+        paths.sort();
+        paths.dedup();
+        for p in paths {
+            if std::fs::metadata(&p).map(|m| m.len() > 40 << 20).unwrap_or(true) {
+                continue;
+            }
+            let Ok(data) = std::fs::read(&p) else { continue };
+            let hit = enumerate_faces(&data).iter().any(|(i, _, _, _)| {
+                !has_color_tables(&data, *i) && skrifa::FontRef::from_index(&data, *i).is_ok_and(|f| f.charmap().map(c).is_some())
+            });
+            if hit && self.add_font(data) > 0 {
+                return true;
+            }
+        }
+        MISSES.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(c);
+        false
+    }
+
     /// Load an installed colour font covering `c`. True if one was loaded.
     #[cfg(not(target_arch = "wasm32"))]
     fn system_color_fallback(&self, c: char) -> bool {

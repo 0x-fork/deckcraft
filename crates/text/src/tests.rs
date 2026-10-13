@@ -1118,3 +1118,19 @@ fn mongolian_lines_run_left_to_right_and_stacked_letters_stand_one_em_apart() {
     let e = &s.lines[0].edges;
     assert!((e[1].1 - e[1].0 - 20.0).abs() < 0.01 && (e[2].1 - e[2].0 - 20.0).abs() < 0.01, "{e:?}");
 }
+
+#[test]
+fn symbols_after_an_emoji_keep_a_text_face() {
+    // "✅ ⚠ ™": PowerPoint draws ✅ (emoji presentation) in colour and the symbols after it as text.
+    let db = FontDb::global();
+    if !db.cascade(&['✅'], &[], "Regular").is_color() {
+        return;
+    }
+    let (p, sh) = bidi_setup(vec![Run::new("✅ ⚠ ™")], 2000.0, false, Align::Left);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    for r in &l.runs {
+        for (_, c) in &r.cells {
+            assert_eq!(r.face.is_color(), *c == '✅', "{c:?} drawn with {}", r.face.family);
+        }
+    }
+}

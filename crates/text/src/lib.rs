@@ -884,7 +884,11 @@ fn shape_cells(
             .filter(|f| deckcraft_fonts::covers_cluster(f, cluster));
         let face = match (sym_face, prev.as_ref()) {
             (Some(f), _) => f,
-            (None, Some(p)) if neutral && deckcraft_fonts::covers_cluster(p, cluster) && char_style.get(a.wrapping_sub(1)) == Some(&si) => p.clone(),
+            (None, Some(p))
+                if neutral && !p.is_color() && deckcraft_fonts::covers_cluster(p, cluster) && char_style.get(a.wrapping_sub(1)) == Some(&si) =>
+            {
+                p.clone()
+            }
             (None, _) => {
                 let chain = chains.entry((si, slot, sc)).or_insert_with(|| face_chain(ctx, st, slot, sc));
                 db.cascade(cluster, chain, st.style_name)
