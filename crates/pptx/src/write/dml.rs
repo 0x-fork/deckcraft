@@ -589,7 +589,8 @@ pub fn rpr(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, r: &RunProps) {
         || r.font_ea.is_some()
         || r.font_cs.is_some()
         || r.font_sym.is_some()
-        || r.link.is_some();
+        || r.link.is_some()
+        || r.hover.is_some();
     if !has_kids {
         w.empty(tag, a);
         return;
@@ -623,6 +624,10 @@ pub fn rpr(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, r: &RunProps) {
     typeface(w, "a:sym", &r.font_sym);
     if let Some(h) = &r.link {
         hyperlink(w, x, o, "a:hlinkClick", h);
+    }
+    // Schema order: hlinkClick, hlinkMouseOver.
+    if let Some(h) = &r.hover {
+        hyperlink(w, x, o, "a:hlinkMouseOver", h);
     }
     w.close(tag);
 }
