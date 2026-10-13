@@ -146,6 +146,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.zoomOut", "Zoom Out", Some("Cmd+-"), "{}"),
     ("view.zoom", "Zoom…", None, "{percent}"),
     ("view.fit", "Fit to Window", None, "{}"),
+    ("review.thesaurusPane", "Thesaurus", Some("Shift+F7"), "{word?}: open the Thesaurus pane on the selected word"),
     ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|null}"),
     ("view.tab", "Ribbon Tab", None, "{tab}"),
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
@@ -184,6 +185,8 @@ pub struct SlideApp {
     pub textures: textures::Textures,
     pub control_rx: Option<Receiver<ControlRequest>>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The word looked up in the Thesaurus pane.
+    pub thesaurus_query: String,
     pub show: Option<show::Show>,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
@@ -239,6 +242,7 @@ impl SlideApp {
             textures: textures::Textures::default(),
             control_rx: None,
             dialog: None,
+            thesaurus_query: String::new(),
             show: None,
             media: media::MediaHost::new(audio_out),
             status: None,
@@ -473,6 +477,19 @@ impl SlideApp {
                 self.ui.zoom = Some((pct as f32 / 100.0).clamp(0.1, 4.0));
             }
             "view.fit" => self.ui.zoom = None,
+            "review.thesaurusPane" => {
+                let word = match p.get("word").and_then(Value::as_str) {
+                    Some(w) => w.to_string(),
+                    None => self
+                        .session
+                        .execute("review.thesaurus", &json!({}))
+                        .ok()
+                        .and_then(|r| r["word"].as_str().map(String::from))
+                        .unwrap_or_default(),
+                };
+                self.thesaurus_query = word;
+                self.ui.pane = Some("thesaurus".into());
+            }
             "view.pane" => {
                 let pane = p.get("pane").and_then(Value::as_str).map(String::from);
                 self.ui.pane =

@@ -16,6 +16,16 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("comment.resolve", "Resolve Thread", ["Comments"], None, "{index, resolved?: bool}", has_slide, resolve),
         cmd!(query "comment.list", "Comments", [], None, "{slide?} → comments", has_slide, list),
         cmd!(query "review.accessibility", "Check Accessibility", ["Review", "Accessibility"], None, "{} → [{slide, shape, issue}]", has_doc, accessibility),
+        cmd!(query "review.thesaurus", "Thesaurus", ["Review", "Proofing"], None, "{word?: default the selected word, or the word at the caret} → {word, senses: [{word, synonyms}]}", has_doc, thesaurus),
+        cmd!(
+            "review.replaceWord",
+            "Insert Synonym",
+            [],
+            None,
+            "{with}: replace the selected word (or the word at the caret) while editing text",
+            has_text,
+            replace_word
+        ),
         cmd!(query "review.spelling", "Spelling", ["Review", "Proofing"], Some("F7"), "{} → [{slide, shape, word}] (words not in the built-in list)", has_doc, spelling),
         cmd!(noundo "show.fromStart", "Play from Start", ["Slide Show", "Start Slide Show"], Some("Cmd+Shift+Enter"), "{}", has_slide, |s, _| start(s, 0)),
         cmd!(noundo "show.fromCurrent", "Play from Current Slide", ["Slide Show", "Start Slide Show"], Some("Cmd+Enter"), "{}", has_slide, |s, _| {
@@ -263,4 +273,37 @@ fn custom_show(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     ok()
+}
+
+/// The selected text when it lies in one paragraph, else the word at the caret.
+fn word_under_caret(s: &Session) -> Option<String> {
+    let st = s.doc().ok()?;
+    let t = st.selection.text.clone()?;
+    let body = super::text::body_of(st, &t)?;
+    let (a, b) = if t.anchor != t.caret { t.ordered() } else { deckcraft_model::edit::word_at(body, t.caret) };
+    if a.0 != b.0 {
+        return None;
+    }
+    let text = body.paragraphs.get(a.0)?.text();
+    let w: String = text.chars().skip(a.1).take(b.1.saturating_sub(a.1)).collect();
+    let w = w.trim().to_string();
+    (!w.is_empty()).then_some(w)
+}
+
+fn thesaurus(s: &mut Session, p: &Value) -> Result<Value> {
+    let word = str_param(p, "word").map(str::to_string).or_else(|| word_under_caret(s)).unwrap_or_default();
+    let senses = crate::thesaurus::lookup(&word);
+    Ok(json!({"word": word, "senses": senses}))
+}
+
+fn replace_word(s: &mut Session, p: &Value) -> Result<Value> {
+    let with = str_param(p, "with").filter(|w| !w.trim().is_empty()).ok_or_else(|| bad("review.replaceWord", "missing `with`"))?.to_string();
+    if with.chars().count() > 200 {
+        return Err(bad("review.replaceWord", "too long"));
+    }
+    let collapsed = s.doc()?.selection.text.as_ref().is_some_and(|t| t.anchor == t.caret);
+    if collapsed {
+        s.execute("text.selectWord", &json!({}))?;
+    }
+    s.execute("text.insert", &json!({"text": with}))
 }

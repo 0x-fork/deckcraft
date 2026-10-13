@@ -9,7 +9,7 @@ The summary between `<!-- SUMMARY -->
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
+| P2 | 54 | 13 | 16 | 25 | 39% |
 
 | Area | Parity |
 |---|---|
@@ -21,7 +21,7 @@ The summary between `<!-- SUMMARY -->
 | Shapes | 88% |
 | Format | 83% |
 | Arrange | 100% |
-| Text | 80% |
+| Text | 81% |
 | Tables | 89% |
 | Charts | 65% |
 | SmartArt | 33% |
@@ -155,7 +155,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Text direction (rotated, stacked) | P1 | D |
 | Text | Find and replace, replace fonts | P1 | P |
 | Text | Spelling check | P1 | P |
-| Text | Thesaurus | P2 | M |
+| Text | Thesaurus | P2 | P |
 | Text | AutoCorrect and smart quotes | P2 | M |
 | Text | Symbols and emoji | P1 | D |
 | Text | Equations | P2 | M |

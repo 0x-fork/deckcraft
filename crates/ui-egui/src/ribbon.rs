@@ -1780,8 +1780,7 @@ fn record(app: &mut SlideApp, ui: &mut Ui) {
 fn review(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         big(app, ui, Icon::Spelling, "Spelling", "app.dialog", json!({"id": "spelling"}));
-        let r = big_button(ui, Icon::Thesaurus, "Thesaurus", false);
-        let _ = r.on_hover_text("Thesaurus (coming soon)");
+        big(app, ui, Icon::Thesaurus, "Thesaurus", "review.thesaurusPane", json!({}));
     });
     group(ui, |ui| {
         big(app, ui, Icon::Accessibility, "Check\nAccessibility", "app.dialog", json!({"id": "accessibility"}));
