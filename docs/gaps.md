@@ -169,8 +169,8 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   `prstTxWarp` presets render and their adjusts round-trip, but there is no Transform gallery or
   command to apply one, no adjust handles, and arc/circle placement can differ from PowerPoint by
   1–3 % of the path length), "Bevel and 3-D rotation" (partial: bevels, camera presets and rotations and face lighting
-  render as approximations and `scene3d`/`sp3d` round-trip as raw XML; no extrusion or side faces,
-  only the three-point rig, and no command or pane to apply 3-D).
+  render as approximations and `scene3d`/`sp3d` round-trip as raw XML; extrusions draw their
+  sides, in one shaded colour, under turned cameras; only the three-point rig, and no command or pane to apply 3-D).
 - **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
   rigs and materials, Format Shape page).
 
@@ -256,6 +256,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | 3-D extrusions draw their sides under turned cameras |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |

@@ -116,8 +116,15 @@ pub fn from_raw(raw: &str) -> Option<Camera> {
 
 /// Where a point of the shape (relative to its centre) lands.
 fn project(c: &Camera, p: Point, size: f64) -> Point {
+    project3(c, p.x, p.y, 0.0, size)
+}
+
+/// Where a point in the shape's space (relative to its centre; z towards the viewer, so an
+/// extrusion runs to negative z) lands.
+pub fn project3(c: &Camera, x: f64, y: f64, z: f64, size: f64) -> Point {
+    let p = Point::new(x, y);
     let (a, b, r) = (c.lat.to_radians(), c.lon.to_radians(), -c.rev.to_radians());
-    let (x1, y1, z1) = (p.x * b.cos(), p.y, -p.x * b.sin());
+    let (x1, y1, z1) = (p.x * b.cos() + z * b.sin(), p.y, -p.x * b.sin() + z * b.cos());
     let (x2, y2, z2) = (x1, y1 * a.cos() - z1 * a.sin(), y1 * a.sin() + z1 * a.cos());
     let (x3, y3) = (x2 * r.cos() - y2 * r.sin(), x2 * r.sin() + y2 * r.cos());
     if c.dist > 0.0 {

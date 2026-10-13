@@ -1711,3 +1711,69 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
     let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
     assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
 }
+
+/// Shapes with depth under turned cameras (an `extrusionH` and, on two, an `extrusionClr`).
+fn extruded_deck() -> Presentation {
+    let mk = |id: u32, x: f64, preset: &str, raw: &str| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 170.0, 170.0, 130.0)),
+        geom: Geom::preset(preset),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        effects: Some(deckcraft_model::Effects { raw3d: Some(raw.into()), ..Default::default() }),
+        ..Default::default()
+    };
+    deck_with(vec![
+        mk(
+            700,
+            40.0,
+            "rect",
+            r#"<a:scene3d><a:camera prst="isometricOffAxis2Left"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="381000"/>"#,
+        ),
+        mk(
+            701,
+            280.0,
+            "ellipse",
+            r#"<a:scene3d><a:camera prst="isometricTopUp"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="254000"><a:extrusionClr><a:srgbClr val="C00000"/></a:extrusionClr></a:sp3d>"#,
+        ),
+        mk(
+            702,
+            520.0,
+            "star5",
+            r#"<a:scene3d><a:camera prst="perspectiveContrastingLeftFacing"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="508000"><a:extrusionClr><a:schemeClr val="accent2"/></a:extrusionClr></a:sp3d>"#,
+        ),
+        mk(
+            703,
+            760.0,
+            "rect",
+            r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="381000"/>"#,
+        ),
+    ])
+}
+
+#[test]
+fn extrusions_show_their_sides_under_a_turned_camera() {
+    let p = extruded_deck();
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    if let Ok(path) = std::env::var("DECKCRAFT_PNG_OUT") {
+        let _ = std::fs::write(path, img.to_png());
+    }
+    let count = |x0: u32, x1: u32, f: &dyn Fn([u8; 4]) -> bool| {
+        (x0..x1).flat_map(|x| (100..400).map(move |y| (x, y))).filter(|(x, y)| f(img.pixel(*x, *y))).count()
+    };
+    // The red sides of the ellipse; the dark accent-1 sides of the cube; none for a front camera.
+    assert!(count(250, 500, &|c| c[0] > 100 && c[1] < 40 && c[2] < 40) > 300, "red extrusion");
+    let flat = render_slide(&deck_with(vec![]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let ink = |img: &Image, x0: u32, x1: u32| {
+        (x0..x1).flat_map(|x| (100..400).map(move |y| (x, y))).filter(|(x, y)| img.pixel(*x, *y) != [255, 255, 255, 255]).count()
+    };
+    let mut no_depth = extruded_deck();
+    for sh in &mut std::sync::Arc::make_mut(&mut no_depth.slides[0]).shapes {
+        if let Some(fx) = sh.effects.as_mut() {
+            fx.raw3d = fx.raw3d.as_ref().map(|r| r.replace(" extrusionH=", " x="));
+        }
+    }
+    let thin = render_slide(&no_depth, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    assert!(ink(&img, 0, 260) > ink(&thin, 0, 260) + 1000, "the cube's sides add ink");
+    assert_eq!(ink(&img, 740, 960), ink(&thin, 740, 960), "a front camera shows no sides");
+    assert_eq!(ink(&flat, 0, 960), 0);
+}

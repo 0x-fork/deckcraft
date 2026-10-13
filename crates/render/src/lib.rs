@@ -11,6 +11,7 @@ mod bevel;
 mod camera;
 mod chart;
 mod colr;
+mod extrude;
 
 mod compound;
 mod extent;
@@ -925,6 +926,20 @@ impl Renderer {
             ctx.set_transform(Affine::IDENTITY);
             ctx.push_layer(None, None, None, None, None);
             let _ = r;
+        }
+        // A 3-D extrusion under a turned camera: the sides, swept behind the face.
+        if let Some(raw) = effects.as_ref().and_then(|e| e.raw3d.as_deref())
+            && let Some(ex) = extrude::from_raw(raw)
+            && let Some(cam) = camera::from_raw(raw)
+            && let Some(turn) = camera::affine(&cam, w, h)
+            && turn.determinant().abs() > 1e-9
+        {
+            let face = match &fill {
+                Some(Fill::Solid { color: c }) => Some(rctx.color(c, fill_ph)),
+                _ => None,
+            };
+            let pre = m * turn.inverse();
+            extrude::draw(ctx, &outline, pre, turn, extrude::back_offset(&cam, ex.depth, w, h), extrude::side_color(rctx, &ex, face));
         }
         // Fill.
         match &s.kind {
