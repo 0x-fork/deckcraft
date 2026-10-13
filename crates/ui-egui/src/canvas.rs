@@ -106,7 +106,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let px = ((slide_rect.width() * ppp).round().max(1.0) as u32, (slide_rect.height() * ppp).round().max(1.0) as u32);
     let now = ui.input(|i| i.time);
     let gifs = match app.session.active() {
-        Some(d) if d.selection.target == Target::Slides => app.media.gifs(&d.doc, d.selection.slide, now, &app.session.gif_paused),
+        Some(d) if d.selection.target == Target::Slides => app.media.gifs(d.uid, &d.doc, d.selection.slide, now, &app.session.gif_paused),
         _ => vec![],
     };
     crate::media::gif_repaint(ui.ctx(), &gifs);
@@ -276,6 +276,7 @@ fn media_frames(app: &SlideApp, painter: &egui::Painter, xf: Xf) {
 /// selection or hover).
 fn media_bar(app: &mut SlideApp, ui: &mut Ui, xf: Xf) {
     let Some(d) = app.session.active() else { return };
+    let uid = d.uid;
     if d.selection.target != Target::Slides || d.selection.text.is_some() || app.session.tool.dragging() {
         return;
     }
@@ -294,11 +295,11 @@ fn media_bar(app: &mut SlideApp, ui: &mut Ui, xf: Xf) {
     let bar = Rect::from_min_size(pos2(r.center().x - w / 2.0, r.max.y + 6.0), vec2(w, 26.0));
     let status = app.media.status(id);
     match crate::media::control_bar(ui, bar, status.as_ref(), &clip) {
-        Some(crate::media::BarAction::Toggle) => app.media.toggle(&doc, id, &clip, crate::media::Owner::Editor),
-        Some(crate::media::BarAction::Seek(t)) => app.media.seek(&doc, id, &clip, t, crate::media::Owner::Editor),
+        Some(crate::media::BarAction::Toggle) => app.media.toggle(uid, &doc, id, &clip, crate::media::Owner::Editor),
+        Some(crate::media::BarAction::Seek(t)) => app.media.seek(uid, &doc, id, &clip, t, crate::media::Owner::Editor),
         Some(crate::media::BarAction::Nudge(dt)) => {
             let pos = status.map(|s| s.position).unwrap_or(0.0);
-            app.media.seek(&doc, id, &clip, (pos + dt).max(0.0), crate::media::Owner::Editor);
+            app.media.seek(uid, &doc, id, &clip, (pos + dt).max(0.0), crate::media::Owner::Editor);
         }
         None => {}
     }
