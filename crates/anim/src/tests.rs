@@ -789,3 +789,38 @@ fn show_follows_links() {
     assert_eq!(s.follow(&p, &Action::LastViewed, None), LinkJump::None);
     assert_eq!(s.slide, 3);
 }
+
+#[test]
+fn trigger_sequences_keep_first_appearance_order_when_interleaved() {
+    let mut anims = vec![];
+    for (i, tr) in [7u32, 5, 7, 0, 9, 5].iter().enumerate() {
+        let mut a = anim(1 + (i as u32 % 4), AnimClass::Entrance, "fade", AnimStart::OnClick);
+        a.trigger = (*tr != 0).then_some(ShapeId(*tr));
+        anims.push(a);
+    }
+    let tl = Timeline::new(&slide_with(anims), W, H);
+    assert_eq!(tl.trigger_shapes(), vec![ShapeId(7), ShapeId(5), ShapeId(9)]);
+    assert_eq!(tl.trigger_steps(ShapeId(7)), 2);
+    assert_eq!(tl.trigger_steps(ShapeId(5)), 2);
+    assert_eq!(tl.trigger_steps(ShapeId(9)), 1);
+    assert_eq!(tl.steps(), 1);
+}
+
+#[test]
+fn many_distinct_triggers_past_the_effect_cap_build_in_order() {
+    // One sequence per animation: grouping used to rescan every animation per trigger
+    // (~1.2e10 steps here), now it is one pass, and nothing past the cap is looked at.
+    let n = 110_000u32;
+    let anims: Vec<Animation> = (0..n)
+        .map(|i| {
+            let mut a = anim(1, AnimClass::Entrance, "appear", AnimStart::OnClick);
+            a.trigger = Some(ShapeId(1000 + i));
+            a
+        })
+        .collect();
+    let tl = Timeline::new(&slide_with(anims), W, H);
+    assert_eq!(tl.effects().len(), 100_000);
+    let shapes = tl.trigger_shapes();
+    assert_eq!(shapes.len(), 100_000);
+    assert!(shapes.iter().enumerate().all(|(i, s)| *s == ShapeId(1000 + i as u32)));
+}
