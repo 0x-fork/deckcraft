@@ -199,7 +199,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Transitions | Transition gallery (fade, push, wipe, split, cover, uncover, zoom, morph…) | P0 | D |
 | Transitions | Effect options and duration | P0 | D |
 | Transitions | Advance on click / after time, apply to all | P0 | D |
-| Transitions | Transition sounds | P2 | P |
+| Transitions | Transition sounds | P2 | D |
 | Transitions | Morph | P1 | D |
 | Animations | Entrance, emphasis, exit effects | P0 | D |
 | Animations | Motion paths | P1 | P |

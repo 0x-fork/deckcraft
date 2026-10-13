@@ -35,7 +35,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Sound",
             ["Transitions", "Timing"],
             None,
-            "{path? | data: base64, name?; none?: true (No Sound); index?} — the sound plays as the slide comes in",
+            "{builtin?: chime|click|camera|whoosh|drumRoll|laser | path? | data: base64, name?; none?: true (No Sound); stopPrevious?: true; loop?: bool (Loop Until Next Sound); index?} — the sound plays as the slide comes in",
             has_slide,
             sound
         ),
@@ -69,7 +69,11 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
                 t.option = option.clone();
                 t.duration_ms = duration.unwrap_or(info.3);
                 t.raw = None;
-                sl.transition = if info.0 == "none" && t.advance_after_ms.is_none() && t.advance_on_click { None } else { Some(t) };
+                sl.transition = if info.0 == "none" && t.advance_after_ms.is_none() && t.advance_on_click && t.sound.is_none() && !t.stop_sound {
+                    None
+                } else {
+                    Some(t)
+                };
             }
         }
         Ok(())
@@ -120,20 +124,51 @@ fn timing(s: &mut Session, p: &Value) -> Result<Value> {
 /// Transitions › Sound: embed an audio file as the slides' transition sound, or `none` to remove it.
 fn sound(s: &mut Session, p: &Value) -> Result<Value> {
     let list = slide_indices(s, p)?;
-    if bool_param(p, "none") == Some(true) {
+    let looping = bool_param(p, "loop");
+    let edit_all = |s: &mut Session, f: &dyn Fn(&mut Transition)| {
         s.edit(|doc, _| {
-            for i in list {
-                if let Some(sl) = doc.slides.get_mut(i)
-                    && let Some(t) = Arc::make_mut(sl).transition.as_mut()
-                {
-                    t.sound = None;
+            for &i in &list {
+                if let Some(sl) = doc.slides.get_mut(i) {
+                    f(Arc::make_mut(sl).transition.get_or_insert_with(Transition::default));
                 }
             }
             Ok(())
+        })
+    };
+    if bool_param(p, "none") == Some(true) {
+        edit_all(s, &|t| {
+            t.sound = None;
+            t.stop_sound = false;
+            t.sound_loop = false;
         })?;
         return Ok(json!({"sound": null}));
     }
-    let (name, bytes) = super::insert::media_bytes(p, "transition.sound")?;
+    if bool_param(p, "stopPrevious") == Some(true) {
+        edit_all(s, &|t| {
+            t.sound = None;
+            t.sound_loop = false;
+            t.stop_sound = true;
+        })?;
+        return Ok(json!({"sound": null, "stopPrevious": true}));
+    }
+    let wants_file = p.get("path").is_some() || p.get("data").is_some() || p.get("builtin").is_some();
+    if !wants_file {
+        // Only Loop Until Next Sound changes.
+        let Some(l) = looping else { return Err(bad("transition.sound", "give `path`, `data`, `builtin`, `none`, `stopPrevious` or `loop`")) };
+        edit_all(s, &|t| t.sound_loop = l && t.sound.is_some())?;
+        return Ok(json!({"loop": l}));
+    }
+    let (name, bytes) = match str_param(p, "builtin") {
+        Some(id) => {
+            let (id, label) = crate::sounds::BUILTIN.iter().find(|b| b.0.eq_ignore_ascii_case(id)).ok_or_else(|| {
+                let ids: Vec<&str> = crate::sounds::BUILTIN.iter().map(|b| b.0).collect();
+                bad("transition.sound", format!("unknown built-in sound `{id}` (one of {})", ids.join(", ")))
+            })?;
+            let bytes = crate::sounds::builtin(id).ok_or_else(|| bad("transition.sound", "built-in sound failed"))?;
+            (format!("{label}.wav"), bytes)
+        }
+        None => super::insert::media_bytes(p, "transition.sound")?,
+    };
     let ct = super::insert::content_type(&name, &bytes);
     let bytes = Arc::new(bytes);
     let audible = deckcraft_media::probe(&bytes).is_ok_and(|i| i.audio.is_some());
@@ -141,16 +176,25 @@ fn sound(s: &mut Session, p: &Value) -> Result<Value> {
     if !audible && !ct.starts_with("audio/") {
         return Err(bad("transition.sound", format!("{name} is not a sound file ({ct})")));
     }
+    let lp = looping.unwrap_or(false);
     let media = s.edit(|doc, _| {
-        let media = doc.add_media(&name, ct, bytes);
-        for i in list {
+        // The same built-in sound is embedded once.
+        let existing = doc.media.iter().find(|m| m.name == name && m.data.as_slice() == bytes.as_slice()).map(|m| m.id);
+        let media = match existing {
+            Some(m) => m,
+            None => doc.add_media(&name, ct, bytes),
+        };
+        for &i in &list {
             if let Some(sl) = doc.slides.get_mut(i) {
-                Arc::make_mut(sl).transition.get_or_insert_with(Transition::default).sound = Some(media);
+                let t = Arc::make_mut(sl).transition.get_or_insert_with(Transition::default);
+                t.sound = Some(media);
+                t.stop_sound = false;
+                t.sound_loop = lp;
             }
         }
         Ok(media)
     })?;
-    Ok(json!({"sound": name, "media": media.0, "playable": audible}))
+    Ok(json!({"sound": name, "media": media.0, "playable": audible, "loop": lp}))
 }
 
 fn apply_all(s: &mut Session, _p: &Value) -> Result<Value> {

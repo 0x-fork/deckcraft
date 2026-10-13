@@ -697,7 +697,11 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
         return;
     }
     show.media_slide = cur;
-    let sound = cur.and_then(|i| doc.slides.get(i)).and_then(|s| s.transition.as_ref()).and_then(|t| t.sound);
+    let trans = cur.and_then(|i| doc.slides.get(i)).and_then(|s| s.transition.as_ref());
+    let sound = trans.and_then(|t| t.sound);
+    let sound_loop = trans.is_some_and(|t| t.sound_loop);
+    // [Stop Previous Sound] ends a transition sound still playing.
+    let stop_previous = trans.is_some_and(|t| t.stop_sound);
     let keep: Vec<ShapeId> = match cur {
         Some(_) => app
             .media
@@ -705,7 +709,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
             .into_iter()
             .filter(|id| crate::media::find_clip(doc, *id).is_some_and(|c| c.play_across_slides))
             // A transition sound plays to its end, as in PowerPoint, unless the new slide has its own.
-            .chain(sound.is_none().then_some(TRANSITION_SOUND).filter(|id| app.media.is_playing(*id)))
+            .chain((sound.is_none() && !stop_previous).then_some(TRANSITION_SOUND).filter(|id| app.media.is_playing(*id)))
             .collect(),
         None => vec![],
     };
@@ -715,7 +719,8 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
         }
     }
     if let Some(media) = sound {
-        let clip = deckcraft_model::MediaClip { media, volume: 1.0, ..Default::default() };
+        // Loop Until Next Sound: it repeats until another slide's sound or Stop Previous Sound.
+        let clip = deckcraft_model::MediaClip { media, volume: 1.0, loop_play: sound_loop, ..Default::default() };
         app.media.play(doc, TRANSITION_SOUND, &clip, None, crate::media::Owner::Show);
     }
     if let Some(i) = cur {
