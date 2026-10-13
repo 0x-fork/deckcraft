@@ -1506,3 +1506,50 @@ fn group_child_scale_does_not_scale_line_widths() {
         assert!(d * 20 < drawn, "{name}: {d} differing values against {drawn} inked pixels");
     }
 }
+
+#[test]
+fn a_picture_casts_its_shadow_from_its_pixels() {
+    // PowerPoint shades only where a picture paints: a logo on a transparent background casts the
+    // logo's shadow, not its frame's. Here the left half of the image is transparent.
+    let png = {
+        let img = image::RgbaImage::from_fn(8, 4, |x, _| if x < 4 { image::Rgba([0, 0, 0, 0]) } else { image::Rgba([20, 160, 20, 255]) });
+        let mut out = std::io::Cursor::new(vec![]);
+        image::DynamicImage::ImageRgba8(img).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    };
+    let shadow = deckcraft_model::style::Shadow {
+        color: ColorRef::rgb(deckcraft_color::Rgba::BLACK),
+        blur: 0.0,
+        dist: 20.0,
+        dir: 90.0,
+        inner: false,
+        sx: 1.0,
+        sy: 1.0,
+        kx: 0.0,
+        ky: 0.0,
+        align: String::new(),
+        rotate_with_shape: false,
+    };
+    for as_fill in [false, true] {
+        let mut p = Presentation::default();
+        let media = p.add_media("logo.png", "image/png", png.clone());
+        let pf = deckcraft_model::style::PictureFill { media, ..Default::default() };
+        let mut sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)), ..Default::default() };
+        if as_fill {
+            sh.fill = Some(Fill::Picture(pf));
+            sh.line = Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() });
+        } else {
+            sh.kind = ShapeKind::Picture { fill: pf };
+        }
+        sh.effects = Some(deckcraft_model::Effects { outer_shadow: Some(shadow.clone()), ..Default::default() });
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        // Below the picture, 10 pt down: shadow under the opaque right half only.
+        let left = img.pixel(200, 310);
+        let right = img.pixel(400, 310);
+        assert!(left[0] > 240, "no shadow under the transparent half ({as_fill}): {left:?}");
+        assert!(right[0] < 40, "shadow under the opaque half ({as_fill}): {right:?}");
+        // The transparent half shows the slide, not a shadow behind it.
+        assert!(img.pixel(200, 200)[0] > 240, "{as_fill}");
+    }
+}

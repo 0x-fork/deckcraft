@@ -785,7 +785,12 @@ impl Renderer {
         let fill = if let Some(t) = st.tint { Some(Fill::solid(deckcraft_model::ColorRef::rgb(t))) } else { fill };
         // Effects below the shape.
         if let Some(e) = &effects {
-            self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, m, w, h);
+            // A picture (or picture fill) casts its shadow from its pixels, not its frame.
+            let content = match (&s.kind, &fill) {
+                (ShapeKind::Picture { fill: pf }, _) | (_, Some(Fill::Picture(pf))) => Some(paint::resolved(rctx, pf, None).into_owned()),
+                _ => None,
+            };
+            self.effects_below(ctx, rctx, e, fx_ph, &geo, &fill, content.as_ref(), m, w, h);
         }
         let soft = effects.as_ref().and_then(|e| e.soft_edge).filter(|r| *r > 0.0);
         if let Some(r) = soft {
@@ -959,6 +964,7 @@ impl Renderer {
         ph: Option<Rgba>,
         geo: &Geometry,
         fill: &Option<Fill>,
+        content: Option<&deckcraft_model::style::PictureFill>,
         m: Affine,
         w: f64,
         h: f64,
@@ -986,8 +992,24 @@ impl Renderer {
             // Blurred by a third of the blur radius, as PowerPoint's export shows.
             ctx.push_layer(None, None, Some((c.a as f32) / 255.0), None, Some(blur(sh.blur / 3.0 * k)));
             ctx.set_transform(sm);
-            ctx.set_paint(color(c.with_alpha(255), 1.0));
-            ctx.fill_path(&silhouette);
+            match content {
+                // As PowerPoint draws it: the shadow is the picture's own coverage (a logo on a
+                // transparent background casts the logo's shadow): the picture, clipped to the
+                // shape, recoloured to the shadow colour.
+                Some(pf) => {
+                    ctx.push_clip_layer(&silhouette);
+                    paint::picture(ctx, rctx.pres, pf, Rect::new(0.0, 0.0, w, h), sm, None);
+                    ctx.push_layer(None, Some(peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::SrcIn)), None, None, None);
+                    ctx.set_paint(color(c.with_alpha(255), 1.0));
+                    ctx.fill_rect(&Rect::new(0.0, 0.0, w, h).inflate(1.0, 1.0));
+                    ctx.pop_layer();
+                    ctx.pop_layer();
+                }
+                None => {
+                    ctx.set_paint(color(c.with_alpha(255), 1.0));
+                    ctx.fill_path(&silhouette);
+                }
+            }
             ctx.pop_layer();
         }
         if let Some(g) = &e.glow {
