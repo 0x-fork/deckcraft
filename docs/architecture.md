@@ -55,7 +55,8 @@ effects project cards through a perspective camera and `anim::layer_mesh` subdiv
 textures stay straight; soft edges are per-corner opacities. The show renders the slides once per
 transition and only composites cached textures each frame; `render::composite_transition` is the
 CPU twin used by `deckcraft-cli render-transition` and the tests. The show window and the presenter view are egui viewports; animation state per shape
-comes from `anim::timeline` each frame. PDF export renders each slide at print resolution and
+comes from `anim::timeline` each frame. Animations ▸ Preview plays that same state on the editor
+canvas for the current slide, then draws the slide at rest. PDF export renders each slide at print resolution and
 overlays an invisible real-text layer with embedded font subsets.
 
 ## File I/O
@@ -78,5 +79,6 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | trivial | Animation preview draws the current slide's timeline on the editor canvas |
 | 2026-10-13 | minor | Transitions: perspective meshes, background/content parts, CPU compositor |
 | 2026-10-10 | major | Created from the code on main (d556ff9) and AGENTS.md §4 |

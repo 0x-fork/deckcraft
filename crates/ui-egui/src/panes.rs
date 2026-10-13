@@ -465,13 +465,9 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
     let names: Vec<(u32, String)> = st.shapes().iter().map(|s| (s.id.0, s.name.clone())).collect();
     let selected: Vec<u32> = st.selection.shapes.iter().map(|i| i.0).collect();
     ui.horizontal(|ui| {
-        if ui.button("▶ Play All").clicked() {
-            let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(from, true);
-            if let Some(s) = app.show.as_mut() {
-                s.preview_only = true;
-                s.autoplay = true;
-            }
+        let playing = app.anim_preview_active();
+        if ui.button(if playing { "■ Stop" } else { "▶ Play All" }).clicked() {
+            run(app, "animation.preview", json!({"on": !playing}));
         }
     });
     ui.separator();

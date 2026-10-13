@@ -76,6 +76,7 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
         "home": app.backstage_open(),
         "backstage": app.backstage.as_ref().map(|b| b.page.id()),
         "showing": app.show.as_ref().map(|s| json!({"slide": s.state.slide, "step": s.state.step, "ended": s.ended})),
+        "animPreview": app.anim_preview_report().map(|(slide, time, duration)| json!({"slide": slide, "time": time, "duration": duration})),
         "documents": app.session.documents().iter().map(|d| json!({"title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
         "status": app.status.as_ref().map(|s| s.0.clone()),
         "perf": {"frameMs": app.perf.frame_ms, "renderMs": app.perf.render_ms, "fps": app.perf.fps},
@@ -134,6 +135,10 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
         }
         "ui.key" => {
             let Some(k) = s("key") else { return err("missing `key`") };
+            if app.anim_preview_active() && app.show.is_none() && matches!(k.to_ascii_lowercase().as_str(), "escape" | "esc") {
+                app.stop_anim_preview();
+                return ok(json!({"preview": false}));
+            }
             if let Some(show) = app.show.as_ref()
                 && !show.ended
                 && let Some(key) = key_from(k)

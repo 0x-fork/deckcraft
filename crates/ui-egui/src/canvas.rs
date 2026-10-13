@@ -80,7 +80,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             let _ = pinch_pos;
         } else if overflow != egui::Vec2::ZERO {
             offset -= wheel;
-        } else if wheel.y.abs() > 18.0 && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
+        } else if wheel.y.abs() > 18.0 && !app.anim_preview_active() && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
             // Wheel over a fitted slide pages through slides (like PowerPoint).
             let id = if wheel.y < 0.0 { "slide.next" } else { "slide.previous" };
             let gate = ui.id().with("wheel_gate");
@@ -111,6 +111,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     };
     crate::media::gif_repaint(ui.ctx(), &gifs);
     let times: Vec<_> = gifs.iter().map(|g| (g.id, g.t)).collect();
+    let anim = app.anim_preview_draw();
     let st = app.session.active();
     // One texture pixel in screen points, and the canvas in pixels from the slide's corner.
     let pixel = vec2(slide_rect.width() / px.0 as f32, slide_rect.height() / px.1 as f32);
@@ -119,7 +120,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         Some((Target::Slides, d)) => {
             let idx = d.selection.slide;
             let doc = d.doc.clone();
-            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times)
+            let frame = anim.as_ref().map(|(tl, t)| (tl, *t));
+            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times, frame)
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
@@ -163,11 +165,13 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         ruler(&painter, avail, slide_rect, scale, &t);
     }
     pointer(app, ui, &resp, xf);
-    overlays(app, ui, &painter, xf, &t);
-    ime_output(app, ui, xf);
-    media_bar(app, ui, xf);
-    gif_buttons(app, ui, xf, &gifs);
-    context_menu(app, &resp);
+    if !app.anim_preview_active() {
+        overlays(app, ui, &painter, xf, &t);
+        ime_output(app, ui, xf);
+        media_bar(app, ui, xf);
+        gif_buttons(app, ui, xf, &gifs);
+        context_menu(app, &resp);
+    }
 }
 
 /// The canvas `avail` in texture pixels (`pixel`: one pixel's size in points) from the slide's
@@ -367,6 +371,14 @@ fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
 }
 
 fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
+    if app.anim_preview_active() {
+        // A click on the slide ends the preview, then selects as usual.
+        if resp.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
+            app.stop_anim_preview();
+        } else {
+            return;
+        }
+    }
     let tol = (4.0 / xf.scale) as f64;
     let m = mods(ui);
     let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) else { return };

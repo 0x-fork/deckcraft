@@ -1,14 +1,14 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-13 (summary by `cargo xtask parity`; Preview in editor re-scored; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
+| P1 | 65 | 39 | 20 | 6 | 75% |
 | P2 | 54 | 13 | 15 | 26 | 38% |
 
 | Area | Parity |
@@ -28,7 +28,7 @@ The summary between `<!-- SUMMARY -->
 | Pictures | 48% |
 | Media | 67% |
 | Transitions | 92% |
-| Animations | 79% |
+| Animations | 85% |
 | Slide show | 66% |
 | Review | 60% |
 | Draw | 33% |
@@ -208,7 +208,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Animations | By-paragraph text builds | P1 | D |
 | Animations | Triggers | P2 | D |
 | Animations | Animation Painter | P2 | D |
-| Animations | Preview in editor | P1 | P |
+| Animations | Preview in editor | P1 | D |
 | Slide show | Full-screen show from start / current | P0 | D |
 | Slide show | Navigation (keys, click, go to slide, blank screen) | P0 | D |
 | Slide show | Presenter view (notes, next slide, timer) | P0 | P |

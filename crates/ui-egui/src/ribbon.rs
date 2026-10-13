@@ -1523,13 +1523,10 @@ fn animations(app: &mut SlideApp, ui: &mut Ui) {
         s.animations.iter().find(|a| a.shape == *id).cloned()
     });
     group(ui, |ui| {
-        if big_button(ui, Icon::Preview, "Preview", true).clicked() {
-            let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(from, true);
-            if let Some(s) = app.show.as_mut() {
-                s.preview_only = true;
-                s.autoplay = true;
-            }
+        let playing = app.anim_preview_active();
+        let (resp, _) = big_button_ex(ui, Icon::Preview, "Preview", true, false, playing);
+        if resp.on_hover_text("Play this slide's animations on the canvas").clicked() {
+            run(app, "animation.preview", json!({}));
         }
     });
     group(ui, |ui| {
