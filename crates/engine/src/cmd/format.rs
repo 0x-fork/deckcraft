@@ -4,7 +4,7 @@
 use deckcraft_model::edit as ed;
 use deckcraft_model::resolve;
 use deckcraft_model::text::{Align, Anchor, AutoFit, Bullet, Caps, ParaProps, RunProps, Spacing, Strike, TextDir};
-use deckcraft_model::{Effects, Fill, Line, Shape};
+use deckcraft_model::{ColorRef, ColorTransform, Effects, Fill, Line, SchemeSlot, Shape};
 use serde_json::{Value, json};
 
 use super::text::{format_body, format_para, format_run};
@@ -47,6 +47,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{color: #RRGGBB | accent1..6 | tx1… | {scheme, lumMod…}}",
             has_text_or_shapes,
             color
+        ),
+        cmd!(
+            "format.textTransparency",
+            "Text Transparency",
+            ["Shape Format", "WordArt Styles"],
+            None,
+            "{value: 0..1} — 0 opaque, 1 invisible; keeps the text's colour (inherited colours included)",
+            has_text_or_shapes,
+            text_transparency
         ),
         cmd!("format.highlight", "Text Highlight Color", ["Home", "Font"], None, "{color? (absent = none)}", has_text_or_shapes, highlight),
         cmd!(
@@ -292,6 +301,41 @@ fn shrink(s: &mut Session, _p: &Value) -> Result<Value> {
 fn color(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color").ok_or_else(|| bad("format.color", "missing or invalid `color`"))?;
     format_run(s, &move |r| r.fill = Some(Fill::solid(c.clone())))
+}
+/// `a:alpha` for `transparency` (0–1) on `c`, replacing any alpha it had; fully opaque drops it.
+fn with_transparency(c: &mut ColorRef, transparency: f64) {
+    c.mods.retain(|m| !matches!(m, ColorTransform::Alpha(_)));
+    if transparency > 0.0 {
+        c.mods.push(ColorTransform::Alpha(((1.0 - transparency) * 100_000.0).round() as i32));
+    }
+}
+
+/// Text Fill › Transparency: the text keeps its colour and gets an alpha. A run without its own
+/// fill takes the colour it shows now (from the placeholder, master or theme) so only its
+/// opacity changes.
+fn text_transparency(s: &mut Session, p: &Value) -> Result<Value> {
+    let v = f64_param(p, "value").ok_or_else(|| bad("format.textTransparency", "missing `value` (0–1)"))?;
+    if !v.is_finite() {
+        return Err(bad("format.textTransparency", "`value` must be a number from 0 to 1"));
+    }
+    let v = v.clamp(0.0, 1.0);
+    let shown = match current_run(s).fill {
+        Some(f @ (Fill::Solid { .. } | Fill::Gradient(_))) => f,
+        _ => Fill::solid(ColorRef::scheme(SchemeSlot::Tx1)),
+    };
+    format_run(s, &move |r| {
+        let mut f = match &r.fill {
+            Some(f @ (Fill::Solid { .. } | Fill::Gradient(_))) => f.clone(),
+            Some(Fill::None) => return,
+            _ => shown.clone(),
+        };
+        match &mut f {
+            Fill::Solid { color } => with_transparency(color, v),
+            Fill::Gradient(g) => g.stops.iter_mut().for_each(|st| with_transparency(&mut st.color, v)),
+            _ => {}
+        }
+        r.fill = Some(f);
+    })
 }
 fn highlight(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color");

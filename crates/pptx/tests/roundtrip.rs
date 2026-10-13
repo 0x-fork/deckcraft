@@ -991,3 +991,19 @@ fn transition_defaults_read_like_powerpoint() {
         assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
     }
 }
+
+/// Text transparency (#32) is `a:alpha` on the run's colour, and survives a save.
+#[test]
+fn text_transparency_round_trips() {
+    use deckcraft_engine::Session;
+    let mut s = Session::with_new();
+    s.execute("shape.insert", &serde_json::json!({"preset": "rect", "rect": [100, 100, 200, 100], "text": "Hi"})).unwrap();
+    s.execute("format.color", &serde_json::json!({"color": "#336699"})).unwrap();
+    s.execute("format.textTransparency", &serde_json::json!({"value": 0.4})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    let bytes = deckcraft_pptx::export(&doc).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let sh = back.slides[0].shapes.iter().find(|sh| sh.text.as_ref().is_some_and(|t| t.text().contains("Hi"))).unwrap();
+    let Some(deckcraft_model::Fill::Solid { color }) = &sh.text.as_ref().unwrap().paragraphs[0].runs[0].props.fill else { panic!() };
+    assert!((color.alpha() - 0.6).abs() < 1e-9, "{color:?}");
+}

@@ -182,6 +182,13 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             ui.data_mut(|d| d.insert_temp(id, alt));
         }
         "text" => {
+            ui.label(egui::RichText::new("Text Fill").font(theme::bold(13.0)));
+            color_button(app, ui, "Color", None, |c| match c {
+                Some(c) => ("format.color".into(), json!({"color": cref_param(&c)})),
+                None => ("format.color".into(), json!({"color": "tx1"})),
+            });
+            text_transparency_slider(app, ui, &sh);
+            ui.add_space(6.0);
             ui.label(egui::RichText::new("Text Box").font(theme::bold(13.0)));
             ui.horizontal(|ui| {
                 ui.label("Vertical alignment");
@@ -634,4 +641,31 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
         }
         ui.add_space(8.0);
     }
+}
+
+/// The transparency (0–1) of a shape's first text run as stored on it.
+pub(crate) fn text_transparency_of(sh: &deckcraft_model::Shape) -> f64 {
+    let run = sh.text.as_ref().and_then(|t| t.paragraphs.iter().flat_map(|p| p.runs.iter()).next());
+    match run.and_then(|r| r.props.fill.as_ref()) {
+        Some(Fill::Solid { color }) => 1.0 - color.alpha(),
+        Some(Fill::Gradient(g)) => g.stops.first().map_or(0.0, |s| 1.0 - s.color.alpha()),
+        _ => 0.0,
+    }
+}
+
+/// Text Fill › Transparency, as in PowerPoint's Format Shape › Text Options (#32).
+pub(crate) fn text_transparency_slider(app: &mut SlideApp, ui: &mut Ui, sh: &deckcraft_model::Shape) {
+    ui.horizontal(|ui| {
+        ui.label("Transparency");
+        let id = ui.id().with(("text-transparency", sh.id));
+        let stored = (text_transparency_of(sh) * 100.0) as f32;
+        let mut v: f32 = ui.data_mut(|d| d.get_temp(id).unwrap_or(stored));
+        let r = ui.add(egui::Slider::new(&mut v, 0.0..=100.0).suffix("%"));
+        if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+            let _ = app.run("format.textTransparency", json!({"value": v as f64 / 100.0}));
+            ui.data_mut(|d| d.remove::<f32>(id));
+        } else if r.dragged() {
+            ui.data_mut(|d| d.insert_temp(id, v));
+        }
+    });
 }
