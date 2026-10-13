@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (editor slide rasters sit on the physical pixel grid, #184; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -128,8 +128,10 @@ Alt+Shift+arrows in text are handled elsewhere (#78, #93).
 
 Colours, spacing, ribbon card and tab geometry follow the observations in
 `plan/powerpoint/01-observed-ui.md`; icons are original (~240, drawn in code or Lucide) and must not
-imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been run since
-2026-10-07. Cross-app icon consistency is open (#73, #56).
+imitate Microsoft's. The editing canvas, thumbnails and layout previews are drawn on the physical
+pixel grid, so a Retina display does not blur them between pixels (#184). No pixel comparison
+against PowerPoint screenshots has been run since 2026-10-07. Cross-app icon consistency is open
+(#73, #56).
 
 ## Estimates
 
@@ -148,6 +150,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

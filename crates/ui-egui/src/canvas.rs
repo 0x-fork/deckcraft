@@ -95,14 +95,15 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     offset.x = offset.x.clamp(0.0, overflow.x);
     offset.y = offset.y.clamp(0.0, overflow.y);
     ui.data_mut(|d| d.insert_temp(scroll_id, offset));
-    let slide_rect = content_rect.translate(-offset);
+    // On the physical pixel grid, so the slide texture is one texel per device pixel (#184).
+    let ppp = ui.ctx().pixels_per_point();
+    let slide_rect = crate::textures::device_pixel_rect(content_rect.translate(-offset), ppp);
     app.slide_rect = Some(slide_rect);
     app.canvas_scale = scale;
     let xf = Xf { origin: slide_rect.min, scale };
     let painter = ui.painter_at(avail);
     // Shadow + slide.
     painter.rect_filled(slide_rect.translate(vec2(0.0, 1.5)).expand(1.0), CornerRadius::same(2), t.shadow);
-    let ppp = ui.ctx().pixels_per_point();
     let px = ((slide_rect.width() * ppp).round().max(1.0) as u32, (slide_rect.height() * ppp).round().max(1.0) as u32);
     let now = ui.input(|i| i.time);
     let gifs = match app.session.active() {
@@ -320,7 +321,7 @@ fn master_tex(
         layout,
         &deckcraft_render::RenderOpts { scale, edit: true, offset: region.offset(), size: Some(region.size()), ..Default::default() },
     );
-    Some((ctx.load_texture("master-canvas", crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR), region))
+    Some((ctx.load_texture("master-canvas", crate::textures::to_color_image(&img, false), crate::textures::editor_texture_options()), region))
 }
 
 fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {

@@ -339,9 +339,13 @@ fn layout_menu(app: &mut SlideApp, ui: &mut Ui, cmd: &str) {
                             ..Default::default()
                         },
                     );
-                    let tex =
-                        ui.ctx().load_texture(format!("layout-{li}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
-                    ui.painter().image(tex.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    let tex = ui.ctx().load_texture(
+                        format!("layout-{li}"),
+                        crate::textures::to_color_image(&img, false),
+                        crate::textures::editor_texture_options(),
+                    );
+                    let at = crate::textures::device_pixel_rect(rect, ui.ctx().pixels_per_point());
+                    ui.painter().image(tex.id(), at, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 }
                 let t = Tokens::get(ui.ctx());
                 ui.painter().rect_stroke(

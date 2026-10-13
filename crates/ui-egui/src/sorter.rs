@@ -32,10 +32,10 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                         break;
                     }
                     let (cell, resp) = ui.allocate_exact_size(vec2(tw + 36.0, th + 36.0), Sense::click_and_drag());
-                    let img = Rect::from_min_size(cell.min + vec2(18.0, 8.0), vec2(tw, th));
+                    let img = crate::textures::device_pixel_rect(Rect::from_min_size(cell.min + vec2(18.0, 8.0), vec2(tw, th)), ppp);
                     rects.push((i, cell));
                     let p = ui.painter();
-                    match app.textures.thumb(ui.ctx(), &doc, i, (tw * ppp) as u32, &mut budget) {
+                    match app.textures.thumb(ui.ctx(), &doc, i, (img.width() * ppp).round() as u32, &mut budget) {
                         Some(tex) => {
                             p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                         }
@@ -123,10 +123,11 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     ui.painter().rect_filled(page, CornerRadius::ZERO, Color32::WHITE);
     let sw = page_w * 0.78;
     let sh = sw * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32;
-    let srect = Rect::from_min_size(pos2(page.center().x - sw / 2.0, page.min.y + page_h * 0.08), vec2(sw, sh));
     let ppp = ui.ctx().pixels_per_point();
+    let srect =
+        crate::textures::device_pixel_rect(Rect::from_min_size(pos2(page.center().x - sw / 2.0, page.min.y + page_h * 0.08), vec2(sw, sh)), ppp);
     let mut budget = 2;
-    if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (sw * ppp) as u32, &mut budget) {
+    if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (srect.width() * ppp).round() as u32, &mut budget) {
         ui.painter().image(tex.id(), srect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
     ui.painter().rect_stroke(srect, CornerRadius::ZERO, Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Outside);

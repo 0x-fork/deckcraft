@@ -1,6 +1,6 @@
 # Hardware parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (IME input, #101; previous: major, created from the renderer, media and windowing code) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (editor rasters on the Retina pixel grid, #184; previous: IME input, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
 
 What hardware PowerPoint uses and what DeckCraft uses, per platform. Dimension score: **~40%
 ready** (estimated), **25–45 h** to parity. Performance (unmeasured, ~55%) is tracked here too
@@ -13,7 +13,7 @@ because it mostly follows from hardware use.
 | Window compositing on the GPU | Metal / DirectX | wgpu (Metal) | wgpu, DX12 only by default (#16) | wgpu (Vulkan, GL) | WebGPU, WebGL2 fallback |
 | Slide rasterization | GPU | **CPU** (`vello_cpu`) | CPU | CPU | CPU (wasm) |
 | Transitions and Morph frames | GPU | CPU-rendered slide images composited as textured quads on the GPU | same | same | same |
-| High-DPI / Retina | yes | yes | yes | yes | yes |
+| High-DPI / Retina | yes | yes; editor slide rasters sit on the physical pixel grid (#184) | yes | yes | yes |
 | Wide gamut / HDR display | partly (P3 images) | no (sRGB) | no | no | no |
 | Startup on all GPUs | yes | yes | **no**: crashes in some Intel/AMD drivers (#40, #59) | not reported | n/a |
 | Software fallback when no GPU | yes (WARP on Windows) | no | no | no | no |
@@ -71,5 +71,6 @@ outlines every frame (#67, fix open), and the decoders run in software.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
 | 2026-10-12 | minor | IME input methods (#101) |
 | 2026-10-10 | major | Created: rendering, media, displays, input and performance against PowerPoint 16.113 |
