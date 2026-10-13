@@ -170,9 +170,11 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   command to apply one, no adjust handles, and arc/circle placement can differ from PowerPoint by
   1–3 % of the path length), "Bevel and 3-D rotation" (partial: bevels, camera presets and rotations and face lighting
   render as approximations and `scene3d`/`sp3d` round-trip as raw XML; extrusions draw their
-  sides, in one shaded colour, under turned cameras; only the three-point rig, and no command or pane to apply 3-D).
-- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
-  rigs and materials, Format Shape page).
+  sides under turned cameras, each lit for its own normal; the preset light rigs, rig directions and
+  materials shade bevels and sides approximately (fitted to PowerPoint for three-point/matte only); no contours,
+  and no command or pane to apply 3-D).
+- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 2–4 h (3-D contours and
+  rig/material fidelity), plus the Format Shape page.
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks a small built-in list of frequent misspellings
@@ -256,6 +258,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | 3-D light rigs and materials; extrusion sides lit per side |
 | 2026-10-14 | trivial | 3-D extrusions draw their sides under turned cameras |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
