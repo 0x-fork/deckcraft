@@ -176,12 +176,14 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks with Hunspell-format dictionaries the system already has
-  (`crates/engine/src/spell.rs`: affixes, cross products, one level of continuation, case rules,
-  suggestions; no compounding) and the Spelling dialog changes or ignores words, but none ship with
-  DeckCraft, so without one installed (always on Windows and the web) only a short list of common
-  misspellings is found. No red squiggles while typing, no per-run language, no Add to Dictionary.
+  (`crates/engine/src/spell.rs`: affixes, cross products, one level of continuation, compounds,
+  case rules, suggestions), each run in its own language (`lang` from PPTX), with a user dictionary
+  for Add to Dictionary. Red squiggles on the current slide come from a worker thread, with a
+  context menu to correct, ignore or add. None ship with DeckCraft, so without one installed (always
+  on Windows and the web) only a short list of common misspellings is found, and the web build has
+  no squiggles. Notes and table cells aren't squiggled.
   Thesaurus (#549) and AutoCorrect (#521) have open PRs.
-- **Estimate:** 4–8 h (bundle openly licensed dictionaries, squiggles, custom dictionary, compounding).
+- **Estimate:** 2–4 h (bundle openly licensed dictionaries; squiggles in notes and table cells).
 
 ### Equations
 - **Evidence:** checklist row missing; PR #55 (OMML editor, +10.5k lines) is open.
@@ -260,6 +262,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Spelling squiggles while typing, Add to Dictionary, per-run languages and compounds |
 | 2026-10-14 | minor | Spelling checks with installed Hunspell dictionaries and suggests corrections |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

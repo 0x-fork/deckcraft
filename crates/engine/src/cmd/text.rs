@@ -485,6 +485,27 @@ fn commit(s: &mut Session, p: &Value) -> Result<Value> {
 /// Underlines under an input method's composition (#101), in slide coordinates: `(from, to,
 /// thick)` per line, thick under the part being converted. Empty without a composition or when
 /// the edited text isn't laid out on the slide (notes, table cells).
+/// Underlines (slide coordinates) under character ranges `(para, start, end)` of shape `id`'s
+/// text as laid out on the current slide: where spelling squiggles go.
+pub fn range_underlines(
+    st: &DocState,
+    id: deckcraft_model::ShapeId,
+    ranges: &[(usize, usize, usize)],
+) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point)> {
+    let Some(sh) = st.shape(id) else { return vec![] };
+    let Some(l) = layout_for(st, &TextSel { shape: id, ..Default::default() }) else { return vec![] };
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
+    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    let mut out = vec![];
+    for &(para, a, b) in ranges {
+        for (x0, x1, y) in l.composition_underlines(deckcraft_text::Pos { para, ch: a }, deckcraft_text::Pos { para, ch: b }) {
+            out.push((m * deckcraft_geom::Point::new(x0, y), m * deckcraft_geom::Point::new(x1, y)));
+        }
+    }
+    out
+}
+
 pub fn composition_underlines(st: &DocState) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point, bool)> {
     let (Some(c), Some(t)) = (&st.composition, &st.selection.text) else { return vec![] };
     let Some(sh) = st.shape(t.shape) else { return vec![] };

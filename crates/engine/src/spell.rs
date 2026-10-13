@@ -103,6 +103,13 @@ pub struct Dictionary {
     need_affix: Option<Flag>,
     no_suggest: Option<Flag>,
     keep_case: Option<Flag>,
+    only_in_compound: Option<Flag>,
+    compound: Option<Flag>,
+    compound_begin: Option<Flag>,
+    compound_middle: Option<Flag>,
+    compound_end: Option<Flag>,
+    compound_min: usize,
+    compound_max: usize,
 }
 
 fn decode(bytes: &[u8], latin1: bool) -> String {
@@ -144,7 +151,7 @@ impl Dictionary {
                 })
             })
             .unwrap_or(FlagMode::Char);
-        let mut d = Dictionary::default();
+        let mut d = Dictionary { compound_min: 3, ..Dictionary::default() };
         let mut lines = aff.lines().map(|l| l.split('#').next().unwrap_or("")).peekable();
         while let Some(l) = lines.next() {
             let w: Vec<&str> = l.split_whitespace().collect();
@@ -155,6 +162,13 @@ impl Dictionary {
                 ["NEEDAFFIX", f, ..] | ["PSEUDOROOT", f, ..] => d.need_affix = one_flag(Some(f), mode),
                 ["NOSUGGEST", f, ..] => d.no_suggest = one_flag(Some(f), mode),
                 ["KEEPCASE", f, ..] => d.keep_case = one_flag(Some(f), mode),
+                ["ONLYINCOMPOUND", f, ..] => d.only_in_compound = one_flag(Some(f), mode),
+                ["COMPOUNDFLAG", f, ..] => d.compound = one_flag(Some(f), mode),
+                ["COMPOUNDBEGIN", f, ..] => d.compound_begin = one_flag(Some(f), mode),
+                ["COMPOUNDMIDDLE", f, ..] => d.compound_middle = one_flag(Some(f), mode),
+                ["COMPOUNDEND", f, ..] | ["COMPOUNDLAST", f, ..] => d.compound_end = one_flag(Some(f), mode),
+                ["COMPOUNDMIN", n, ..] => d.compound_min = n.parse::<usize>().unwrap_or(3).max(1),
+                ["COMPOUNDWORDMAX", n, ..] => d.compound_max = n.parse().unwrap_or(0),
                 ["REP", n] => {
                     for _ in 0..n.parse::<usize>().unwrap_or(0) {
                         let r: Vec<&str> = lines.next().unwrap_or("").split_whitespace().collect();
@@ -220,7 +234,12 @@ impl Dictionary {
     /// `word` as a root carrying all of `need` (and not forbidden).
     fn root(&self, word: &str, need: &[Flag], affixed: bool) -> bool {
         self.words.get(word).is_some_and(|hs| {
-            hs.iter().any(|f| !self.has(f, self.forbidden) && (affixed || !self.has(f, self.need_affix)) && need.iter().all(|n| f.contains(n)))
+            hs.iter().any(|f| {
+                !self.has(f, self.forbidden)
+                    && (affixed || !self.has(f, self.need_affix))
+                    && !self.has(f, self.only_in_compound)
+                    && need.iter().all(|n| f.contains(n))
+            })
         })
     }
 
@@ -263,6 +282,53 @@ impl Dictionary {
         false
     }
 
+    /// A root (or, for the last part, a suffixed root) carrying `flag`, as a compound part.
+    fn compound_part(&self, part: &[char], flag: Flag, last: bool) -> bool {
+        let word: String = part.iter().collect();
+        let ok = self.words.get(&word).is_some_and(|hs| hs.iter().any(|f| !self.has(f, self.forbidden) && f.contains(&flag)));
+        ok || (last && self.suffixed_compound_end(part, flag))
+    }
+
+    /// The last part of a compound with a suffix: the root must carry the compound `flag`.
+    fn suffixed_compound_end(&self, w: &[char], flag: Flag) -> bool {
+        self.sfx.iter().any(|s| {
+            strip_end(w, &s.add, &s.strip).is_some_and(|stem| {
+                s.cond_ok(&stem, false)
+                    && self
+                        .words
+                        .get(&stem.iter().collect::<String>())
+                        .is_some_and(|hs| hs.iter().any(|f| !self.has(f, self.forbidden) && f.contains(&flag) && f.contains(&s.flag)))
+            })
+        })
+    }
+
+    /// `w` made of dictionary parts allowed in compounds (`COMPOUNDFLAG`, or the begin, middle and
+    /// end flags), each at least `COMPOUNDMIN` characters long.
+    fn compounded(&self, w: &[char], index: usize) -> bool {
+        if self.compound.is_none() && self.compound_end.is_none() {
+            return false;
+        }
+        let min = self.compound_min.max(1);
+        if index >= 8 || (self.compound_max > 0 && index + 1 >= self.compound_max) || w.len() < 2 * min {
+            return false;
+        }
+        let role = if index == 0 { self.compound_begin } else { self.compound_middle };
+        for i in min..=w.len() - min {
+            let (head, rest) = w.split_at(i);
+            let head_ok = [self.compound, role].into_iter().flatten().any(|f| self.compound_part(head, f, false));
+            if !head_ok {
+                continue;
+            }
+            if [self.compound, self.compound_end].into_iter().flatten().any(|f| self.compound_part(rest, f, true)) {
+                return true;
+            }
+            if self.compounded(rest, index + 1) {
+                return true;
+            }
+        }
+        false
+    }
+
     fn check_exact(&self, word: &str) -> bool {
         if self.forbidden_word(word) {
             return false;
@@ -286,7 +352,7 @@ impl Dictionary {
                 return true;
             }
         }
-        false
+        self.compounded(&w, 0)
     }
 
     /// Is `word` spelt correctly? Capitalised and upper-case forms of a lower-case word pass.
@@ -494,6 +560,168 @@ pub fn dictionary(lang: &str) -> Option<Arc<Dictionary>> {
     loaded
 }
 
+/// Where Add to Dictionary keeps words: `user.dic` in DeckCraft's own dictionaries folder, one
+/// word per line (the Hunspell `.dic` format without a count).
+pub fn user_dictionary_path() -> Option<PathBuf> {
+    if let Ok(p) = user_override().lock()
+        && let Some(p) = p.clone()
+    {
+        return Some(p);
+    }
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let dir = if cfg!(target_os = "macos") {
+        home.map(|h| h.join("Library/Application Support/DeckCraft/Dictionaries"))
+    } else if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("DeckCraft").join("Dictionaries"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home.map(|h| h.join(".local/share")))
+            .map(|d| d.join("deckcraft/dictionaries"))
+    };
+    dir.map(|d| d.join("user.dic"))
+}
+
+fn user_override() -> &'static Mutex<Option<PathBuf>> {
+    static P: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+struct UserWords {
+    words: Option<HashSet<String>>,
+    generation: u64,
+}
+
+fn user_state() -> &'static Mutex<UserWords> {
+    static U: OnceLock<Mutex<UserWords>> = OnceLock::new();
+    U.get_or_init(|| Mutex::new(UserWords { words: None, generation: 0 }))
+}
+
+/// Keep the user dictionary at `path` instead (tests, or a portable install).
+pub fn set_user_dictionary_path(path: PathBuf) {
+    if let Ok(mut p) = user_override().lock() {
+        *p = Some(path);
+    }
+    if let Ok(mut u) = user_state().lock() {
+        u.words = None;
+        u.generation += 1;
+    }
+}
+
+/// Bumped whenever the user dictionary changes, so cached results can be dropped.
+pub fn user_generation() -> u64 {
+    user_state().lock().map(|u| u.generation).unwrap_or(0)
+}
+
+fn with_user<T>(f: impl FnOnce(&HashSet<String>) -> T) -> Option<T> {
+    let mut u = user_state().lock().ok()?;
+    if u.words.is_none() {
+        let text = user_dictionary_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        u.words = Some(text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_string).collect());
+    }
+    u.words.as_ref().map(f)
+}
+
+/// Add `word` to the user dictionary file (and to checks from now on).
+pub fn add_user_word(word: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let word = word.trim();
+    if word.is_empty() || word.contains(['\n', '\r']) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a word"));
+    }
+    if with_user(|u| u.contains(word)).unwrap_or(false) {
+        return Ok(());
+    }
+    let path = user_dictionary_path().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no folder for the user dictionary"))?;
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    writeln!(f, "{word}")?;
+    if let Ok(mut u) = user_state().lock() {
+        if let Some(w) = u.words.as_mut() {
+            w.insert(word.to_string());
+        }
+        u.generation += 1;
+    }
+    Ok(())
+}
+
+/// Is `word` right: in the user dictionary (as written, or lower-case), else by `d`.
+pub fn is_correct(d: &Dictionary, word: &str) -> bool {
+    with_user(|u| u.contains(word) || u.contains(&word.to_lowercase())).unwrap_or(false) || d.check(word)
+}
+
+/// A word of a paragraph: its characters `start..end` (paragraph character offsets, as text
+/// positions count them) and the language of the run it starts in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Word {
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+    pub lang: String,
+}
+
+/// The words of `p`, each with its run's language (`lang` on the run, else `default`). Words
+/// with digits are skipped; apostrophes inside a word belong to it; hyphenated words are checked
+/// part by part.
+pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Word> {
+    let mut chars: Vec<(char, usize)> = vec![];
+    for (ri, r) in p.runs.iter().enumerate() {
+        chars.extend(r.content().chars().map(|c| (c, ri)));
+    }
+    let lang_of = |ri: usize| p.runs.get(ri).and_then(|r| r.props.lang.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| default.to_string());
+    let inside = |c: char| c.is_alphanumeric() || c == '\'' || c == '’' || c == '-';
+    let mut out = vec![];
+    let mut i = 0;
+    while i < chars.len() {
+        if !inside(chars[i].0) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < chars.len() && inside(chars[i].0) {
+            i += 1;
+        }
+        let (mut a, mut b) = (start, i);
+        while a < b && !chars[a].0.is_alphanumeric() {
+            a += 1;
+        }
+        while b > a && !chars[b - 1].0.is_alphanumeric() {
+            b -= 1;
+        }
+        let text: String = chars[a..b].iter().map(|c| c.0).collect();
+        if text.is_empty() || text.chars().any(|c| c.is_ascii_digit()) || !text.chars().any(char::is_alphabetic) {
+            continue;
+        }
+        let mut k = a;
+        for part in text.split('-') {
+            let n = part.chars().count();
+            if !part.is_empty()
+                && let Some(c) = chars.get(k)
+            {
+                out.push(Word { start: k, end: k + n, text: part.to_string(), lang: lang_of(c.1) });
+            }
+            k += n + 1;
+        }
+    }
+    out
+}
+
+/// The misspelt words of `p`, each checked in its own language (languages with no dictionary
+/// installed are skipped), leaving out `ignore` (lower-case).
+pub fn misspelt(p: &deckcraft_model::Paragraph, default: &str, ignore: &[String]) -> Vec<Word> {
+    let mut dicts: HashMap<String, Option<Arc<Dictionary>>> = HashMap::new();
+    paragraph_words(p, default)
+        .into_iter()
+        .filter(|w| !ignore.contains(&w.text.to_lowercase()))
+        .filter(|w| {
+            let d = dicts.entry(w.lang.clone()).or_insert_with(|| dictionary(&w.lang));
+            d.as_ref().is_some_and(|d| !is_correct(d, &w.text))
+        })
+        .collect()
+}
+
 /// Use `d` for `lang` from now on in this process (a dictionary the app loaded itself).
 pub fn install(lang: &str, d: Dictionary) {
     if let Ok(mut c) = cache().lock() {
@@ -536,6 +764,43 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
         assert!(d.suggest("foto", 5).contains(&"photo".to_string()));
         assert!(d.suggest("Slidse", 5).contains(&"Slides".to_string()));
         assert!(d.suggest("workingslides", 5).contains(&"working slides".to_string()));
+    }
+
+    #[test]
+    fn compounds_join_flagged_parts() {
+        let aff = "COMPOUNDFLAG X\nCOMPOUNDMIN 3\nONLYINCOMPOUND O\nSFX S Y 1\nSFX S 0 en .\n";
+        let d = Dictionary::parse(aff.as_bytes(), b"4\nhaus/X\ntuer/XS\nschluessel/X\nfugs/OX\n".as_slice());
+        for w in ["haustuer", "haustueren", "haustuerschluessel", "haus", "hausfugstuer"] {
+            assert!(d.check(w), "{w}");
+        }
+        for w in ["hausx", "fugs", "tuerhausz"] {
+            assert!(!d.check(w), "{w}");
+        }
+    }
+
+    #[test]
+    fn runs_give_words_their_language() {
+        use deckcraft_model::{Paragraph, Run, RunProps};
+        let p = Paragraph {
+            runs: vec![
+                Run::with("Hello wor", RunProps { lang: Some("en-GB".into()), ..Default::default() }),
+                Run::with("ld, Grüße well-known 3rd l'été", RunProps { lang: Some("de-DE".into()), ..Default::default() }),
+            ],
+            ..Default::default()
+        };
+        let w = paragraph_words(&p, "en-US");
+        let got: Vec<(&str, &str, usize)> = w.iter().map(|w| (w.text.as_str(), w.lang.as_str(), w.start)).collect();
+        assert_eq!(
+            got,
+            vec![
+                ("Hello", "en-GB", 0),
+                ("world", "en-GB", 6),
+                ("Grüße", "de-DE", 13),
+                ("well", "de-DE", 19),
+                ("known", "de-DE", 24),
+                ("l'été", "de-DE", 34)
+            ]
+        );
     }
 
     #[test]

@@ -556,6 +556,11 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         if ui.small_button("Ignore All").clicked() {
                             add_ignore = Some(w.to_string());
                         }
+                        if ui.small_button("Add to Dictionary").clicked()
+                            && let Err(e) = app.session.execute("review.addToDictionary", &json!({"word": w}))
+                        {
+                            app.set_status(e.to_string());
+                        }
                     });
                     let sug: Vec<String> = item
                         .get("suggestions")

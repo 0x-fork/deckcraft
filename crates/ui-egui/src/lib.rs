@@ -20,6 +20,7 @@ pub mod ribbon;
 pub mod selpane;
 pub mod show;
 pub mod sorter;
+pub mod squiggles;
 pub mod status;
 pub mod textures;
 pub mod theme;
@@ -183,6 +184,8 @@ pub struct SlideApp {
     pub ui: UiState,
     pub textures: textures::Textures,
     pub control_rx: Option<Receiver<ControlRequest>>,
+    /// Spelling squiggles, checked on a worker thread.
+    pub squiggles: squiggles::Squiggles,
     pub dialog: Option<dialogs::Dialog>,
     pub show: Option<show::Show>,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
@@ -238,6 +241,7 @@ impl SlideApp {
             ui: UiState::default(),
             textures: textures::Textures::default(),
             control_rx: None,
+            squiggles: Default::default(),
             dialog: None,
             show: None,
             media: media::MediaHost::new(audio_out),

@@ -871,3 +871,41 @@ fn spelling_without_a_dictionary_falls_back_to_common_misspellings() {
     assert!(d["found"].is_null());
     assert_eq!(d["available"], false);
 }
+
+#[test]
+fn spelling_checks_each_run_in_its_language_and_learns_words() {
+    let dir = std::env::temp_dir().join(format!("deckcraft-userdic-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    crate::spell::set_user_dictionary_path(dir.join("user.dic"));
+    crate::spell::install("xx-ONE", crate::spell::Dictionary::parse(b"", b"2\nhello\nworld\n"));
+    crate::spell::install("xx-TWO", crate::spell::Dictionary::parse(b"", b"2\nhallo\nwelt\n"));
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 300, 100], "text": "hello hallo deckcraft"})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    // The second word is in another language (as a PPTX run's `lang` gives it).
+    s.edit(|doc, _| {
+        let sh = deckcraft_model::find_shape_mut(&mut std::sync::Arc::make_mut(&mut doc.slides[0]).shapes, id).unwrap();
+        let p = &mut sh.text.as_mut().unwrap().paragraphs[0];
+        let t = p.runs[0].text.clone();
+        let props = p.runs[0].props.clone();
+        p.runs = vec![
+            deckcraft_model::Run::with(&t[..6], deckcraft_model::RunProps { lang: Some("xx-ONE".into()), ..props.clone() }),
+            deckcraft_model::Run::with(&t[6..12], deckcraft_model::RunProps { lang: Some("xx-TWO".into()), ..props.clone() }),
+            deckcraft_model::Run::with(&t[12..], deckcraft_model::RunProps { lang: Some("xx-ONE".into()), ..props }),
+        ];
+        Ok(())
+    })
+    .unwrap();
+    let v = s.execute("review.spelling", &json!({})).unwrap();
+    let words: Vec<_> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| (w["word"].as_str().unwrap().to_string(), w["lang"].as_str().unwrap().to_string(), w["start"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(words, vec![("deckcraft".to_string(), "xx-ONE".to_string(), 12)]);
+    s.execute("review.addToDictionary", &json!({"word": "deckcraft"})).unwrap();
+    assert!(s.execute("review.spelling", &json!({})).unwrap().as_array().unwrap().is_empty());
+    assert_eq!(std::fs::read_to_string(dir.join("user.dic")).unwrap(), "deckcraft\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
