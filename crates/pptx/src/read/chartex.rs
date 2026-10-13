@@ -66,12 +66,12 @@ fn kind_of(layout: &str) -> Option<ChartType> {
         "sunburst" => ChartType::Sunburst,
         "clusteredColumn" => ChartType::Histogram,
         "boxWhisker" => ChartType::BoxWhisker,
+        "regionMap" => ChartType::RegionMap,
         _ => return None,
     })
 }
 
-/// Parse a `chartEx` part. `None` for anything else, and for layouts DeckCraft has no type
-/// for (region maps).
+/// Parse a `chartEx` part. `None` for anything else, and for layouts DeckCraft has no type for.
 pub fn read_chartex_xml(bytes: &[u8]) -> Option<Chart> {
     let doc = crate::xml::parse(bytes).ok()?;
     let mut root = doc.root;
@@ -110,7 +110,7 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
         });
         let d = datas.get(s.child("dataId").and_then(|i| i.attr("val")).unwrap_or("0"))?;
         let (values, format) =
-            ["val", "size"].iter().find_map(|t| d.numbers.get(*t)).or_else(|| d.numbers.values().next()).cloned().unwrap_or_default();
+            ["val", "size", "colorVal"].iter().find_map(|t| d.numbers.get(*t)).or_else(|| d.numbers.values().next()).cloned().unwrap_or_default();
         if c.categories.is_empty() {
             c.categories = d.categories.clone();
             c.category_levels = d.levels.clone();

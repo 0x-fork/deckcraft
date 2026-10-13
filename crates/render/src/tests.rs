@@ -1803,3 +1803,34 @@ fn multilevel_treemap_and_sunburst_draw_their_groups() {
         assert!(seen.len() >= 6, "{kind:?}: {} colours", seen.len());
     }
 }
+
+/// A region map without drawable geography falls back to coloured tiles on the value scale.
+#[test]
+fn region_map_draws_tiles_on_its_colour_scale() {
+    let names = ["Brest", "Vitebsk", "Gomel", "Grodno", "Minsk", "Mogilev", "Minsk City"];
+    let vals = [3.1, 2.2, 2.9, 4.8, 6.0, 1.4, 9.5];
+    let c = Chart {
+        kind: ChartType::RegionMap,
+        title: Some("Sales by region".into()),
+        categories: names.iter().map(|s| s.to_string()).collect(),
+        series: vec![deckcraft_model::chart::Series { name: "Sales".into(), values: vals.iter().map(|v| Some(*v)).collect(), ..Default::default() }],
+        data_labels: true,
+        ..Default::default()
+    };
+    let sh = Shape { id: ShapeId(624), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+        let _ = std::fs::write(format!("{dir}/RegionMap-tiles.png"), img.to_png());
+    }
+    let mut seen: Vec<[u8; 3]> = Vec::new();
+    for y in (60..520).step_by(6) {
+        for x in (40..920).step_by(6) {
+            let p = img.pixel(x, y);
+            let c = [p[0] / 16, p[1] / 16, p[2] / 16];
+            if c != [15, 15, 15] && !seen.contains(&c) {
+                seen.push(c);
+            }
+        }
+    }
+    assert!(seen.len() >= 5, "{} colours", seen.len());
+}

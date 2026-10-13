@@ -180,7 +180,8 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     } else if matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) {
         // A hierarchy's legend names its top-level groups.
         c.category_tree().iter().enumerate().map(|(i, n)| (n.name.clone(), series_color(rctx, c, i))).collect()
-    } else if c.kind == ChartType::Funnel {
+    } else if matches!(c.kind, ChartType::Funnel | ChartType::RegionMap) {
+        // A map draws its own colour scale.
         vec![]
     } else if pie {
         c.categories.iter().enumerate().map(|(i, n)| (n.clone(), series_color(rctx, c, i))).collect()
@@ -274,7 +275,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         }
         return;
     }
-    if matches!(c.kind, ChartType::Funnel | ChartType::Treemap | ChartType::Sunburst) {
+    if matches!(c.kind, ChartType::Funnel | ChartType::Treemap | ChartType::Sunburst | ChartType::RegionMap) {
         crate::chartex::draw(ctx, rctx, c, m, area, base, text_col);
         return;
     }
