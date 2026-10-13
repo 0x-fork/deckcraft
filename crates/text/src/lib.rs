@@ -59,6 +59,26 @@ pub struct GlyphRun {
     pub gradient: Option<deckcraft_model::style::Gradient>,
     /// Shadow and glow behind the glyphs (`a:rPr/a:effectLst`).
     pub effects: Option<RunEffects>,
+    /// East Asian vertical text (`eaVert`): each glyph stands upright, turned a quarter turn
+    /// back about the centre of its em box ([`GlyphRun::upright_centre`]) inside text that is
+    /// laid out turned a quarter turn.
+    pub upright: bool,
+}
+
+/// Share of the size the ideographic em box's centre sits above the baseline (CJK fonts put the
+/// em box from 0.88 em above to 0.12 em below it).
+pub const UPRIGHT_CENTRE: f64 = 0.38;
+
+impl GlyphRun {
+    /// The point an upright glyph at pen position (`x`, `y`) turns about: the centre of its em box,
+    /// `advance` wide (`None` when the run is not upright).
+    pub fn upright_centre(&self, gid: u32, x: f64, y: f64) -> Option<(f64, f64)> {
+        if !self.upright {
+            return None;
+        }
+        let adv = self.face.advance(gid) * self.size / self.face.upem.max(1.0);
+        Some((x + adv / 2.0, y - self.size * UPRIGHT_CENTRE))
+    }
 }
 
 /// A text run's shadow and glow, colours resolved.
@@ -371,6 +391,8 @@ struct Cell {
     head: usize,
     /// A grapheme starts here: carets stand and lines break only before such cells.
     boundary: bool,
+    /// Drawn upright in East Asian vertical text.
+    upright: bool,
 }
 
 impl Cell {
@@ -672,7 +694,17 @@ pub fn autonum(scheme: &str, n: u32) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, opts: &Opts, number: Option<u32>, no_kern: bool) -> ParaShaped {
+fn shape_para(
+    ctx: &Ctx,
+    shape: &Shape,
+    body: &TextBody,
+    pi: usize,
+    scale: f64,
+    opts: &Opts,
+    number: Option<u32>,
+    no_kern: bool,
+    vertical: bool,
+) -> ParaShaped {
     let db = FontDb::global();
     let Some(para) = body.paragraphs.get(pi) else {
         let face = db.face("Inter", "Regular");
@@ -710,7 +742,7 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
         char_style.extend(std::iter::repeat_n(si, t.chars().count()));
         text.push_str(&t);
     }
-    let cells = shape_cells(ctx, &text, &char_style, &styles, &mut faces, rtl);
+    let cells = shape_cells(ctx, &text, &char_style, &styles, &mut faces, rtl, vertical);
     let lead = para.runs.first().map(|r| resolve::run(ctx, shape, para, &r.props)).unwrap_or_else(|| resolve::run(ctx, shape, para, &para.end_props));
     let lead_style = make_style(ctx, &lead, scale, opts.prompt_color);
     let lead_size = lead_style.size;
@@ -791,7 +823,16 @@ fn run_effects(ctx: &Ctx, r: &RunProps, scale: f64) -> Option<RunEffects> {
     (shadow.is_some() || glow.is_some()).then_some(RunEffects { shadow, glow })
 }
 
-fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], faces: &mut Vec<Arc<FontFace>>, rtl: bool) -> Vec<Cell> {
+#[allow(clippy::too_many_arguments)]
+fn shape_cells(
+    ctx: &Ctx,
+    text: &str,
+    char_style: &[usize],
+    styles: &[Style],
+    faces: &mut Vec<Arc<FontFace>>,
+    rtl: bool,
+    vertical: bool,
+) -> Vec<Cell> {
     let db = FontDb::global();
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
@@ -865,21 +906,39 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
             adv: 0.0,
             head: i,
             boundary: boundary.get(i).copied().unwrap_or(true),
+            upright: false,
         })
         .collect();
+    // In East Asian vertical text, ideographs, kana, Hangul, full-width forms and the like stand
+    // upright (a whole grapheme at a time); other text lies on its side.
+    if vertical {
+        for &(a, b) in &graphemes {
+            let up = chars.get(a).is_some_and(|c| is_upright(*c));
+            for c in cells.get_mut(a..b).into_iter().flatten() {
+                c.upright = up;
+            }
+        }
+    }
     // Items: maximal ranges of one level, face, script and shaping style (case mapping, language).
     let upper = |i: usize| styles.get(char_style.get(i).copied().unwrap_or(0)).is_some_and(|st| st.caps != Caps::None);
     let lang = |i: usize| styles.get(char_style.get(i).copied().unwrap_or(0)).and_then(|st| st.lang.as_deref());
     let kern = |i: usize| styles.get(char_style.get(i).copied().unwrap_or(0)).is_some_and(|st| st.kern);
-    let key = |i: usize| (levels.get(i).copied(), char_face.get(i).copied(), scripts.get(i).map(|s| s.0), upper(i), lang(i), kern(i));
+    let up = |i: usize| cells.get(i).is_some_and(|c| c.upright);
+    let key = |i: usize| (levels.get(i).copied(), char_face.get(i).copied(), scripts.get(i).map(|s| s.0), upper(i), lang(i), kern(i), up(i));
+    let mut items: Vec<(usize, usize)> = Vec::new();
     let mut a = 0;
     while a < n {
         let mut b = a + 1;
         while b < n && key(b) == key(a) {
             b += 1;
         }
-        shape_item(&mut cells, styles, faces, text, &byte_of, &char_at_byte, a..b, scripts.get(a).and_then(|s| s.0), lang(a), upper(a));
+        items.push((a, b));
         a = b;
+    }
+    // Upright glyphs keep their horizontal forms: PowerPoint turns "、", "。" and "「" as they are
+    // (no `vert` alternates).
+    for (a, b) in items {
+        shape_item(&mut cells, styles, faces, text, &byte_of, &char_at_byte, a..b, scripts.get(a).and_then(|s| s.0), lang(a), upper(a));
     }
     cells
 }
@@ -893,6 +952,35 @@ fn caps_char(ch: char) -> char {
         (Some(u), None) => u,
         _ => ch,
     }
+}
+
+/// Does `c` stand upright in East Asian vertical text? Ideographs, kana, Hangul, Bopomofo, CJK
+/// symbols and punctuation, full-width forms, enclosed and compatibility CJK, circled numbers
+/// and emoji (Unicode's Vertical_Orientation U and T, roughly); Latin, digits and the rest of the
+/// half-width text lie on their side as in `vert`.
+fn is_upright(c: char) -> bool {
+    matches!(c as u32,
+        0x1100..=0x11FF
+            | 0x2460..=0x24FF
+            | 0x2E80..=0x2FFF
+            | 0x3000..=0x303F
+            | 0x3040..=0x30FF
+            | 0x3100..=0x312F
+            | 0x3130..=0x318F
+            | 0x3190..=0x31FF
+            | 0x3200..=0x33FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xA960..=0xA97F
+            | 0xAC00..=0xD7FF
+            | 0xF900..=0xFAFF
+            | 0xFE10..=0xFE1F
+            | 0xFE30..=0xFE6F
+            | 0xFF01..=0xFF60
+            | 0xFFE0..=0xFFE6
+            | 0x1F000..=0x1FAFF
+            | 0x20000..=0x3FFFF
+    )
 }
 
 /// Size of superscript and subscript text relative to the run's size.
@@ -1465,6 +1553,8 @@ fn spacing_stops_kerning(ctx: &Ctx, shape: &Shape, body: &TextBody) -> bool {
 fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts: &Opts, scale: f64, reduce: f64, no_kern: bool) -> TextLayout {
     let r = opts.rect;
     let vert = bp.vert.unwrap_or(TextDir::Horizontal);
+    // East Asian vertical text: CJK stands upright in text turned a quarter turn.
+    let upright_text = vert == TextDir::EaVertical;
     let rotation = match vert {
         TextDir::Vertical | TextDir::EaVertical | TextDir::Stacked => 90.0,
         TextDir::Vertical270 => 270.0,
@@ -1515,7 +1605,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             }
             None
         };
-        shaped_paras.push(shape_para(ctx, shape, body, pi, scale, opts, number, no_kern));
+        shaped_paras.push(shape_para(ctx, shape, body, pi, scale, opts, number, no_kern, upright_text));
     }
     for (pi, p) in shaped_paras.iter().enumerate() {
         let props = &p.props;
@@ -1773,11 +1863,12 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 alpha: st.alpha,
                 gradient: None,
                 effects: None,
+                upright: false,
             });
         }
         // Group visually consecutive cells by (style, face).
         let mut cur: Option<GlyphRun> = None;
-        let mut cur_key = (usize::MAX, usize::MAX, false);
+        let mut cur_key = (usize::MAX, usize::MAX, false, false);
         for &k in &place.order {
             let ci = line.start + k;
             let Some(cell) = p.cells.get(ci) else { continue };
@@ -1787,7 +1878,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             let size = if st.baseline != 0.0 { st.size * SUB_SUPER } else { st.size };
             let size = if st.caps == Caps::Small && cell.ch.is_lowercase() { size * 0.8 } else { size };
             // Small capitals are drawn smaller than the capitals beside them: a run of their own.
-            let key = (cell.style, cell.face, st.caps == Caps::Small && cell.ch.is_lowercase());
+            let key = (cell.style, cell.face, st.caps == Caps::Small && cell.ch.is_lowercase(), cell.upright);
             if key != cur_key {
                 if let Some(r) = cur.take() {
                     out.runs.push(r);
@@ -1808,6 +1899,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                     alpha: st.alpha,
                     gradient: st.gradient.clone(),
                     effects: st.effects,
+                    upright: cell.upright,
                 });
                 cur_key = key;
             }

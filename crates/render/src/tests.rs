@@ -1675,3 +1675,34 @@ fn dotted_and_wavy_underlines_draw_their_pattern() {
     let (wavy_rows, _) = row_runs("wavy");
     assert!(wavy_rows > sng_rows, "a wave spans more rows ({wavy_rows}) than a single line ({sng_rows})");
 }
+
+#[test]
+fn east_asian_vertical_text_stands_ideographs_upright() {
+    // "一" is a horizontal stroke. In eaVert text it stays horizontal (upright) while the line runs
+    // down the shape; in vert it lies on its side like Latin text.
+    let ink = |dir: deckcraft_model::text::TextDir| {
+        let mut sh = Shape { id: ShapeId(770), xfrm: Some(Xfrm::new(100.0, 50.0, 200.0, 400.0)), text_box: true, ..Default::default() };
+        let mut t = TextBody::from_text("一");
+        t.body.vert = Some(dir);
+        let props = &mut t.paragraphs[0].runs[0].props;
+        props.size = Some(80.0);
+        props.fill = Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0))));
+        sh.text = Some(t);
+        let p = deck_with(vec![sh]);
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
+        for y in 0..540 {
+            for x in 0..960 {
+                if img.pixel(x, y)[0] < 128 {
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                }
+            }
+        }
+        assert!(x1 >= x0 && y1 >= y0, "no ink for {dir:?}");
+        (x1 - x0, y1 - y0)
+    };
+    let (w, h) = ink(deckcraft_model::text::TextDir::EaVertical);
+    assert!(w > h * 3, "eaVert: upright stroke {w}x{h}");
+    let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
+    assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
+}

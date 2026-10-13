@@ -144,8 +144,11 @@ fn character_spacing_in_the_body_stops_kerning() {
 #[test]
 fn ligatures_stay_for_scripts_that_need_them() {
     let has = |f: &[deckcraft_fonts::Feature], tag: &str| f.iter().any(|x| Some(*x) == deckcraft_fonts::feature(tag));
-    let cells =
-        |s: &str| s.chars().map(|ch| Cell { ch, style: 0, face: 0, level: 0, glyphs: vec![], adv: 0.0, head: 0, boundary: true }).collect::<Vec<_>>();
+    let cells = |s: &str| {
+        s.chars()
+            .map(|ch| Cell { ch, style: 0, face: 0, level: 0, glyphs: vec![], adv: 0.0, head: 0, boundary: true, upright: false })
+            .collect::<Vec<_>>()
+    };
     let latin = shaping_features(&cells("office"), &[], Some(*b"Latn"));
     assert!(has(&latin, "-liga") && has(&latin, "-clig") && has(&latin, "-kern"));
     // Arabic needs its ligatures; emoji sequences are joined by them.
@@ -1062,4 +1065,26 @@ fn autonumber_schemes_follow_powerpoint() {
     // Past the end of an alphabet the letter doubles, like "aa".
     assert_eq!(autonum("hebrew2Minus", 23), "אא-");
     assert_eq!(autonum("thaiAlphaPeriod", 0), ".");
+}
+
+#[test]
+fn east_asian_vertical_text_marks_cjk_upright() {
+    let (p, mut sh) = setup("日本、ABC 12", 300.0, 600.0);
+    sh.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::EaVertical);
+    let l = lay(&p, &sh, 300.0, 600.0);
+    assert_eq!(l.rotation, 90.0);
+    let upright: Vec<bool> = l
+        .runs
+        .iter()
+        .filter(|r| !r.cells.is_empty())
+        .flat_map(|r| r.cells.iter().map(move |c| (c.1, r.upright)))
+        .filter(|(c, _)| *c != ' ')
+        .map(|(_, u)| u)
+        .collect();
+    assert_eq!(upright, vec![true, true, true, false, false, false, false, false]);
+    // In vert nothing stands upright.
+    sh.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::Vertical);
+    let l = lay(&p, &sh, 300.0, 600.0);
+    assert!(l.runs.iter().all(|r| !r.upright));
+    assert!(is_upright('あ') && is_upright('、') && is_upright('Ａ') && !is_upright('A') && !is_upright('1'));
 }
