@@ -23,7 +23,7 @@ pub const MAX_LEVEL: u8 = 8;
 const MAX_SHAPES: usize = 40;
 
 /// DeckCraft's layouts, with the names PowerPoint's gallery gives them.
-pub const LAYOUTS: [(&str, &str); 15] = [
+pub const LAYOUTS: [(&str, &str); 18] = [
     ("list", "Vertical Bullet List"),
     ("blockList", "Basic Block List"),
     ("hBulletList", "Horizontal Bullet List"),
@@ -39,19 +39,41 @@ pub const LAYOUTS: [(&str, &str); 15] = [
     ("invertedPyramid", "Inverted Pyramid"),
     ("matrix", "Basic Matrix"),
     ("titledMatrix", "Titled Matrix"),
+    ("pictureList", "Vertical Picture List"),
+    ("pictureCaption", "Picture Caption List"),
+    ("pictureProcess", "Picture Accent Process"),
 ];
 /// SmartArt Styles.
-pub const STYLES: [(&str, &str); 4] =
-    [("flat", "Simple Fill"), ("subtle", "Subtle Effect"), ("intense", "Intense Effect"), ("outline", "White Outline")];
+pub const STYLES: [(&str, &str); 9] = [
+    ("flat", "Simple Fill"),
+    ("subtle", "Subtle Effect"),
+    ("intense", "Intense Effect"),
+    ("outline", "White Outline"),
+    ("polished", "Polished"),
+    ("inset", "Inset"),
+    ("cartoon", "Cartoon"),
+    ("powder", "Powder"),
+    ("brick", "Brick Scene"),
+];
 /// Change Colors.
-pub const COLORS: [(&str, &str); 7] = [
+pub const COLORS: [(&str, &str); 17] = [
     ("colorful", "Colorful"),
+    ("range23", "Colorful Range - Accent Colors 2 to 3"),
+    ("range34", "Colorful Range - Accent Colors 3 to 4"),
+    ("range45", "Colorful Range - Accent Colors 4 to 5"),
+    ("range56", "Colorful Range - Accent Colors 5 to 6"),
     ("accent1", "Accent 1"),
     ("accent2", "Accent 2"),
     ("accent3", "Accent 3"),
     ("accent4", "Accent 4"),
     ("accent5", "Accent 5"),
     ("accent6", "Accent 6"),
+    ("accent1Grad", "Gradient Range - Accent 1"),
+    ("accent2Grad", "Gradient Range - Accent 2"),
+    ("accent3Grad", "Gradient Range - Accent 3"),
+    ("accent4Grad", "Gradient Range - Accent 4"),
+    ("accent5Grad", "Gradient Range - Accent 5"),
+    ("accent6Grad", "Gradient Range - Accent 6"),
 ];
 
 pub fn is_kind(k: &str) -> bool {
@@ -103,16 +125,25 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Layout",
             ["SmartArt Design", "Layouts"],
             None,
-            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix}",
+            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess}",
             has_selection,
             change_layout
+        ),
+        cmd!(
+            "smartArt.picture",
+            "Insert Picture in SmartArt",
+            ["SmartArt Design", "Create Graphic"],
+            None,
+            "{id?, index, data?: base64 | path?: string | reset?: bool} (the node's picture placeholder in picture layouts)",
+            has_selection,
+            set_picture
         ),
         cmd!(
             "smartArt.style",
             "SmartArt Styles",
             ["SmartArt Design", "SmartArt Styles"],
             None,
-            "{id?, style: flat|subtle|intense|outline}",
+            "{id?, style: flat|subtle|intense|outline|polished|inset|cartoon|powder|brick}",
             has_selection,
             change_style
         ),
@@ -121,7 +152,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Colors",
             ["SmartArt Design", "SmartArt Styles"],
             None,
-            "{id?, colors: colorful|accent1|…|accent6}",
+            "{id?, colors: colorful|range23|range34|range45|range56|accent1|…|accent6|accent1Grad|…|accent6Grad}",
             has_selection,
             change_colors
         ),
@@ -135,7 +166,7 @@ pub fn nodes_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> Vec<Dia
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
             let tabs = l.chars().take_while(|c| *c == '\t').count();
-            DiagramNode { text: l.trim().to_string(), level: u8::try_from(tabs).unwrap_or(MAX_LEVEL).min(MAX_LEVEL) }
+            DiagramNode { text: l.trim().to_string(), level: u8::try_from(tabs).unwrap_or(MAX_LEVEL).min(MAX_LEVEL), picture: None }
         })
         .collect()
 }
@@ -167,7 +198,7 @@ fn subtree_end(nodes: &[DiagramNode], i: usize) -> usize {
 /// new node's index.
 pub fn add(nodes: &mut Vec<DiagramNode>, index: Option<usize>, position: &str, text: &str) -> usize {
     let Some(i) = index.filter(|i| *i < nodes.len()) else {
-        nodes.push(DiagramNode { text: text.into(), level: 0 });
+        nodes.push(DiagramNode { text: text.into(), level: 0, picture: None });
         return nodes.len() - 1;
     };
     let lv = nodes[i].level;
@@ -183,7 +214,7 @@ pub fn add(nodes: &mut Vec<DiagramNode>, index: Option<usize>, position: &str, t
         }
         _ => (subtree_end(nodes, i), lv),
     };
-    nodes.insert(at, DiagramNode { text: text.into(), level });
+    nodes.insert(at, DiagramNode { text: text.into(), level, picture: None });
     at
 }
 
@@ -272,19 +303,49 @@ fn slot(i: usize) -> SchemeSlot {
 /// The accent shape `i` is drawn in under Change Colors: `colorful` cycles the accents, `accentN`
 /// keeps one.
 fn accent(d: &Diagram, i: usize) -> SchemeSlot {
-    match d.colors.strip_prefix("accent").and_then(|n| n.parse::<usize>().ok()) {
+    let digit = |s: &str, k: usize| s.chars().nth(k).and_then(|c| c.to_digit(10)).map(|n| n as usize);
+    if let Some(r) = d.colors.strip_prefix("range")
+        && let Some(a @ 1..=6) = digit(r, 0)
+    {
+        // Colorful Range: alternate between two neighbouring accents.
+        return slot(a - 1 + i % 2);
+    }
+    match d.colors.strip_prefix("accent").and_then(|r| digit(r, 0)) {
         Some(n @ 1..=6) => slot(n - 1),
         _ => slot(i),
     }
+}
+
+/// Gradient Range: each shape a step darker than the one before (the steps cycle).
+fn shade(d: &Diagram, i: usize) -> Option<ColorTransform> {
+    d.colors.ends_with("Grad").then(|| ColorTransform::LumMod(100_000 - (i % 4) as i32 * 15_000))
+}
+
+/// The 3-D XML (`scene3d` + `sp3d`) for a 3-D SmartArt Style: a top bevel (`w`, `h` in points)
+/// lit by the three-point rig.
+fn three_d(bevel: &str, w: f64, h: f64) -> String {
+    format!(
+        "<a:scene3d><a:camera prst=\"orthographicFront\"/><a:lightRig rig=\"threePt\" dir=\"t\"/></a:scene3d><a:sp3d prstMaterial=\"matte\"><a:bevelT w=\"{}\" h=\"{}\" prst=\"{bevel}\"/></a:sp3d>",
+        (w * 12700.0).round() as i64,
+        (h * 12700.0).round() as i64
+    )
+}
+
+/// Whether `style` is one of the 3-D SmartArt Styles.
+pub fn is_3d(style: &str) -> bool {
+    matches!(style, "polished" | "inset" | "cartoon" | "powder" | "brick")
 }
 
 /// Fill, outline, text colour and effects for the SmartArt style. `light` shapes (the bullet
 /// boxes of the bullet lists) are a pale tint of the accent with dark text.
 fn paint(d: &Diagram, sh: &mut Shape, i: usize, light: bool) {
     let a = accent(d, i);
-    let base = ColorRef::scheme(a);
+    let base = match shade(d, i) {
+        Some(t) => ColorRef::scheme(a).with(t),
+        None => ColorRef::scheme(a),
+    };
     let tint = |pct: i32| ColorRef::scheme(a).with(ColorTransform::LumMod(100_000 - pct * 1000)).with(ColorTransform::LumOff(pct * 1000));
-    let dark_text = light || d.style == "outline";
+    let dark_text = light || matches!(d.style.as_str(), "outline" | "powder");
     sh.style = Some(ShapeStyle::accent(a));
     match d.style.as_str() {
         _ if light => {
@@ -299,6 +360,23 @@ fn paint(d: &Diagram, sh: &mut Shape, i: usize, light: bool) {
             sh.fill = Some(Fill::solid(base.clone()));
             sh.line = Some(Line::solid(ColorRef::scheme(SchemeSlot::Lt1), 1.5));
             sh.effects = Some(Effects { outer_shadow: Some(shadow(4.0, 3.0)), ..Default::default() });
+        }
+        "polished" | "inset" | "cartoon" | "powder" | "brick" => {
+            let (bevel, bw, line, fill) = match d.style.as_str() {
+                "polished" => ("circle", 12.0, Some(Line::solid(ColorRef::scheme(SchemeSlot::Lt1), 0.75)), base.clone()),
+                "inset" => ("relaxedInset", 10.0, None, base.clone()),
+                "cartoon" => ("softRound", 8.0, Some(Line::solid(ColorRef::scheme(SchemeSlot::Tx1), 2.0)), base.clone()),
+                "powder" => ("convex", 14.0, None, tint(40)),
+                _ => ("slope", 6.0, Some(Line::solid(ColorRef::scheme(SchemeSlot::Lt1), 1.0)), base.clone()),
+            };
+            sh.fill = Some(Fill::solid(fill));
+            sh.line = Some(line.unwrap_or_else(|| Line { fill: Some(Fill::None), ..Default::default() }));
+            sh.effects = Some(Effects {
+                outer_shadow: (d.style != "inset").then(|| shadow(6.0, 4.0)),
+                bevel: Some(bevel.into()),
+                raw3d: Some(three_d(bevel, bw, bw * 0.6)),
+                ..Default::default()
+            });
         }
         "intense" => {
             sh.fill = Some(Fill::Gradient(Gradient {
@@ -403,8 +481,73 @@ pub fn layout(d: &Diagram, area: Xfrm) -> Vec<Shape> {
     layout_items(d, area).into_iter().map(|(s, _)| s).collect()
 }
 
-/// Lay out `d`, painted with its style and colours, each shape with the nodes it shows.
+/// Lay out `d`, painted with its style and colours, each shape with the nodes it shows; text is
+/// shrunk per shape so its longest word fits on a line.
 fn layout_items(d: &Diagram, area: Xfrm) -> Vec<Item> {
+    let mut v = layout_raw(d, area);
+    for (sh, _) in &mut v {
+        fit_words(sh);
+    }
+    v
+}
+
+/// Rough advance of a character as a fraction of the font size (a sans text face).
+const CHAR_W: f64 = 0.6;
+/// Smallest font scale shrinking to fit goes to.
+const MIN_SCALE: f64 = 0.25;
+
+/// Shrink the shape's text (all paragraphs together, as PowerPoint's per-shape font size does) so
+/// no word is wider than its line and would break mid-word. Overflow in height is left to the
+/// body's shrink-on-overflow autofit.
+fn fit_words(sh: &mut Shape) {
+    let Some(w) = sh.xfrm.map(|x| x.w) else { return };
+    let Some(body) = &mut sh.text else { return };
+    let avail = w - body.body.inset_l.unwrap_or(7.2) - body.body.inset_r.unwrap_or(7.2);
+    let mut scale: f64 = 1.0;
+    for p in &body.paragraphs {
+        let line = avail - p.props.margin_left.unwrap_or(0.0).max(0.0);
+        for r in &p.runs {
+            let size = r.props.size.unwrap_or(18.0);
+            let word = r.text.split_whitespace().map(|t| t.chars().count()).max().unwrap_or(0) as f64;
+            let need = word * size * CHAR_W;
+            if need > 0.0 {
+                scale = scale.min(line.max(0.0) / need);
+            }
+        }
+    }
+    let scale = scale.max(MIN_SCALE);
+    if scale >= 0.999 {
+        return;
+    }
+    let shrink = |v: &mut Option<f64>| {
+        if let Some(x) = v {
+            *x = (*x * scale * 2.0).floor() / 2.0;
+        }
+    };
+    for p in &mut body.paragraphs {
+        for r in &mut p.runs {
+            shrink(&mut r.props.size);
+        }
+        shrink(&mut p.end_props.size);
+        shrink(&mut p.props.margin_left);
+        if let Some(i) = &mut p.props.indent {
+            *i *= scale;
+        }
+    }
+}
+
+/// A picture placeholder for node `node`: its picture when it has one, else a pale box.
+fn picture_shape(d: &Diagram, preset: &str, x: Xfrm, i: usize, node: usize) -> Shape {
+    let mut sh = Shape { name: "SmartArt picture".into(), xfrm: Some(x), geom: Geom::preset(preset), ..Default::default() };
+    paint(d, &mut sh, i, true);
+    if let Some(m) = d.nodes.get(node).and_then(|n| n.picture) {
+        sh.fill = Some(Fill::Picture(deckcraft_model::style::PictureFill { media: m, ..Default::default() }));
+        sh.line = Some(Line::solid(ColorRef::scheme(SchemeSlot::Lt1), 1.5));
+    }
+    sh
+}
+
+fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
     let gs = groups(d);
     let nodes = |g: &[usize]| -> Vec<&DiagramNode> { g.iter().filter_map(|i| d.nodes.get(*i)).collect() };
     let n = gs.len().max(1);
@@ -564,10 +707,15 @@ fn layout_items(d: &Diagram, area: Xfrm) -> Vec<Item> {
                     paths: vec![deckcraft_model::CustomPath { w, h: bh, d: path, fill: deckcraft_geom::preset::FillMode::Norm, stroke: true }],
                 };
                 // Keep the text inside the sloped sides: inset it to a bit past the band's mid width.
-                let inset = ((it + ib) / 2.0 + (it - ib).abs() / 4.0 + 4.0).min(w * 0.2);
+                // The tip band is a triangle: its text sits at the wide end, inset to the width there.
+                let tip = wt.min(wb) < 1e-6;
+                let inset = if tip { w * 0.22 } else { (it + ib) / 2.0 + (it - ib).abs() / 4.0 + 4.0 };
                 if let Some(b) = &mut sh.text {
                     b.body.inset_l = Some(inset);
                     b.body.inset_r = Some(inset);
+                    if tip {
+                        b.body.anchor = Some(if inverted { deckcraft_model::text::Anchor::Top } else { deckcraft_model::text::Anchor::Bottom });
+                    }
                 }
                 paint(d, &mut sh, i, false);
                 out.push((sh, g.clone()));
@@ -588,6 +736,46 @@ fn layout_items(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 let mut sh = text_shape("roundRect", Xfrm::new(x0 + (s - c) / 2.0, y0 + (s - c * 0.6) / 2.0, c, c * 0.6), &nodes(t), true);
                 paint(d, &mut sh, 0, true);
                 out.push((sh, t.clone()));
+            }
+        }
+        "pictureList" => {
+            // Vertical Picture List: a picture square at the left of each row, the text beside it.
+            let h = area.h / nf;
+            let bh = h * 0.88;
+            for (i, g) in gs.iter().enumerate() {
+                let y = area.y + i as f64 * h;
+                let s = bh.min(area.w * 0.3);
+                out.push((picture_shape(d, "rect", Xfrm::new(area.x, y, s, bh), i, g[0]), vec![]));
+                titled(&mut out, "roundRect", Xfrm::new(area.x + s + bh * 0.08, y, (area.w - s - bh * 0.08).max(1.0), bh), i, g);
+            }
+        }
+        "pictureCaption" | "pictureProcess" => {
+            // Picture Caption List: a picture over each caption, in rows. Picture Accent Process: one
+            // row, arrows between the steps.
+            let process = d.kind == "pictureProcess";
+            let cols = if process { n } else { ((nf * area.w / area.h.max(1.0) / 1.2).sqrt().ceil() as usize).clamp(1, n) };
+            let rows = n.div_ceil(cols);
+            let gap = if process { area.w * 0.05 } else { 0.0 };
+            let w = (area.w - gap * (cols as f64 - 1.0)) / cols as f64;
+            let h = area.h / rows as f64;
+            let bw = if process { w } else { w * 0.9 };
+            let ch = (h * 0.9).min(bw * 1.1);
+            for (i, g) in gs.iter().enumerate() {
+                let (c, r) = (i % cols, i / cols);
+                let in_row = if r + 1 == rows { n - r * cols } else { cols };
+                let x0 = area.x + (area.w - in_row as f64 * w - gap * (in_row as f64 - 1.0)) / 2.0;
+                let x = x0 + c as f64 * (w + gap) + (w - bw) / 2.0;
+                let y = area.y + r as f64 * h + (h - ch) / 2.0;
+                let ph = ch * 0.62;
+                out.push((
+                    picture_shape(d, if process { "ellipse" } else { "rect" }, Xfrm::new(x + (bw - ph.min(bw)) / 2.0, y, ph.min(bw), ph), i, g[0]),
+                    vec![],
+                ));
+                titled(&mut out, if process { "roundRect" } else { "rect" }, Xfrm::new(x, y + ph + ch * 0.03, bw, ch * 0.35), i, g);
+                if process && i + 1 < n {
+                    let a = (gap * 0.7).min(ch * 0.2);
+                    arrow(&mut out, Xfrm::new(x + bw + (gap - a) / 2.0, y + ph / 2.0 - a / 2.0, a, a), 0.0, i);
+                }
             }
         }
         _ => {}
@@ -751,7 +939,7 @@ fn index(p: &Value, cmd: &str) -> Result<usize> {
 pub fn insert(s: &mut Session, kind: &str, mut nodes: Vec<DiagramNode>) -> Result<Value> {
     let kind = if is_kind(kind) { kind } else { "process" };
     if nodes.is_empty() {
-        nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0 }).collect();
+        nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0, picture: None }).collect();
     }
     normalize(&mut nodes);
     let d = Diagram { kind: kind.into(), nodes, ..Default::default() };
@@ -834,6 +1022,26 @@ fn demote(s: &mut Session, p: &Value) -> Result<Value> {
     edit_diagram(s, p, CMD, |d| if demote_node(&mut d.nodes, i) { Ok(Value::Null) } else { Err(bad(CMD, "nothing above to demote under")) })
 }
 
+fn set_picture(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "smartArt.picture";
+    let i = index(p, CMD)?;
+    let media = if bool_or(p, "reset", false) {
+        None
+    } else {
+        let (name, bytes) = super::insert::media_bytes(p, CMD)?;
+        let ct = super::insert::content_type(&name, &bytes);
+        target_group(s, p, CMD)?;
+        Some(s.edit(|doc, _| Ok(doc.add_media(&name, ct, bytes)))?)
+    };
+    edit_diagram(s, p, CMD, |d| {
+        // A sub-point's picture is its top-level node's: that's the node the placeholder shows.
+        let top = (0..=i.min(d.nodes.len().saturating_sub(1))).rev().find(|k| d.nodes.get(*k).is_some_and(|n| n.level == 0)).unwrap_or(i);
+        let n = d.nodes.get_mut(top).ok_or_else(|| bad(CMD, "no such node"))?;
+        n.picture = media;
+        Ok(Value::Null)
+    })
+}
+
 fn change_style(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "smartArt.style";
     let v = str_param(p, "style").filter(|k| STYLES.iter().any(|(id, _)| id == k)).ok_or_else(|| bad(CMD, "unknown style"))?.to_string();
@@ -880,7 +1088,7 @@ mod tests {
         n.iter().map(|x| x.level).collect()
     }
     fn mk(levels: &[u8]) -> Vec<DiagramNode> {
-        levels.iter().enumerate().map(|(i, l)| DiagramNode { text: format!("n{i}"), level: *l }).collect()
+        levels.iter().enumerate().map(|(i, l)| DiagramNode { text: format!("n{i}"), level: *l, picture: None }).collect()
     }
 
     #[test]
@@ -934,7 +1142,7 @@ mod tests {
     fn every_layout_shows_every_node_inside_its_area() {
         let area = Xfrm::new(50.0, 40.0, 800.0, 400.0);
         for (kind, _) in LAYOUTS {
-            for style in ["", "subtle", "intense", "outline"] {
+            for style in std::iter::once("").chain(STYLES.iter().map(|(k, _)| *k)) {
                 let d = Diagram {
                     kind: kind.into(),
                     nodes: mk(&[0, 1, 0, 0, 1, 0]),
@@ -955,5 +1163,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn long_words_shrink_to_fit_their_shape() {
+        let d = Diagram { kind: "pyramid".into(), nodes: nodes_from_lines(["Internationalisation", "Build", "Test"]), ..Default::default() };
+        let items = layout_items(&d, Xfrm::new(0.0, 0.0, 600.0, 300.0));
+        let size = |k: usize| items[k].0.text.as_ref().and_then(|b| b.paragraphs[0].runs[0].props.size).unwrap_or(0.0);
+        assert!(size(0) < 20.0 && size(0) >= 20.0 * MIN_SCALE - 0.5, "the tip's long word shrinks: {}", size(0));
+        assert!((size(1) - 20.0).abs() < 1e-9, "short words keep their size");
+    }
+
+    #[test]
+    fn colour_variants_pick_accents() {
+        let d = |c: &str| Diagram { colors: c.into(), ..Default::default() };
+        assert_eq!(
+            (accent(&d("range45"), 0), accent(&d("range45"), 1), accent(&d("range45"), 2)),
+            (SchemeSlot::Accent4, SchemeSlot::Accent5, SchemeSlot::Accent4)
+        );
+        assert_eq!(accent(&d("accent3Grad"), 4), SchemeSlot::Accent3);
+        assert!(shade(&d("accent3Grad"), 1).is_some() && shade(&d("accent3"), 1).is_none());
     }
 }

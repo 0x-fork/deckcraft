@@ -362,6 +362,9 @@ pub struct Diagram {
 pub struct DiagramNode {
     pub text: String,
     pub level: u8,
+    /// The picture shown in the node's picture placeholder (picture layouts).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<MediaId>,
 }
 
 impl Default for Shape {

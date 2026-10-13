@@ -925,3 +925,48 @@ fn smartart_round_trips_through_pptx_as_a_diagram() {
     let d = again.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
     assert_eq!(d.nodes.last().map(|n| (n.text.as_str(), n.level)), Some(("COO", 1)));
 }
+
+#[test]
+fn smartart_pictures_3d_styles_and_colour_variants() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.smartArt", &json!({"kind": "pictureCaption", "items": ["Lakes", "\tBlue", "Hills"]})).unwrap();
+    let pics = |s: &Session| -> Vec<deckcraft_model::Shape> {
+        let st = s.doc().unwrap();
+        let g = st.doc.slides[1].shapes.iter().find(|x| x.diagram.is_some()).unwrap().clone();
+        g.children().iter().filter(|c| c.name == "SmartArt picture").cloned().collect()
+    };
+    assert_eq!(pics(&s).len(), 2, "one picture placeholder per top-level node");
+    assert!(pics(&s).iter().all(|p| !matches!(p.fill, Some(deckcraft_model::Fill::Picture(_)))));
+    // A 1×1 PNG put in through a sub-point lands in its top-level node.
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    s.execute("smartArt.picture", &json!({"index": 1, "name": "p.png", "data": png})).unwrap();
+    let p = pics(&s);
+    assert!(matches!(p[0].fill, Some(deckcraft_model::Fill::Picture(_))));
+    assert!(!matches!(p[1].fill, Some(deckcraft_model::Fill::Picture(_))));
+    // Text edits keep the picture; reset removes it.
+    s.execute("smartArt.addNode", &json!({"text": "Woods"})).unwrap();
+    assert!(matches!(pics(&s)[0].fill, Some(deckcraft_model::Fill::Picture(_))));
+    assert_eq!(pics(&s).len(), 3);
+    // The picture is written to the .pptx drawing.
+    let bytes = deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    assert!(back.validate().is_empty());
+    assert_eq!(back.slides[1].shapes.iter().find_map(|x| x.diagram.as_ref()).map(|d| d.kind.clone()).as_deref(), Some("pictureCaption"));
+    s.execute("smartArt.picture", &json!({"index": 0, "reset": true})).unwrap();
+    assert!(pics(&s).iter().all(|p| !matches!(p.fill, Some(deckcraft_model::Fill::Picture(_)))));
+
+    // 3-D styles carry a lit bevel; colour variants round trip through .pptx.
+    s.execute("smartArt.style", &json!({"style": "cartoon"})).unwrap();
+    let st = s.doc().unwrap();
+    let g = st.doc.slides[1].shapes.iter().find(|x| x.diagram.is_some()).unwrap().clone();
+    let raw = g.children().iter().find_map(|c| c.effects.as_ref().and_then(|e| e.raw3d.clone())).expect("3-D XML");
+    assert!(raw.contains("scene3d") && raw.contains("softRound"));
+    for (style, colors) in [("polished", "range34"), ("powder", "accent5Grad"), ("brick", "accent2")] {
+        s.execute("smartArt.style", &json!({"style": style})).unwrap();
+        s.execute("smartArt.colors", &json!({"colors": colors})).unwrap();
+        let back = deckcraft_pptx::import(&deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap()).unwrap();
+        let d = back.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+        assert_eq!((d.style.as_str(), d.colors.as_str()), (style, colors));
+    }
+}

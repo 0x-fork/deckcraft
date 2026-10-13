@@ -173,6 +173,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
+    ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
@@ -547,6 +548,12 @@ impl SlideApp {
             "app.preferences" => self.dialog = Some(dialogs::Dialog::new("preferences")),
             "app.openDialog" => self.pick_and_open(),
             "app.insertPictureDialog" => self.pick_and_insert("picture", "insert.picture"),
+            "app.smartArtPictureDialog" => {
+                if self.services.pick_open.is_none() {
+                    return Err("picking a SmartArt picture needs the desktop app".into());
+                }
+                self.pick_and_run("picture", "smartArt.picture", p);
+            }
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
@@ -591,14 +598,25 @@ impl SlideApp {
     }
 
     fn pick_and_insert(&mut self, purpose: &str, cmd: &str) {
+        self.pick_and_run(purpose, cmd, &json!({}));
+    }
+
+    /// Pick a file and run `cmd` with it (`name` + `data`, or `path`) added to `extra`.
+    fn pick_and_run(&mut self, purpose: &str, cmd: &str, extra: &Value) {
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick(purpose) {
+                let mut args = if extra.is_object() { extra.clone() } else { json!({}) };
                 let r = match self.services.read.as_ref().map(|r| r(&path)) {
                     Some(Ok(bytes)) => {
                         let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        self.session.execute(cmd, &json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&bytes)}))
+                        args["name"] = json!(name);
+                        args["data"] = json!(deckcraft_engine::cmd::base64_encode(&bytes));
+                        self.session.execute(cmd, &args)
                     }
-                    _ => self.session.execute(cmd, &json!({"path": path})),
+                    _ => {
+                        args["path"] = json!(path);
+                        self.session.execute(cmd, &args)
+                    }
                 };
                 if let Err(e) = r {
                     self.set_status(e.to_string());

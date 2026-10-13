@@ -28,6 +28,11 @@ pub fn qs_id(style: &str) -> String {
         "subtle" => "simple3",
         "intense" => "simple5",
         "outline" => "simple4",
+        "polished" => "3d1",
+        "inset" => "3d2",
+        "cartoon" => "3d3",
+        "powder" => "3d4",
+        "brick" => "3d5",
         _ => "simple1",
     };
     format!("{QS_BASE}{s}")
@@ -38,6 +43,11 @@ pub fn style_for(qs: &str) -> &'static str {
     match qs.rsplit('/').next().unwrap_or("") {
         "simple1" | "" => "",
         "simple4" => "outline",
+        "3d1" => "polished",
+        "3d2" => "inset",
+        "3d3" => "cartoon",
+        "3d4" => "powder",
+        "3d5" => "brick",
         "simple2" | "simple3" => "subtle",
         _ => "intense",
     }
@@ -45,17 +55,37 @@ pub fn style_for(qs: &str) -> &'static str {
 
 /// PowerPoint's colour definition for Change Colors.
 pub fn cs_id(colors: &str) -> String {
-    match colors.strip_prefix("accent").and_then(|n| n.parse::<u8>().ok()) {
-        Some(n @ 1..=6) => format!("{CS_BASE}accent{n}_2"),
+    if let Some(a @ 2..=5) = colors.strip_prefix("range").and_then(|r| r.get(..1)).and_then(|n| n.parse::<u8>().ok()) {
+        return format!("{CS_BASE}colorful{a}");
+    }
+    let grad = colors.ends_with("Grad");
+    match colors.strip_prefix("accent").and_then(|r| r.get(..1)).and_then(|n| n.parse::<u8>().ok()) {
+        Some(n @ 1..=6) => format!("{CS_BASE}accent{n}_{}", if grad { 3 } else { 2 }),
         _ => format!("{CS_BASE}colorful1"),
+    }
+}
+
+/// The accents a Change Colors choice fills shapes with, in turn.
+fn fill_accents(colors: &str) -> Vec<String> {
+    if let Some(a @ 2..=5) = colors.strip_prefix("range").and_then(|r| r.get(..1)).and_then(|n| n.parse::<u8>().ok()) {
+        return vec![format!("accent{a}"), format!("accent{}", a + 1)];
+    }
+    match colors.strip_prefix("accent").and_then(|r| r.get(..1)).and_then(|n| n.parse::<u8>().ok()) {
+        Some(n @ 1..=6) => vec![format!("accent{n}")],
+        _ => (1..=6).map(|k| format!("accent{k}")).collect(),
     }
 }
 
 /// Change Colors from a colour definition id: `accentN_…` keeps accent N, anything else is colourful.
 pub fn colors_for(cs: &str) -> String {
     let last = cs.rsplit('/').next().unwrap_or("");
-    match last.strip_prefix("accent").and_then(|r| r.split('_').next()).and_then(|n| n.parse::<u8>().ok()) {
-        Some(n @ 1..=6) => format!("accent{n}"),
+    if let Some(a @ 2..=5) = last.strip_prefix("colorful").and_then(|n| n.parse::<u8>().ok()) {
+        return format!("range{a}{}", a + 1);
+    }
+    let mut parts = last.strip_prefix("accent").unwrap_or("").split('_');
+    match (parts.next().and_then(|n| n.parse::<u8>().ok()), parts.next()) {
+        (Some(n @ 1..=6), Some("3" | "4" | "5")) => format!("accent{n}Grad"),
+        (Some(n @ 1..=6), _) => format!("accent{n}"),
         _ => String::new(),
     }
 }
@@ -79,6 +109,9 @@ pub fn layout_id(kind: &str) -> &'static str {
         "invertedPyramid" => "urn:microsoft.com/office/officeart/2005/8/layout/pyramid3",
         "matrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix3",
         "titledMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix1",
+        "pictureList" => "urn:microsoft.com/office/officeart/2005/8/layout/vList4",
+        "pictureCaption" => "urn:microsoft.com/office/officeart/2005/8/layout/pList1",
+        "pictureProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/pList2",
         _ => "urn:microsoft.com/office/officeart/2005/8/layout/vList2",
     }
 }
@@ -102,6 +135,9 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "invertedPyramid",
         "matrix",
         "titledMatrix",
+        "pictureList",
+        "pictureCaption",
+        "pictureProcess",
         "list",
     ] {
         if layout_id == layout_id_of(k) {
@@ -138,7 +174,7 @@ fn layout_id_of(kind: &str) -> &'static str {
 
 fn category(kind: &str) -> &'static str {
     match kind {
-        "process" | "chevron" | "verticalProcess" | "stepUp" => "process",
+        "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" => "process",
         "cycle" | "blockCycle" | "radial" => "cycle",
         "hierarchy" => "hierarchy",
         "pyramid" | "invertedPyramid" => "pyramid",
@@ -288,7 +324,7 @@ pub fn outline(data: &El) -> Vec<DiagramNode> {
         if out.len() >= MAX_NODES || !seen.insert(id) {
             continue;
         }
-        out.push(DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8) });
+        out.push(DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8), picture: None });
         if let Some(v) = kids.get(id) {
             stack.extend(v.iter().rev().map(|(_, c)| (*c, level.saturating_add(1))));
         }
@@ -312,7 +348,7 @@ fn paragraphs(t: &El) -> String {
 /// The layout algorithm and node shape of a DeckCraft layout.
 fn alg(kind: &str) -> (&'static str, Vec<(&'static str, &'static str)>, &'static str) {
     match kind {
-        "process" | "stepUp" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "roundRect"),
+        "process" | "stepUp" | "pictureProcess" | "pictureCaption" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "roundRect"),
         "chevron" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "chevron"),
         "verticalProcess" => ("lin", vec![("linDir", "fromT"), ("nodeHorzAlign", "ctr")], "roundRect"),
         "cycle" | "radial" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
@@ -450,6 +486,18 @@ pub fn layout_xml(kind: &str) -> Vec<u8> {
     w.finish()
 }
 
+/// The top bevel (preset, width in EMU) of a 3-D SmartArt Style.
+fn bevel(style: &str) -> Option<(&'static str, i64)> {
+    Some(match style {
+        "polished" => ("circle", 76200),
+        "inset" => ("relaxedInset", 63500),
+        "cartoon" => ("softRound", 50800),
+        "powder" => ("convex", 101600),
+        "brick" => ("slope", 50800),
+        _ => return None,
+    })
+}
+
 /// `ppt/diagrams/quickStyleN.xml`: flat shapes drawn from the theme's first styles.
 pub fn style_xml(style: &str) -> Vec<u8> {
     let mut w = W::new();
@@ -457,7 +505,7 @@ pub fn style_xml(style: &str) -> Vec<u8> {
     w.empty("dgm:title", A::new().a("val", ""));
     w.empty("dgm:desc", A::new().a("val", ""));
     w.open0("dgm:catLst");
-    w.empty("dgm:cat", A::new().a("type", "simple").a("pri", "10100"));
+    w.empty("dgm:cat", A::new().a("type", if bevel(style).is_some() { "3D" } else { "simple" }).a("pri", "10100"));
     w.close("dgm:catLst");
     w.open0("dgm:scene3d");
     w.empty("a:camera", A::new().a("prst", "orthographicFront"));
@@ -468,7 +516,14 @@ pub fn style_xml(style: &str) -> Vec<u8> {
     w.empty("a:camera", A::new().a("prst", "orthographicFront"));
     w.empty("a:lightRig", A::new().a("rig", "threePt").a("dir", "t"));
     w.close("dgm:scene3d");
-    w.empty0("dgm:sp3d");
+    match bevel(style) {
+        Some((prst, w_emu)) => {
+            w.open0("dgm:sp3d");
+            w.empty("a:bevelT", A::new().a("w", w_emu.to_string()).a("h", (w_emu * 3 / 5).to_string()).a("prst", prst));
+            w.close("dgm:sp3d");
+        }
+        None => w.empty0("dgm:sp3d"),
+    }
     w.empty("dgm:txPr", A::new());
     w.open0("dgm:style");
     for (tag, idx) in [("a:lnRef", "2"), ("a:fillRef", "1"), ("a:effectRef", "0")] {
@@ -491,19 +546,26 @@ pub fn colors_xml(colors: &str) -> Vec<u8> {
     w.open("dgm:colorsDef", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("uniqueId", cs_id(colors)));
     w.empty("dgm:title", A::new().a("val", ""));
     w.empty("dgm:desc", A::new().a("val", ""));
-    let single = colors.starts_with("accent");
+    let accents = fill_accents(colors);
+    let single = accents.len() == 1;
+    let cat = if single { accents.first().map(String::as_str).unwrap_or("accent1") } else { "colorful" };
     w.open0("dgm:catLst");
-    w.empty("dgm:cat", A::new().a("type", if single { colors } else { "colorful" }).a("pri", "11200"));
+    w.empty("dgm:cat", A::new().a("type", cat).a("pri", "11200"));
     w.close("dgm:catLst");
     w.open("dgm:styleLbl", A::new().a("name", "node1"));
-    if single {
+    if colors.ends_with("Grad") {
+        // Gradient Range: the accent shaded darker across the shapes.
         w.open("dgm:fillClrLst", A::new().a("meth", "repeat"));
-        w.empty("a:schemeClr", A::new().a("val", colors));
+        for k in 0..4 {
+            w.open("a:schemeClr", A::new().a("val", cat));
+            w.empty("a:lumMod", A::new().a("val", (100_000 - k * 15_000).to_string()));
+            w.close("a:schemeClr");
+        }
         w.close("dgm:fillClrLst");
     } else {
         w.open("dgm:fillClrLst", A::new().a("meth", "repeat"));
-        for k in 1..=6 {
-            w.empty("a:schemeClr", A::new().a("val", format!("accent{k}")));
+        for a in &accents {
+            w.empty("a:schemeClr", A::new().a("val", a.as_str()));
         }
         w.close("dgm:fillClrLst");
     }
@@ -524,7 +586,7 @@ mod tests {
     use super::*;
 
     fn nodes(v: &[(&str, u8)]) -> Vec<DiagramNode> {
-        v.iter().map(|(t, l)| DiagramNode { text: (*t).into(), level: *l }).collect()
+        v.iter().map(|(t, l)| DiagramNode { text: (*t).into(), level: *l, picture: None }).collect()
     }
 
     #[test]
@@ -536,8 +598,32 @@ mod tests {
         assert_eq!(outline(&doc.root), d.nodes);
         let s = String::from_utf8(xml).unwrap();
         assert!(s.contains("hierarchy1") && s.contains("relId=\"rId9\""));
-        for x in [layout_xml("hierarchy"), layout_xml("cycle"), style_xml("subtle"), colors_xml(""), colors_xml("accent3")] {
+        for x in [
+            layout_xml("hierarchy"),
+            layout_xml("cycle"),
+            style_xml("subtle"),
+            colors_xml(""),
+            colors_xml("accent3"),
+            style_xml("polished"),
+            colors_xml("range23"),
+            colors_xml("accent6Grad"),
+            layout_xml("pictureList"),
+        ] {
             assert!(crate::xml::parse(&x).is_ok());
+        }
+    }
+
+    #[test]
+    fn style_and_colour_ids_round_trip() {
+        for st in ["", "subtle", "intense", "outline", "polished", "inset", "cartoon", "powder", "brick"] {
+            assert_eq!(style_for(&qs_id(st)), st);
+        }
+        for c in ["", "range23", "range56", "accent1", "accent4Grad"] {
+            assert_eq!(colors_for(&cs_id(c)), c);
+        }
+        assert!(String::from_utf8(style_xml("cartoon")).unwrap().contains("bevelT"));
+        for k in ["pictureList", "pictureCaption", "pictureProcess"] {
+            assert_eq!(kind_for(layout_id(k), ""), k);
         }
     }
 
