@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt Transform gallery; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -83,6 +83,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Text caret, selection, double/triple click, drag-select | yes | yes; Tab in text boxes ends editing (#78) |
 | Exact size/position, lock aspect | yes | yes |
 | Rulers with indent markers and tab stops | yes | rulers yes; tab stops partial |
+| WordArt transform | Transform gallery | Shape Format ▸ Text Effects ▸ Transform (`format.textWarp`): No Transform, Follow Path and the other 36 presets. No adjust handles |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
 | Drag and drop of files and between thumbnails | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
@@ -148,6 +149,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | WordArt Transform gallery on Shape Format ▸ Text Effects; `format.textWarp` applies a preset or clears it. Adjust handles remain open |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

@@ -80,6 +80,15 @@ pub fn specs() -> Vec<CommandSpec> {
             text_outline
         ),
         cmd!(
+            "format.textWarp",
+            "Text Transform",
+            ["Shape Format", "WordArt Styles"],
+            None,
+            "{preset: a prstTxWarp name or none, adj?: [finite raw guide values, at most 8]} — none clears the transform; omitted adj uses the preset's defaults",
+            has_text_or_shapes,
+            text_warp
+        ),
+        cmd!(
             "format.align",
             "Align",
             ["Home", "Paragraph"],
@@ -333,6 +342,36 @@ fn text_outline(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color");
     let w = f64_or(p, "width", 0.75);
     format_run(s, &move |r| r.outline = c.clone().map(|c| Line::solid(c, w)))
+}
+
+fn text_warp(s: &mut Session, p: &Value) -> Result<Value> {
+    let preset = str_param(p, "preset").ok_or_else(|| bad("format.textWarp", "missing `preset`"))?;
+    let clear = preset == "none" || preset == "textNoShape";
+    if !clear && !deckcraft_geom::warp::is_supported(preset) {
+        return Err(bad("format.textWarp", format!("unknown text transform `{preset}`")));
+    }
+    let adj = match p.get("adj") {
+        None => Vec::new(),
+        Some(Value::Array(arr)) => {
+            if arr.len() > 8 {
+                return Err(bad("format.textWarp", "at most 8 adjust values"));
+            }
+            let mut v = Vec::with_capacity(arr.len());
+            for a in arr {
+                let Some(n) = a.as_f64().filter(|n| n.is_finite()) else {
+                    return Err(bad("format.textWarp", "adjust values must be finite numbers"));
+                };
+                v.push(n.clamp(-2.0e9, 2.0e9));
+            }
+            v
+        }
+        Some(_) => return Err(bad("format.textWarp", "`adj` must be an array of numbers")),
+    };
+    let stored = if clear { None } else { Some(preset.to_string()) };
+    format_body(s, &|b| {
+        b.warp.clone_from(&stored);
+        b.warp_adj.clone_from(&adj);
+    })
 }
 
 fn case(s: &mut Session, p: &Value) -> Result<Value> {
