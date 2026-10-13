@@ -452,6 +452,35 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             continue;
         }
         let editing_this = editing.as_ref().is_some_and(|e| e.shape == *id && !e.notes);
+        if app.session.tool.editing_points(st) == Some(sh.id) {
+            // Edit Points: the outline's vertices are the handles.
+            // No selection box: the outline and its vertices are what's edited.
+            if let Some((path, index)) = app.session.tool.edit_vertex
+                && let Some((hin, hout, v)) = deckcraft_engine::cmd::points::slide_handles(&st.doc, &st.selection, sh, path, index)
+            {
+                for h in [hin, hout].into_iter().flatten() {
+                    painter.line_segment([xf.to_screen(v), xf.to_screen(h)], sel_stroke);
+                    painter.rect(
+                        egui::Rect::from_center_size(xf.to_screen(h), egui::vec2(6.0, 6.0)),
+                        0.0,
+                        Color32::WHITE,
+                        Stroke::new(1.0, t.selection),
+                        egui::StrokeKind::Middle,
+                    );
+                }
+            }
+            for q in deckcraft_engine::cmd::points::slide_vertices(&st.doc, &st.selection, sh).into_iter().flatten() {
+                let c = xf.to_screen(q);
+                painter.rect(
+                    egui::Rect::from_center_size(c, egui::vec2(7.0, 7.0)),
+                    0.0,
+                    Color32::BLACK,
+                    Stroke::new(1.0, Color32::WHITE),
+                    egui::StrokeKind::Middle,
+                );
+            }
+            continue;
+        }
         if editing_this {
             // Dashed box while editing text.
             for i in 0..4 {
@@ -465,20 +494,6 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             // Locked: greyed handles that don't respond, no rotate or adjust handles.
             for h in box_handles(&x).0 {
                 painter.circle(xf.to_screen(h), 4.0, t.text_faint, Stroke::new(1.0, t.handle_fill));
-            }
-            continue;
-        }
-        if app.session.tool.editing_points(st) == Some(sh.id) {
-            // Edit Points: the outline's vertices are the handles.
-            for q in deckcraft_engine::cmd::points::slide_vertices(&st.doc, &st.selection, sh).into_iter().flatten() {
-                let c = xf.to_screen(q);
-                painter.rect(
-                    egui::Rect::from_center_size(c, egui::vec2(7.0, 7.0)),
-                    0.0,
-                    Color32::BLACK,
-                    Stroke::new(1.0, Color32::WHITE),
-                    egui::StrokeKind::Middle,
-                );
             }
             continue;
         }
@@ -635,7 +650,36 @@ fn draw_preview(app: &SlideApp, p: &egui::Painter, xf: Xf, x: Xfrm, t: &Tokens) 
 }
 
 fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
+    // Right-clicking a vertex in Edit Points picks it for the point menu.
+    if resp.secondary_clicked()
+        && let Some(Hit::Vertex { path, index, .. }) = app.session.tool.hover.clone()
+    {
+        app.session.tool.edit_vertex = Some((path, index));
+    }
     resp.context_menu(|ui| {
+        let editing = app.session.active().and_then(|d| app.session.tool.editing_points(d).and_then(|id| d.shape(id).cloned()));
+        if let Some(sh) = editing {
+            if let Some((path, index)) = app.session.tool.edit_vertex {
+                let cur = deckcraft_engine::cmd::points::kind_of(&sh, path, index);
+                for (l, k) in [("Smooth Point", "smooth"), ("Straight Point", "straight"), ("Corner Point", "corner")] {
+                    if ui.radio(cur == Some(k), l).clicked() {
+                        let _ = app.run("shape.pointType", json!({"path": path, "index": index, "type": k}));
+                        ui.close();
+                    }
+                }
+                if ui.button("Delete Point").clicked() {
+                    let _ = app.run("shape.deletePoint", json!({"path": path, "index": index}));
+                    app.session.tool.edit_vertex = None;
+                    ui.close();
+                }
+                ui.separator();
+            }
+            if ui.button("Exit Edit Points").clicked() {
+                let _ = app.run("shape.editPoints", json!({"on": false}));
+                ui.close();
+            }
+            return;
+        }
         let has_sel = app.session.active().is_some_and(|d| !d.selection.shapes.is_empty());
         for (l, id) in [("Cut", "edit.cut"), ("Copy", "edit.copy"), ("Paste", "edit.paste")] {
             if ui.add_enabled(crate::ribbon::enabled(app, id), egui::Button::new(l)).clicked() {
@@ -647,6 +691,13 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
         if has_sel {
             if ui.button("Edit Text").clicked() {
                 let _ = app.run("text.edit", json!({}));
+                ui.close();
+            }
+            if crate::ribbon::enabled(app, "shape.editPoints")
+                && app.session.active().is_some_and(|d| d.selection.shapes.len() == 1 && d.selected_shapes().iter().all(|s| !s.is_line()))
+                && ui.button("Edit Points").clicked()
+            {
+                let _ = app.run("shape.editPoints", json!({"on": true}));
                 ui.close();
             }
             ui.menu_button("Bring to Front", |ui| {

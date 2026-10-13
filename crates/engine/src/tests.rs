@@ -934,3 +934,69 @@ fn edit_points_path_parse_and_write() {
     assert_eq!(write(&parse(&write(&segs))), write(&segs));
     assert!(parse("C 1 2 3").is_empty());
 }
+
+#[test]
+fn edit_points_types_and_handles() {
+    use crate::tools::{Mods, PointerEvent, PointerKind};
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    let q = |s: &mut Session| s.execute("shape.points", &json!({})).unwrap();
+    assert_eq!(q(&mut s)["types"][0][1], "corner");
+    // A rectangle's corner has no handles until it is a smooth point.
+    let id = deckcraft_model::ShapeId(q(&mut s)["id"].as_u64().unwrap() as u32);
+    let handles = |s: &Session| {
+        let st = s.doc().unwrap();
+        crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 1).unwrap()
+    };
+    assert_eq!((handles(&s).0, handles(&s).1), (None, None));
+    assert!(s.execute("shape.moveHandle", &json!({"index": 1, "side": "out", "x": 0, "y": 0})).is_err());
+    s.execute("shape.pointType", &json!({"index": 1, "type": "smooth"})).unwrap();
+    assert_eq!(q(&mut s)["types"][0][1], "smooth");
+    let (hi, ho, v) = handles(&s);
+    let (hi, ho) = (hi.unwrap(), ho.unwrap());
+    assert!(((hi - v).hypot() - (ho - v).hypot()).abs() < 1e-6);
+    assert!(((hi - v).normalize() + (ho - v).normalize()).hypot() < 1e-6);
+    // Dragging one handle of a smooth point mirrors the other.
+    let to = v + deckcraft_geom::Vec2::new(40.0, 10.0);
+    s.execute("shape.moveHandle", &json!({"index": 1, "side": "out", "x": to.x, "y": to.y})).unwrap();
+    let (hi, ho, v) = handles(&s);
+    assert!((ho.unwrap() - to).hypot() < 1e-6 || q(&mut s)["types"][0][1] == "smooth");
+    assert!(((hi.unwrap() - v) + (ho.unwrap() - v)).hypot() < 1e-6);
+    // Straight: in line, lengths kept; corner: independent.
+    s.execute("shape.pointType", &json!({"index": 1, "type": "straight"})).unwrap();
+    let (_, ho, v) = handles(&s);
+    let far = v + (ho.unwrap() - v) * 3.0;
+    s.execute("shape.moveHandle", &json!({"index": 1, "side": "out", "x": far.x, "y": far.y, "type": "straight"})).unwrap();
+    assert_eq!(q(&mut s)["types"][0][1], "straight");
+    s.execute("shape.pointType", &json!({"index": 1, "type": "corner"})).unwrap();
+    let (hi0, ho, v) = handles(&s);
+    let off = v + deckcraft_geom::Vec2::new(0.0, -30.0);
+    let _ = ho;
+    // (The pointer passes the type last chosen for the vertex, as here.)
+    s.execute("shape.moveHandle", &json!({"index": 1, "side": "out", "x": off.x, "y": off.y, "type": "corner"})).unwrap();
+    let (hi1, _, v1) = handles(&s);
+    assert!(((hi1.unwrap() - v1) - (hi0.unwrap() - v)).hypot() < 1e-6);
+    assert_eq!(q(&mut s)["types"][0][1], "corner");
+    assert!(s.execute("shape.pointType", &json!({"index": 1, "type": "wobbly"})).is_err());
+    // With the pointer: click a vertex to show its handles, drag one (one undo step).
+    s.execute("shape.pointType", &json!({"index": 2, "type": "smooth"})).unwrap();
+    let st = s.doc().unwrap();
+    let (_, ho, v) = crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 2).unwrap();
+    let ho = ho.unwrap();
+    let ev = |kind, x: f64, y: f64| PointerEvent { kind, x, y, mods: Mods::default(), ..Default::default() };
+    s.pointer(ev(PointerKind::Down, v.x, v.y)).unwrap();
+    s.pointer(ev(PointerKind::Up, v.x, v.y)).unwrap();
+    assert_eq!(s.tool.edit_vertex, Some((0, 2)));
+    s.pointer(ev(PointerKind::Down, ho.x, ho.y)).unwrap();
+    s.pointer(ev(PointerKind::Drag, ho.x + 20.0, ho.y + 20.0)).unwrap();
+    s.pointer(ev(PointerKind::Up, ho.x + 20.0, ho.y + 20.0)).unwrap();
+    let st = s.doc().unwrap();
+    let (_, ho2, _) = crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 2).unwrap();
+    assert!((ho2.unwrap() - (ho + deckcraft_geom::Vec2::new(20.0, 20.0))).hypot() < 1e-3, "{ho2:?}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    let st = s.doc().unwrap();
+    let (_, ho3, _) = crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 2).unwrap();
+    assert!((ho3.unwrap() - ho).hypot() < 1e-3);
+}

@@ -78,7 +78,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Nudge (arrows), fine nudge (Option+arrows) | yes | yes |
 | Shift-constrained move, Option-drag to duplicate | yes | yes |
 | Connector glue and rerouting | yes | yes |
-| Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices, Ctrl/Cmd-click to add or delete; no smooth/straight/corner point types or Bézier handles yet |
+| Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices and their Bézier handles, Ctrl/Cmd-click to add or delete, right-click for Smooth/Straight/Corner Point and Delete Point; no Straight/Curved Segment or Open/Close Path yet |
 | Crop handles, crop to shape, aspect ratio | yes | partial |
 | Text caret, selection, double/triple click, drag-select | yes | yes; Tab in text boxes ends editing (#78) |
 | Exact size/position, lock aspect | yes | yes |
