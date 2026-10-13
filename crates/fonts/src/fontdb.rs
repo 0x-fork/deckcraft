@@ -450,6 +450,12 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
         dirs.extend(["/System/Library/Fonts", "/Library/Fonts"].map(Into::into));
         if let Some(h) = &home {
             dirs.push(h.join("Library/Fonts"));
+            // Fonts Microsoft Office downloads on demand (Aptos…), used where Office put them.
+            dirs.push(h.join("Library/Group Containers/UBF8T346G9.Office/FontCache/4/CloudFonts"));
+        }
+        // Fonts Office installs inside its apps.
+        for app in ["Microsoft PowerPoint", "Microsoft Word", "Microsoft Excel"] {
+            dirs.push(std::path::PathBuf::from(format!("/Applications/{app}.app/Contents/Resources/DFonts")));
         }
         // Fonts macOS ships as assets (PingFang, Yu Mincho, …): com_apple_MobileAsset_Font<N>.
         for parent in ["/System/Library/AssetsV2", "/System/Library/AssetsV2/PreinstalledAssetsV2/InstallWithOs"] {
@@ -464,7 +470,11 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
         let root = std::env::var_os("WINDIR").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into());
         dirs.push(root.join("Fonts"));
         if let Some(l) = std::env::var_os("LOCALAPPDATA") {
-            dirs.push(std::path::PathBuf::from(l).join("Microsoft\\Windows\\Fonts"));
+            let l = std::path::PathBuf::from(l);
+            dirs.push(l.join("Microsoft\\Windows\\Fonts"));
+            // Fonts Microsoft Office downloads on demand (Aptos…), used where Office put them;
+            // DeckCraft never ships or needs them.
+            dirs.push(l.join("Microsoft\\FontCache\\4\\CloudFonts"));
         }
     } else {
         dirs.extend(["/usr/share/fonts", "/usr/local/share/fonts"].map(Into::into));

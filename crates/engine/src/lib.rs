@@ -9,6 +9,7 @@
 
 pub mod cmd;
 pub mod connect;
+pub mod fonts;
 pub mod guard;
 pub mod keys;
 pub mod links;
@@ -141,6 +142,9 @@ pub struct DocState {
     pub interaction: Option<Interaction>,
     pub uid: u64,
     pub title: String,
+    /// Fonts the file's text uses that aren't installed, found when it was opened (empty for new
+    /// documents); the app mentions them once.
+    pub missing_fonts: Vec<String>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -158,6 +162,7 @@ impl DocState {
             interaction: None,
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             title,
+            missing_fonts: Vec::new(),
         }
     }
     pub fn is_dirty(&self) -> bool {

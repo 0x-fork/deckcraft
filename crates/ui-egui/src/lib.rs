@@ -22,6 +22,7 @@ pub mod status;
 pub mod textures;
 pub mod theme;
 pub mod thumbs;
+pub mod toast;
 pub mod widgets;
 
 use std::sync::mpsc::{Receiver, Sender};
@@ -181,6 +182,10 @@ pub struct SlideApp {
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
+    /// A brief notice over the bottom of the window (missing fonts on opening a file).
+    pub toast: Option<toast::Toast>,
+    /// Documents (by uid) whose missing fonts have been mentioned.
+    fonts_noted: std::collections::HashSet<u64>,
     pub perf: Perf,
     /// Synthetic input events (control channel `ui.click` etc.), injected one per frame.
     pub synthetic: Vec<egui::Event>,
@@ -224,6 +229,8 @@ impl SlideApp {
             show: None,
             media: media::MediaHost::new(audio_out),
             status: None,
+            toast: None,
+            fonts_noted: Default::default(),
             perf: Perf { frame_ms: 0.0, render_ms: 0.0, fps: 0.0 },
             synthetic: vec![],
             canvas_rect: None,
@@ -730,6 +737,8 @@ impl SlideApp {
                 }
             }
         });
+        toast::note_missing_fonts(self);
+        toast::show(self, &ctx);
         dialogs::show(self, &ctx);
         menus::palette(self, &ctx);
         for url in std::mem::take(&mut self.pending_urls) {
@@ -887,6 +896,37 @@ mod tests {
         let d = app.session.active().unwrap();
         let sh = &d.doc.slides[0].shapes[0];
         sh.text.as_ref().map(|t| t.paragraphs.iter().map(|p| p.text()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+    }
+
+    #[test]
+    fn opening_a_file_with_missing_fonts_shows_a_toast_once() {
+        use egui_kittest::kittest::Queryable;
+        let mut p = deckcraft_model::Presentation::default();
+        let slide = std::sync::Arc::make_mut(&mut p.slides[0]);
+        let mut body = deckcraft_model::text::TextBody::from_text("Hello");
+        body.paragraphs[0].runs[0].props.font = Some("Qqq Nonexistent Sans".into());
+        slide.shapes[0].text = Some(body);
+        let data = deckcraft_engine::cmd::base64_encode(&deckcraft_engine::cmd::file::save_bytes(&p, "pptx").unwrap());
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        assert!(harness.state().toast.is_none(), "a new presentation has nothing to say");
+        harness.state_mut().session.execute("file.openBytes", &json!({"name": "a.pptx", "data": data})).unwrap();
+        harness.run_steps(2);
+        let text = harness.state().toast.as_ref().map(|t| t.text.clone()).unwrap_or_default();
+        assert!(text.starts_with("Qqq Nonexistent Sans isn't installed"), "{text}");
+        assert!(harness.query_by_label_contains("Qqq Nonexistent Sans isn't installed").is_some());
+        // Closed, it stays closed for that document.
+        harness.get_by_label("Close").click();
+        harness.run_steps(2);
+        assert!(harness.state().toast.is_none());
+        harness.run_steps(2);
+        assert!(harness.state().toast.is_none());
     }
 
     /// #17: Home created a new blank presentation instead of going to the start screen.

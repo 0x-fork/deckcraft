@@ -504,6 +504,30 @@ fn hyperlink_on_a_word_or_shape_links_it() {
     assert!(s.doc().unwrap().current_slide().unwrap().shapes[0].click.is_some(), "a selected shape gets the link as its click action");
 }
 
+/// A .pptx (base64) whose first slide's title is set in `font`.
+fn deck_in_font(font: &str) -> String {
+    let mut p = deckcraft_model::Presentation::default();
+    let slide = std::sync::Arc::make_mut(&mut p.slides[0]);
+    let mut body = deckcraft_model::text::TextBody::from_text("Hello");
+    body.paragraphs[0].runs[0].props.font = Some(font.into());
+    slide.shapes[0].text = Some(body);
+    crate::cmd::base64_encode(&crate::cmd::file::save_bytes(&p, "pptx").unwrap())
+}
+
+#[test]
+fn opening_a_file_lists_the_fonts_it_uses_that_are_missing() {
+    let mut s = Session::with_new();
+    let r = s.execute("file.openBytes", &json!({"name": "a.pptx", "data": deck_in_font("Qqq Nonexistent Sans")})).unwrap();
+    assert_eq!(r["missingFonts"], json!(["Qqq Nonexistent Sans"]));
+    assert_eq!(s.doc().unwrap().missing_fonts, vec!["Qqq Nonexistent Sans".to_string()]);
+    // A font that is there (bundled or installed) isn't listed; new documents list nothing.
+    let have = deckcraft_fonts::FontDb::global().face(deckcraft_fonts::FALLBACK_FAMILY, "Regular").family.clone();
+    let r = s.execute("file.openBytes", &json!({"name": "b.pptx", "data": deck_in_font(&have)})).unwrap();
+    assert_eq!(r["missingFonts"], json!([]));
+    s.execute("file.new", &json!({})).unwrap();
+    assert!(s.doc().unwrap().missing_fonts.is_empty());
+}
+
 #[test]
 fn clicks_in_flipped_shapes_hit_the_text_where_it_is_drawn() {
     // Flips don't mirror text, so a click lands on the character drawn under it.
