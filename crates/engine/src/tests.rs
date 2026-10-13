@@ -1129,3 +1129,56 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// Tables whose style the file defines (#292, #294: its look and background drawn) edit like the
+/// others: the caret is laid out with the file style's lettering, clicks and double-clicks land
+/// in the cell where it is drawn, and borders still resize.
+#[test]
+fn tables_with_a_file_defined_style_edit_and_resize() {
+    use deckcraft_model::style::{ColorRef, Fill};
+    use deckcraft_model::table::{TablePart, TablePartStyle, TableStyleDef};
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", "d"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let built_in = caret_point(&s, 0, 8);
+    s.execute("text.exit", &json!({})).unwrap();
+    // The table's style, defined by the file: a plain (not bold) header, a filled body, a
+    // background.
+    {
+        let style = table_of(&s, id).style;
+        let d = s.doc_mut().unwrap();
+        let doc = std::sync::Arc::make_mut(&mut d.doc);
+        let solid = |r, g, b| Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(r, g, b))));
+        doc.table_styles.push(TableStyleDef {
+            id: style,
+            name: "File style".into(),
+            parts: vec![
+                (TablePart::WholeTbl, TablePartStyle { fill: solid(230, 240, 250), ..Default::default() }),
+                (TablePart::FirstRow, TablePartStyle { fill: solid(40, 60, 90), bold: Some(false), ..Default::default() }),
+            ],
+            background: Some(TablePartStyle { fill: solid(200, 200, 200), ..Default::default() }),
+            raw: String::new(),
+        });
+    }
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let p = caret_point(&s, 0, 8);
+    assert!((p.x - built_in.x).abs() > 0.5, "the header is laid out in the file style's (regular) weight: {p:?} vs {built_in:?}");
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // A double-click selects the word drawn there.
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 0)), ((0, 6), (0, 11))));
+    // A click in another cell moves the caret there.
+    s.pointer(tev(PointerKind::Down, 400.0, 160.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 400.0, 160.0)).unwrap();
+    assert_eq!(text_sel(&s).unwrap().cell, Some((1, 1)));
+    // Border drag, while editing: the columns resize, editing goes on.
+    s.pointer(tev(PointerKind::Down, 300.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 320.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 330.0, 121.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 330.0, 121.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![230.0, 170.0]);
+    assert_eq!(text_sel(&s).unwrap().cell, Some((1, 1)));
+}
