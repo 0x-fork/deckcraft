@@ -17,6 +17,11 @@ use skrifa::raw::TableProvider;
 use crate::script::{ScriptTag, script_of};
 use crate::{CRAFT_FONTS, FontDb, FontFace};
 
+/// Variation selector 15: text presentation.
+const TEXT_SELECTOR: char = '\u{FE0E}';
+/// Combining enclosing keycap.
+const KEYCAP: char = '\u{20E3}';
+
 /// Characters that never decide a face: they're drawn by whatever face the cluster gets.
 fn ignorable(c: char) -> bool {
     c.is_whitespace()
@@ -139,12 +144,8 @@ impl FontDb {
             return f.clone();
         }
         // Text presentation (U+FE0E) and keycaps: a plain face, not a colour emoji one.
-        // So does a pictograph that defaults to text presentation (⚠ ♥ ⬆ ▶) when the colour font
-        // is the first to have it: PowerPoint draws those from a plain symbol font.
-        let plain = cluster.contains(&'\u{FE0E}')
-            || cluster.contains(&'\u{20E3}')
-            || (!is_emoji_cluster(cluster) && cluster.iter().any(|c| matches!(*c as u32, 0x2190..=0x2BFF | 0x1F000..=0x1FAFF)));
-        if plain
+        let text_style = cluster.contains(&TEXT_SELECTOR) || cluster.contains(&KEYCAP);
+        if text_style
             && let Some(key) = cluster.iter().copied().find(|c| !ignorable(*c))
             && let Some(f) = self.plain_face_for(key, cluster)
         {
@@ -181,11 +182,20 @@ impl FontDb {
             }
         }
         let exclude = chain.first().map(|f| f.id()).unwrap_or(u32::MAX);
-        match self.fallback_for(key, exclude) {
+        let f = match self.fallback_for(key, exclude) {
             Some(f) if covers_cluster(&f, cluster) => f,
             Some(f) if chain.iter().all(|c| !c.covers(key)) => f,
             _ => first(),
+        };
+        // A pictograph that defaults to text presentation (⚠ ♥ ⬆ ▶) whose first fallback is the
+        // colour emoji font: PowerPoint draws it from a plain symbol font.
+        if f.is_color()
+            && !is_emoji_cluster(cluster)
+            && let Some(plain) = self.plain_face_for(key, cluster)
+        {
+            return plain;
         }
+        f
     }
 
     /// An installed (non-bundled) face covering the cluster, loading one from the system catalog
