@@ -1891,6 +1891,8 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
             if let Some(p) = shapes_gallery(ui) {
                 run(app, "shape.change", json!({"preset": p}));
             }
+            ui.separator();
+            smooth_corners_row(app, ui);
         });
         let can_merge = enabled(app, "shape.merge");
         let r = big_button(ui, Icon::MergeShapes, "Merge\nShapes", can_merge).on_hover_text("Merge Shapes");
@@ -2419,4 +2421,46 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
         _ => (0..=40).map(|i| i as f32 / 40.0).map(|u| at(u, 0.5 + 0.35 * (u * 19.0).sin() * (1.0 - u * 0.4))).collect(),
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
+}
+
+/// Edit Shape ▸ Smooth Corners (#286): a slider that smooths a rectangle's corners into a
+/// squircle. The radius is taken from the rectangle when the slider is first used and kept (in egui
+/// memory, per shape) so later moves re-smooth the same corners.
+fn smooth_corners_row(app: &mut SlideApp, ui: &mut egui::Ui) {
+    let Some((id, radius)) = app.session.active().and_then(|d| {
+        let id = *d.selection.shapes.first()?;
+        let sh = d.shape(id)?;
+        let x = sh.xfrm?;
+        let ss = x.w.min(x.h).max(0.0);
+        let own = match &sh.geom {
+            deckcraft_model::Geom::Preset { name, adj } if name == "roundRect" => {
+                Some(ss * adj.first().copied().unwrap_or(16667.0).clamp(0.0, 50000.0) / 100000.0)
+            }
+            deckcraft_model::Geom::Preset { name, .. } if name == "rect" => Some(ss * 16667.0 / 100000.0),
+            _ => None,
+        };
+        Some((id, own))
+    }) else {
+        return;
+    };
+    let key = egui::Id::new(("deckcraft-smooth-corners", id.0));
+    let mut state: (f64, f64) = ui.data(|d| d.get_temp(key)).unwrap_or((radius.unwrap_or(0.0), 0.0));
+    if let Some(r) = radius {
+        state.0 = r;
+    }
+    let usable = radius.is_some() || ui.data(|d| d.get_temp::<(f64, f64)>(key)).is_some();
+    ui.horizontal(|ui| {
+        ui.label("Smooth Corners");
+        let mut pct = state.1;
+        let resp = ui.add_enabled(usable, egui::Slider::new(&mut pct, 0.0..=100.0).suffix("%").integer());
+        let resp = if usable { resp } else { resp.on_disabled_hover_text("For rectangles and rounded rectangles") };
+        if resp.changed() {
+            state.1 = pct;
+            ui.data_mut(|d| d.insert_temp(key, state));
+        }
+        // One undo step per adjustment: apply when the drag ends (or on a click / keyboard step).
+        if resp.drag_stopped() || (resp.changed() && !resp.dragged()) {
+            run(app, "shape.smoothCorners", json!({"smoothing": state.1, "radius": state.0}));
+        }
+    });
 }
