@@ -317,6 +317,9 @@ pub struct Shape {
     pub decorative: bool,
     pub click: Option<text::Hyperlink>,
     pub hover: Option<text::Hyperlink>,
+    /// Add-in tags (`p:custDataLst` → `ppt/tags/tagN.xml`): name/value pairs kept for round trip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<(String, String)>,
     /// Unmodelled XML kept for round-trip (extension lists etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
@@ -344,6 +347,7 @@ impl Default for Shape {
             decorative: false,
             click: None,
             hover: None,
+            tags: vec![],
             raw_ext: None,
         }
     }
@@ -534,7 +538,10 @@ pub struct Slide {
     /// the layout.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_map: Option<Vec<(String, String)>>,
-    /// Unmodelled XML kept for round-trip (custom data, tags).
+    /// Add-in tags (`p:custDataLst` → `ppt/tags/tagN.xml`): name/value pairs kept for round trip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<(String, String)>,
+    /// Unmodelled XML kept for round-trip (custom data).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
 }
@@ -554,6 +561,7 @@ impl Default for Slide {
             notes: TextBody::default(),
             comments: vec![],
             color_map: None,
+            tags: vec![],
             raw_ext: None,
         }
     }
@@ -843,6 +851,9 @@ pub struct Presentation {
     /// Table styles defined in the file (`ppt/tableStyles.xml`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub table_styles: Vec<table::TableStyleDef>,
+    /// Add-in tags (`p:custDataLst` → `ppt/tags/tagN.xml`): name/value pairs kept for round trip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<(String, String)>,
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
