@@ -277,7 +277,33 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
     if let Some(a) = cat_ax {
         c.axis_titles.0 = a.child("title").map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
     }
+    // Text sizes as the file sets them (PowerPoint draws chart text at these sizes, not scaled to
+    // the chart): the axes' and legend's, else the whole chart's; the title's own.
+    let chart_size = text_size(root.child("txPr"));
+    c.text_size = [val_ax, cat_ax, ch.child("legend")].into_iter().flatten().find_map(|e| text_size(e.child("txPr"))).or(chart_size);
+    c.title_size = ch.child("title").and_then(|t| text_size(t.child("tx").and_then(|x| x.child("rich"))).or_else(|| text_size(t.child("txPr"))));
     Some(c)
+}
+
+/// The size in points of the first `a:defRPr` or `a:rPr` with one under `e` (`sz` in hundredths).
+fn text_size(e: Option<&El>) -> Option<f64> {
+    fn rec(e: &El, depth: usize) -> Option<f64> {
+        if depth > 8 {
+            return None;
+        }
+        for c in e.elements() {
+            if (c.is("defRPr") || c.is("rPr"))
+                && let Some(v) = c.attr("sz").and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite() && *v > 0.0)
+            {
+                return Some((v / 100.0).clamp(1.0, 400.0));
+            }
+            if let Some(v) = rec(c, depth + 1) {
+                return Some(v);
+            }
+        }
+        None
+    }
+    rec(e?, 0)
 }
 
 #[cfg(test)]
@@ -335,5 +361,31 @@ mod tests {
             .replace("<c:axId val=\"3\"/><c:axId val=\"4\"/></c:lineChart>", "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>");
         let c = read_chart_xml(single.as_bytes()).unwrap();
         assert!(c.series.iter().all(|s| !s.secondary_axis));
+    }
+
+    #[test]
+    fn text_sizes_are_read_from_the_file() {
+        // PowerPoint's new charts set the axes' and legend's text to 11.97 pt and the title's to
+        // 18.62 pt; a chart that only sets its overall text size uses it everywhere.
+        let ns =
+            r#"xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main""#;
+        let tx = |sz: u32| format!(r#"<c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz="{sz}"/></a:pPr></a:p></c:txPr>"#);
+        let xml = format!(
+            r#"<c:chartSpace {ns}><c:chart><c:title><c:tx><c:rich><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1862"/></a:pPr><a:r><a:t>T</a:t></a:r></a:p></c:rich></c:tx></c:title><c:plotArea><c:barChart><c:barDir val="col"/><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/>{}</c:catAx><c:valAx><c:axId val="2"/>{}</c:valAx></c:plotArea></c:chart></c:chartSpace>"#,
+            tx(1197),
+            tx(1197)
+        );
+        let c = read_chart_xml(xml.as_bytes()).unwrap();
+        assert_eq!((c.text_size, c.title_size), (Some(11.97), Some(18.62)));
+        let xml = format!(
+            r#"<c:chartSpace {ns}><c:chart><c:plotArea><c:barChart><c:barDir val="col"/></c:barChart></c:plotArea></c:chart>{}</c:chartSpace>"#,
+            tx(1400)
+        );
+        let c = read_chart_xml(xml.as_bytes()).unwrap();
+        assert_eq!((c.text_size, c.title_size), (Some(14.0), None));
+        let xml = format!(
+            r#"<c:chartSpace {ns}><c:chart><c:plotArea><c:barChart><c:barDir val="col"/></c:barChart></c:plotArea></c:chart></c:chartSpace>"#
+        );
+        assert_eq!(read_chart_xml(xml.as_bytes()).unwrap().text_size, None, "no sizes: the renderer picks one");
     }
 }

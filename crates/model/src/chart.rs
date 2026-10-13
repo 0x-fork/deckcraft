@@ -150,6 +150,13 @@ pub struct Chart {
     pub legend: Option<String>,
     /// `c:legend/c:overlay`: the legend is drawn over the plot instead of shrinking it.
     pub legend_overlay: bool,
+    /// Text size in points of the axis labels and legend (from their `c:txPr`, else the chart's);
+    /// `None`: the file gives none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_size: Option<f64>,
+    /// Title text size in points (its rich text or `c:txPr`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title_size: Option<f64>,
     pub data_labels: bool,
     pub gridlines: bool,
     pub axis_titles: (Option<String>, Option<String>),
@@ -193,6 +200,8 @@ impl Default for Chart {
             series: vec![],
             legend: Some("b".into()),
             legend_overlay: false,
+            text_size: None,
+            title_size: None,
             data_labels: false,
             gridlines: true,
             axis_titles: (None, None),

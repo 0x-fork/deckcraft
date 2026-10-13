@@ -139,11 +139,14 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             rctx.pres,
         );
     }
-    let base = (h.min(w) / 22.0).clamp(7.0, 18.0);
+    // The file's text sizes when it has them (PowerPoint draws chart text at them); otherwise a size
+    // that suits the chart.
+    let base = c.text_size.unwrap_or_else(|| (h.min(w) / 22.0).clamp(7.0, 18.0));
+    let title_size = c.title_size.unwrap_or(base * 1.4);
     let mut area = Rect::new(w * 0.04, h * 0.04, w * 0.96, h * 0.96);
     if let Some(t) = &c.title {
-        label(ctx, rctx, m, t, Rect::new(0.0, area.y0, w, area.y0 + base * 1.8), base * 1.4, Align::Center, Anchor::Top, text_col, false);
-        area.y0 += base * 2.4;
+        label(ctx, rctx, m, t, Rect::new(0.0, area.y0, w, area.y0 + title_size * 1.3), title_size, Align::Center, Anchor::Top, text_col, false);
+        area.y0 += title_size * 1.7;
     }
     let pie = matches!(c.kind, ChartType::Pie | ChartType::Doughnut);
     // Legend placed by `c:legendPos`.
