@@ -839,3 +839,35 @@ fn symbol_font_characters_draw_in_the_sym_font() {
     // The letters around it keep the run's font.
     assert!(families.iter().all(|(f, c)| c.0 == 1 || !f.eq_ignore_ascii_case(symbol)), "{families:?}");
 }
+
+#[test]
+fn small_capitals_draw_smaller_than_the_capitals_beside_them() {
+    let (p, mut sh) = setup("HxHx", 2000.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.props.bullet = Some(Bullet::None);
+    para.runs[0].props.caps = Some(Caps::Small);
+    para.runs[0].props.size = Some(40.0);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let sizes: Vec<(usize, f64)> = l.runs.iter().map(|r| (r.glyphs.len(), r.size)).collect();
+    // H at 40 pt, x as a capital at 80 % (four runs: the size changes at every letter).
+    assert_eq!(sizes, vec![(1, 40.0), (1, 32.0), (1, 40.0), (1, 32.0)]);
+}
+
+#[test]
+fn capitals_keep_characters_whose_capital_is_a_sequence() {
+    assert_eq!(caps_char('a'), 'A');
+    assert_eq!(caps_char('ǆ'), 'Ǆ');
+    // PowerPoint draws "ß", "ﬁ" and "ŉ" unchanged in all caps.
+    assert_eq!(caps_char('ß'), 'ß');
+    assert_eq!(caps_char('\u{FB01}'), '\u{FB01}');
+    assert_eq!(caps_char('ŉ'), 'ŉ');
+    let (p, mut sh) = setup("aß", 2000.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.runs[0].props.caps = Some(Caps::All);
+    let l = lay(&p, &sh, 2000.0, 300.0);
+    let r = l.runs.iter().find(|r| !r.cells.is_empty()).unwrap();
+    let face = &r.face;
+    if face.covers('ß') {
+        assert_eq!(r.glyphs[1].0, face.glyph_for('ß'), "ß is not drawn as S");
+    }
+}

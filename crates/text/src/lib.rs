@@ -647,6 +647,17 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
     cells
 }
 
+/// A character in capitals (`cap="all"`/`"small"`): its uppercase when that is one character.
+/// PowerPoint leaves characters whose capital is a sequence as they are: "ß" stays "ß" (not "SS"),
+/// "ﬁ" and "ŉ" stay.
+fn caps_char(ch: char) -> char {
+    let mut up = ch.to_uppercase();
+    match (up.next(), up.next()) {
+        (Some(u), None) => u,
+        _ => ch,
+    }
+}
+
 /// Size of superscript and subscript text relative to the run's size.
 const SUB_SUPER: f64 = 0.66;
 
@@ -690,7 +701,7 @@ fn shape_item(
     let (Some(&b0), Some(&b1)) = (byte_of.get(range.start), byte_of.get(range.end)) else { return };
     let features = shaping_features(cells.get(range.clone()).unwrap_or(&[]), styles, script);
     let params = ShapeParams { features: &features, rtl, script, language: lang };
-    let glyphs = deckcraft_fonts::shape_range(face, text, b0..b1, &params, |ch| if upper { ch.to_uppercase().next().unwrap_or(ch) } else { ch });
+    let glyphs = deckcraft_fonts::shape_range(face, text, b0..b1, &params, |ch| if upper { caps_char(ch) } else { ch });
     let upem = face.upem.max(1.0);
     let scale_of = |cell: &Cell| {
         let st = styles.get(cell.style);
@@ -1420,7 +1431,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         }
         // Group visually consecutive cells by (style, face).
         let mut cur: Option<GlyphRun> = None;
-        let mut cur_key = (usize::MAX, usize::MAX);
+        let mut cur_key = (usize::MAX, usize::MAX, false);
         for &k in &place.order {
             let ci = line.start + k;
             let Some(cell) = p.cells.get(ci) else { continue };
@@ -1429,7 +1440,8 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             let base_y = line.baseline - st.baseline * st.size;
             let size = if st.baseline != 0.0 { st.size * SUB_SUPER } else { st.size };
             let size = if st.caps == Caps::Small && cell.ch.is_lowercase() { size * 0.8 } else { size };
-            let key = (cell.style, cell.face);
+            // Small capitals are drawn smaller than the capitals beside them: a run of their own.
+            let key = (cell.style, cell.face, st.caps == Caps::Small && cell.ch.is_lowercase());
             if key != cur_key {
                 if let Some(r) = cur.take() {
                     out.runs.push(r);
