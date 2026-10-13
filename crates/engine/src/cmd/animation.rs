@@ -127,7 +127,7 @@ pub fn default_path(effect: &str, option: &str) -> String {
         "turns" => format!("M 0 0 L {} {} C {} {} {dx} {} {dx} {dy} E", dx * 0.5, dy * 0.5, dx, dy * 0.5, dy * 0.75),
         "shapes" => "M 0 0 C 0.1 0 0.1 0.15 0 0.15 C -0.1 0.15 -0.1 0 0 0 Z E".into(),
         "loops" => "M 0 0 C 0.1 -0.1 0.2 0.1 0.1 0.1 C 0 0.1 0.1 -0.1 0.25 0 E".into(),
-        _ => format!("M 0 0 L {dx} {dy} E"),
+        other => deckcraft_model::anim::preset_path(other).unwrap_or_else(|| format!("M 0 0 L {dx} {dy} E")),
     }
 }
 
