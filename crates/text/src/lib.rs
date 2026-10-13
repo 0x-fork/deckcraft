@@ -201,6 +201,9 @@ struct Style {
     /// The `a:ea` and `a:cs` families (theme references resolved), if the document names one.
     ea: Option<String>,
     cs: Option<String>,
+    /// The `a:sym` family: private-use characters (U+F000–U+F0FF, as PowerPoint stores symbol-font
+    /// characters) are drawn in it.
+    sym: Option<String>,
     /// Heading font (`+mj-…`): the theme's major font set applies.
     major: bool,
     /// Pair kerning on: `a:rPr/@kern` is set and the size reaches it.
@@ -315,6 +318,7 @@ fn make_style(ctx: &Ctx, r: &RunProps, scale: f64, prompt: Option<Rgba>) -> Styl
         lang: r.lang.clone().filter(|l| !l.is_empty()),
         ea,
         cs,
+        sym: r.font_sym.as_deref().map(|f| ctx.master.theme.font(f)).filter(|f| !f.trim().is_empty()),
         major,
         kern: r.kern.is_some_and(|k| k > 0.0 && size + 1e-6 >= k * scale),
     }
@@ -588,9 +592,18 @@ fn shape_cells(ctx: &Ctx, text: &str, char_style: &[usize], styles: &[Style], fa
         // Emoji, and pictographs asked to look like text (U+FE0E), pick their own face.
         let neutral =
             cluster.iter().all(|c| script::script_of(*c).is_none()) && !deckcraft_fonts::is_emoji_cluster(cluster) && !cluster.contains(&'\u{FE0E}');
-        let face = match prev.as_ref() {
-            Some(p) if neutral && deckcraft_fonts::covers_cluster(p, cluster) && char_style.get(a.wrapping_sub(1)) == Some(&si) => p.clone(),
-            _ => {
+        // A symbol-font character (U+F0xx) with an `a:sym` font draws in that font when it's there.
+        let sym_face = st
+            .sym
+            .as_deref()
+            .filter(|_| cluster.first().is_some_and(|c| ('\u{F000}'..='\u{F0FF}').contains(c)))
+            .filter(|f| db.has_family(f))
+            .map(|f| db.face(f, st.style_name))
+            .filter(|f| deckcraft_fonts::covers_cluster(f, cluster));
+        let face = match (sym_face, prev.as_ref()) {
+            (Some(f), _) => f,
+            (None, Some(p)) if neutral && deckcraft_fonts::covers_cluster(p, cluster) && char_style.get(a.wrapping_sub(1)) == Some(&si) => p.clone(),
+            (None, _) => {
                 let chain = chains.entry((si, slot, sc)).or_insert_with(|| face_chain(ctx, st, slot, sc));
                 db.cascade(cluster, chain, st.style_name)
             }

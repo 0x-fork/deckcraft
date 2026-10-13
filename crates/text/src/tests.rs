@@ -759,3 +759,25 @@ fn symbol_char_maps_symbol_font_codes() {
     assert_eq!(symbol_char(&face, "Wingdings", '\u{F06E}'), Some('\u{25A0}'));
     assert_eq!(symbol_char(&face, "Wingdings", '\u{100}'), None, "not a symbol code");
 }
+
+#[test]
+fn symbol_font_characters_draw_in_the_sym_font() {
+    // PowerPoint stores a Symbol-font character as U+F0xx with `<a:sym typeface="Symbol"/>`:
+    // U+F0DE is the Symbol font's double arrow (⇒). It must come from that font, not from
+    // whichever installed font happens to map U+F0DE (Wingdings draws an arrow at another angle).
+    let symbol = "Symbol";
+    if !FontDb::global().has_family(symbol) {
+        eprintln!("skipped: no Symbol font installed");
+        return;
+    }
+    let (p, mut sh) = setup("x\u{F0DE}y", 600.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.props.bullet = Some(Bullet::None);
+    para.runs[0].props.font = Some("Arial".into());
+    para.runs[0].props.font_sym = Some(symbol.into());
+    let l = lay(&p, &sh, 600.0, 300.0);
+    let families: Vec<(String, (usize, usize))> = l.runs.iter().map(|r| (r.face.family.clone(), r.chars)).collect();
+    assert!(families.iter().any(|(f, c)| f.eq_ignore_ascii_case(symbol) && c.0 == 1), "{families:?}");
+    // The letters around it keep the run's font.
+    assert!(families.iter().all(|(f, c)| c.0 == 1 || !f.eq_ignore_ascii_case(symbol)), "{families:?}");
+}
