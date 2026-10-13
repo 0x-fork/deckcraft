@@ -1,13 +1,24 @@
 //! Decoded pictures shared by every render on this process, keyed by the media bytes' address and
 //! the requested size level and adjustments, so each picture is decoded once per size.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use deckcraft_model::style::PictureAdjust;
 use vello_cpu::Pixmap;
 
 const BUDGET: usize = 512 << 20;
+
+/// Largest straight-RGBA picture a decode may produce (bytes, 4 per pixel). Checked from the
+/// header before decoding and again before the conversion to RGBA, which the decoder's own
+/// allocation limit doesn't cover (a grey image converts to four times its decoded size).
+const MAX_RGBA: u64 = 512 << 20;
+
+/// Pictures that failed to decode, remembered so they aren't retried every frame: at most this
+/// many, holding at most this many encoded bytes (oldest forgotten first). Larger failed inputs
+/// aren't kept at all.
+const BAD_MAX: usize = 256;
+const BAD_BUDGET: usize = 64 << 20;
 
 struct Entry {
     _bytes: Arc<Vec<u8>>,
@@ -20,7 +31,11 @@ struct Cache {
     map: HashMap<(usize, u32, u64), Entry>,
     bytes: usize,
     clock: u64,
+    /// Failed sources by address; each holds its bytes so the address can't be reused while it
+    /// is listed. `bad_order` is oldest first; `bad_bytes` their encoded size.
     bad: HashMap<usize, Arc<Vec<u8>>>,
+    bad_order: VecDeque<usize>,
+    bad_bytes: usize,
     /// GIFs by bytes address and adjustments (`None`: not animated); the bytes stay alive with them.
     anims: HashMap<(usize, u64), (Arc<Vec<u8>>, Option<Arc<Anim>>)>,
 }
@@ -115,9 +130,47 @@ fn decode_at(bytes: &[u8], side: u32) -> Option<image::RgbaImage> {
     if crate::metafile::is_metafile(bytes) {
         return crate::metafile::rasterize(bytes, side);
     }
+    decode_raster(bytes, MAX_RGBA)
+}
+
+impl Cache {
+    /// Remember that `bytes` doesn't decode, within [`BAD_MAX`] and [`BAD_BUDGET`].
+    fn mark_bad(&mut self, addr: usize, bytes: &Arc<Vec<u8>>) {
+        if bytes.len() > BAD_BUDGET || self.bad.contains_key(&addr) {
+            return;
+        }
+        while self.bad.len() >= BAD_MAX || self.bad_bytes + bytes.len() > BAD_BUDGET {
+            let Some(old) = self.bad_order.pop_front() else { break };
+            if let Some(b) = self.bad.remove(&old) {
+                self.bad_bytes = self.bad_bytes.saturating_sub(b.len());
+            }
+        }
+        self.bad.insert(addr, bytes.clone());
+        self.bad_order.push_back(addr);
+        self.bad_bytes += bytes.len();
+    }
+
+    fn is_bad(&self, addr: usize, bytes: &Arc<Vec<u8>>) -> bool {
+        self.bad.get(&addr).is_some_and(|b| Arc::ptr_eq(b, bytes))
+    }
+}
+
+/// Whether a `w` × `h` picture fits [`MAX_RGBA`] (`max`: the cap in bytes).
+fn fits(w: u32, h: u32, max: u64) -> bool {
+    w > 0 && h > 0 && (w as u64) * (h as u64) * 4 <= max
+}
+
+/// Decode a raster picture to RGBA, refusing (before decoding, by its header, and again before
+/// the RGBA conversion) any whose RGBA would exceed `max` bytes.
+fn decode_raster(bytes: &[u8], max: u64) -> Option<image::RgbaImage> {
+    let reader = image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?;
+    if let Ok((w, h)) = reader.into_dimensions()
+        && !fits(w, h, max)
+    {
+        return None;
+    }
     let img = image::load_from_memory(bytes).ok()?;
-    let (w, h) = (img.width(), img.height());
-    if w == 0 || h == 0 || (w as u64) * (h as u64) > 400_000_000 {
+    if !fits(img.width(), img.height(), max) {
         return None;
     }
     Some(img.to_rgba8())
@@ -176,7 +229,7 @@ pub fn dpi(bytes: &[u8]) -> Option<(f64, f64)> {
 /// A premultiplied pixmap of the picture, downsampled so its longer side is near `want` px.
 pub fn decode_for(bytes: &Arc<Vec<u8>>, want: f64, adj: &PictureAdjust) -> Option<Arc<Pixmap>> {
     let addr = Arc::as_ptr(bytes) as usize;
-    if with(|c| c.bad.contains_key(&addr)) {
+    if with(|c| c.is_bad(addr, bytes)) {
         return None;
     }
     // Power-of-two size buckets so zooming doesn't re-decode every frame.
@@ -194,9 +247,7 @@ pub fn decode_for(bytes: &Arc<Vec<u8>>, want: f64, adj: &PictureAdjust) -> Optio
     }
     let target = 1u32 << bucket;
     let Some(mut img) = decode_at(bytes, target) else {
-        with(|c| {
-            c.bad.insert(addr, bytes.clone());
-        });
+        with(|c| c.mark_bad(addr, bytes));
         return None;
     };
     let (w, h) = img.dimensions();
@@ -375,6 +426,66 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+
+    fn grey_png(w: u32, h: u32) -> Vec<u8> {
+        let img = image::GrayImage::from_pixel(w, h, image::Luma([90]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).expect("encode");
+        out.into_inner()
+    }
+
+    #[test]
+    fn rgba_conversion_is_refused_past_the_cap() {
+        let png = grey_png(100, 50);
+        let rgba = 100 * 50 * 4;
+        assert!(decode_raster(&png, rgba - 1).is_none(), "grey decodes small, its RGBA does not fit");
+        let img = decode_raster(&png, rgba).expect("fits exactly");
+        assert_eq!(img.dimensions(), (100, 50));
+        // A picture whose header claims a huge size is refused.
+        let mut huge = png.clone();
+        huge[16..20].copy_from_slice(&60_000u32.to_be_bytes());
+        huge[20..24].copy_from_slice(&60_000u32.to_be_bytes());
+        assert!(decode_raster(&huge, MAX_RGBA).is_none());
+        assert!(!fits(60_000, 60_000, MAX_RGBA) && fits(8192, 8192, MAX_RGBA));
+    }
+
+    #[test]
+    fn failed_sources_are_bounded_and_released() {
+        let mut c = Cache::default();
+        let srcs: Vec<Arc<Vec<u8>>> = (0..BAD_MAX + 50).map(|i| Arc::new(vec![i as u8; 1000])).collect();
+        for s in &srcs {
+            c.mark_bad(Arc::as_ptr(s) as usize, s);
+        }
+        assert_eq!(c.bad.len(), BAD_MAX);
+        assert_eq!(c.bad_bytes, BAD_MAX * 1000);
+        // The oldest were forgotten and their bytes released; the newest are still known.
+        assert_eq!(Arc::strong_count(&srcs[0]), 1);
+        assert!(!c.is_bad(Arc::as_ptr(&srcs[0]) as usize, &srcs[0]));
+        let last = srcs.last().expect("source");
+        assert!(c.is_bad(Arc::as_ptr(last) as usize, last));
+        // The byte budget holds too, and an input larger than it isn't kept at all.
+        let big = Arc::new(vec![0u8; BAD_BUDGET / 2 + 1]);
+        c.mark_bad(Arc::as_ptr(&big) as usize, &big);
+        let big2 = Arc::new(vec![1u8; BAD_BUDGET / 2 + 1]);
+        c.mark_bad(Arc::as_ptr(&big2) as usize, &big2);
+        assert!(c.bad_bytes <= BAD_BUDGET);
+        assert_eq!(Arc::strong_count(&big), 1);
+        let huge = Arc::new(vec![0u8; BAD_BUDGET + 1]);
+        c.mark_bad(Arc::as_ptr(&huge) as usize, &huge);
+        assert_eq!(Arc::strong_count(&huge), 1);
+    }
+
+    #[test]
+    fn invalid_pictures_fail_and_valid_ones_still_decode_and_cache() {
+        let bad = Arc::new(b"not a picture at all".to_vec());
+        assert!(decode_for(&bad, 64.0, &PictureAdjust::default()).is_none());
+        assert!(decode_for(&bad, 64.0, &PictureAdjust::default()).is_none());
+        let good = Arc::new(grey_png(20, 10));
+        let a = decode_for(&good, 64.0, &PictureAdjust::default()).expect("decodes");
+        let b = decode_for(&good, 64.0, &PictureAdjust::default()).expect("cached");
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!((a.width(), a.height()), (20, 10));
+    }
 
     #[test]
     fn duotone_maps_luminance_between_its_two_colours() {
