@@ -347,7 +347,12 @@ pub struct RunProps {
     pub link: Option<Hyperlink>,
     pub lang: Option<String>,
     pub shadow: Option<crate::style::Shadow>,
+    /// `a:innerShdw` on the run. Outer shadow stays in `shadow`.
+    pub inner_shadow: Option<crate::style::Shadow>,
     pub glow: Option<crate::style::Glow>,
+    pub reflection: Option<crate::style::Reflection>,
+    /// Soft-edge radius in points (`a:softEdge`).
+    pub soft_edge: Option<f64>,
     /// Spelling/grammar errors are not flagged.
     pub no_proof: Option<bool>,
 }
@@ -378,7 +383,10 @@ impl RunProps {
             link,
             lang,
             shadow,
+            inner_shadow,
             glow,
+            reflection,
+            soft_edge,
             no_proof
         );
     }

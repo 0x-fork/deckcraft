@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors; run effect lists and bevel presets kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -59,9 +59,14 @@ revision history.
 Detail in [file-format-parity.md](file-format-parity.md).
 
 ### PPTX has never met a corpus of real decks
-- **Evidence:** every PPTX test (`crates/pptx/tests`, 30 tests) uses decks DeckCraft generates;
-  the 2026-10-07 alpha checklist already listed this as open. No reference renders from PowerPoint
-  exist to compare against.
+- **Evidence:** PPTX tests use decks DeckCraft generates. An owned check
+  (`crates/pptx/tests/corpus_style.rs`) now opens, saves and reopens text effects (gradient, outline,
+  shadow, glow, inner shadow, reflection and soft edge), autofit, columns, vertical and RTL text,
+  tab stops, line spacing, theme effects, gradient and pattern fills, 3-D bevels and connectors.
+  That check found a run's inner shadow, reflection and soft edge were dropped, and a bevel preset
+  with no kept `sp3d` was not written back; both are kept now. Comment threads (#70), media options
+  (#74), animation rewind (#77) and embedded fonts are still open, and there is no corpus of decks
+  from outside this repo. No reference renders from PowerPoint exist to compare against.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is unknown.
 - **Estimate:** 20–35 h: build an owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -256,6 +261,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors. A run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, are kept. #70, #74, #77 and embedded fonts stay open |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |

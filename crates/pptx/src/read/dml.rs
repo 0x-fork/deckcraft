@@ -503,7 +503,10 @@ pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {
             "effectLst" => {
                 let fx = effects(e);
                 p.shadow = fx.outer_shadow;
+                p.inner_shadow = fx.inner_shadow;
                 p.glow = fx.glow;
+                p.reflection = fx.reflection;
+                p.soft_edge = fx.soft_edge;
             }
             "highlight" => p.highlight = color(e),
             "uFill" => p.underline_color = e.child("solidFill").and_then(color),
