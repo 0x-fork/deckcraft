@@ -975,3 +975,35 @@ fn smartart_pictures_3d_styles_and_colour_variants() {
         assert_eq!((d.style.as_str(), d.colors.as_str()), (style, colors));
     }
 }
+
+#[test]
+fn smartart_converts_to_and_from_text_and_shapes() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.textBox", &json!({"text": "Goals\nRevenue\nGrowth"})).unwrap();
+    let before = s.doc().unwrap().doc.slides[1].shapes.len();
+    let gid = s.execute("smartArt.fromText", &json!({"kind": "blockList"})).unwrap()["id"].as_u64().unwrap();
+    let st = s.doc().unwrap();
+    assert_eq!(st.doc.slides[1].shapes.len(), before, "the text box is replaced, not added to");
+    let d = st.doc.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+    assert_eq!(d.nodes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), ["Goals", "Revenue", "Growth"]);
+
+    // Name and Title: titles show in their own box and survive a .pptx round trip.
+    s.execute("smartArt.layout", &json!({"id": gid, "kind": "nameTitleOrgChart"})).unwrap();
+    s.execute("smartArt.setNodes", &json!({"id": gid, "index": 0, "title": "Lead"})).unwrap();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap()).unwrap();
+    let bd = back.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+    assert_eq!((bd.kind.as_str(), bd.nodes[0].title.as_str()), ("nameTitleOrgChart", "Lead"));
+
+    let tid = s.execute("smartArt.toText", &json!({"id": gid})).unwrap()["id"].as_u64().unwrap();
+    let st = s.doc().unwrap();
+    let tb = st.doc.slides[1].shapes.iter().find(|x| x.id.0 as u64 == tid).unwrap();
+    assert!(tb.diagram.is_none());
+    assert_eq!(tb.text.as_ref().unwrap().paragraphs.len(), 3);
+
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("smartArt.toShapes", &json!({"id": gid})).unwrap();
+    let st = s.doc().unwrap();
+    let g = st.doc.slides[1].shapes.iter().find(|x| x.id.0 as u64 == gid).unwrap();
+    assert!(g.diagram.is_none() && !g.children().is_empty(), "a plain group of the same shapes");
+}

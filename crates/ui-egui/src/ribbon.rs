@@ -2375,6 +2375,15 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
                 }
             }
         });
+        let (r, _) = small_button_ex(ui, Icon::Layout, "Convert", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            if ui.button("Convert to Text").clicked() {
+                run(app, "smartArt.toText", json!({"id": gid}));
+            }
+            if ui.button("Convert to Shapes").clicked() {
+                run(app, "smartArt.toShapes", json!({"id": gid}));
+            }
+        });
     });
     group(ui, |ui| {
         let (r, _) = small_button_ex(ui, Icon::ChangeChartType, "Change Colors", gid.is_some(), false, true);

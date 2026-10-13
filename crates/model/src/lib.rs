@@ -368,6 +368,9 @@ pub struct DiagramNode {
     /// An assistant (organisation charts): drawn beside its parent, off the row of its siblings.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub assistant: bool,
+    /// The job title under the name (Name and Title Organization Chart).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub title: String,
 }
 
 impl Default for Shape {
