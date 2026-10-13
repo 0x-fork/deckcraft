@@ -1,6 +1,6 @@
 # Slide show and presenter view: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; measured from `crates/ui-egui/src/show.rs` and `crates/anim/src/show.rs` against PowerPoint 16.113's Slide Show tab and menu) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (interactive-deck clicks in the slide show; previous: major (created; measured from `crates/ui-egui/src/show.rs` and `crates/anim/src/show.rs` against PowerPoint 16.113's Slide Show tab and menu)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -20,6 +20,9 @@ ready** (estimated), **10–16 h** to parity.
 | Step clock: a click after a long pause plays its step (#11) | yes | yes | |
 | Hidden slides skipped | yes | yes | |
 | Hyperlinks and action settings followed (slides, web, mail, End Show, Last Viewed) | yes | yes | Only `http(s)` and `mailto` open outside the show, by design (`safe_url`) |
+| A shape with a triggered animation plays it when clicked; shapes an animation has hidden cannot be clicked; a shape without an action on top of one with an action blocks it; the pointer is a hand over what can be clicked | yes | yes | Click boxes are bounding boxes; "play sound" actions (`ppaction://media`) do nothing yet |
+| A slide the show returns to (link, arrow keys) looks as it was left; a triggered animation goes on where it stopped | yes | yes | A main-sequence step still playing when the show leaves is finished |
+| "Advance on click" off: a click never leaves the slide (animation steps still play, keys still move on) | yes | yes | |
 | Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable |
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | |
 | See All Slides grid during the show | yes | no | |
@@ -73,4 +76,5 @@ Reading View in a window with navigation: present (checklist row done).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-13 | minor | Click handling for interactive decks: triggers, per-slide state kept across visits, visible-shape hit testing with hand cursor, advance on click |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |

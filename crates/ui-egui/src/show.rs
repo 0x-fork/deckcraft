@@ -1,10 +1,10 @@
 //! Slide Show: full-screen playback with transitions and animations (`deckcraft-anim`),
 //! keyboard/mouse navigation, pen, black/white screens, presenter view and rehearsed timings.
 
-use deckcraft_anim::{Layer, LinkJump, ShowAction, ShowState, Source, Timeline};
+use deckcraft_anim::{Click, HitShape, Layer, LinkJump, ShowAction, ShowState, Source, StepStamp, Timeline, TriggerPlay};
 use deckcraft_model::text::Hyperlink;
 use deckcraft_model::{Presentation, ShapeId};
-use deckcraft_render::{ParaState, RenderOpts, ShapeState};
+use deckcraft_render::{ParaState, PlacedLink, PlacedShape, RenderOpts, ShapeState};
 use egui::{Align2, Color32, CornerRadius, Mesh, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, pos2, vec2};
 use serde_json::json;
 
@@ -40,8 +40,9 @@ pub struct Show {
     media_slide: Option<usize>,
     /// The slide shown before the current one (the Last Slide Viewed action).
     last_viewed: Option<usize>,
-    /// Click areas of hyperlinks and shape actions on slide `.0`, in slide points.
-    links: Option<(usize, Vec<deckcraft_render::PlacedLink>)>,
+    /// Click areas on slide `.0`, in slide points: hyperlinks and shape actions, and the slide's
+    /// shapes in drawing order.
+    links: Option<(usize, Vec<PlacedLink>, Vec<PlacedShape>)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -52,6 +53,8 @@ struct Key {
     doc: usize,
     /// Media hidden while not playing.
     hidden: Vec<ShapeId>,
+    /// Clicks played of each triggered animation (what the shapes look like when none is running).
+    plays: Vec<(ShapeId, usize)>,
     /// The frames animated GIFs show.
     gif: u64,
 }
@@ -169,7 +172,9 @@ impl Show {
 
     /// On entering a slide: auto-play its first step when it begins With/After Previous.
     fn after_enter(&mut self, doc: &Presentation, now: f64) {
-        let auto = self.timeline(doc).step_is_auto(0);
+        // A slide the show comes back to is not started again: only a first visit has an automatic
+        // first step.
+        let auto = self.timeline(doc).step_is_auto(0) && self.state.step == 0;
         if auto || self.autoplay {
             let a = self.state.next(doc);
             if matches!(a, ShowAction::PlayStep(_)) {
@@ -179,8 +184,8 @@ impl Show {
     }
 }
 
-fn state_for(tl: &Timeline, id: ShapeId, step: usize, t: f64) -> ShapeState {
-    let a = tl.state(id, None, step, t);
+fn state_for(tl: &Timeline, id: ShapeId, step: usize, t: f64, plays: &[TriggerPlay], stamps: &[StepStamp]) -> ShapeState {
+    let a = tl.state_ordered(id, None, step, t, plays, stamps);
     ShapeState {
         visible: a.visible,
         opacity: a.opacity,
@@ -314,15 +319,18 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             _ => {}
         }
     }
+    // The clock of the triggered animations runs before anything reacts to the pointer.
+    show.tick_triggers(&doc, now);
     let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
     let gif_click = if clicked && on_slide { gif_hit(&ctx, ui, &show, &doc, app) } else { None };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
-    let link = if on_slide && gif_click.is_none() && media_click.is_none() { link_hit(&ctx, ui, &mut show, &doc) } else { None };
+    let under = if on_slide && gif_click.is_none() && media_click.is_none() { shapes_under_pointer(&ctx, ui, &mut show, &doc, now) } else { None };
+    let pointing = under.as_ref().is_some_and(|u| u.pick.is_some());
     if let Some(id) = gif_click {
         let _ = app.run("media.gifPlay", json!({"id": id}));
     } else if let Some((id, clip)) = media_click {
         app.media.toggle(&doc, id, &clip, crate::media::Owner::Show);
-    } else if clicked && let Some(l) = &link {
+    } else if clicked && let Some(Pick::Text(l)) = under.as_ref().and_then(|u| u.pick.clone()) {
         let last = show.last_viewed;
         match show.state.follow(&doc, &l.action, last) {
             LinkJump::Show(a) => actions.push(a),
@@ -336,7 +344,14 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         } else if show.blank.is_some() {
             show.blank = None;
         } else {
-            actions.push(show.state.next(&doc));
+            // A shape with an action or a triggered animation, or the background.
+            let none = Under::default();
+            match show.click_slide(&doc, under.as_ref().unwrap_or(&none), now) {
+                Click::Show(a) => actions.push(a),
+                Click::Open(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
+                Click::Exit => keep = false,
+                Click::Animated | Click::None => {}
+            }
         }
     }
     if secondary && !show.ended {
@@ -395,8 +410,11 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     } else {
         let idx = show.state.slide;
         let step = show.state.step;
-        let animating = show.state.playing;
-        let t = if animating { now - show.step_start } else { 0.0 };
+        // A main step or a triggered animation is running: the picture changes every frame.
+        let animating = show.state.playing || show.state.trigger_playing();
+        let t = if show.state.playing { now - show.step_start } else { 0.0 };
+        let plays = show.state.trigger_plays();
+        let stamps = show.state.trigger_stamps();
         let media = crate::media::slide_media(&doc, idx);
         let hidden: Vec<ShapeId> = media
             .iter()
@@ -409,14 +427,15 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let times: Vec<_> = gifs.iter().map(|g| (g.id, g.t)).collect();
         crate::media::gif_repaint(&ctx, &gifs);
         let gif = crate::media::gif_key(&gifs);
-        let key = Key { slide: idx, step, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: hidden.clone(), gif };
+        let done: Vec<(ShapeId, usize)> = plays.iter().map(|p| (p.trigger, p.step)).collect();
+        let key = Key { slide: idx, step, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: hidden.clone(), plays: done, gif };
         let tex = if !animating && show.tex.as_ref().is_some_and(|(k, _)| *k == key) {
             show.tex.as_ref().map(|(_, t)| t.clone())
         } else {
             let tl = show.timeline(&doc).clone();
             let hide = hidden.clone();
             let f = move |id: ShapeId| {
-                let mut st = state_for(&tl, id, step, t);
+                let mut st = state_for(&tl, id, step, t, &plays, &stamps);
                 if hide.contains(&id) {
                     st.visible = false;
                 }
@@ -454,7 +473,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             (Some(tr), Some(tl)) => {
                 let p = ((now - tr.start) / tr.dur.max(0.01)).clamp(0.0, 1.0);
                 let hidden_b = |id: ShapeId| {
-                    let st = state_for(&tl, id, 0, 0.0);
+                    let st = state_for(&tl, id, 0, 0.0, &[], &[]);
                     !st.visible || st.opacity <= 0.0 || hidden.contains(&id)
                 };
                 tr.from
@@ -579,7 +598,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             s.push(pos2((p.x - srect.min.x) / srect.width(), (p.y - srect.min.y) / srect.height()));
         }
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
-    } else if link.is_some() {
+    } else if pointing {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     } else if now - show.last_move > 2.5 && !show.reading {
         ctx.set_cursor_icon(egui::CursorIcon::None);
@@ -725,9 +744,34 @@ fn media_hit(ctx: &egui::Context, ui: &Ui, show: &Show, doc: &Presentation) -> O
     })
 }
 
-/// The link under the pointer: the topmost shape action or text hyperlink on the current slide
-/// (a text link wins over its shape's action).
-fn link_hit(ctx: &egui::Context, ui: &Ui, show: &mut Show, doc: &Presentation) -> Option<Hyperlink> {
+/// What a click on the pointer's spot acts on.
+#[derive(Clone)]
+enum Pick {
+    /// A hyperlink in text.
+    Text(Hyperlink),
+    /// A shape with an action or a triggered animation.
+    Shape,
+}
+
+/// The slide's shapes at the pointer, for [`ShowState::click`].
+#[derive(Default)]
+struct Under {
+    shapes: Vec<HitShape>,
+    /// Whether each of `shapes` is currently shown (an animation may have hidden it).
+    visible: Vec<bool>,
+    pick: Option<Pick>,
+}
+
+impl Under {
+    fn visible(&self, id: ShapeId) -> bool {
+        self.shapes.iter().zip(&self.visible).find(|(h, _)| h.id == id).is_none_or(|(_, v)| *v)
+    }
+}
+
+/// What is under the pointer on the shown slide: the slide's shapes with their animation state, the
+/// topmost of them that does something when clicked, and a text hyperlink on it. Only shapes that
+/// are shown can be clicked, and a shape without an action hides the ones beneath it.
+fn shapes_under_pointer(ctx: &egui::Context, ui: &Ui, show: &mut Show, doc: &Presentation, now: f64) -> Option<Under> {
     let p = ctx.input(|i| i.pointer.hover_pos())?;
     let full = ui.max_rect();
     let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
@@ -735,11 +779,72 @@ fn link_hit(ctx: &egui::Context, ui: &Ui, show: &mut Show, doc: &Presentation) -
     let k = (srect.width() / doc.slide_size.width.max(1.0) as f32) as f64;
     let (x, y) = ((p.x - srect.min.x) as f64 / k, (p.y - srect.min.y) as f64 / k);
     let i = show.state.slide;
-    if show.links.as_ref().is_none_or(|(s, _)| *s != i) {
-        show.links = Some((i, deckcraft_render::place_slide(doc, i).links));
+    if show.links.as_ref().is_none_or(|(s, ..)| *s != i) {
+        let placed = deckcraft_render::place_slide(doc, i);
+        show.links = Some((i, placed.links, placed.shapes));
     }
-    let (_, links) = show.links.as_ref()?;
-    links.iter().rev().find(|l| l.rect.x0 <= x && x <= l.rect.x1 && l.rect.y0 <= y && y <= l.rect.y1).map(|l| l.link.clone())
+    show.timeline(doc);
+    let (Some((_, tl)), Some((_, links, shapes))) = (&show.timeline, &show.links) else { return None };
+    let inside = |x0: f64, y0: f64, x1: f64, y1: f64| x0 <= x && x <= x1 && y0 <= y && y <= y1;
+    let hits: Vec<HitShape> = shapes
+        .iter()
+        .map(|s| HitShape {
+            id: s.id,
+            parent: s.parent,
+            is_group: s.is_group,
+            link: s.link.as_ref().map(|l| l.action.clone()),
+            under_pointer: inside(s.rect.x0, s.rect.y0, s.rect.x1, s.rect.y1),
+        })
+        .collect();
+    let (step, plays, stamps) = (show.state.step, show.state.trigger_plays(), show.state.trigger_stamps());
+    let t = if show.state.playing { now - show.step_start } else { 0.0 };
+    let visible: Vec<bool> = shapes
+        .iter()
+        .map(|s| {
+            let a = tl.state_ordered(s.id, None, step, t, &plays, &stamps);
+            a.visible && a.opacity > 0.0
+        })
+        .collect();
+    let mut under = Under { shapes: hits, visible, pick: None };
+    let shown = |id: ShapeId| under.visible(id);
+    // A hyperlink in text applies when its shape is the one on top.
+    let top = show.state.top(doc, tl, &under.shapes, &shown);
+    let text = links.iter().rev().filter(|l| l.text && inside(l.rect.x0, l.rect.y0, l.rect.x1, l.rect.y1)).find(|l| {
+        let mut at = top;
+        (0..=under.shapes.len()).any(|_| match at.and_then(|k| under.shapes.get(k)) {
+            Some(h) if h.id == l.shape => true,
+            Some(h) => {
+                at = h.parent;
+                false
+            }
+            None => false,
+        })
+    });
+    under.pick = match text {
+        Some(l) => Some(Pick::Text(l.link.clone())),
+        None => show.state.target(doc, tl, &under.shapes, &shown).map(|_| Pick::Shape),
+    };
+    Some(under)
+}
+
+impl Show {
+    /// Advance the clock of the running triggered animations.
+    fn tick_triggers(&mut self, doc: &Presentation, now: f64) {
+        self.timeline(doc);
+        if let Some((_, tl)) = &self.timeline {
+            self.state.tick(tl, now);
+        }
+    }
+
+    /// A click on the slide: the shape under the pointer acts, or the background advances.
+    fn click_slide(&mut self, doc: &Presentation, under: &Under, now: f64) -> Click {
+        self.timeline(doc);
+        let last = self.last_viewed;
+        match &self.timeline {
+            Some((_, tl)) => self.state.click(doc, tl, &under.shapes, &|id| under.visible(id), now, last),
+            None => Click::None,
+        }
+    }
 }
 
 /// A slide-space box on screen, the slide being drawn in `srect` at `k` pixels per point.
@@ -878,7 +983,7 @@ mod tests {
         let ctx = egui::Context::default();
         let red = ctx.load_texture("show", egui::ColorImage::filled([1, 1], Color32::RED), egui::TextureOptions::LINEAR);
         let mut show = Show::new(&doc, 0, false, false);
-        show.tex = Some((Key { slide: 0, step: 0, size: (1, 1), doc: 0, hidden: vec![], gif: 0 }, red.clone()));
+        show.tex = Some((Key { slide: 0, step: 0, size: (1, 1), doc: 0, hidden: vec![], gif: 0, plays: vec![] }, red.clone()));
         assert!(show.apply(ShowAction::Slide(1), &doc, 0.0));
         let tr = show.trans.as_ref().expect("the fade plays");
         assert_eq!(tr.old.as_ref().map(TextureHandle::id), Some(red.id()));
