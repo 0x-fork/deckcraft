@@ -1146,3 +1146,34 @@ fn broken_metafiles_draw_nothing_and_never_panic() {
         let _ = render_slide(&p, 0, &RenderOpts { scale: 0.25, ..Default::default() });
     }
 }
+
+#[test]
+fn an_object_deckcraft_doesnt_model_shows_its_preview_picture() {
+    // An embedded OLE object (or an unknown graphic) draws its preview stretched over its frame,
+    // as PowerPoint does; with no preview it draws nothing.
+    let png = {
+        let mut out = std::io::Cursor::new(vec![]);
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(4, 2, image::Rgb([200, 20, 20])))
+            .write_to(&mut out, image::ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    };
+    for with_preview in [true, false] {
+        let mut p = Presentation::default();
+        let media = p.add_media("image1.png", "image/png", png.clone());
+        let sh = Shape {
+            id: ShapeId(600),
+            xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 200.0)),
+            kind: ShapeKind::Opaque { xml: String::new(), preview: with_preview.then_some(media), label: "Package".into() },
+            ..Default::default()
+        };
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        for (x, y) in [(110, 110), (300, 200), (490, 290)] {
+            let px = img.pixel(x, y);
+            let red = px[0] > 180 && px[1] < 60 && px[2] < 60;
+            assert_eq!(red, with_preview, "({x}, {y}) {px:?}");
+        }
+        assert!(img.pixel(520, 200)[1] > 200, "nothing outside the frame");
+    }
+}

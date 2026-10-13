@@ -356,7 +356,8 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
         let mut pics = vec![];
         e.find_all("blip", &mut pics);
         pics.into_iter().find_map(|b| dml::media_ref(imp, part, b))
-    };
+    }
+    .or_else(|| gd.and_then(|g| g.find("oleObj")).and_then(|o| vml_preview(imp, part, o.attr("spid")?)));
     let label = if let Some(o) = gd.and_then(|g| g.find("oleObj")) {
         o.attr("progId").or(o.attr("name")).unwrap_or("Object").to_string()
     } else if uri.ends_with("/diagram") {
@@ -368,6 +369,21 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
     };
     s.kind = ShapeKind::Opaque { xml: part.keep(e), preview, label };
     s
+}
+
+/// The preview picture of an old-style embedded object (`p:oleObj spid` with no `p:pic`): the
+/// `v:imagedata` of the legacy VML drawing shape with that id, as PowerPoint 2007 wrote them.
+fn vml_preview(imp: &mut Imp, part: &Part, spid: &str) -> Option<deckcraft_model::MediaId> {
+    for rel in part.rels.items.iter().filter(|r| r.kind == "vmlDrawing" && !r.external) {
+        let Some(doc) = imp.pkg.xml(&rel.target) else { continue };
+        let mut shapes = vec![];
+        doc.root.find_all("shape", &mut shapes);
+        let Some(img) = shapes.into_iter().find(|s| s.attr("id") == Some(spid)).and_then(|s| s.find("imagedata")) else { continue };
+        let Some(id) = img.attr("o:relid").or(img.attr("r:id")) else { continue };
+        let target = imp.pkg.rels(&rel.target).get(id).filter(|r| !r.external).map(|r| r.target.clone())?;
+        return imp.media_for(&target);
+    }
+    None
 }
 
 /// SmartArt: read the pre-drawn shapes of its drawing part as a group.

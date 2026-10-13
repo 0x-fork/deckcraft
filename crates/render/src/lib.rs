@@ -717,6 +717,13 @@ impl Renderer {
                 paint::picture(ctx, f.pres, &paint::resolved(rctx, pf, None), bounds, m, t);
                 ctx.pop_layer();
             }
+            // An object DeckCraft doesn't model (an embedded OLE object, an unknown graphic): its
+            // preview picture, stretched over the frame, as PowerPoint draws it.
+            ShapeKind::Opaque { preview: Some(media), .. } => {
+                ctx.set_transform(m);
+                let pf = deckcraft_model::style::PictureFill { media: *media, ..Default::default() };
+                paint::picture(ctx, f.pres, &pf, Rect::new(0.0, 0.0, w, h), m, None);
+            }
             ShapeKind::Media(mc) => {
                 ctx.set_transform(m);
                 let bounds = Rect::new(0.0, 0.0, w, h);
