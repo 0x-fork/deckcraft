@@ -703,7 +703,7 @@ fn shape_para(
     opts: &Opts,
     number: Option<u32>,
     no_kern: bool,
-    vertical: bool,
+    vertical: Upright,
 ) -> ParaShaped {
     let db = FontDb::global();
     let Some(para) = body.paragraphs.get(pi) else {
@@ -831,7 +831,7 @@ fn shape_cells(
     styles: &[Style],
     faces: &mut Vec<Arc<FontFace>>,
     rtl: bool,
-    vertical: bool,
+    vertical: Upright,
 ) -> Vec<Cell> {
     let db = FontDb::global();
     let chars: Vec<char> = text.chars().collect();
@@ -911,9 +911,9 @@ fn shape_cells(
         .collect();
     // In East Asian vertical text, ideographs, kana, Hangul, full-width forms and the like stand
     // upright (a whole grapheme at a time); other text lies on its side.
-    if vertical {
+    if vertical != Upright::None {
         for &(a, b) in &graphemes {
-            let up = chars.get(a).is_some_and(|c| is_upright(*c));
+            let up = chars.get(a).is_some_and(|c| if vertical == Upright::All { !c.is_whitespace() } else { is_upright(*c) });
             for c in cells.get_mut(a..b).into_iter().flatten() {
                 c.upright = up;
             }
@@ -939,6 +939,30 @@ fn shape_cells(
     // (no `vert` alternates).
     for (a, b) in items {
         shape_item(&mut cells, styles, faces, text, &byte_of, &char_at_byte, a..b, scripts.get(a).and_then(|s| s.0), lang(a), upper(a));
+    }
+    // Stacked text: each character takes one em down the line, centred across it (PowerPoint
+    // stacks 18 pt Latin letters about 18 pt apart, a space only its own width).
+    if vertical == Upright::All {
+        for i in 0..n {
+            let Some(c) = cells.get(i) else { continue };
+            if !c.upright || c.head != i || c.glyphs.is_empty() {
+                continue;
+            }
+            let size = styles.get(c.style).map(|st| st.size).unwrap_or(18.0);
+            let width: f64 = (i..n).take_while(|&j| cells.get(j).is_some_and(|d| d.head == i)).filter_map(|j| cells.get(j)).map(|d| d.adv).sum();
+            let pad = (size - width) / 2.0;
+            if let Some(c) = cells.get_mut(i) {
+                for g in &mut c.glyphs {
+                    g.1 += pad;
+                }
+            }
+            for j in i..n {
+                match cells.get_mut(j) {
+                    Some(d) if d.head == i => d.adv = if j == i { size } else { 0.0 },
+                    _ => break,
+                }
+            }
+        }
     }
     cells
 }
@@ -981,6 +1005,17 @@ fn is_upright(c: char) -> bool {
             | 0x1F000..=0x1FAFF
             | 0x20000..=0x3FFFF
     )
+}
+
+/// Which characters stand upright in vertical text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Upright {
+    /// None (horizontal text, vert, vert270, mongolianVert).
+    None,
+    /// Ideographs, kana and the like (eaVert).
+    Cjk,
+    /// Every character, one under the other (wordArtVert).
+    All,
 }
 
 /// Size of superscript and subscript text relative to the run's size.
@@ -1553,10 +1588,18 @@ fn spacing_stops_kerning(ctx: &Ctx, shape: &Shape, body: &TextBody) -> bool {
 fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts: &Opts, scale: f64, reduce: f64, no_kern: bool) -> TextLayout {
     let r = opts.rect;
     let vert = bp.vert.unwrap_or(TextDir::Horizontal);
-    // East Asian vertical text: CJK stands upright in text turned a quarter turn.
-    let upright_text = vert == TextDir::EaVertical;
+    // East Asian vertical text: CJK stands upright in text turned a quarter turn; stacked text
+    // stands every character upright, one under the other.
+    let upright_text = match vert {
+        TextDir::EaVertical => Upright::Cjk,
+        TextDir::Stacked => Upright::All,
+        _ => Upright::None,
+    };
+    // Mongolian vertical and stacked text: turned like vert, their lines run from left to right
+    // (as PowerPoint draws both).
+    let lines_ltr = matches!(vert, TextDir::MongolianVertical | TextDir::Stacked);
     let rotation = match vert {
-        TextDir::Vertical | TextDir::EaVertical | TextDir::Stacked => 90.0,
+        TextDir::Vertical | TextDir::EaVertical | TextDir::Stacked | TextDir::MongolianVertical => 90.0,
         TextDir::Vertical270 => 270.0,
         TextDir::Horizontal => 0.0,
     } + bp.rot.unwrap_or(0.0);
@@ -1840,8 +1883,15 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         line.baseline += oy;
         line.bottom += oy;
         line.shift_x(ox);
+        if lines_ltr {
+            // The line's place mirrored across the box: the first line ends up on the left.
+            let d = inner.y0 + inner.y1 - line.top - line.bottom;
+            line.top += d;
+            line.baseline += d;
+            line.bottom += d;
+        }
         let Some(p) = shaped_paras.get(line.para) else { continue };
-        if let Some((s, bx, by)) = bullet.take()
+        if let Some((s, bx, _)) = bullet.take()
             && let Some((_, st)) = p.bullet.as_ref()
         {
             let (_, g) = measure_str(&st.face, st.size, &s);
@@ -1851,7 +1901,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 color: st.color,
                 glyphs: g
                     .into_iter()
-                    .map(|(gid, x)| (gid, ox + bx + x + if line.column > 0 { line.column as f64 * (col_w + col_gap) } else { 0.0 }, by + oy))
+                    .map(|(gid, x)| (gid, ox + bx + x + if line.column > 0 { line.column as f64 * (col_w + col_gap) } else { 0.0 }, line.baseline))
                     .collect(),
                 cells: vec![],
                 fake_bold: false,

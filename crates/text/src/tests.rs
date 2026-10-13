@@ -1088,3 +1088,33 @@ fn east_asian_vertical_text_marks_cjk_upright() {
     assert!(l.runs.iter().all(|r| !r.upright));
     assert!(is_upright('あ') && is_upright('、') && is_upright('Ａ') && !is_upright('A') && !is_upright('1'));
 }
+
+#[test]
+fn mongolian_lines_run_left_to_right_and_stacked_letters_stand_one_em_apart() {
+    let (p, mut sh) = setup("one\ntwo", 200.0, 400.0);
+    sh.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::Vertical);
+    let v = lay(&p, &sh, 200.0, 400.0);
+    sh.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::MongolianVertical);
+    let m = lay(&p, &sh, 200.0, 400.0);
+    assert_eq!(m.rotation, 90.0);
+    // In layout space (turned a quarter turn) vert puts the first line at the top, which shows on
+    // the right; mongolianVert mirrors the line places, so the first line shows on the left.
+    assert!(v.lines[0].top < v.lines[1].top);
+    assert!(m.lines[0].top > m.lines[1].top);
+    let mid = (m.inner.y0 + m.inner.y1) / 2.0;
+    assert!(((m.lines[0].top + m.lines[0].bottom) / 2.0 - mid + ((v.lines[0].top + v.lines[0].bottom) / 2.0 - mid)).abs() < 0.01);
+    // Stacked: every letter upright, one em apart.
+    let (p, mut sh) = setup("Lil", 200.0, 400.0);
+    let t = sh.text.as_mut().unwrap();
+    t.body.vert = Some(deckcraft_model::text::TextDir::Stacked);
+    t.paragraphs[0].runs[0].props.size = Some(20.0);
+    let s = lay(&p, &sh, 200.0, 400.0);
+    assert!(s.runs.iter().filter(|r| !r.cells.is_empty()).all(|r| r.upright));
+    // Its lines run left to right too.
+    let (p2, mut sh2) = setup("one\ntwo", 200.0, 400.0);
+    sh2.text.as_mut().unwrap().body.vert = Some(deckcraft_model::text::TextDir::Stacked);
+    let st = lay(&p2, &sh2, 200.0, 400.0);
+    assert!(st.lines[0].top > st.lines[1].top);
+    let e = &s.lines[0].edges;
+    assert!((e[1].1 - e[1].0 - 20.0).abs() < 0.01 && (e[2].1 - e[2].0 - 20.0).abs() < 0.01, "{e:?}");
+}

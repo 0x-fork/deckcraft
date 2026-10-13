@@ -55,6 +55,8 @@ pub enum TextDir {
     Vertical270,
     Stacked,
     EaVertical,
+    /// `mongolianVert`: turned like `vert`, lines running from left to right.
+    MongolianVertical,
 }
 
 impl TextDir {
@@ -65,12 +67,14 @@ impl TextDir {
             TextDir::Vertical270 => "vert270",
             TextDir::Stacked => "wordArtVert",
             TextDir::EaVertical => "eaVert",
+            TextDir::MongolianVertical => "mongolianVert",
         }
     }
     pub fn from_xml(s: &str) -> Option<Self> {
         Some(match s {
             "horz" => TextDir::Horizontal,
-            "vert" | "mongolianVert" => TextDir::Vertical,
+            "vert" => TextDir::Vertical,
+            "mongolianVert" => TextDir::MongolianVertical,
             "vert270" => TextDir::Vertical270,
             "wordArtVert" | "wordArtVertRtl" => TextDir::Stacked,
             "eaVert" => TextDir::EaVertical,
