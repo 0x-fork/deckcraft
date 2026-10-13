@@ -125,7 +125,7 @@ pub fn blip_fill(imp: &mut Imp, part: &Part, bf: &El) -> Option<PictureFill> {
     let blip = bf.child("blip");
     let media = blip.and_then(|b| media_ref(imp, part, b));
     let media = media?;
-    let mut pf = PictureFill { media, ..Default::default() };
+    let mut pf = PictureFill { media, upright: !bf.bool("rotWithShape").unwrap_or(true), ..Default::default() };
     if let Some(b) = blip {
         for e in b.elements() {
             match e.local() {

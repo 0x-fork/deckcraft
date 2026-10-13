@@ -139,6 +139,10 @@ pub struct PictureFill {
     /// 0–1 opacity of the picture.
     pub alpha: Option<f64>,
     pub adjust: PictureAdjust,
+    /// `rotWithShape="0"`: the picture keeps to the slide's axes when its shape is rotated or
+    /// flipped.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub upright: bool,
 }
 
 /// Picture corrections and colour (Picture Format ▸ Corrections / Color / Transparency).

@@ -82,6 +82,19 @@ pub fn fill_path(
             ctx.fill_path(path);
         }
         Fill::Picture(pf) => {
+            // `rotWithShape="0"`: upright on the slide, stretched over the box the turned shape
+            // covers, clipped to it.
+            let c = m.as_coeffs();
+            let turned = c[1].abs() > 1e-9 || c[2].abs() > 1e-9 || c[0] < 0.0 || c[3] < 0.0;
+            if pf.upright && turned && m.determinant().abs() > 1e-12 {
+                let on_slide = m.transform_rect_bbox(bounds);
+                let on_path = m * path.clone();
+                ctx.set_transform(Affine::IDENTITY);
+                ctx.push_clip_layer(&on_path);
+                picture(ctx, pres, &resolved(rctx, pf, ph), on_slide, Affine::IDENTITY, None);
+                ctx.pop_layer();
+                return;
+            }
             ctx.push_clip_layer(path);
             picture(ctx, pres, &resolved(rctx, pf, ph), bounds, m, None);
             ctx.pop_layer();

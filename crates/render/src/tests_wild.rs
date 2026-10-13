@@ -683,3 +683,30 @@ fn stars_and_right_arrows_have_sharp_corners_by_default() {
     assert!(close(img.pixel(95, 95), WHITE, 30), "{:?}", img.pixel(95, 95));
     assert!(deckcraft_geom::preset::mitred_by_default("rightArrow") && !deckcraft_geom::preset::mitred_by_default("leftArrow"));
 }
+
+#[test]
+fn an_upright_picture_fill_stays_upright_in_a_turned_shape() {
+    use deckcraft_model::style::PictureFill;
+    let blue = Rgba::rgb(0, 0, 255);
+    for upright in [false, true] {
+        let mut p = Presentation::default();
+        let media = p.add_media("t.png", "image/png", half_red_half_blue());
+        // Half red (left) half blue picture in a 200 × 200 square turned a quarter (and so
+        // covering the same square).
+        let sh = Shape {
+            id: ShapeId(30),
+            xfrm: Some(Xfrm { rot: 90.0, ..Xfrm::new(100.0, 100.0, 200.0, 200.0) }),
+            fill: Some(Fill::Picture(PictureFill { media, upright, ..Default::default() })),
+            line: no_line(),
+            ..Default::default()
+        };
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        let (left, top) = (img.pixel(110, 200), img.pixel(200, 110));
+        if upright {
+            assert!(close(left, RED, 30) && close(img.pixel(290, 200), blue, 30), "upright: red left {left:?}");
+        } else {
+            assert!(close(top, RED, 30), "turned with the shape: red at the top {top:?}");
+        }
+    }
+}

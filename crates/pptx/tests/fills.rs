@@ -228,3 +228,24 @@ fn black_and_white_and_inverted_alpha_pictures_round_trip() {
         other => panic!("{other:?}"),
     }
 }
+
+#[test]
+fn an_upright_picture_fill_round_trips() {
+    let bytes = deck();
+    let edited = edit_slides(&bytes, |x| x.replacen("rotWithShape=\"1\"", "rotWithShape=\"0\"", 1));
+    let q = deckcraft_pptx::import(&edited).expect("import");
+    let s = q.slides[0].shapes.iter().find(|s| s.name == "Textured").expect("shape");
+    let Some(Fill::Picture(pf)) = &s.fill else { panic!("{:?}", s.fill) };
+    assert!(pf.upright);
+    let again = deckcraft_pptx::export(&q).expect("export");
+    let r = deckcraft_pptx::import(&again).expect("import");
+    let s = r.slides[0].shapes.iter().find(|s| s.name == "Textured").expect("shape");
+    assert!(matches!(&s.fill, Some(Fill::Picture(pf)) if pf.upright));
+    // Rotating with the shape is the default.
+    assert!(matches!(textured_fill(&bytes), Some(Fill::Picture(pf)) if !pf.upright));
+}
+
+fn textured_fill(bytes: &[u8]) -> Option<Fill> {
+    let q = deckcraft_pptx::import(bytes).expect("import");
+    q.slides[0].shapes.iter().find(|s| s.name == "Textured").and_then(|s| s.fill.clone())
+}
