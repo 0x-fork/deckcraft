@@ -3,13 +3,13 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 79%** over 191 features.
+**Weighted breadth parity: 80%** over 191 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
+| P2 | 54 | 14 | 15 | 25 | 40% |
 
 | Area | Parity |
 |---|---|
@@ -17,7 +17,7 @@ The summary between `<!-- SUMMARY -->
 | Files | 71% |
 | Slides | 90% |
 | Views | 90% |
-| Masters & themes | 85% |
+| Masters & themes | 88% |
 | Shapes | 88% |
 | Format | 83% |
 | Arrange | 100% |
@@ -102,7 +102,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Masters & themes | Hide background graphics | P1 | D |
 | Masters & themes | Slide size (16:9, 4:3, presets, custom) | P0 | D |
 | Masters & themes | Header & footer (date, slide number, footer) | P1 | D |
-| Masters & themes | Browse themes from .pptx/.thmx | P2 | M |
+| Masters & themes | Browse themes from .pptx/.thmx | P2 | D |
 | Masters & themes | Designer layout suggestions (offline) | P2 | M |
 | Shapes | Preset shapes (lines, rectangles, basic, arrows, equation, flowchart, stars, callouts) | P0 | D |
 | Shapes | Action buttons | P2 | D |
