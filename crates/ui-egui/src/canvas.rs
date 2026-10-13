@@ -139,6 +139,27 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     app.perf.render_ms = app.textures.last_render_ms;
     media_frames(app, &painter, xf);
+    // Notes Master view: the current slide inside the slide-image placeholder, as in PowerPoint.
+    let notes_preview = app.session.active().filter(|d| d.selection.target == Target::NotesMaster).and_then(|d| {
+        let frame = d.doc.notes_master.as_ref()?.shapes.iter().find(|s| s.ph_type() == Some(deckcraft_model::PhType::SlideImage))?.xfrm?;
+        Some((d.doc.clone(), d.selection.slide.min(d.doc.slides.len().saturating_sub(1)), frame))
+    });
+    if let Some((doc, idx, f)) = notes_preview
+        && f.w > 1.0
+        && f.h > 1.0
+    {
+        let aspect = doc.slide_size.width / doc.slide_size.height.max(1.0);
+        let (w, h) = if f.w / f.h > aspect { (f.h * aspect, f.h) } else { (f.w, f.w / aspect) };
+        let (x, y) = (f.x + (f.w - w) / 2.0, f.y + (f.h - h) / 2.0);
+        let r = Rect::from_min_size(
+            pos2(slide_rect.min.x + x as f32 * scale, slide_rect.min.y + y as f32 * scale),
+            vec2(w as f32 * scale, h as f32 * scale),
+        );
+        let mut budget = 2;
+        if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (r.width() * ppp).round().max(1.0) as u32, &mut budget) {
+            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+    }
     if let Some(d) = app.session.active().filter(|d| d.selection.target == Target::Handout) {
         // Where the slides go on a printed handout, as in PowerPoint's preview.
         let (n, s) = (d.doc.notes_size, d.doc.slide_size);
