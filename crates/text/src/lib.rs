@@ -1332,14 +1332,16 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
 }
 
 /// Does character spacing switch pair kerning off in this body? PowerPoint stops kerning every run
-/// of a text body once one of its runs is spaced out by 0.6 pt or more, or condensed by 1 pt or
-/// more (measured on Arial at 40 pt: 0.5 pt and -0.99 pt keep the pairs kerned, 0.6 pt and -1 pt
-/// drop them for the whole box).
+/// of a text body once one of its runs is spaced out by 0.6 pt or more (measured on Arial at 40 pt:
+/// 0.5 pt keeps the pairs kerned, 0.6, 0.8, 1 and 1.5 pt drop them for the whole box, even in
+/// paragraphs without spacing). Condensed spacing mostly keeps them (-0.6, -1, -1.5, -2 and -3 pt;
+/// -1.2 and -2.5 pt did not, which no simple rule explains, so condensing never stops kerning
+/// here: titles condensed by 1 pt are common and kerned).
 fn spacing_stops_kerning(ctx: &Ctx, shape: &Shape, body: &TextBody) -> bool {
     body.paragraphs.iter().any(|para| {
         para.runs.iter().any(|run| {
             let s = resolve::run(ctx, shape, para, &run.props).spacing.unwrap_or(0.0);
-            s >= 0.55 || s <= -0.995
+            s >= 0.55
         })
     })
 }

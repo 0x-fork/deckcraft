@@ -133,8 +133,8 @@ fn character_spacing_in_the_body_stops_kerning() {
     };
     let (_, off) = glyphs_and_width(&family, "AVATAR WAVE", Some(0.0));
     let (_, on) = glyphs_and_width(&family, "AVATAR WAVE", Some(12.0));
-    // Small spacing elsewhere keeps the pairs; 0.6 pt or -1 pt anywhere in the box drops them.
-    for (spc, kerned) in [(0.0, true), (0.5, true), (-0.99, true), (0.6, false), (1.0, false), (-1.0, false), (3.0, false)] {
+    // Small or condensed spacing elsewhere keeps the pairs; 0.6 pt anywhere in the box drops them.
+    for (spc, kerned) in [(0.0, true), (0.5, true), (-0.99, true), (-1.0, true), (-2.0, true), (0.6, false), (1.0, false), (3.0, false)] {
         let w = kerned_width_beside_spacing(&family, spc);
         let want = if kerned { on } else { off };
         assert!((w - want).abs() < 0.01, "{family} spc {spc}: {w} vs {want}");
