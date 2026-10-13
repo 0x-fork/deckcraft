@@ -595,7 +595,7 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                         }
                     }
                     if ui.button("Line Spacing Options…").clicked() {
-                        app.dialog = Some(crate::dialogs::Dialog::new("paragraph"));
+                        run(app, "format.paragraphDialog", json!({}));
                     }
                 });
                 let r = icon_toggle(ui, Icon::Columns, "Columns", en, false);
@@ -636,6 +636,9 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                         }
                     }
                 });
+                if ui.add_enabled(en, egui::Button::new("Paragraph…").min_size(vec2(88.0, 22.0))).on_hover_text("Paragraph").clicked() {
+                    run(app, "format.paragraphDialog", json!({}));
+                }
             });
         });
     });

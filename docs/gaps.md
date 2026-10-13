@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -203,9 +203,10 @@ Detail in [ui-parity.md](ui-parity.md).
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
-- **Dialogs**: 28 dialogs vs PowerPoint's ~60. The Font dialog is in (family, size, style, underline,
-  colour, strikethrough, baseline, caps, character spacing, one undo step). Still missing: Bullets
-  and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object…. 6–12 h.
+- **Dialogs**: 29 dialogs vs PowerPoint's ~60. The Font dialog and the Paragraph dialog are in
+  (Paragraph: alignment, first-line and hanging indents, spacing before/after, line spacing, and a
+  Tabs dialog, each OK one undo step). Still missing: Bullets and Numbering, Find/Replace, Replace
+  Fonts, Action Settings, Print, Insert Object…. 4–8 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
 ## Hardware
@@ -257,6 +258,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Paragraph dialog sets alignment, indentation, spacing and line spacing in one step; its Tabs… button opens a standalone Tabs dialog |
 | 2026-10-14 | minor | Font dialog sets typeface, size, style, underline, colour, strikethrough, baseline, caps and character spacing in one step |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

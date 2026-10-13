@@ -3,7 +3,7 @@
 
 use deckcraft_model::edit as ed;
 use deckcraft_model::resolve;
-use deckcraft_model::text::{Align, Anchor, AutoFit, Bullet, Caps, ParaProps, RunProps, Spacing, Strike, TextDir};
+use deckcraft_model::text::{Align, Anchor, AutoFit, Bullet, Caps, ParaProps, RunProps, Spacing, Strike, TabStop, TextDir};
 use deckcraft_model::{Effects, Fill, Line, Shape};
 use serde_json::{Value, json};
 
@@ -147,6 +147,24 @@ pub fn specs() -> Vec<CommandSpec> {
             "{align?, indentLeft?: pt, indentFirst?: pt (negative = hanging), spaceBefore?: pt, spaceAfter?: pt, lineSpacing?: lines}",
             has_text_or_shapes,
             paragraph
+        ),
+        cmd!(
+            "format.paragraphDialog",
+            "Paragraph…",
+            ["Home", "Paragraph"],
+            None,
+            "{align?: left|center|right|justify|justLow|distributed, indentLeft?: pt, indentRight?: pt, special?: none|first|hanging, specialBy?: pt, indentFirst?: pt, spaceBefore?: pt, spaceAfter?: pt, spaceBeforeKind?: pts|pct, spaceAfterKind?: pts|pct, lineSpacing?: lines, lineSpacingPt?: pt} — with none of these, opens the Paragraph dialog",
+            has_text_or_shapes,
+            paragraph_dialog
+        ),
+        cmd!(
+            "format.tabs",
+            "Tabs…",
+            ["Home", "Paragraph"],
+            None,
+            "{set?: [{pos: pt, align: l|ctr|r|dec}], defaultTab?: pt} — with neither, opens the Tabs dialog",
+            has_text_or_shapes,
+            tabs
         ),
         cmd!("format.anchor", "Align Text", ["Home", "Paragraph"], None, "{anchor: top|middle|bottom}", has_text_or_shapes, anchor),
         cmd!(
@@ -758,6 +776,229 @@ fn paragraph(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
+const PARA_DIALOG_KEYS: &[&str] =
+    &["align", "indentLeft", "indentRight", "indentFirst", "special", "specialBy", "spaceBefore", "spaceAfter", "lineSpacing", "lineSpacingPt"];
+
+fn para_dialog_has_fields(p: &Value) -> bool {
+    PARA_DIALOG_KEYS.iter().any(|k| p.get(*k).is_some())
+}
+
+fn finite_key(p: &Value, cmd: &str, key: &str) -> Result<Option<f64>> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(v) => {
+            let n = v.as_f64().filter(|n| n.is_finite()).ok_or_else(|| bad(cmd, format!("`{key}` must be a finite number")))?;
+            Ok(Some(n))
+        }
+    }
+}
+
+fn clamp_pt(v: f64) -> f64 {
+    v.clamp(0.0, 1584.0)
+}
+
+fn parse_align(cmd: &str, s: &str) -> Result<Align> {
+    Ok(match s {
+        "left" | "l" => Align::Left,
+        "center" | "ctr" => Align::Center,
+        "right" | "r" => Align::Right,
+        "justify" | "just" => Align::Justify,
+        "justLow" => Align::JustLow,
+        "distributed" | "dist" => Align::Distributed,
+        _ => return Err(bad(cmd, "`align` must be left, center, right, justify, justLow or distributed")),
+    })
+}
+
+fn align_name(a: Align) -> &'static str {
+    match a {
+        Align::Left => "left",
+        Align::Center => "center",
+        Align::Right => "right",
+        Align::Justify => "justify",
+        Align::JustLow => "justLow",
+        Align::Distributed => "distributed",
+    }
+}
+
+fn spacing_parts(s: Option<Spacing>) -> (&'static str, f64) {
+    match s {
+        Some(Spacing::Pct(v)) => ("pct", v),
+        Some(Spacing::Pts(v)) => ("pts", v),
+        None => ("pts", 0.0),
+    }
+}
+
+fn paragraph_dialog_params(s: &Session) -> Value {
+    let pp = current_para(s);
+    let indent = pp.indent.unwrap_or(0.0);
+    let (special, by) = if indent > 0.05 {
+        ("first", indent)
+    } else if indent < -0.05 {
+        ("hanging", -indent)
+    } else {
+        ("none", 0.0)
+    };
+    let (line_kind, line_value) = match pp.line_spacing {
+        Some(Spacing::Pts(v)) => ("exactly", v),
+        Some(Spacing::Pct(v)) => ("multiple", v),
+        None => ("multiple", 1.0),
+    };
+    let (before_kind, before) = spacing_parts(pp.space_before);
+    let (after_kind, after) = spacing_parts(pp.space_after);
+    let tabs: Vec<Value> = pp.tabs.unwrap_or_default().iter().map(|t| json!({"pos": t.pos, "align": t.align})).collect();
+    json!({
+        "align": align_name(pp.align.unwrap_or(Align::Left)),
+        "indentLeft": pp.margin_left.unwrap_or(0.0),
+        "indentRight": pp.margin_right.unwrap_or(0.0),
+        "special": special,
+        "specialBy": by,
+        "spaceBefore": before,
+        "spaceBeforeKind": before_kind,
+        "spaceAfter": after,
+        "spaceAfterKind": after_kind,
+        "lineKind": line_kind,
+        "lineValue": line_value,
+        "tabs": tabs,
+        "defaultTab": pp.default_tab.unwrap_or(72.0),
+    })
+}
+
+fn write_spacing(kind: Option<&str>, value: f64) -> Spacing {
+    if kind == Some("pct") { Spacing::Pct(value.clamp(0.0, 10.0)) } else { Spacing::Pts(clamp_pt(value)) }
+}
+
+fn paragraph_dialog(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "format.paragraphDialog";
+    if !para_dialog_has_fields(p) {
+        s.ui_requests.push(crate::UiRequest::Dialog { id: "paragraph".into(), params: paragraph_dialog_params(s) });
+        return ok();
+    }
+    let align = match p.get("align") {
+        None => None,
+        Some(Value::String(a)) => Some(parse_align(CMD, a)?),
+        Some(_) => return Err(bad(CMD, "`align` must be a string")),
+    };
+    let indent_left = finite_key(p, CMD, "indentLeft")?.map(clamp_pt);
+    let indent_right = finite_key(p, CMD, "indentRight")?.map(clamp_pt);
+    let special_by = finite_key(p, CMD, "specialBy")?.map(|v| clamp_pt(v.max(0.0)));
+    let indent = match p.get("special") {
+        None => finite_key(p, CMD, "indentFirst")?.map(|v| v.clamp(-1584.0, 1584.0)),
+        Some(Value::String(kind)) => {
+            let by = special_by.unwrap_or(0.0);
+            Some(match kind.as_str() {
+                "none" => 0.0,
+                "first" | "firstLine" => by,
+                "hanging" | "hang" => -by,
+                _ => return Err(bad(CMD, "`special` must be none, first or hanging")),
+            })
+        }
+        Some(_) => return Err(bad(CMD, "`special` must be none, first or hanging")),
+    };
+    let space_before = finite_key(p, CMD, "spaceBefore")?;
+    let space_after = finite_key(p, CMD, "spaceAfter")?;
+    let before_kind = str_param(p, "spaceBeforeKind");
+    let after_kind = str_param(p, "spaceAfterKind");
+    for kind in [before_kind, after_kind].into_iter().flatten() {
+        if !matches!(kind, "pts" | "pct") {
+            return Err(bad(CMD, "spacing kind must be pts or pct"));
+        }
+    }
+    let line_mult = finite_key(p, CMD, "lineSpacing")?.map(|v| v.clamp(0.0, 9.99));
+    let line_pt = finite_key(p, CMD, "lineSpacingPt")?.map(clamp_pt);
+    format_para(s, &move |para| {
+        if align.is_some() {
+            para.props.align = align;
+        }
+        if indent_left.is_some() {
+            para.props.margin_left = indent_left;
+        }
+        if indent_right.is_some() {
+            para.props.margin_right = indent_right;
+        }
+        if indent.is_some() {
+            para.props.indent = indent;
+        }
+        if let Some(v) = space_before {
+            para.props.space_before = Some(write_spacing(before_kind, v));
+        }
+        if let Some(v) = space_after {
+            para.props.space_after = Some(write_spacing(after_kind, v));
+        }
+        if let Some(v) = line_mult {
+            para.props.line_spacing = Some(Spacing::Pct(v));
+        }
+        if let Some(v) = line_pt {
+            para.props.line_spacing = Some(Spacing::Pts(v));
+        }
+    })
+}
+
+fn tab_align(s: &str) -> Option<&'static str> {
+    Some(match s {
+        "l" | "left" => "l",
+        "ctr" | "center" => "ctr",
+        "r" | "right" => "r",
+        "dec" | "decimal" => "dec",
+        _ => return None,
+    })
+}
+
+fn tabs_params(s: &Session) -> Value {
+    let pp = current_para(s);
+    let stops: Vec<Value> = pp.tabs.unwrap_or_default().iter().map(|t| json!({"pos": t.pos, "align": t.align})).collect();
+    json!({"tabs": stops, "defaultTab": pp.default_tab.unwrap_or(72.0)})
+}
+
+fn tabs(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "format.tabs";
+    let set = p.get("set");
+    let default_tab = finite_key(p, CMD, "defaultTab")?.map(|v| v.clamp(1.0, 1584.0));
+    if set.is_none() && default_tab.is_none() {
+        s.ui_requests.push(crate::UiRequest::Dialog { id: "tabs".into(), params: tabs_params(s) });
+        return ok();
+    }
+    let stops = match set {
+        None => None,
+        Some(Value::Array(items)) => {
+            if items.len() > 64 {
+                return Err(bad(CMD, "`set` has more than 64 tab stops"));
+            }
+            let mut out: Vec<TabStop> = Vec::new();
+            for (i, item) in items.iter().enumerate() {
+                let Some(obj) = item.as_object() else {
+                    return Err(bad(CMD, format!("tab stop {i} must be an object")));
+                };
+                let pos = obj
+                    .get("pos")
+                    .and_then(Value::as_f64)
+                    .filter(|n| n.is_finite())
+                    .map(clamp_pt)
+                    .ok_or_else(|| bad(CMD, format!("tab stop {i} needs a finite `pos`")))?;
+                let align = match obj.get("align").and_then(Value::as_str) {
+                    None => "l",
+                    Some(a) => tab_align(a).ok_or_else(|| bad(CMD, format!("tab stop {i} align must be l, ctr, r or dec")))?,
+                };
+                if let Some(prev) = out.iter_mut().find(|t| (t.pos - pos).abs() < 0.05) {
+                    *prev = TabStop { pos, align: align.to_string() };
+                } else {
+                    out.push(TabStop { pos, align: align.to_string() });
+                }
+            }
+            out.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+            Some(out)
+        }
+        Some(_) => return Err(bad(CMD, "`set` must be an array")),
+    };
+    format_para(s, &move |para| {
+        if let Some(stops) = &stops {
+            para.props.tabs = Some(stops.clone());
+        }
+        if let Some(v) = default_tab {
+            para.props.default_tab = Some(v);
+        }
+    })
+}
+
 fn anchor(s: &mut Session, p: &Value) -> Result<Value> {
     let a = match str_param(p, "anchor").unwrap_or("top") {
         "middle" | "center" | "ctr" => Anchor::Middle,
@@ -901,7 +1142,7 @@ fn state(s: &mut Session, _p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
-    use deckcraft_model::text::{Caps, Strike};
+    use deckcraft_model::text::{Align, Caps, ParaProps, Spacing, Strike};
     use deckcraft_model::{ColorBase, Fill, SchemeSlot};
     use serde_json::json;
 
@@ -1017,5 +1258,122 @@ mod tests {
         assert!(props(&s).underline.is_none());
         s.execute("edit.deselect", &json!({})).unwrap();
         assert!(s.execute("format.fontDialog", &json!({"bold": true})).is_err());
+    }
+
+    fn para(s: &Session) -> ParaProps {
+        s.doc().unwrap().selected_shapes().first().and_then(|sh| sh.text.as_ref()).and_then(|t| t.paragraphs.first()).unwrap().props.clone()
+    }
+
+    #[test]
+    fn paragraph_dialog_applies_alignment_indent_and_spacing_in_one_undo() {
+        let mut s = shape();
+        let before = s.doc().unwrap().history.undo.len();
+        s.execute(
+            "format.paragraphDialog",
+            &json!({
+                "align": "justify",
+                "indentLeft": 36.0,
+                "indentRight": 18.0,
+                "special": "hanging",
+                "specialBy": 18.0,
+                "spaceBefore": 6.0,
+                "spaceAfter": 8.0,
+                "lineSpacing": 1.5
+            }),
+        )
+        .unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), before + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Paragraph…");
+        let p = para(&s);
+        assert_eq!(p.align, Some(Align::Justify));
+        assert_eq!(p.margin_left, Some(36.0));
+        assert_eq!(p.margin_right, Some(18.0));
+        assert_eq!(p.indent, Some(-18.0));
+        assert_eq!(p.space_before, Some(Spacing::Pts(6.0)));
+        assert_eq!(p.space_after, Some(Spacing::Pts(8.0)));
+        assert_eq!(p.line_spacing, Some(Spacing::Pct(1.5)));
+        s.execute("edit.undo", &json!({})).unwrap();
+        let p = para(&s);
+        assert_eq!(p.align, Some(Align::Center), "undo restores the alignment shape.insert wrote");
+        assert!(p.margin_left.is_none() && p.indent.is_none() && p.space_before.is_none() && p.line_spacing.is_none());
+    }
+
+    #[test]
+    fn paragraph_dialog_first_line_and_exact_spacing_replace_only_those_fields() {
+        let mut s = shape();
+        s.execute("format.paragraphDialog", &json!({"align": "right"})).unwrap();
+        s.execute("format.paragraphDialog", &json!({"special": "first", "specialBy": 27.0, "lineSpacingPt": 20.0})).unwrap();
+        let p = para(&s);
+        assert_eq!(p.align, Some(Align::Right));
+        assert_eq!(p.indent, Some(27.0));
+        assert_eq!(p.line_spacing, Some(Spacing::Pts(20.0)));
+        assert!(p.margin_left.is_none());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(para(&s).align, Some(Align::Right));
+        assert!(para(&s).indent.is_none());
+    }
+
+    #[test]
+    fn paragraph_dialog_with_no_fields_asks_the_ui_to_open() {
+        let mut s = shape();
+        let rev = s.doc().unwrap().revision;
+        let n = s.doc().unwrap().history.undo.len();
+        s.ui_requests.clear();
+        s.execute("format.paragraphDialog", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().revision, rev);
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
+        let Some(UiRequest::Dialog { id, params }) = s.ui_requests.last() else { panic!("dialog request") };
+        assert_eq!(id, "paragraph");
+        assert_eq!(params["align"], "center", "a new shape's text is centred");
+        assert_eq!(params["special"], "none");
+        assert_eq!(params["lineKind"], "multiple");
+        assert!(params["lineValue"].as_f64().is_some_and(|v| v > 0.0));
+    }
+
+    #[test]
+    fn paragraph_dialog_rejects_bad_fields_without_editing() {
+        let mut s = shape();
+        let n = s.doc().unwrap().history.undo.len();
+        assert!(s.execute("format.paragraphDialog", &json!({"align": "sparkle"})).unwrap_err().to_string().contains("align"));
+        assert!(s.execute("format.paragraphDialog", &json!({"special": "middle"})).is_err());
+        assert!(s.execute("format.paragraphDialog", &json!({"indentLeft": "wide"})).is_err());
+        assert!(s.execute("format.paragraphDialog", &json!({"lineSpacing": "double"})).is_err());
+        assert!(s.execute("format.paragraphDialog", &json!({"spaceBeforeKind": "lines", "spaceBefore": 4.0})).is_err());
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
+        assert_eq!(para(&s).align, Some(Align::Center));
+        assert!(para(&s).indent.is_none());
+    }
+
+    #[test]
+    fn tabs_dialog_sets_stops_in_one_undo_and_opens_with_no_fields() {
+        let mut s = shape();
+        let before = s.doc().unwrap().history.undo.len();
+        s.execute(
+            "format.tabs",
+            &json!({"set": [{"pos": 144.0, "align": "center"}, {"pos": 72.0, "align": "dec"}, {"pos": 72.02, "align": "right"}], "defaultTab": 36.0}),
+        )
+        .unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), before + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Tabs…");
+        let p = para(&s);
+        let tabs = p.tabs.unwrap();
+        assert_eq!(tabs.len(), 2, "stops within 0.05 pt collapse");
+        assert_eq!(tabs[0].pos, 72.02);
+        assert_eq!(tabs[0].align, "r");
+        assert_eq!(tabs[1].align, "ctr");
+        assert_eq!(p.default_tab, Some(36.0));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(para(&s).tabs.is_none() && para(&s).default_tab.is_none());
+
+        let n = s.doc().unwrap().history.undo.len();
+        s.ui_requests.clear();
+        s.execute("format.tabs", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
+        let Some(UiRequest::Dialog { id, params }) = s.ui_requests.last() else { panic!("dialog request") };
+        assert_eq!(id, "tabs");
+        assert!(params["tabs"].as_array().is_some_and(|a| a.is_empty()));
+        assert!(s.execute("format.tabs", &json!({"set": [{"pos": 10.0, "align": "sparkle"}]})).is_err());
+        assert!(s.execute("format.tabs", &json!({"set": "nope"})).is_err());
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
     }
 }

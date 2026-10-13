@@ -2,7 +2,7 @@
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -64,7 +64,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
 | Comments pane (threads) | yes | yes |
 | Design Ideas (Designer) | yes (cloud) | no |
-| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Font, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 29 (`crates/ui-egui/src/dialogs.rs`): Font, Paragraph, Tabs, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 
 ## Direct manipulation
 
@@ -82,7 +82,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Crop handles, crop to shape, aspect ratio | yes | partial |
 | Text caret, selection, double/triple click, drag-select | yes | yes; Tab in text boxes ends editing (#78) |
 | Exact size/position, lock aspect | yes | yes |
-| Rulers with indent markers and tab stops | yes | rulers yes; tab stops partial |
+| Rulers with indent markers and tab stops | yes | rulers yes; tab stops are set in the Tabs dialog, not on the ruler |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
 | Drag and drop of files and between thumbnails | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
@@ -137,7 +137,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 |---|---|
 | Native macOS menu bar from `menu_tree()`, filled out to PowerPoint's menu items | 3–5 |
 | Format Shape pane depth | 6–10 |
-| Missing dialogs (Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 6–12 |
+| Missing dialogs (Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 4–8 |
 | Window chrome, system appearance, palette fixes (#41, #71, #79) | 3–5 |
 | Grid Options, edit points UI, crop depth | 4–7 |
 | Multiple windows | 3–5 |
@@ -148,6 +148,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Paragraph dialog from the Home › Paragraph launcher; Tabs… opens a standalone Tabs dialog |
 | 2026-10-14 | minor | Font dialog from Home › Font, the shape menu and Cmd+T |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |

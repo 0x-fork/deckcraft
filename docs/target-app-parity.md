@@ -1,6 +1,6 @@
 # DeckCraft vs Microsoft PowerPoint: parity assessment
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (227 commands; previous: minor, hours to ~95% per audience added; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (229 commands; previous: trivial, 227 commands; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -239,7 +239,7 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Files:** `.deckcraft` (zip + JSON), PPTX import/export (also opens `.potx`/`.ppsx`), PDF
   export (slides, notes, handouts 1–9 per page, text layer, links, bookmarks), PNG/JPEG, outline
   text, AutoRecover.
-- **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+- **Automation:** 229 commands, every one reachable from `deckcraft-cli`, the JSON control channel
   and MCP.
 - **Platforms:** signed releases for macOS (universal), Windows x64/x86/arm64, Linux
   (AppImage/deb/rpm/tar.gz/Flatpak, x86_64 and aarch64), FreeBSD and the web (v0.4.0, 2026-10-09).
@@ -276,6 +276,7 @@ scored done (16 open issues).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Command count 227 → 229 (Paragraph dialog and Tabs). Breadth and ready percentages unchanged |
 | 2026-10-14 | trivial | Command count 226 → 227 (Font dialog). Breadth and ready percentages unchanged |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |

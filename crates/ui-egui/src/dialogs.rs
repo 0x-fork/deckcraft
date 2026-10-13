@@ -1,4 +1,4 @@
-//! Dialogs (Insert Table, Slide Size, Font, Header & Footer, Hyperlink, Set Up Show, Zoom, …) and the
+//! Dialogs (Insert Table, Slide Size, Font, Paragraph, Tabs, Header & Footer, Hyperlink, Set Up Show, Zoom, …) and the
 //! About window. The start screen is File › Home (`backstage.rs`).
 
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, Ui, pos2, vec2};
@@ -43,6 +43,7 @@ fn title(id: &str) -> &'static str {
         "renameShape" => "Rename",
         "renameLayout" => "Rename Layout",
         "paragraph" => "Paragraph",
+        "tabs" => "Tabs",
         "font" => "Font",
         "about" => "About DeckCraft",
         "preferences" => "Preferences",
@@ -75,8 +76,17 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
             ui.set_min_width(340.0);
             close = body(app, ui, &mut d);
         });
-    if open && !close && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if open && !close && !escape {
         app.dialog = Some(d);
+    } else if app.dialog.is_none()
+        && let Some(ret) = d.params.get("returnParams").filter(|v| v.is_object()).cloned()
+    {
+        // Tabs… opened from Paragraph: closing it (OK, Cancel, Esc or the window) returns there.
+        let id = d.params.get("returnId").and_then(Value::as_str).unwrap_or("paragraph");
+        let mut back = Dialog::new(id);
+        back.params = ret;
+        app.dialog = Some(back);
     }
 }
 
@@ -384,22 +394,8 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok || cancel
         }
         "font" => font_dialog(app, ui, d),
-        "paragraph" => {
-            field(ui, d, "Before text (in):", "left", "0");
-            field(ui, d, "Special — hanging (in):", "hang", "0");
-            field(ui, d, "Spacing before (pt):", "before", "0");
-            field(ui, d, "Spacing after (pt):", "after", "0");
-            field(ui, d, "Line spacing (lines):", "lines", "1.0");
-            let (ok, cancel) = buttons(ui, "OK");
-            if ok {
-                run(
-                    app,
-                    "format.paragraph",
-                    json!({"indentLeft": num(d, "left", 0.0) * 72.0, "indentFirst": -num(d, "hang", 0.0) * 72.0, "spaceBefore": num(d, "before", 0.0), "spaceAfter": num(d, "after", 0.0), "lineSpacing": num(d, "lines", 1.0)}),
-                );
-            }
-            ok || cancel
-        }
+        "paragraph" => paragraph_dialog(app, ui, d),
+        "tabs" => tabs_dialog(app, ui, d),
         "export" => {
             ui.label("Export the presentation as:");
             let fmt = d.get("fmt", "pdf");
@@ -1036,6 +1032,330 @@ fn font_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     ok || cancel
 }
 
+fn pt_text(v: Option<&Value>, default: f64) -> String {
+    match v.and_then(Value::as_f64).filter(|n| n.is_finite()) {
+        Some(n) => crate::widgets::fmt_num(n, ""),
+        None => crate::widgets::fmt_num(default, ""),
+    }
+}
+
+fn inches_text(v: Option<&Value>) -> String {
+    crate::widgets::fmt_num(v.and_then(Value::as_f64).filter(|n| n.is_finite()).unwrap_or(0.0) / 72.0, "")
+}
+
+fn seed_paragraph_fields(d: &mut Dialog) {
+    seed_once(d, "align", json_text(d.params.get("align"), "left"));
+    seed_once(d, "before", inches_text(d.params.get("indentLeft")));
+    seed_once(d, "after", inches_text(d.params.get("indentRight")));
+    seed_once(d, "special", json_text(d.params.get("special"), "none"));
+    seed_once(d, "by", inches_text(d.params.get("specialBy")));
+    seed_once(d, "spaceBefore", pt_text(d.params.get("spaceBefore"), 0.0));
+    seed_once(d, "spaceBeforeSeed", pt_text(d.params.get("spaceBefore"), 0.0));
+    seed_once(d, "spaceAfter", pt_text(d.params.get("spaceAfter"), 0.0));
+    seed_once(d, "spaceAfterSeed", pt_text(d.params.get("spaceAfter"), 0.0));
+    seed_once(d, "lineKind", json_text(d.params.get("lineKind"), "multiple"));
+    seed_once(d, "lineValue", pt_text(d.params.get("lineValue"), 1.0));
+}
+
+fn paragraph_return_params(d: &mut Dialog) -> Value {
+    let before = finite_pt(&d.get("before", "0")).unwrap_or(0.0) * 72.0;
+    let after = finite_pt(&d.get("after", "0")).unwrap_or(0.0) * 72.0;
+    let by = finite_pt(&d.get("by", "0")).unwrap_or(0.0) * 72.0;
+    let space_before = finite_pt(&d.get("spaceBefore", "0")).unwrap_or(0.0);
+    let space_after = finite_pt(&d.get("spaceAfter", "0")).unwrap_or(0.0);
+    let line_value = finite_pt(&d.get("lineValue", "1")).unwrap_or(1.0);
+    let before_same = d.get("spaceBefore", "") == d.get("spaceBeforeSeed", "");
+    let after_same = d.get("spaceAfter", "") == d.get("spaceAfterSeed", "");
+    let v = json!({
+        "align": d.get("align", "left"),
+        "indentLeft": before,
+        "indentRight": after,
+        "special": d.get("special", "none"),
+        "specialBy": by,
+        "spaceBefore": space_before,
+        "spaceBeforeKind": if before_same { d.params.get("spaceBeforeKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+        "spaceAfter": space_after,
+        "spaceAfterKind": if after_same { d.params.get("spaceAfterKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+        "lineKind": d.get("lineKind", "multiple"),
+        "lineValue": line_value,
+        "tabs": d.params.get("tabs").cloned().unwrap_or_else(|| json!([])),
+        "defaultTab": d.params.get("defaultTab").cloned().unwrap_or_else(|| json!(72.0)),
+    });
+    v
+}
+
+fn line_preset_label(kind: &str, value: &str) -> &'static str {
+    if kind == "exactly" {
+        "Exactly"
+    } else {
+        match value {
+            "1" => "Single",
+            "1.5" => "1.5 lines",
+            "2" => "Double",
+            _ => "Multiple",
+        }
+    }
+}
+
+/// Home › Paragraph launcher. One OK applies alignment, indentation and spacing together.
+fn paragraph_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.set_min_width(460.0);
+    seed_paragraph_fields(d);
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 20.0), egui::Label::new("Alignment"));
+        choice(
+            ui,
+            d,
+            "paragraph_align",
+            "align",
+            &[
+                ("left", "Left"),
+                ("center", "Center"),
+                ("right", "Right"),
+                ("justify", "Justify"),
+                ("justLow", "Justify low"),
+                ("distributed", "Distributed"),
+            ],
+        );
+    });
+    ui.label(egui::RichText::new("Indentation").strong());
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Before text", "before", 64.0);
+        ui.label("in");
+        ui.add_space(12.0);
+        let _ = labeled_text(ui, d, "After text", "after", 64.0);
+        ui.label("in");
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 20.0), egui::Label::new("Special"));
+        choice(ui, d, "paragraph_special", "special", &[("none", "None"), ("first", "First line"), ("hanging", "Hanging")]);
+        ui.add_space(8.0);
+        let _ = labeled_text(ui, d, "By", "by", 64.0);
+        ui.label("in");
+    });
+    ui.label(egui::RichText::new("Spacing").strong());
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Spacing before", "spaceBefore", 64.0);
+        ui.label("pt");
+        ui.add_space(12.0);
+        let _ = labeled_text(ui, d, "Spacing after", "spaceAfter", 64.0);
+        ui.label("pt");
+    });
+    let mut picked: Option<(&'static str, Option<&'static str>)> = None;
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 20.0), egui::Label::new("Line spacing"));
+        let kind = d.get("lineKind", "multiple");
+        let value = d.get("lineValue", "1");
+        egui::ComboBox::from_id_salt("paragraph_line").selected_text(line_preset_label(&kind, &value)).width(140.0).show_ui(ui, |ui| {
+            for (label, k, v) in [
+                ("Single", "multiple", Some("1")),
+                ("1.5 lines", "multiple", Some("1.5")),
+                ("Double", "multiple", Some("2")),
+                ("Multiple", "multiple", None),
+                ("Exactly", "exactly", None),
+            ] {
+                if ui.selectable_label(line_preset_label(&kind, &value) == label, label).clicked() {
+                    picked = Some((k, v));
+                }
+            }
+        });
+        ui.add_space(8.0);
+        let _ = labeled_text(ui, d, "At", "lineValue", 64.0);
+    });
+    if let Some((kind, value)) = picked {
+        d.fields.insert("lineKind".into(), kind.into());
+        if let Some(v) = value {
+            d.fields.insert("lineValue".into(), v.into());
+        } else if kind == "exactly" && finite_pt(&d.get("lineValue", "1")).is_some_and(|n| n <= 9.99) {
+            d.fields.insert("lineValue".into(), "18".into());
+        } else if kind == "multiple" && finite_pt(&d.get("lineValue", "1")).is_some_and(|n| n > 9.99) {
+            d.fields.insert("lineValue".into(), "1".into());
+        }
+    }
+    let mut open_tabs = false;
+    ui.horizontal(|ui| {
+        if ui.button("Tabs…").clicked() {
+            open_tabs = true;
+        }
+    });
+    let (ok, cancel) = buttons(ui, "OK");
+    if open_tabs {
+        let mut tabs = Dialog::new("tabs");
+        tabs.params = json!({
+            "tabs": d.params.get("tabs").cloned().unwrap_or_else(|| json!([])),
+            "defaultTab": d.params.get("defaultTab").cloned().unwrap_or_else(|| json!(72.0)),
+            "returnId": "paragraph",
+            "returnParams": paragraph_return_params(d),
+        });
+        app.dialog = Some(tabs);
+        return true;
+    }
+    if ok {
+        let Some(before_in) = finite_pt(&d.get("before", "")) else {
+            app.set_status("Indent before text must be a number of inches");
+            return false;
+        };
+        let Some(after_in) = finite_pt(&d.get("after", "")) else {
+            app.set_status("Indent after text must be a number of inches");
+            return false;
+        };
+        let Some(by_in) = finite_pt(&d.get("by", "")) else {
+            app.set_status("Special indent must be a number of inches");
+            return false;
+        };
+        let Some(space_before) = finite_pt(&d.get("spaceBefore", "")) else {
+            app.set_status("Spacing before must be a number");
+            return false;
+        };
+        let Some(space_after) = finite_pt(&d.get("spaceAfter", "")) else {
+            app.set_status("Spacing after must be a number");
+            return false;
+        };
+        let Some(line_value) = finite_pt(&d.get("lineValue", "")) else {
+            app.set_status("Line spacing must be a number");
+            return false;
+        };
+        let mut params = json!({
+            "align": d.get("align", "left"),
+            "indentLeft": before_in * 72.0,
+            "indentRight": after_in * 72.0,
+            "special": d.get("special", "none"),
+            "specialBy": by_in * 72.0,
+            "spaceBefore": space_before,
+            "spaceAfter": space_after,
+            "spaceBeforeKind": if d.get("spaceBefore", "") == d.get("spaceBeforeSeed", "") { d.params.get("spaceBeforeKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+            "spaceAfterKind": if d.get("spaceAfter", "") == d.get("spaceAfterSeed", "") { d.params.get("spaceAfterKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+        });
+        if d.get("lineKind", "multiple") == "exactly" {
+            params["lineSpacingPt"] = json!(line_value);
+        } else {
+            params["lineSpacing"] = json!(line_value);
+        }
+        if app.run("format.paragraphDialog", params).is_err() {
+            return false;
+        }
+    }
+    ok || cancel
+}
+
+fn tab_rows(v: &Value) -> Vec<(f64, String)> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|t| {
+                    let pos = t.get("pos").and_then(Value::as_f64).filter(|n| n.is_finite())?;
+                    let align = t.get("align").and_then(Value::as_str).unwrap_or("l").to_string();
+                    Some((pos, align))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn tab_label(align: &str) -> &'static str {
+    match align {
+        "ctr" => "Center",
+        "r" => "Right",
+        "dec" => "Decimal",
+        _ => "Left",
+    }
+}
+
+/// Standalone Tabs dialog (the ruler dialog from the open tabs work is not on main).
+/// OK applies the stops in one step. Opened from Paragraph, closing returns there.
+fn tabs_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.set_min_width(420.0);
+    if d.params.get("editing").is_none() {
+        d.params["edit"] = d.params.get("tabs").cloned().unwrap_or_else(|| json!([]));
+        d.params["editing"] = json!(true);
+    }
+    seed_once(d, "pos", "0.5".to_string());
+    seed_once(d, "stopAlign", "l".to_string());
+    seed_once(d, "defaultTab", inches_text(d.params.get("defaultTab")));
+    seed_once(d, "sel", String::new());
+    let rows = tab_rows(d.params.get("edit").unwrap_or(&Value::Null));
+    ui.label("Tab stop position");
+    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+        if rows.is_empty() {
+            ui.label(egui::RichText::new("No custom stops").weak());
+        }
+        for (i, (pos, align)) in rows.iter().enumerate() {
+            let label = format!("{} in  {}", crate::widgets::fmt_num(pos / 72.0, ""), tab_label(align));
+            let on = d.get("sel", "") == i.to_string();
+            if ui.selectable_label(on, label).clicked() {
+                d.fields.insert("sel".into(), i.to_string());
+                d.fields.insert("pos".into(), crate::widgets::fmt_num(pos / 72.0, ""));
+                d.fields.insert("stopAlign".into(), align.clone());
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Position", "pos", 64.0);
+        ui.label("in");
+        ui.add_space(8.0);
+        choice(ui, d, "tabs_align", "stopAlign", &[("l", "Left"), ("ctr", "Center"), ("r", "Right"), ("dec", "Decimal")]);
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Set").clicked()
+            && let Some(inches) = finite_pt(&d.get("pos", ""))
+        {
+            let pos = (inches * 72.0).clamp(0.0, 1584.0);
+            let align = d.get("stopAlign", "l");
+            let mut rows = tab_rows(d.params.get("edit").unwrap_or(&Value::Null));
+            let sel = d.get("sel", "").parse::<usize>().ok();
+            if let Some(i) = sel.filter(|i| *i < rows.len()) {
+                rows[i] = (pos, align);
+            } else if rows.len() < 64 {
+                rows.push((pos, align));
+                d.fields.insert("sel".into(), (rows.len() - 1).to_string());
+            }
+            rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+            d.params["edit"] = json!(rows.iter().map(|(p, a)| json!({"pos": p, "align": a})).collect::<Vec<_>>());
+        }
+        if ui.button("Clear").clicked()
+            && let Some(i) = d.get("sel", "").parse::<usize>().ok()
+        {
+            let mut rows = tab_rows(d.params.get("edit").unwrap_or(&Value::Null));
+            if i < rows.len() {
+                rows.remove(i);
+                d.params["edit"] = json!(rows.iter().map(|(p, a)| json!({"pos": p, "align": a})).collect::<Vec<_>>());
+                d.fields.insert("sel".into(), String::new());
+            }
+        }
+        if ui.button("Clear All").clicked() {
+            d.params["edit"] = json!([]);
+            d.fields.insert("sel".into(), String::new());
+        }
+    });
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Default", "defaultTab", 64.0);
+        ui.label("in");
+    });
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        let Some(default_in) = finite_pt(&d.get("defaultTab", "")) else {
+            app.set_status("Default tab stops must be a number of inches");
+            return false;
+        };
+        let set: Vec<Value> =
+            tab_rows(d.params.get("edit").unwrap_or(&Value::Null)).into_iter().map(|(p, a)| json!({"pos": p, "align": a})).collect();
+        if app.run("format.tabs", json!({"set": set, "defaultTab": (default_in * 72.0).clamp(1.0, 1584.0)})).is_err() {
+            return false;
+        }
+        let applied = d.params.get("edit").cloned().unwrap_or_else(|| json!([]));
+        let default_pt = (default_in * 72.0).clamp(1.0, 1584.0);
+        if let Some(ret) = d.params.get_mut("returnParams") {
+            ret["tabs"] = applied;
+            ret["defaultTab"] = json!(default_pt);
+        }
+    }
+    ok || cancel
+}
+
 #[cfg(test)]
 #[path = "font_dialog_tests.rs"]
 mod font_dialog_tests;
+
+#[cfg(test)]
+#[path = "paragraph_dialog_tests.rs"]
+mod paragraph_dialog_tests;
