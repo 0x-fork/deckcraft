@@ -234,11 +234,11 @@ mod tests {
     #[test]
     fn legend_position_and_overlay_are_read() {
         let legend = r#"<c:legend><c:legendPos val="r"/><c:overlay val="1"/></c:legend>"#;
-        let xml = format!(r#"<c:chartSpace xmlns:c="c"><c:chart><c:plotArea/>{legend}</c:chart></c:chartSpace>"#);
+        let xml = format!(r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/></c:barChart></c:plotArea>{legend}</c:chart></c:chartSpace>"#);
         let c = read_chart_xml(xml.as_bytes()).unwrap();
         assert_eq!(c.legend.as_deref(), Some("r"));
         assert!(c.legend_overlay);
-        let xml = br#"<c:chartSpace xmlns:c="c"><c:chart><c:plotArea/><c:legend/></c:chart></c:chartSpace>"#;
+        let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/></c:barChart></c:plotArea><c:legend/></c:chart></c:chartSpace>"#;
         let c = read_chart_xml(xml).unwrap();
         assert_eq!(c.legend.as_deref(), Some("r"));
         assert!(!c.legend_overlay);
