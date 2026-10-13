@@ -1408,4 +1408,33 @@ mod tests {
         harness.run_steps(3);
         assert_eq!(harness.state().textures.canvas_renders, n, "an unchanged slide isn't rendered again");
     }
+
+    /// #339: clicking a language in Review > Language did nothing, and OK didn't mark the text.
+    #[test]
+    fn the_language_dialog_marks_the_selected_text() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.state_mut().session.execute("text.insert", &json!({"text": "Bonjour"})).unwrap();
+        harness.state_mut().session.execute("text.selectAll", &json!({})).unwrap();
+        harness.state_mut().run("app.dialog", json!({"id": "language"})).unwrap();
+        // The anchored window settles over its first frames; click once it stays put.
+        harness.run_steps(4);
+        harness.get_by_label("Français").click();
+        harness.run_steps(2);
+        harness.get_by_label("OK").click();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none());
+        let d = harness.state().session.active().unwrap();
+        let body = d.doc.slides[0].shapes[0].text.as_ref().unwrap();
+        assert_eq!(body.paragraphs[0].runs[0].props.lang.as_deref(), Some("fr-FR"));
+    }
 }

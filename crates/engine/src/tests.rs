@@ -835,3 +835,17 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn format_language_marks_the_selected_text() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hola mundo"})).unwrap();
+    s.execute("text.move", &json!({"to": "wordLeft", "extend": true})).unwrap();
+    s.execute("format.language", &json!({"lang": "es-ES"})).unwrap();
+    assert_eq!(s.execute("format.state", &json!({})).unwrap()["lang"], "es-ES");
+    let body = s.doc().unwrap().current_slide().unwrap().shapes[0].text.clone().unwrap();
+    let langs: Vec<_> = body.paragraphs[0].runs.iter().map(|r| (r.text.as_str(), r.props.lang.as_deref())).collect();
+    assert_eq!(langs, vec![("Hola ", None), ("mundo", Some("es-ES"))]);
+}
