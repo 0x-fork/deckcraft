@@ -978,3 +978,38 @@ fn underlines_sit_at_the_font_underline_in_their_style() {
     let (_, words) = underline_decos("words");
     assert_eq!(words.len(), 1);
 }
+
+#[test]
+fn no_break_after_a_zero_width_space_or_before_an_em_dash() {
+    let (allowed, _) = break_opportunities("ab\u{200B}cd", false);
+    assert!(!allowed[3], "PowerPoint does not break after a zero-width space");
+    let (allowed, _) = break_opportunities("ab\u{2014}cd", false);
+    assert!(!allowed[2] && allowed[3], "an em dash ends a line, never starts one");
+}
+
+#[test]
+fn a_line_broken_at_a_soft_hyphen_shows_a_hyphen() {
+    let (p, mut sh) = setup("Soft\u{AD}hyphenated\u{AD}words", 150.0, 300.0);
+    let para = &mut sh.text.as_mut().unwrap().paragraphs[0];
+    para.props.bullet = Some(Bullet::None);
+    para.runs[0].props.size = Some(24.0);
+    let l = lay(&p, &sh, 150.0, 300.0);
+    assert!(l.lines.len() >= 2);
+    let first = &l.lines[0];
+    let shy = first.end - 1;
+    assert_eq!(first.end, 5, "breaks after the soft hyphen: {:?}", l.lines.iter().map(|x| (x.start, x.end)).collect::<Vec<_>>());
+    let (x0, x1) = first.edges[shy - first.start];
+    assert!(x1 - x0 > 2.0, "the hyphen takes room");
+    let r = l.runs.iter().find(|r| r.cells.iter().any(|c| c.0 == shy)).expect("a glyph for the soft hyphen");
+    assert_eq!(r.glyphs[r.cells.iter().position(|c| c.0 == shy).unwrap()].0, r.face.glyph_for('-'));
+    // Soft hyphens draw only where a line ends; in a wide box, nowhere.
+    let ends: Vec<usize> = l.lines.iter().map(|x| x.end.saturating_sub(1)).collect();
+    for r in &l.runs {
+        for (g, c) in r.glyphs.iter().zip(&r.cells) {
+            assert!(c.1 != '\u{AD}' || ends.contains(&c.0) || g.0 != r.face.glyph_for('-'), "mid-line soft hyphen drawn");
+        }
+    }
+    let wide = lay(&p, &sh, 2000.0, 300.0);
+    assert_eq!(wide.lines.len(), 1);
+    assert!(wide.runs.iter().all(|r| r.cells.iter().all(|c| c.1 != '\u{AD}' || r.glyphs.iter().all(|g| g.0 != r.face.glyph_for('-')))));
+}

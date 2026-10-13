@@ -1112,7 +1112,12 @@ fn break_opportunities(text: &str, latin_break: bool) -> (Vec<bool>, Vec<bool>) 
     let chars: Vec<char> = text.chars().collect();
     for (i, w) in chars.windows(2).enumerate() {
         let (prev, next) = (w[0], w[1]);
-        let keep = if is_hangul(prev) && is_hangul(next) { false } else { latin_break || !matches!(prev, '/' | '\\') || next.is_whitespace() };
+        // PowerPoint never breaks after a zero-width space, nor before an em dash (only after it).
+        let keep = if (is_hangul(prev) && is_hangul(next)) || prev == '\u{200B}' || next == '\u{2014}' {
+            false
+        } else {
+            latin_break || !matches!(prev, '/' | '\\') || next.is_whitespace()
+        };
         if !keep
             && !mandatory.get(i + 1).copied().unwrap_or(false)
             && let Some(a) = allowed.get_mut(i + 1)
@@ -1461,8 +1466,12 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             // Logical advances; tabs measure from the start edge.
             let mut adv = Vec::with_capacity(n);
             let mut x = 0.0;
+            // A line that breaks at a soft hyphen ends with a visible hyphen.
+            let shy_end = li + 1 < raw.len() && line_cells.last().is_some_and(|c| c.ch == '\u{AD}');
             for (k, c) in line_cells.iter().enumerate() {
-                let a = if c.ch == '\t' {
+                let a = if shy_end && k + 1 == n {
+                    p.faces.get(c.face).zip(p.styles.get(c.style)).map(|(f, st)| measure_str(f, st.size, "-").0).unwrap_or(0.0)
+                } else if c.ch == '\t' {
                     tab_advance(x0 + x, &tabs, props.default_tab.unwrap_or(72.0), tab_segment(&p.cells, rl.start + k))
                 } else {
                     c.adv
@@ -1694,7 +1703,13 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             }
             if let Some(r) = cur.as_mut() {
                 r.chars = (r.chars.0.min(ci), r.chars.1.max(ci + 1));
-                if cell.head == ci && !cell.glyphs.is_empty() {
+                if cell.ch == '\u{AD}' && cx1 - cx > 0.01 {
+                    // The soft hyphen a line breaks at is drawn as a hyphen.
+                    if let Some(f) = p.faces.get(cell.face) {
+                        r.glyphs.push((f.glyph_for('-'), cx, base_y));
+                        r.cells.push((ci, cell.ch));
+                    }
+                } else if cell.head == ci && !cell.glyphs.is_empty() {
                     // The cluster's glyphs start at its leftmost cell; kashida (right-to-left
                     // only) fills the gap on the cluster's left with tatweel glyphs.
                     let cells_of =
