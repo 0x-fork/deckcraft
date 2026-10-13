@@ -152,7 +152,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
   have their own layouts, histograms and Paretos bin their data (count, width or Scott's rule),
   and box & whisker charts use exclusive or inclusive quartiles with 1.5 IQR whiskers. Region maps are kept
   (their cached geography too, also through edits) and drawn as value-coloured tiles with a
-  colour scale, since DeckCraft ships no map boundaries.
+  colour scale, since DeckCraft ships no map boundaries. Radar charts are drawn polar (filled
+  or lines), stock charts as high-low lines with close dashes or up/down bars and saved as
+  `c:stockChart`, and combo charts start as columns with a line. Secondary-axis writing and
+  trendlines are tracked separately.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 

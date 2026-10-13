@@ -217,6 +217,10 @@ pub struct Chart {
     /// Box and whisker quartiles by the inclusive method (QUARTILE.INC) instead of exclusive.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub inclusive_quartiles: bool,
+    /// A stock chart's up/down bars (`c:upDownBars`): open-high-low-close, the box between
+    /// the first and last series, hollow when the price rose.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub up_down_bars: bool,
     /// A histogram's bin count (`cx:binCount`); with neither this nor `bin_size` the bins are
     /// automatic (Scott's rule, as Excel does).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,6 +270,7 @@ impl Default for Chart {
             subtotals: vec![],
             category_levels: vec![],
             inclusive_quartiles: false,
+            up_down_bars: false,
             bin_count: None,
             bin_size: None,
             raw: None,
@@ -309,6 +314,15 @@ impl Chart {
             c.legend = (kind == ChartType::BoxWhisker).then(|| "b".to_string());
             return c;
         }
+        if kind == ChartType::Stock {
+            // High-low-close over five days, the series in the order PowerPoint expects.
+            c.categories = ["Mon", "Tue", "Wed", "Thu", "Fri"].iter().map(|s| s.to_string()).collect();
+            let hlc = [("High", [55.0, 57.0, 57.0, 58.0, 58.0]), ("Low", [11.0, 12.0, 13.0, 11.0, 25.0]), ("Close", [25.0, 38.0, 50.0, 35.0, 43.0])];
+            for (name, v) in hlc {
+                c.series.push(Series { name: name.into(), values: v.iter().map(|x| Some(*x)).collect(), ..Default::default() });
+            }
+            return c;
+        }
         let n_series =
             if matches!(kind, ChartType::Pie | ChartType::Doughnut | ChartType::Funnel | ChartType::Waterfall | ChartType::Treemap) { 1 } else { 3 };
         for s in 0..n_series {
@@ -320,6 +334,12 @@ impl Chart {
             });
         }
         c.vary_colors = n_series == 1;
+        if kind == ChartType::Combo {
+            // Columns with the last series as a line, as PowerPoint's combo starts.
+            for (i, s) in c.series.iter_mut().enumerate() {
+                s.kind = Some(if i + 1 == n_series { ChartType::Line } else { ChartType::Column });
+            }
+        }
         c
     }
     /// A series' own chart type: its own in a combo chart (columns when it names none), else the
