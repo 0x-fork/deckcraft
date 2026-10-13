@@ -97,3 +97,67 @@ fn dash_lengths_make_room_for_round_and_square_caps() {
     assert_eq!(dash_with_caps(vec![4.0, 3.0], kurbo::Cap::Butt, 1.0), vec![4.0, 3.0]);
     assert_eq!(dash_with_caps(vec![4.0, 3.0, 1.0], kurbo::Cap::Round, 1.0), vec![4.0, 3.0, 1.0]);
 }
+
+fn arrow_line(kind: &str, width: f64, c: Rgba) -> Shape {
+    let end = deckcraft_model::style::LineEnd { kind: kind.into(), w: "med".into(), len: "med".into() };
+    Shape {
+        id: ShapeId(12),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 0.0)),
+        geom: Geom::preset("line"),
+        line: Some(Line { fill: solid(c), width: Some(width), tail: Some(end), ..Default::default() }),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_wide_line_stops_inside_its_arrowhead() {
+    // 10 pt line, medium triangle (30 pt long, 30 wide) whose tip is the line's end at x = 300.
+    let img = render(vec![arrow_line("triangle", 10.0, RED)]);
+    assert!(close(img.pixel(297, 100), RED, 40), "the tip {:?}", img.pixel(297, 100));
+    // 2 pt back from the tip the triangle is 2 pt wide: the line's corner must not show there.
+    assert!(close(img.pixel(298, 104), WHITE, 10), "line corner past the head {:?}", img.pixel(298, 104));
+}
+
+#[test]
+fn a_see_through_line_and_its_arrowhead_are_one_shape() {
+    let half_red = Rgba::rgba(255, 0, 0, 128);
+    let img = render(vec![arrow_line("triangle", 10.0, half_red)]);
+    let line_only = img.pixel(200, 100);
+    let head_over_line = img.pixel(285, 100);
+    assert!(close(line_only, Rgba::rgb(255, 127, 127), 6), "{line_only:?}");
+    assert!(close(head_over_line, Rgba::rgb(line_only[0], line_only[1], line_only[2]), 3), "no darker overlap: {head_over_line:?}");
+}
+
+#[test]
+fn an_open_arrowheads_point_is_on_the_lines_end() {
+    let img = render(vec![arrow_line("arrow", 8.0, RED)]);
+    let reach = (290..320).rev().find(|x| img.pixel(*x, 100)[1] < 128);
+    assert!(reach.is_some_and(|x| x <= 300), "point reaches {reach:?}");
+    assert!(reach.is_some_and(|x| x >= 297), "point reaches {reach:?}");
+}
+
+#[test]
+fn arrowheads_are_sized_for_at_least_a_two_point_line() {
+    let e = deckcraft_model::style::LineEnd { kind: "triangle".into(), w: "sm".into(), len: "lg".into() };
+    assert_eq!(head_size(&e, 0.5), (4.0, 10.0));
+    assert_eq!(head_size(&e, 4.0), (8.0, 20.0));
+}
+
+#[test]
+fn trimming_a_path_leaves_its_ends_off_by_arc_length() {
+    let mut p = BezPath::new();
+    p.move_to((0.0, 0.0));
+    p.line_to((50.0, 0.0));
+    p.line_to((50.0, 50.0));
+    let t = trim_ends(&p, 10.0, 20.0);
+    let els = t.elements();
+    assert_eq!(els.first(), Some(&PathEl::MoveTo(Point::new(10.0, 0.0))));
+    match els.last() {
+        Some(PathEl::LineTo(q)) => assert!((q.x - 50.0).abs() < 1e-6 && (q.y - 30.0).abs() < 1e-6, "{q:?}"),
+        other => panic!("{other:?}"),
+    }
+    // Trims longer than the path leave nothing; closed paths are untouched.
+    assert!(trim_ends(&p, 60.0, 50.0).elements().is_empty());
+    let r = Rect::new(0.0, 0.0, 10.0, 10.0).to_path(0.1);
+    assert_eq!(trim_ends(&r, 3.0, 3.0).elements().len(), r.elements().len());
+}

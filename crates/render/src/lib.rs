@@ -943,18 +943,46 @@ impl Renderer {
         if line.fill.as_ref().is_some_and(|f| !f.is_none()) {
             let lw = line.width.unwrap_or(0.75).max(0.0);
             let (base, rel) = self.line_space(m, depth);
+            let ends = s.is_line() || geo.is_open();
+            let trims = if ends { head_trims(&line, lw) } else { (0.0, 0.0) };
+            let has_heads = ends && [&line.head, &line.tail].iter().any(|e| e.as_ref().is_some_and(|e| e.kind != "none"));
+            // A see-through line and its arrowheads are one shape in PowerPoint: drawn opaque into
+            // a layer that is then faded, so they don't darken where they meet.
+            let see_through = match &line.fill {
+                Some(Fill::Solid { color: c }) if has_heads => Some(rctx.color(c, line_ph)).filter(|c| c.a < 255),
+                _ => None,
+            };
+            let line = match see_through {
+                Some(c) => {
+                    ctx.set_transform(Affine::IDENTITY);
+                    ctx.push_layer(None, None, Some(c.a as f32 / 255.0), None, None);
+                    std::borrow::Cow::Owned(Line {
+                        fill: Some(Fill::solid(deckcraft_model::style::ColorRef::rgb(c.with_alpha(255)))),
+                        ..line.clone()
+                    })
+                }
+                None => std::borrow::Cow::Borrowed(&line),
+            };
+            let first_stroked = geo.paths.iter().position(|p| p.stroke);
             for (i, sp) in geo.paths.iter().enumerate().filter(|(i, p)| p.stroke && fade(*i).stroke > 0.0) {
-                let path = if rel == Affine::IDENTITY {
+                let mut path = if rel == Affine::IDENTITY {
                     std::borrow::Cow::Borrowed(&sp.path)
                 } else {
                     let mut moved = sp.path.clone();
                     moved.apply_affine(rel);
                     std::borrow::Cow::Owned(moved)
                 };
+                // The line stops inside its arrowheads, so a wide line doesn't poke out of them.
+                if Some(i) == first_stroked && trims != (0.0, 0.0) {
+                    path = std::borrow::Cow::Owned(trim_ends(&path, trims.0, trims.1));
+                }
                 stroke(ctx, rctx, &line, line_ph, &path, base, lw, fade(i).stroke);
             }
-            if s.is_line() || geo.is_open() {
+            if ends {
                 arrowheads(ctx, rctx, &line, line_ph, &geo, rel, base, lw);
+            }
+            if see_through.is_some() {
+                ctx.pop_layer();
             }
         }
         if let Some(r) = soft {
@@ -1336,6 +1364,128 @@ fn end_points(path: &BezPath) -> Option<((Point, Point), (Point, Point))> {
     Some(((first, second), (last, prev)))
 }
 
+/// An arrowhead's width and length for a line `lw` wide. PowerPoint sizes them in multiples of
+/// the line width (small 2, medium 3, large 5), but never smaller than for a 2 pt line.
+fn head_size(e: &deckcraft_model::style::LineEnd, lw: f64) -> (f64, f64) {
+    let sz = |s: &str| match s {
+        "sm" => 2.0,
+        "lg" => 5.0,
+        _ => 3.0,
+    };
+    let k = lw.max(2.0);
+    (sz(&e.w) * k, sz(&e.len) * k)
+}
+
+/// How far back from the tip an open arrowhead's legs (`lw` wide) meet along their centre lines:
+/// PowerPoint puts the outside of the point, not the legs' centre lines, on the line's end.
+fn open_arrow_setback(wl: f64, ll: f64, lw: f64) -> f64 {
+    let half = (wl / 2.0).atan2(ll);
+    if half.sin() > 1e-6 { (lw / 2.0 / half.sin()).min(ll) } else { 0.0 }
+}
+
+/// How much of a `lw`-wide line to leave off at its start and end, under its arrowheads: up to
+/// a triangle's base, into a stealth arrow's notch far enough for its barbs to cover the line's
+/// corners, and to where an open arrow's legs meet. Ovals and diamonds sit on the end itself.
+fn head_trims(line: &Line, lw: f64) -> (f64, f64) {
+    // A square cap reaches half a width past the line's end: leave that off too.
+    let cap = if line.cap == Some(deckcraft_model::style::LineCap::Square) { lw / 2.0 } else { 0.0 };
+    let trim = |e: &Option<deckcraft_model::style::LineEnd>| {
+        let Some(e) = e else { return 0.0 };
+        let (wl, ll) = head_size(e, lw);
+        match e.kind.as_str() {
+            "triangle" => ll + cap,
+            "stealth" => (ll * (0.6 + 0.4 * lw / wl.max(1e-9))).min(ll) + cap,
+            "arrow" => open_arrow_setback(wl, ll, lw.max(0.75)) + cap,
+            _ => 0.0,
+        }
+    };
+    (trim(&line.head), trim(&line.tail))
+}
+
+/// `path` with `start` left off the beginning of its first sub-path and `end` off the end of its
+/// last (by arc length), where those are open. A sub-path shorter than its trims disappears.
+fn trim_ends(path: &BezPath, start: f64, end: f64) -> BezPath {
+    use kurbo::{ParamCurve, ParamCurveArclen};
+    const ACC: f64 = 1e-3;
+    let mut subs: Vec<(Vec<kurbo::PathSeg>, bool)> = vec![];
+    let (mut last, mut first) = (Point::ZERO, Point::ZERO);
+    for el in path.elements() {
+        let seg = match *el {
+            PathEl::MoveTo(p) => {
+                subs.push((vec![], false));
+                last = p;
+                first = p;
+                continue;
+            }
+            PathEl::ClosePath => {
+                if let Some(s) = subs.last_mut() {
+                    s.1 = true;
+                }
+                last = first;
+                continue;
+            }
+            PathEl::LineTo(p) => kurbo::PathSeg::Line(kurbo::Line::new(last, p)),
+            PathEl::QuadTo(a, p) => kurbo::PathSeg::Quad(kurbo::QuadBez::new(last, a, p)),
+            PathEl::CurveTo(a, b, p) => kurbo::PathSeg::Cubic(kurbo::CubicBez::new(last, a, b, p)),
+        };
+        last = seg.end();
+        if subs.is_empty() {
+            subs.push((vec![], false));
+        }
+        if let Some(s) = subs.last_mut() {
+            s.0.push(seg);
+        }
+    }
+    if let Some((segs, false)) = subs.first_mut()
+        && start > 0.0
+    {
+        let mut left = start;
+        while let Some(seg) = segs.first().copied() {
+            let l = seg.arclen(ACC);
+            if l > left {
+                if let Some(s0) = segs.first_mut() {
+                    *s0 = seg.subsegment(seg.inv_arclen(left, ACC)..1.0);
+                }
+                break;
+            }
+            left -= l;
+            segs.remove(0);
+        }
+    }
+    if let Some((segs, false)) = subs.last_mut()
+        && end > 0.0
+    {
+        let mut left = end;
+        while let Some(seg) = segs.last().copied() {
+            let l = seg.arclen(ACC);
+            if l > left {
+                if let Some(s1) = segs.last_mut() {
+                    *s1 = seg.subsegment(0.0..seg.inv_arclen(l - left, ACC));
+                }
+                break;
+            }
+            left -= l;
+            segs.pop();
+        }
+    }
+    let mut out = BezPath::new();
+    for (segs, closed) in subs {
+        let Some(s0) = segs.first() else { continue };
+        out.move_to(s0.start());
+        for seg in &segs {
+            match seg {
+                kurbo::PathSeg::Line(l) => out.line_to(l.p1),
+                kurbo::PathSeg::Quad(q) => out.quad_to(q.p1, q.p2),
+                kurbo::PathSeg::Cubic(c) => out.curve_to(c.p1, c.p2, c.p3),
+            }
+        }
+        if closed {
+            out.close_path();
+        }
+    }
+    out
+}
+
 #[allow(clippy::too_many_arguments)]
 fn arrowheads(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>, geo: &Geometry, rel: Affine, m: Affine, lw: f64) {
     let Some(sp) = geo.paths.iter().find(|p| p.stroke) else { return };
@@ -1346,18 +1496,12 @@ fn arrowheads(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>
         Some(Fill::Solid { color: c }) => rctx.color(c, ph),
         _ => Rgba::BLACK,
     };
-    let lw = lw.max(0.75);
     for (end, tip, from) in [(&line.head, a, a2), (&line.tail, b, b2)] {
         let Some(e) = end else { continue };
         if e.kind == "none" {
             continue;
         }
-        let sz = |s: &str| match s {
-            "sm" => 2.0,
-            "lg" => 5.0,
-            _ => 3.0,
-        };
-        let (wl, ll) = (sz(&e.w) * lw, sz(&e.len) * lw);
+        let (wl, ll) = head_size(e, lw);
         let dir = (tip - from).normalize();
         if !dir.x.is_finite() {
             continue;
@@ -1385,13 +1529,17 @@ fn arrowheads(ctx: &mut RenderContext, rctx: &Ctx, line: &Line, ph: Option<Rgba>
                 p.close_path();
             }
             "arrow" => {
+                // Legs the line's width with round ends, meeting in a sharp point whose outside is
+                // on the line's end.
+                let leg = lw.max(0.75);
+                let back = dir * open_arrow_setback(wl, ll, leg);
                 let mut o = BezPath::new();
-                o.move_to(base + n * wl / 2.0);
-                o.line_to(tip);
-                o.line_to(base - n * wl / 2.0);
+                o.move_to(base + n * wl / 2.0 - back);
+                o.line_to(tip - back);
+                o.line_to(base - n * wl / 2.0 - back);
                 ctx.set_transform(m);
                 ctx.set_paint(color(col, 1.0));
-                ctx.set_stroke(kurbo::Stroke::new(lw).with_join(kurbo::Join::Miter));
+                ctx.set_stroke(kurbo::Stroke::new(leg).with_join(kurbo::Join::Miter).with_miter_limit(100.0).with_caps(kurbo::Cap::Round));
                 ctx.stroke_path(&o);
                 continue;
             }
