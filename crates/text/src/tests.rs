@@ -1028,3 +1028,38 @@ fn small_kana_and_closing_brackets_follow_powerpoint_kinsoku() {
     let lines = wrapped("あいうえ「。」かき", w, |p| p.hanging_punct = Some(true));
     assert_eq!(lines[0], "あいうえ", "{lines:?}");
 }
+
+#[test]
+fn autonumber_schemes_follow_powerpoint() {
+    // As PowerPoint's export draws them (start values as in the probe deck).
+    for (scheme, n, want) in [
+        ("ea1ChsPlain", 4, "四"),
+        ("ea1ChsPeriod", 10, "十．"),
+        ("ea1ChtPeriod", 21, "二十一．"),
+        ("ea1JpnKorPeriod", 10, "一〇．"),
+        ("ea1JpnChsDbPeriod", 13, "一三．"),
+        ("arabicDbPlain", 10, "１０"),
+        ("arabicDbPeriod", 13, "１３．"),
+        ("circleNumDbPlain", 13, "⑬"),
+        ("circleNumWdWhitePlain", 13, "③"),
+        ("circleNumWdBlackPlain", 2, "❷"),
+        ("thaiAlphaPeriod", 1, "ก."),
+        ("thaiAlphaParenR", 4, "ง)"),
+        ("thaiAlphaParenBoth", 7, "(ช)"),
+        ("thaiNumPeriod", 10, "๑๐."),
+        ("hindiAlphaPeriod", 4, "ई."),
+        ("hindiAlpha1Period", 1, "क."),
+        ("hindiNumParenR", 13, "१३)"),
+        ("hebrew2Minus", 1, "א-"),
+        ("arabic1Minus", 13, "ش-"),
+        ("arabic2Minus", 10, "ي-"),
+        ("arabicPlain", 10, "10"),
+    ] {
+        assert_eq!(autonum(scheme, n), want, "{scheme} {n}");
+    }
+    assert_eq!(chinese_num(105), "一百零五");
+    assert_eq!(chinese_num(20), "二十");
+    // Past the end of an alphabet the letter doubles, like "aa".
+    assert_eq!(autonum("hebrew2Minus", 23), "אא-");
+    assert_eq!(autonum("thaiAlphaPeriod", 0), ".");
+}
