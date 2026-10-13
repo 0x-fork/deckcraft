@@ -92,7 +92,7 @@ fn decode_ogg_opus(bytes: &Bytes) -> Option<Result<Pcm>> {
         let mut dec = deckcraft_opus::Decoder::new(head).map_err(|e| MediaError::Corrupt(e.to_string()))?;
         dec.set_trim_pre_skip(true);
         let channels = dec.channels() as u16;
-        let timing = deckcraft_ogg::OpusTiming::of(stream, dec.pre_skip() as u32);
+        let timing = deckcraft_ogg::OpusTiming::of(stream, dec.pre_skip() as u32).map_err(|e| MediaError::Corrupt(e.to_string()))?;
         let mut out = Vec::new();
         for i in 0..stream.packets.len() {
             let Ok(p) = file.read_packet(src, s, i) else { continue };
