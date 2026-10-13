@@ -1268,3 +1268,178 @@ fn text_spilling_out_of_its_box_below_the_slide_is_reported() {
     let (_, drawn) = render_slide_drawn(&Presentation::default(), 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
     assert_eq!(drawn, Rect::new(0.0, 0.0, 960.0, 540.0));
 }
+
+/// A placeable WMF (1440 units per inch, bounds `w` × `h`) holding `records` (function, parameter
+/// bytes).
+fn wmf_with(w: i16, h: i16, records: &[(u16, Vec<u8>)]) -> Vec<u8> {
+    let mut body = Vec::new();
+    for (func, params) in records {
+        let mut p = params.clone();
+        if p.len() % 2 == 1 {
+            p.push(0);
+        }
+        body.extend(((6 + p.len()) as u32 / 2).to_le_bytes());
+        body.extend(func.to_le_bytes());
+        body.extend(p);
+    }
+    body.extend([3, 0, 0, 0, 0, 0]);
+    let mut f = 0x9AC6_CDD7u32.to_le_bytes().to_vec();
+    f.extend(0u16.to_le_bytes());
+    for v in [0i16, 0, w, h] {
+        f.extend(v.to_le_bytes());
+    }
+    f.extend(1440u16.to_le_bytes());
+    f.extend(0u32.to_le_bytes());
+    f.extend(0u16.to_le_bytes());
+    let total = (f.len() + 18 + body.len()) / 2;
+    for v in [1u16, 9, 0x300] {
+        f.extend(v.to_le_bytes());
+    }
+    f.extend((total as u32).to_le_bytes());
+    f.extend(16u16.to_le_bytes());
+    f.extend(0u32.to_le_bytes());
+    f.extend(0u16.to_le_bytes());
+    f.extend(body);
+    f
+}
+
+fn i16s(v: &[i32]) -> Vec<u8> {
+    v.iter().flat_map(|x| (*x as i16).to_le_bytes()).collect()
+}
+
+/// CREATEFONTINDIRECT (height, escapement, face) then SELECTOBJECT of it (handle 0), transparent
+/// background, and the alignment `ta`.
+fn font_records(height: i32, esc: i32, face: &str, ta: i32) -> Vec<(u16, Vec<u8>)> {
+    let mut f = i16s(&[height, 0, esc, esc, 400]);
+    f.extend([0, 0, 0, if face.contains("dings") { 2 } else { 0 }, 0, 0, 0, 0]);
+    f.extend(face.as_bytes());
+    f.push(0);
+    vec![(0x02FB, f), (0x012D, i16s(&[0])), (0x0102, i16s(&[1])), (0x012E, i16s(&[ta]))]
+}
+
+/// EXTTEXTOUT at (x, y) with an optional dx array.
+fn text_record(x: i32, y: i32, s: &str, dx: &[i32]) -> (u16, Vec<u8>) {
+    let mut v = i16s(&[y, x, s.len() as i32, 0]);
+    v.extend(s.as_bytes());
+    if s.len() % 2 == 1 {
+        v.push(0);
+    }
+    v.extend(i16s(dx));
+    (0x0A32, v)
+}
+
+/// Bounding box (x0, y0, x1, y1) of the pixels at least half opaque and darker than mid-grey.
+fn mf_ink(img: &image::RgbaImage) -> Option<(u32, u32, u32, u32)> {
+    let mut b: Option<(u32, u32, u32, u32)> = None;
+    for (x, y, p) in img.enumerate_pixels() {
+        if p[3] > 128 && (p[0] as u32 + p[1] as u32 + p[2] as u32) < 384 {
+            b = Some(match b {
+                None => (x, y, x, y),
+                Some((a, c, d, e)) => (a.min(x), c.min(y), d.max(x), e.max(y)),
+            });
+        }
+    }
+    b
+}
+
+#[test]
+fn metafile_text_ink_lands_at_its_reference_point() {
+    // 2 × 1 inch (144 × 72 pt) drawn 288 px wide: 2 px per point. A 36-point "HH", top-left
+    // aligned at (72, 18) pt.
+    let mut recs = font_records(-720, 0, "Arial", 0);
+    recs.push(text_record(1440, 360, "HH", &[]));
+    let img = crate::metafile::rasterize(&wmf_with(2880, 1440, &recs), 288).expect("raster");
+    let (x0, y0, x1, y1) = mf_ink(&img).expect("text ink");
+    assert!((144..156).contains(&x0), "left edge at the reference point: {x0}");
+    assert!(x1 > x0 + 40 && x1 < 288, "two capitals wide: {x1}");
+    // The cell's top is at 36 px; a capital starts below the cell top and sits on the baseline.
+    assert!((38..72).contains(&y0), "cap top below the cell top: {y0}");
+    assert!((88..112).contains(&y1), "baseline one ascent below the top: {y1}");
+}
+
+#[test]
+fn metafile_text_centre_baseline_and_escapement() {
+    // TA_CENTER | TA_BASELINE at (72, 36) pt: the ink is centred on 144 px and sits on 72 px.
+    let mut recs = font_records(-720, 0, "Arial", 24 | 6);
+    recs.push(text_record(1440, 720, "HH", &[]));
+    let img = crate::metafile::rasterize(&wmf_with(2880, 1440, &recs), 288).expect("raster");
+    let (x0, _, x1, y1) = mf_ink(&img).expect("ink");
+    assert!(((x0 + x1) as i32 / 2 - 144).abs() <= 4, "centred: {x0}..{x1}");
+    assert!((69..=74).contains(&y1), "on the baseline: {y1}");
+    // Escapement 90°: the string runs up the picture.
+    let mut recs = font_records(-360, 900, "Arial", 24);
+    recs.push(text_record(1440, 1300, "HHHH", &[]));
+    let img = crate::metafile::rasterize(&wmf_with(2880, 1440, &recs), 288).expect("raster");
+    let (x0, y0, x1, y1) = mf_ink(&img).expect("ink");
+    assert!(y1 - y0 > 2 * (x1 - x0), "a vertical run: {x0} {y0} {x1} {y1}");
+    assert!(x1 <= 146 && y1 <= 132, "drawn up and left of the baseline origin (144, 130): {x1} {y1}");
+}
+
+#[test]
+fn metafile_text_follows_its_dx_array() {
+    // "HH" with the second H a full inch (144 px) after the first: two clumps of ink, a gap between.
+    let mut recs = font_records(-360, 0, "Arial", 24);
+    recs.push(text_record(360, 720, "HH", &[1440, 100]));
+    let img = crate::metafile::rasterize(&wmf_with(2880, 1440, &recs), 288).expect("raster");
+    let col_has_ink = |x: u32| (0..img.height()).any(|y| img.get_pixel(x, y)[3] > 128);
+    assert!((36..56).any(col_has_ink), "first H at 36 px");
+    assert!((180..200).any(col_has_ink), "second H one inch later");
+    assert!(!(70..170).any(col_has_ink), "nothing between them");
+}
+
+#[test]
+fn metafile_symbol_text_draws_a_bullet_not_a_box() {
+    // Webdings "n" is a filled circle (installed, or mapped to a black circle where it is not), as
+    // is Wingdings "l" in a symbol font that is not installed anywhere.
+    for (face, s) in [("Webdings", "n"), ("Wingdings Not Installed", "l")] {
+        let mut recs = font_records(-1080, 0, face, 0);
+        recs.push(text_record(360, 0, s, &[]));
+        let img = crate::metafile::rasterize(&wmf_with(2880, 1440, &recs), 288).expect("raster");
+        let (x0, y0, x1, y1) = mf_ink(&img).expect("ink");
+        assert!(x1 - x0 > 10 && y1 - y0 > 10, "{face}: a sizeable mark: {x0} {y0} {x1} {y1}");
+        let (cx, cy) = ((x0 + x1) / 2, (y0 + y1) / 2);
+        assert!(img.get_pixel(cx, cy)[3] > 200, "{face}: filled in the middle");
+        for (x, y) in [(x0, y0), (x1, y0), (x0, y1), (x1, y1)] {
+            assert!(img.get_pixel(x, y)[3] < 128, "{face}: round, not a box: corner ({x}, {y})");
+        }
+    }
+}
+
+#[test]
+fn metafile_opaque_text_fills_its_cell() {
+    // OPAQUE background in red behind a space.
+    let mut recs = font_records(-720, 0, "Arial", 0);
+    recs.push((0x0102, i16s(&[2])));
+    recs.push((0x0201, 0x0000_00FFu32.to_le_bytes().to_vec()));
+    recs.push(text_record(1440, 360, " ", &[]));
+    let img = crate::metafile::rasterize(&wmf_with(2880, 1440, &recs), 288).expect("raster");
+    let p = img.get_pixel(148, 60);
+    assert!(p[0] > 200 && p[1] < 60 && p[3] > 200, "cell filled red: {p:?}");
+    assert!(img.get_pixel(140, 60)[3] < 50, "nothing left of the cell");
+}
+
+#[test]
+fn metafile_pattern_brush_tiles_and_averages_when_tiny() {
+    // A 1-bit 8 × 8 checker (palette white, black), a null pen and a one-inch square.
+    let mut dib: Vec<u8> = [40u32, 8, 8].iter().flat_map(|v| v.to_le_bytes()).collect();
+    dib.extend(1u16.to_le_bytes());
+    dib.extend(1u16.to_le_bytes());
+    dib.extend([0u8; 24]);
+    dib.extend([255, 255, 255, 0, 0, 0, 0, 0]);
+    for r in 0..8 {
+        dib.extend([if r % 2 == 0 { 0x55 } else { 0xAA }, 0, 0, 0]);
+    }
+    let mut brush = i16s(&[5, 0]);
+    brush.extend(dib);
+    let recs = vec![(0x0142, brush), (0x012D, i16s(&[0])), (0x012D, i16s(&[0x8008])), (0x041B, i16s(&[1440, 1440, 0, 0]))];
+    let bytes = wmf_with(1440, 1440, &recs);
+    // 4 px per point: a 0.75 pt cell is 3 px.
+    let img = crate::metafile::rasterize(&bytes, 288).expect("raster");
+    let (a, b) = (img.get_pixel(1, 1), img.get_pixel(4, 1));
+    assert!(a[3] > 200 && b[3] > 200);
+    assert!((a[0] as i32 - b[0] as i32).abs() > 200, "neighbouring cells alternate: {a:?} {b:?}");
+    // Far below one pixel per cell: the average grey.
+    let img = crate::metafile::rasterize(&bytes, 32).expect("raster");
+    let p = img.get_pixel(16, 16);
+    assert!((100..156).contains(&p[0]) && p[3] > 200, "average grey: {p:?}");
+}

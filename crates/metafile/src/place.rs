@@ -19,6 +19,12 @@ pub enum PlacedItem {
     Path { path: BezPath, fill: Option<[u8; 4]>, stroke: Option<([u8; 4], f64)>, even_odd: bool },
     /// `Picture::items[index]`, a bitmap, stretched into `rect`.
     Bitmap { index: usize, rect: Rect },
+    /// `Picture::items[index]`, a pattern fill: `path` (target units) filled with the item's tile
+    /// repeated; `tile` maps tile pixels to target units.
+    Pattern { index: usize, path: BezPath, even_odd: bool, tile: Affine },
+    /// `Picture::items[index]`, a text string: `transform` maps its text space to target units;
+    /// `clip` (target units) bounds what it draws.
+    Text { index: usize, transform: Affine, clip: Option<Rect> },
 }
 
 impl Picture {
@@ -54,6 +60,26 @@ impl Picture {
                     if in_range(path.bounding_box()) {
                         let stroke = stroke.map(|(c, w)| (c, f64::from(w) * k));
                         out.push(PlacedItem::Path { path, fill: *fill, stroke, even_odd: *even_odd });
+                    }
+                }
+                Item::Pattern { segs, even_odd, tile: t } => {
+                    let path = tf * bez(segs);
+                    let tile = tf
+                        * Affine::translate((f64::from(t.origin[0]), f64::from(t.origin[1])))
+                        * Affine::scale_non_uniform(f64::from(t.cell[0]), f64::from(t.cell[1]));
+                    let det = tile.determinant();
+                    if in_range(path.bounding_box()) && det.is_finite() && det.abs() > 1e-12 {
+                        out.push(PlacedItem::Pattern { index, path, even_odd: *even_odd, tile });
+                    }
+                }
+                Item::Text(t) => {
+                    let transform = tf * Affine::new(t.transform);
+                    let clip =
+                        t.clip.map(|[x0, y0, x1, y1]| tf.transform_rect_bbox(Rect::new(f64::from(x0), f64::from(y0), f64::from(x1), f64::from(y1))));
+                    let c = transform.as_coeffs();
+                    let origin = Rect::new(c[4], c[5], c[4], c[5]);
+                    if in_range(origin) && c.iter().all(|v| v.is_finite()) && clip.is_none_or(in_range) {
+                        out.push(PlacedItem::Text { index, transform, clip });
                     }
                 }
                 Item::Bitmap { rect: [x, y, w, h], .. } => {

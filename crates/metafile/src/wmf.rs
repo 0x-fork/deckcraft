@@ -1,14 +1,19 @@
 //! WMF reader (MS-WMF). A file is an optional 22-byte placeable header, a 9-word standard header, then
 //! records of (size in 16-bit words, function, parameters). Parameters are read at byte 6 of each record.
 
+use std::sync::Arc;
+
 use crate::bytes::Bytes;
-use crate::canvas::{Brush, Canvas, Obj, Pen, colorref};
+use crate::canvas::{BS_HATCHED, Brush, Canvas, LogFont, Obj, Pen, colorref};
 use crate::dib;
 use crate::geom::{self, ArcKind, P};
+use crate::text::{ETO_CLIPPED, ETO_OPAQUE, Font, MAX_CHARS, decode_bytes};
 use crate::{Error, Frame, MAX_PATH_OPS};
 
 const PLACEABLE_KEY: u32 = 0x9AC6_CDD7;
 const DEFAULT_INCH: f64 = 1440.0;
+/// A placeable WMF plays into a target sized in points; brushes are laid out in 96-dpi pixels.
+const PT_PER_PX: f64 = 72.0 / 96.0;
 
 pub(crate) fn is_wmf(b: Bytes) -> bool {
     if b.u32(0) == Some(PLACEABLE_KEY) {
@@ -42,6 +47,7 @@ pub(crate) fn parse(input: Bytes) -> Result<(Canvas, Option<Frame>), Error> {
     let mut cv = Canvas::new();
     if let Some((c, size)) = bounds {
         cv.play_into(Some([c[0], c[1], c[2] - c[0], c[3] - c[1]]), size);
+        cv.pattern_px = PT_PER_PX;
     }
     let mut player_viewport = bounds.is_some();
     let mut parsed = 0usize;
@@ -128,12 +134,31 @@ fn record(cv: &mut Canvas, func: u16, r: Bytes) {
         }),
         0x02FA => create_pen(cv, r),
         0x02FC => create_brush(cv, r),
-        // Fonts, palettes, pattern brushes and regions take a handle slot too, so later SELECTOBJECT
-        // handles count them; selecting one draws nothing.
-        0x02FB | 0x00F7 | 0x01F9 | 0x0142 | 0x06FF => {
+        0x02FB => {
+            let f = font(r).unwrap_or_default();
+            cv.add_object(None, Obj::Font(Arc::new(f)));
+            Some(())
+        }
+        0x0142 => {
+            // A pattern the reader cannot decode still takes its handle slot.
+            let b = dib_pattern_brush(r).map_or(Obj::Other, Obj::Brush);
+            cv.add_object(None, b);
+            Some(())
+        }
+        // Palettes, old-style pattern brushes and regions take a handle slot too, so later
+        // SELECTOBJECT handles count them; selecting one draws nothing.
+        0x00F7 | 0x01F9 | 0x06FF => {
             cv.add_object(None, Obj::Other);
             Some(())
         }
+        0x0209 => r.u32(6).map(|c| cv.set_text_color(c)),
+        0x0201 => r.u32(6).map(|c| cv.set_bk_color(c)),
+        0x0102 => r.u16(6).map(|m| cv.set_bk_mode(u32::from(m))),
+        0x012E => r.u16(6).map(|a| cv.set_text_align(u32::from(a))),
+        0x0A32 => ext_text_out(cv, r),
+        0x0521 => text_out(cv, r),
+        // PATBLT: rop(4), height, width, y, x.
+        0x061D => r.u32(6).map(|rop| cv.fill_rop([i16s(r, 16), i16s(r, 14), i16s(r, 12), i16s(r, 10)], rop)),
         0x012D => r.u16(6).map(|h| cv.select(wmf_handle(h))),
         0x01F0 => r.u16(6).map(|h| cv.delete_object(u32::from(h))),
         // STRETCHDIB: rop(4) usage(2) srcH srcW ySrc xSrc destH destW yDest xDest, then the DIB.
@@ -168,11 +193,93 @@ fn create_pen(cv: &mut Canvas, r: Bytes) -> Option<()> {
     Some(())
 }
 
-/// CREATEBRUSHINDIRECT: style, colour, hatch (hatch is not drawn).
+/// CREATEBRUSHINDIRECT: style, colour, hatch.
 fn create_brush(cv: &mut Canvas, r: Bytes) -> Option<()> {
-    let style = r.u16(6)?;
+    let style = u32::from(r.u16(6)?);
     let color = r.u32(8)?;
-    cv.add_object(None, Obj::Brush(Brush { style: u32::from(style), color: colorref(color) }));
+    let mut b = Brush::new(style, colorref(color));
+    if style == BS_HATCHED {
+        b.hatch = u32::from(r.u16(12).unwrap_or(0));
+    }
+    cv.add_object(None, Obj::Brush(b));
+    Some(())
+}
+
+/// DIBCREATEPATTERNBRUSH: style, colour usage, then a DIB (MS-WMF 2.3.4.8). The DIB's own palette
+/// gives the colours; with DIB_PAL_COLORS (indices into a palette the reader does not keep) a
+/// monochrome DIB takes the text and background colours.
+fn dib_pattern_brush(r: Bytes) -> Option<Brush> {
+    let usage = r.u16(8)?;
+    let dib = r.tail(10)?;
+    let n = dib::info_len(dib)?;
+    let img = dib::decode(Bytes(dib.slice(0, n)?), dib.tail(n)?, false)?;
+    Brush::pattern(img, usage == 1)
+}
+
+/// Font object (MS-WMF 2.2.1.2): height, width, escapement, orientation, weight (i16 each), italic,
+/// underline, strike-out and charset bytes, three precision/quality bytes, pitch and family, then the
+/// face name (up to 32 bytes, NUL-terminated, in the font's character set).
+fn font(r: Bytes) -> Option<LogFont> {
+    let height = r.i16(6)?;
+    let width = r.i16(8).unwrap_or(0);
+    let escapement = r.i16(10).unwrap_or(0);
+    let weight = r.i16(14).unwrap_or(0);
+    let byte = |o: usize| r.0.get(o).copied().unwrap_or(0);
+    let charset = byte(19);
+    let name = r.0.get(24..).unwrap_or(&[]);
+    let name = name.get(..32).unwrap_or(name);
+    let name = name.split(|b| *b == 0).next().unwrap_or(&[]);
+    // Face names are plain ASCII in practice; other bytes go through the Western code page.
+    let (family, _) = decode_bytes(name, 0, &[]);
+    Some(LogFont {
+        font: Font {
+            family: family.trim().to_string(),
+            height: f32::from(height),
+            width: f32::from(width),
+            weight: weight.clamp(0, 1000) as u16,
+            italic: byte(16) != 0,
+            underline: byte(17) != 0,
+            strike: byte(18) != 0,
+            charset,
+        },
+        escapement: f64::from(escapement),
+    })
+}
+
+/// The charset of the selected font, for decoding 8-bit text.
+fn charset(cv: &Canvas) -> u8 {
+    cv.font_charset()
+}
+
+/// EXTTEXTOUT (MS-WMF 2.3.3.5): y, x, string length, options, the rectangle (left, top, right,
+/// bottom) when ETO_OPAQUE or ETO_CLIPPED is set, the string padded to a word, then an optional dx
+/// array of i16 advances.
+fn ext_text_out(cv: &mut Canvas, r: Bytes) -> Option<()> {
+    let (y, x) = (r.i16(6)?, r.i16(8)?);
+    let n = usize::from(r.u16(10)?).min(MAX_CHARS);
+    let opts = u32::from(r.u16(12)?);
+    let has_rect = opts & (ETO_OPAQUE | ETO_CLIPPED) != 0;
+    let rect = if has_rect { Some([i16s(r, 14), i16s(r, 16), i16s(r, 18), i16s(r, 20)]) } else { None };
+    let at = if has_rect { 22 } else { 14 };
+    // A string running past the record is cut to what the record holds.
+    let avail = r.0.len().saturating_sub(at);
+    let n = n.min(avail);
+    let bytes = r.slice(at, n)?;
+    let dx_at = at + n.next_multiple_of(2);
+    let dx: Vec<f32> = if r.0.len() >= dx_at + 2 * n { (0..n).filter_map(|i| r.i16(dx_at + 2 * i)).map(f32::from).collect() } else { Vec::new() };
+    let (text, dx) = decode_bytes(bytes, charset(cv), &dx);
+    cv.text((f64::from(x), f64::from(y)), text, dx, opts, rect);
+    Some(())
+}
+
+/// TEXTOUT (MS-WMF 2.3.3.20): string length, the string padded to a word, then y and x.
+fn text_out(cv: &mut Canvas, r: Bytes) -> Option<()> {
+    let n = usize::from(r.u16(6)?).min(MAX_CHARS);
+    let bytes = r.slice(8, n)?;
+    let at = 8 + n.next_multiple_of(2);
+    let (y, x) = (r.i16(at)?, r.i16(at + 2)?);
+    let (text, _) = decode_bytes(bytes, charset(cv), &[]);
+    cv.text((f64::from(x), f64::from(y)), text, Vec::new(), 0, None);
     Some(())
 }
 

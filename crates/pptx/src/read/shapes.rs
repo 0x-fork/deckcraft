@@ -87,6 +87,22 @@ pub fn sp_tree(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, tree: &El, depth: us
     out
 }
 
+/// ActiveX controls (`p:controls`): each control's picture (`p:pic`), the image PowerPoint shows
+/// for it, as a picture above the slide's shapes. Controls without one are left out.
+pub fn controls(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, controls: &El) -> Vec<Shape> {
+    let mut out = vec![];
+    for c in controls.children_named("control") {
+        if ctx.count >= MAX_SHAPES {
+            break;
+        }
+        if let Some(p) = c.child("pic") {
+            ctx.count += 1;
+            out.push(pic(imp, part, ctx, p));
+        }
+    }
+    out
+}
+
 fn remap_connectors(shapes: &mut [Shape], ctx: &IdCtx, depth: usize) {
     if depth > MAX_TREE_DEPTH {
         return;

@@ -2,8 +2,11 @@
 //! transform, pen and brush selection through an object table, the DC save stack and path brackets.
 //! Output is device-space items; `lib.rs` maps them into the picture frame.
 
+use std::sync::{Arc, OnceLock};
+
 use crate::dib::Rgba;
 use crate::geom::{Op, P};
+use crate::text::{ETO_CLIPPED, ETO_OPAQUE, Font, TA_UPDATECP, Text, align};
 use crate::{MAX_BYTES, MAX_ITEMS, MAX_OBJECTS, MAX_PATH_OPS, MAX_STACK};
 
 pub(crate) const MM_TEXT: u32 = 1;
@@ -15,9 +18,21 @@ pub(crate) const PS_NULL: u32 = 5;
 pub(crate) const PS_STYLE_MASK: u32 = 0x0F;
 const BS_SOLID: u32 = 0;
 pub(crate) const BS_NULL: u32 = 1;
+pub(crate) const BS_HATCHED: u32 = 2;
+/// BS_PATTERN, BS_DIBPATTERN and BS_DIBPATTERNPT: the brush paints a bitmap tile.
+const BS_PATTERN: u32 = 3;
+const BS_DIBPATTERN: u32 = 5;
+const BS_DIBPATTERNPT: u32 = 6;
 const WINDING: u32 = 2;
-/// SETROP2 mix mode that leaves the destination alone: outlines and fills draw nothing.
+/// SETROP2 mix modes. R2_NOP leaves the destination alone: outlines and fills draw nothing.
+/// R2_XORPEN and R2_MASKPEN draw the classic see-through shadow (XOR a colour, AND a pattern, XOR
+/// the colour again); the others draw as R2_COPYPEN.
+const R2_XORPEN: u32 = 7;
+const R2_MASKPEN: u32 = 9;
 const R2_NOP: u32 = 11;
+const R2_COPYPEN: u32 = 13;
+/// SETBKMODE OPAQUE: text cells and hatch gaps are filled with the background colour.
+const OPAQUE: u32 = 2;
 const PATCOPY: u32 = 0x00F0_0021;
 const BLACKNESS: u32 = 0x0000_0042;
 const WHITENESS: u32 = 0x00FF_0062;
@@ -48,18 +63,76 @@ pub(crate) struct Pen {
     pub color: [u8; 4],
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub(crate) struct Brush {
     pub style: u32,
     pub color: [u8; 4],
+    /// HS_* hatch style of a BS_HATCHED brush.
+    pub hatch: u32,
+    /// The tile of a pattern brush.
+    pub pattern: Option<Arc<Pattern>>,
 }
 
-#[derive(Clone, Copy, Debug)]
+impl Brush {
+    pub fn new(style: u32, color: [u8; 4]) -> Self {
+        Brush { style, color, hatch: 0, pattern: None }
+    }
+
+    /// A pattern brush painting `img`. A monochrome brush paints its dark pixels in the text
+    /// colour and its light ones in the background colour. None for an empty or oversized tile.
+    pub fn pattern(img: Rgba, mono: bool) -> Option<Self> {
+        if img.w == 0 || img.h == 0 || img.w > MAX_TILE_SIDE || img.h > MAX_TILE_SIDE || img.px.len() != img.w * img.h * 4 {
+            return None;
+        }
+        let pattern = Arc::new(Pattern { w: img.w, h: img.h, px: img.px, mono, plain: OnceLock::new() });
+        Some(Brush { style: BS_DIBPATTERNPT, color: [0, 0, 0, 255], hatch: 0, pattern: Some(pattern) })
+    }
+}
+
+/// A pattern brush's tile, top-down RGBA.
+#[derive(PartialEq, Debug)]
+pub(crate) struct Pattern {
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<u8>,
+    pub mono: bool,
+    /// The tile as drawn when nothing recolours it, shared by every fill with this brush.
+    pub plain: OnceLock<Arc<RawTile>>,
+}
+
+/// Largest pattern tile side kept (GDI brushes are typically 8×8).
+pub(crate) const MAX_TILE_SIDE: usize = 256;
+
+#[derive(Clone, Debug)]
 pub(crate) enum Obj {
     Pen(Pen),
     Brush(Brush),
-    /// Fonts, palettes, pattern brushes and regions: they take a table slot but draw nothing.
+    Font(Arc<LogFont>),
+    /// Palettes and regions: they take a table slot but draw nothing.
     Other,
+}
+
+/// A font object: the neutral [`Font`] and its escapement (tenths of a degree, counter-clockwise),
+/// which the text transform takes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub(crate) struct LogFont {
+    pub font: Font,
+    pub escapement: f64,
+}
+
+/// A brush tile in device units: `cell` device units per tile pixel, laid from the device origin.
+#[derive(Debug, PartialEq)]
+pub(crate) struct RawTile {
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<u8>,
+    pub cell: f64,
+}
+
+/// What a fill paints.
+enum Paint {
+    Solid([u8; 4]),
+    Tile(Arc<RawTile>),
 }
 
 /// Converts a COLORREF (0x00BBGGRR) to opaque RGBA.
@@ -166,8 +239,34 @@ fn ratio(num: f64, den: f64) -> f64 {
 
 /// Output of drawing, in device units. Path points are already mapped; `lib.rs` normalises them.
 pub(crate) enum Raw {
-    Path { ops: Vec<Op>, fill: Option<[u8; 4]>, stroke: Option<([u8; 4], f64)>, even_odd: bool },
-    Bitmap { rect: [f64; 4], img: Rgba },
+    Path {
+        ops: Vec<Op>,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], f64)>,
+        even_odd: bool,
+    },
+    /// A path filled with a repeating tile.
+    Pattern {
+        ops: Vec<Op>,
+        even_odd: bool,
+        tile: Arc<RawTile>,
+    },
+    Bitmap {
+        rect: [f64; 4],
+        img: Rgba,
+    },
+    /// Text whose transform and clip are in device units.
+    Text(Box<Text>),
+}
+
+/// Text drawing state: colours, background mode, alignment and the selected font.
+#[derive(Clone)]
+struct TextState {
+    color: [u8; 4],
+    bk_color: [u8; 4],
+    bk_opaque: bool,
+    align: u32,
+    font: Option<Arc<LogFont>>,
 }
 
 #[derive(Clone)]
@@ -176,7 +275,8 @@ struct Saved {
     pen: Pen,
     brush: Brush,
     even_odd: bool,
-    nop: bool,
+    rop2: u32,
+    text: TextState,
 }
 
 pub(crate) struct Canvas {
@@ -193,8 +293,13 @@ pub(crate) struct Canvas {
     pen: Pen,
     brush: Brush,
     even_odd: bool,
-    /// The mix mode is R2_NOP: shapes draw nothing.
-    nop: bool,
+    /// SETROP2 mix mode.
+    rop2: u32,
+    /// The colour of the last fill drawn with R2_XORPEN, for the see-through shadow idiom.
+    xor_color: Option<[u8; 4]>,
+    text: TextState,
+    /// Device units per pattern-brush pixel: brushes are laid out in 96-dpi pixels.
+    pub pattern_px: f64,
     pos: P,
     in_path: bool,
     path: Vec<Op>,
@@ -212,9 +317,12 @@ impl Canvas {
             used: 0,
             objects: Vec::new(),
             pen: Pen { style: 0, width: 0.0, color: [0, 0, 0, 255] },
-            brush: Brush { style: BS_SOLID, color: [255, 255, 255, 255] },
+            brush: Brush::new(BS_SOLID, [255, 255, 255, 255]),
             even_odd: true,
-            nop: false,
+            rop2: R2_COPYPEN,
+            xor_color: None,
+            text: TextState { color: [0, 0, 0, 255], bk_color: [255, 255, 255, 255], bk_opaque: true, align: 0, font: None },
+            pattern_px: 1.0,
             pos: (0.0, 0.0),
             in_path: false,
             path: Vec::new(),
@@ -230,7 +338,14 @@ impl Canvas {
     fn push(&mut self, raw: Raw) {
         let cost = match &raw {
             Raw::Path { ops, .. } => ops.len() * std::mem::size_of::<Op>(),
+            // A tile shared with its brush is counted once (by the brush); one made for this fill
+            // counts here.
+            Raw::Pattern { ops, tile, .. } => {
+                let own = if Arc::strong_count(tile) == 1 { tile.px.len() } else { 0 };
+                ops.len() * std::mem::size_of::<Op>() + 64 + own
+            }
             Raw::Bitmap { img, .. } => img.px.len(),
+            Raw::Text(t) => t.text.len() + t.dx.len() * 4 + t.font.family.len() + 128,
         };
         if self.items.len() >= MAX_ITEMS || self.used.saturating_add(cost) > MAX_BYTES {
             self.full = true;
@@ -288,9 +403,31 @@ impl Canvas {
         self.even_odd = mode != WINDING;
     }
 
-    /// SETROP2: only R2_NOP changes what is drawn (nothing); the other mix modes draw as copy.
+    /// SETROP2. R2_NOP draws nothing; R2_XORPEN and R2_MASKPEN are read as the see-through shadow
+    /// idiom (see [`Canvas::fill_paint`]); the other mix modes draw as copy.
     pub fn set_rop2(&mut self, mode: u32) {
-        self.nop = mode == R2_NOP;
+        self.rop2 = mode;
+    }
+
+    pub fn set_text_color(&mut self, c: u32) {
+        self.text.color = colorref(c);
+    }
+
+    pub fn set_bk_color(&mut self, c: u32) {
+        self.text.bk_color = colorref(c);
+    }
+
+    pub fn set_bk_mode(&mut self, mode: u32) {
+        self.text.bk_opaque = mode == OPAQUE;
+    }
+
+    pub fn set_text_align(&mut self, ta: u32) {
+        self.text.align = ta;
+    }
+
+    /// The character set of the selected font (ANSI without one).
+    pub fn font_charset(&self) -> u8 {
+        self.text.font.as_ref().map_or(0, |f| f.font.charset)
     }
 
     /// EMF SETWORLDTRANSFORM (`mode` 4) and MODIFYWORLDTRANSFORM (1 identity, 2 left, 3 right, 4 set).
@@ -309,7 +446,14 @@ impl Canvas {
     /// could no longer match the file.
     pub fn save_dc(&mut self) {
         if self.saved.len() < MAX_STACK {
-            self.saved.push(Saved { map: self.map, pen: self.pen, brush: self.brush, even_odd: self.even_odd, nop: self.nop });
+            self.saved.push(Saved {
+                map: self.map,
+                pen: self.pen,
+                brush: self.brush.clone(),
+                even_odd: self.even_odd,
+                rop2: self.rop2,
+                text: self.text.clone(),
+            });
         } else {
             self.full = true;
         }
@@ -325,11 +469,21 @@ impl Canvas {
         self.pen = s.pen;
         self.brush = s.brush;
         self.even_odd = s.even_odd;
-        self.nop = s.nop;
+        self.rop2 = s.rop2;
+        self.text = s.text;
     }
 
     /// Stores an object in `slot` (EMF index), or in the first free slot (WMF handle table).
     pub fn add_object(&mut self, slot: Option<usize>, obj: Obj) {
+        // A pattern brush's pixels count against the byte budget like drawn items.
+        if let Obj::Brush(Brush { pattern: Some(p), .. }) = &obj {
+            let cost = p.px.len();
+            if self.used.saturating_add(cost) > MAX_BYTES {
+                self.full = true;
+                return;
+            }
+            self.used += cost;
+        }
         match slot {
             Some(i) if i < MAX_OBJECTS => {
                 if self.objects.len() <= i {
@@ -363,9 +517,10 @@ impl Canvas {
         if i & STOCK != 0 {
             return self.select_stock(i & !STOCK);
         }
-        match self.objects.get(i as usize).copied().flatten() {
+        match self.objects.get(i as usize).cloned().flatten() {
             Some(Obj::Pen(p)) => self.pen = p,
             Some(Obj::Brush(b)) => self.brush = b,
+            Some(Obj::Font(f)) => self.text.font = Some(f),
             Some(Obj::Other) | None => {}
         }
     }
@@ -373,17 +528,19 @@ impl Canvas {
     fn select_stock(&mut self, i: u32) {
         let white = [255, 255, 255, 255];
         let black = [0, 0, 0, 255];
-        let gray = |v: u8| Brush { style: BS_SOLID, color: [v, v, v, 255] };
+        let gray = |v: u8| Brush::new(BS_SOLID, [v, v, v, 255]);
         match i {
-            0 | 18 => self.brush = Brush { style: BS_SOLID, color: white },
+            0 | 18 => self.brush = Brush::new(BS_SOLID, white),
             1 => self.brush = gray(192),
             2 => self.brush = gray(128),
             3 => self.brush = gray(64),
-            4 => self.brush = Brush { style: BS_SOLID, color: black },
-            5 => self.brush = Brush { style: BS_NULL, color: black },
+            4 => self.brush = Brush::new(BS_SOLID, black),
+            5 => self.brush = Brush::new(BS_NULL, black),
             6 => self.pen = Pen { style: 0, width: 0.0, color: white },
             7 | 19 => self.pen = Pen { style: 0, width: 0.0, color: black },
             8 => self.pen = Pen { style: PS_NULL, width: 0.0, color: black },
+            // The stock fonts (OEM_FIXED_FONT … DEFAULT_GUI_FONT): drawn in the default face.
+            10..=17 => self.text.font = None,
             _ => {}
         }
     }
@@ -397,8 +554,81 @@ impl Canvas {
         }
     }
 
-    fn fill_color(&self) -> Option<[u8; 4]> {
-        (self.brush.style == BS_SOLID).then_some(self.brush.color)
+    /// The current brush's paint. Hatch and monochrome brushes take the background colour (when
+    /// the background mode is opaque) and the text colour. Under R2_MASKPEN (destination AND
+    /// brush) a tile's white pixels keep what is below, and its black ones take the colour of the
+    /// XOR fill before it: XOR, AND, XOR again leaves that colour where the tile is black.
+    fn fill_paint(&self) -> Option<Paint> {
+        let b = &self.brush;
+        match b.style {
+            BS_SOLID => Some(Paint::Solid(b.color)),
+            BS_HATCHED => {
+                let bg = self.text.bk_opaque.then_some(self.text.bk_color);
+                let px = hatch_tile(b.hatch, b.color, bg)?;
+                Some(Paint::Tile(Arc::new(RawTile { w: 8, h: 8, px, cell: self.pattern_px })))
+            }
+            BS_PATTERN | BS_DIBPATTERN | BS_DIBPATTERNPT => {
+                let p = b.pattern.as_ref()?;
+                if !p.mono && self.rop2 != R2_MASKPEN {
+                    let cell = self.pattern_px;
+                    return Some(Paint::Tile(p.plain.get_or_init(|| Arc::new(RawTile { w: p.w, h: p.h, px: p.px.clone(), cell })).clone()));
+                }
+                let mut px = p.px.clone();
+                for c in px.as_chunks_mut::<4>().0 {
+                    if p.mono {
+                        let light = u16::from(c[0]) + u16::from(c[1]) + u16::from(c[2]) >= 384;
+                        let v = if light { self.text.bk_color } else { self.text.color };
+                        *c = [v[0], v[1], v[2], 255];
+                    }
+                    if self.rop2 == R2_MASKPEN {
+                        if c[..3] == [255, 255, 255] {
+                            c[3] = 0;
+                        } else if c[..3] == [0, 0, 0]
+                            && let Some(x) = self.xor_color
+                        {
+                            *c = x;
+                        }
+                    }
+                }
+                Some(Paint::Tile(Arc::new(RawTile { w: p.w, h: p.h, px, cell: self.pattern_px })))
+            }
+            _ => None,
+        }
+    }
+
+    /// Pushes device ops filled with `fill` and stroked with `stroke`: a tile fill and its outline
+    /// are two items.
+    fn push_shape(&mut self, ops: Vec<Op>, fill: Option<Paint>, stroke: Option<([u8; 4], f64)>) {
+        let even_odd = self.even_odd;
+        match fill {
+            Some(Paint::Tile(tile)) => {
+                if stroke.is_some() {
+                    self.push(Raw::Pattern { ops: ops.clone(), even_odd, tile });
+                    self.push(Raw::Path { ops, fill: None, stroke, even_odd });
+                } else {
+                    self.push(Raw::Pattern { ops, even_odd, tile });
+                }
+            }
+            Some(Paint::Solid(c)) => self.push(Raw::Path { ops, fill: Some(c), stroke, even_odd }),
+            None if stroke.is_some() => self.push(Raw::Path { ops, fill: None, stroke, even_odd }),
+            None => {}
+        }
+    }
+
+    /// Whether the mix mode suppresses drawing: R2_NOP draws nothing, and R2_XORPEN shapes only
+    /// remember their fill colour (an XOR pair cancels; the see-through shadow idiom draws its
+    /// pattern in that colour).
+    fn mix_skips(&mut self, fill: bool) -> bool {
+        match self.rop2 {
+            R2_NOP => true,
+            R2_XORPEN => {
+                if fill && self.brush.style == BS_SOLID {
+                    self.xor_color = Some(self.brush.color);
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     fn stroke_pen(&self) -> Option<([u8; 4], f64)> {
@@ -426,16 +656,12 @@ impl Canvas {
         if self.in_path {
             return self.push_path_ops(dev);
         }
-        if self.nop {
+        if self.mix_skips(fill) || dev.len() < 2 {
             return;
         }
-        let fill = if fill { self.fill_color() } else { None };
+        let fill = if fill { self.fill_paint() } else { None };
         let stroke = if stroke { self.stroke_pen() } else { None };
-        if (fill.is_none() && stroke.is_none()) || dev.len() < 2 {
-            return;
-        }
-        let even_odd = self.even_odd;
-        self.push(Raw::Path { ops: dev, fill, stroke, even_odd });
+        self.push_shape(dev, fill, stroke);
     }
 
     pub fn move_to(&mut self, p: P) {
@@ -508,23 +734,22 @@ impl Canvas {
     /// FILLPATH, STROKEPATH and STROKEANDFILLPATH: paints the bracketed path and empties it.
     pub fn paint_path(&mut self, fill: bool, stroke: bool) {
         let ops = std::mem::take(&mut self.path);
-        if self.nop {
+        if self.mix_skips(fill) || ops.len() < 2 {
             return;
         }
-        let fill = if fill { self.fill_color() } else { None };
+        let fill = if fill { self.fill_paint() } else { None };
         let stroke = if stroke { self.stroke_pen() } else { None };
-        if ops.len() < 2 || (fill.is_none() && stroke.is_none()) {
-            return;
-        }
-        let even_odd = self.even_odd;
-        self.push(Raw::Path { ops, fill, stroke, even_odd });
+        self.push_shape(ops, fill, stroke);
     }
 
-    /// Fills a logical rectangle `[l, t, r, b]` with the current brush (nothing when it is not solid).
-    pub fn fill_brush_rect(&mut self, rect: [f64; 4]) {
-        if let Some(color) = self.fill_color() {
-            self.fill_rect_with(rect, color);
+    /// Fills a logical rectangle `[l, t, r, b]` with the current brush (PATBLT, PATCOPY blits).
+    pub fn fill_brush_rect(&mut self, [l, t, r, b]: [f64; 4]) {
+        if self.mix_skips(true) {
+            return;
         }
+        let fill = self.fill_paint();
+        let dev: Vec<Op> = crate::geom::rect(l, t, r, b).iter().map(|o| self.map_op(*o)).collect();
+        self.push_shape(dev, fill, None);
     }
 
     /// Fills a logical rectangle `[l, t, r, b]` with a solid colour (ROP fills such as BLACKNESS).
@@ -550,6 +775,75 @@ impl Canvas {
         }
     }
 
+    /// Draws `text` (one `dx` advance per character, or none) with the current font, colours and
+    /// alignment. The reference point is `at`, or the current position under TA_UPDATECP (which
+    /// then moves past the string). `rect` (logical `[l, t, r, b]`) is filled with the background
+    /// colour under ETO_OPAQUE and clips the text under ETO_CLIPPED. Text ignores the mix mode, as
+    /// GDI's does.
+    pub fn text(&mut self, at: P, text: String, dx: Vec<f32>, options: u32, rect: Option<[f64; 4]>) {
+        if let (true, Some(r)) = (options & ETO_OPAQUE != 0, rect) {
+            self.fill_rect_with(r, self.text.bk_color);
+        }
+        let lf = self.text.font.as_deref().cloned().unwrap_or_default();
+        let update = self.text.align & TA_UPDATECP != 0;
+        let origin = if update { self.pos } else { at };
+        let (h_align, v_align) = align(self.text.align);
+        let o = self.map.device(origin);
+        let ux = self.map.device((origin.0 + 1.0, origin.1));
+        let uy = self.map.device((origin.0, origin.1 + 1.0));
+        let (ux, uy) = ((ux.0 - o.0, ux.1 - o.1), (uy.0 - o.0, uy.1 - o.1));
+        if update {
+            // The current position moves along the baseline past the string (back past it when
+            // right-aligned). Without a dx array the advance is estimated from the height.
+            let adv: f64 = if dx.is_empty() {
+                f64::from(lf.font.height.abs().max(1.0)) * 0.5 * text.chars().count() as f64
+            } else {
+                dx.iter().map(|d| f64::from(*d)).sum()
+            };
+            let adv = match h_align {
+                crate::HAlign::Left => adv,
+                crate::HAlign::Right => -adv,
+                crate::HAlign::Center => 0.0,
+            };
+            let theta = (lf.escapement / 10.0).to_radians();
+            let y_sign = if uy.1 < 0.0 { 1.0 } else { -1.0 };
+            let p = (origin.0 + adv * theta.cos(), origin.1 + adv * theta.sin() * y_sign);
+            if p.0.is_finite() && p.1.is_finite() {
+                self.pos = p;
+            }
+        }
+        let (sx, sy) = (ux.0.hypot(ux.1), uy.0.hypot(uy.1));
+        let drawable = !text.is_empty() && [sx, sy, o.0, o.1].iter().all(|v| v.is_finite()) && sx > 0.0 && sy > 0.0;
+        if !drawable {
+            return;
+        }
+        // The baseline runs along the device direction of the logical x axis (rotated by a world
+        // transform; a mirroring mapping does not mirror glyphs), turned counter-clockwise by the
+        // escapement.
+        let det = ux.0 * uy.1 - ux.1 * uy.0;
+        let phi = if det > 0.0 { ux.1.atan2(ux.0) } else { ux.1.atan2(ux.0.abs()) };
+        let a = phi - (lf.escapement / 10.0).to_radians();
+        let (c, s) = (a.cos(), a.sin());
+        let clip = match (options & ETO_CLIPPED != 0, rect) {
+            (true, Some([l, t, r, b])) => {
+                let (p, q) = (self.map.device((l, t)), self.map.device((r, b)));
+                Some([p.0.min(q.0) as f32, p.1.min(q.1) as f32, p.0.max(q.0) as f32, p.1.max(q.1) as f32])
+            }
+            _ => None,
+        };
+        self.push(Raw::Text(Box::new(Text {
+            transform: [sx * c, sx * s, -sy * s, sy * c, o.0, o.1],
+            text,
+            dx,
+            font: lf.font,
+            color: self.text.color,
+            background: self.text.bk_opaque.then_some(self.text.bk_color),
+            h_align,
+            v_align,
+            clip,
+        })));
+    }
+
     /// A bitmap stretched into a logical rectangle `[x, y, w, h]`. A negative extent mirrors the
     /// bitmap, as the mapping does.
     pub fn bitmap(&mut self, rect: [f64; 4], mut img: Rgba) {
@@ -560,6 +854,31 @@ impl Canvas {
         let dev = [a.0.min(b.0), a.1.min(b.1), (b.0 - a.0).abs(), (b.1 - a.1).abs()];
         self.push(Raw::Bitmap { rect: dev, img });
     }
+}
+
+/// An 8×8 hatch tile (HS_HORIZONTAL, HS_VERTICAL, HS_FDIAGONAL, HS_BDIAGONAL, HS_CROSS,
+/// HS_DIAGCROSS): one-pixel lines in `fg` over `bg`, or over nothing when the background is
+/// transparent. None for an unknown style.
+pub(crate) fn hatch_tile(style: u32, fg: [u8; 4], bg: Option<[u8; 4]>) -> Option<Vec<u8>> {
+    if style > 5 {
+        return None;
+    }
+    let mut px = Vec::with_capacity(8 * 8 * 4);
+    for y in 0..8u32 {
+        for x in 0..8u32 {
+            let (h, v, f, b) = (y == 7, x == 7, x == y, x + y == 7);
+            let on = match style {
+                0 => h,
+                1 => v,
+                2 => f,
+                3 => b,
+                4 => h || v,
+                _ => f || b,
+            };
+            px.extend(if on { fg } else { bg.unwrap_or([0, 0, 0, 0]) });
+        }
+    }
+    Some(px)
 }
 
 /// Cubic segments from groups of three points (control, control, end). A trailing partial group is

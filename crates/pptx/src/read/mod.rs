@@ -711,6 +711,10 @@ fn read_slide(imp: &mut Imp, part: &Part, doc: &Doc, id: SlideId, layout: Layout
         if let Some(tree) = csld.child("spTree") {
             s.shapes = shapes::sp_tree(imp, part, &mut ctx, tree, 0);
         }
+        if let Some(c) = csld.child("controls") {
+            let pics = shapes::controls(imp, part, &mut ctx, c);
+            s.shapes.extend(pics);
+        }
     }
     if let Some(t) = root.child("transition") {
         s.transition = timing::transition(imp, part, t);

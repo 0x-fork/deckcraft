@@ -120,7 +120,7 @@ const DIB24_RGBA: [u8; 16] = [255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255
 fn path_segs(item: &Item) -> (&Vec<Seg>, Option<[u8; 4]>, Option<([u8; 4], f32)>, bool) {
     match item {
         Item::Path { segs, fill, stroke, even_odd } => (segs, *fill, *stroke, *even_odd),
-        Item::Bitmap { .. } => panic!("expected a path"),
+        other => panic!("expected a path: {other:?}"),
     }
 }
 
@@ -1015,4 +1015,506 @@ fn plain_wmf_target_comes_from_a_window_that_was_read() {
     assert_eq!((p.width, p.height), (200.0, 100.0));
     let (x0, y0, x1, y1) = rect_extent(&p.items[0]);
     assert!(close(x0, 0.0) && close(y0, 0.0) && close(x1, 200.0) && close(y1, 100.0), "{x0} {y0} {x1} {y1}");
+}
+
+// ---- Text, pattern and hatch brushes, mix-mode idioms ----
+
+use crate::{HAlign, Picture, Text, VAlign};
+
+/// META_CREATEFONTINDIRECT: height, width, escapement (and orientation), weight, the italic,
+/// underline, strike-out and charset bytes, four precision bytes, then the NUL-terminated face.
+fn wfont(height: i32, weight: i32, flags: [u8; 3], charset: u8, esc: i32, face: &[u8]) -> Vec<u8> {
+    let mut v = cat(vec![h16(height), h16(0), h16(esc), h16(esc), h16(weight)]);
+    v.extend(flags);
+    v.extend([charset, 0, 0, 0, 0]);
+    v.extend(face);
+    v.push(0);
+    wrec(0x02FB, &v)
+}
+
+/// META_EXTTEXTOUT at (x, y): the rectangle when given, the string padded to a word, then `dx`.
+fn wtext(x: i32, y: i32, s: &[u8], opts: i32, rect: Option<[i32; 4]>, dx: &[i32]) -> Vec<u8> {
+    let mut v = cat(vec![h16(y), h16(x), h16(s.len() as i32), h16(opts)]);
+    for c in rect.into_iter().flatten() {
+        v.extend(h16(c));
+    }
+    v.extend(s);
+    if s.len() % 2 == 1 {
+        v.push(0);
+    }
+    for d in dx {
+        v.extend(h16(*d));
+    }
+    wrec(0x0A32, &v)
+}
+
+/// A plain WMF whose 200 × 100 window maps one logical unit to one picture unit.
+fn wmf200(records: &[Vec<u8>]) -> Picture {
+    let mut recs = vec![wrec(0x020C, &cat(vec![h16(100), h16(200)]))];
+    recs.extend(records.iter().cloned());
+    parse(&wmf(&recs, None)).unwrap()
+}
+
+fn texts(p: &Picture) -> Vec<&Text> {
+    p.items
+        .iter()
+        .filter_map(|i| match i {
+            Item::Text(t) => Some(t.as_ref()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn close6(a: [f64; 6], b: [f64; 6]) -> bool {
+    a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6)
+}
+
+#[test]
+fn wmf_text_reads_the_font_string_dx_colour_and_alignment() {
+    let recs = [
+        wfont(-20, 700, [1, 1, 1], 0, 0, b"Arial"),
+        wrec(0x012D, &h16(0)),
+        wrec(0x0209, &h32(0x0000_00FF)),
+        wrec(0x0102, &h16(1)),
+        wrec(0x012E, &h16(24 | 6)),
+        wtext(50, 60, b"Hi!", 0, None, &[10, 8, 6]),
+    ];
+    let p = wmf200(&recs);
+    let t = texts(&p);
+    assert_eq!(t.len(), 1, "{:?}", p.items);
+    let t = t[0];
+    assert_eq!(t.text, "Hi!");
+    assert_eq!(t.dx, vec![10.0, 8.0, 6.0], "the dx array follows the word-padded odd string");
+    assert_eq!(t.font.family, "Arial");
+    assert_eq!((t.font.height, t.font.weight, t.font.italic, t.font.underline, t.font.strike), (-20.0, 700, true, true, true));
+    assert_eq!(t.color, [255, 0, 0, 255]);
+    assert_eq!(t.background, None, "TRANSPARENT background mode");
+    assert_eq!((t.h_align, t.v_align), (HAlign::Center, VAlign::Baseline));
+    assert!(close6(t.transform, [1.0, 0.0, 0.0, 1.0, 50.0, 60.0]), "{:?}", t.transform);
+    assert_eq!(t.clip, None);
+}
+
+#[test]
+fn font_height_sign_and_default_state_are_kept() {
+    // A positive height is the cell height; it stays positive for the renderer to resolve. Without
+    // SETTEXTALIGN the reference point is the top left; without SETBKMODE the cell is filled white.
+    let recs = [wfont(30, 400, [0, 0, 0], 0, 0, b"Times New Roman"), wrec(0x012D, &h16(0)), wtext(5, 5, b"x", 0, None, &[])];
+    let p = wmf200(&recs);
+    let t = texts(&p)[0];
+    assert_eq!(t.font.height, 30.0);
+    assert_eq!(t.font.family, "Times New Roman");
+    assert_eq!((t.h_align, t.v_align), (HAlign::Left, VAlign::Top));
+    assert_eq!(t.background, Some([255, 255, 255, 255]));
+    assert!(t.dx.is_empty(), "no dx array in the record");
+    // Right and bottom.
+    let p = wmf200(&[wrec(0x012E, &h16(2 | 8)), wtext(5, 5, b"x", 0, None, &[])]);
+    let t = texts(&p)[0];
+    assert_eq!((t.h_align, t.v_align), (HAlign::Right, VAlign::Bottom));
+    assert_eq!(t.font, crate::Font::default(), "no font selected");
+}
+
+#[test]
+fn escapement_turns_the_baseline_counter_clockwise() {
+    let recs = [wfont(-20, 400, [0, 0, 0], 0, 900, b"Arial"), wrec(0x012D, &h16(0)), wtext(100, 90, b"Up", 0, None, &[])];
+    let p = wmf200(&recs);
+    let t = texts(&p)[0];
+    // Text x runs up the picture (0, -1); text y (down the glyphs) runs right (1, 0).
+    assert!(close6(t.transform, [0.0, -1.0, 1.0, 0.0, 100.0, 90.0]), "{:?}", t.transform);
+}
+
+#[test]
+fn a_y_up_mapping_moves_text_but_does_not_mirror_it() {
+    // Window 200 × -100 onto a 200 × 100 viewport: y goes up.
+    let recs = [
+        wrec(0x0103, &h16(8)),
+        wrec(0x020C, &cat(vec![h16(-100), h16(200)])),
+        wrec(0x020E, &cat(vec![h16(100), h16(200)])),
+        wtext(40, -30, b"A", 0, None, &[]),
+    ];
+    let p = parse(&wmf(&recs, None)).unwrap();
+    let t = texts(&p)[0];
+    assert!(close6(t.transform, [1.0, 0.0, 0.0, 1.0, 40.0, 30.0]), "{:?}", t.transform);
+}
+
+#[test]
+fn update_cp_starts_at_the_current_position_and_moves_past_the_string() {
+    let recs =
+        [wrec(0x012E, &h16(1)), wrec(0x0214, &cat(vec![h16(20), h16(10)])), wtext(0, 0, b"ab", 0, None, &[5, 7]), wtext(0, 0, b"c", 0, None, &[3])];
+    let p = wmf200(&recs);
+    let t = texts(&p);
+    assert_eq!(t.len(), 2);
+    assert!(close6(t[0].transform, [1.0, 0.0, 0.0, 1.0, 10.0, 20.0]), "{:?}", t[0].transform);
+    assert!(close6(t[1].transform, [1.0, 0.0, 0.0, 1.0, 22.0, 20.0]), "{:?}", t[1].transform);
+}
+
+#[test]
+fn eto_opaque_fills_the_rectangle_and_eto_clipped_clips() {
+    let recs = [wrec(0x0201, &h32(0x0000_FF00)), wtext(12, 30, b"ok", 2 | 4, Some([10, 10, 60, 40]), &[])];
+    let p = wmf200(&recs);
+    assert_eq!(p.items.len(), 2, "{:?}", p.items);
+    let (x0, y0, x1, y1) = rect_extent(&p.items[0]);
+    assert!(close(x0, 10.0) && close(y0, 10.0) && close(x1, 60.0) && close(y1, 40.0));
+    assert_eq!(path_segs(&p.items[0]).1, Some([0, 255, 0, 255]));
+    let t = texts(&p)[0];
+    assert_eq!(t.clip, Some([10.0, 10.0, 60.0, 40.0]));
+    assert_eq!(t.background, Some([0, 255, 0, 255]));
+}
+
+#[test]
+fn character_sets_decode_bytes() {
+    let one = |charset: u8, s: &[u8]| {
+        let p = wmf200(&[wfont(-10, 400, [0, 0, 0], charset, 0, b"F"), wrec(0x012D, &h16(0)), wtext(0, 0, s, 0, None, &[])]);
+        texts(&p)[0].text.clone()
+    };
+    assert_eq!(one(0, &[b'A', 0x80, 0x93, 0x94, 0xE9]), "A€“”é");
+    assert_eq!(one(238, &[0xB9, 0xE8, 0x9E, 0xA3]), "ąčžŁ");
+    assert_eq!(one(204, &[0xC0, 0xFF, 0xA8]), "АяЁ");
+    assert_eq!(one(2, b"n\xA7"), "\u{F06E}\u{F0A7}", "symbol fonts keep their codes in the private-use area");
+    assert_eq!(one(0, &[0x81]), "\u{FFFD}", "an undefined byte");
+    // A double-byte character set: a lead and trail byte become one blank with both advances.
+    let p =
+        wmf200(&[wfont(-10, 400, [0, 0, 0], 128, 0, b"F"), wrec(0x012D, &h16(0)), wtext(0, 0, &[0x41, 0x82, 0xA0, 0x42], 0, None, &[1, 2, 3, 4])]);
+    let t = texts(&p)[0];
+    assert_eq!((t.text.as_str(), t.dx.as_slice()), ("A B", [1.0, 5.0, 4.0].as_slice()));
+}
+
+#[test]
+fn wmf_textout_reads_its_string_and_position() {
+    let mut v = cat(vec![h16(3)]);
+    v.extend(b"abc\0");
+    v.extend(cat(vec![h16(40), h16(30)]));
+    let p = wmf200(&[wrec(0x0521, &v)]);
+    let t = texts(&p)[0];
+    assert_eq!(t.text, "abc");
+    assert!(close6(t.transform, [1.0, 0.0, 0.0, 1.0, 30.0, 40.0]), "{:?}", t.transform);
+}
+
+#[test]
+fn savedc_restores_text_colour_and_font() {
+    let recs = [
+        wfont(-10, 400, [0, 0, 0], 0, 0, b"One"),
+        wrec(0x012D, &h16(0)),
+        wrec(0x0209, &h32(0x0000_00FF)),
+        wrec(0x001E, &[]),
+        wfont(-10, 400, [0, 0, 0], 0, 0, b"Two"),
+        wrec(0x012D, &h16(1)),
+        wrec(0x0209, &h32(0x00FF_0000)),
+        wrec(0x0127, &h16(-1)),
+        wtext(0, 0, b"x", 0, None, &[]),
+    ];
+    let p = wmf200(&recs);
+    let t = texts(&p)[0];
+    assert_eq!((t.font.family.as_str(), t.color), ("One", [255, 0, 0, 255]));
+}
+
+/// EMR_EXTCREATEFONTINDIRECTW in slot 1: LogFont at 12, face at 40.
+fn efont(height: i32, esc: i32, weight: i32, italic: u8, charset: u8, face: &str) -> Vec<u8> {
+    let mut v = cat(vec![h32(1), e32(height), e32(0), e32(esc), e32(esc), e32(weight)]);
+    v.extend([italic, 0, 0, charset, 0, 0, 0, 0]);
+    let mut name: Vec<u8> = face.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+    name.resize(64, 0);
+    v.extend(name);
+    erec(82, &v)
+}
+
+/// EMR_EXTTEXTOUTW (or A) at (x, y) with options, the rectangle (absent under ETO_NO_RECT), the
+/// string at 76 and the dx array after it.
+fn etext(wide: bool, x: i32, y: i32, units: &[u16], opts: u32, dx: &[i32]) -> Vec<u8> {
+    let no_rect = opts & 0x100 != 0;
+    let fixed = if no_rect { 60 } else { 76 };
+    let s: Vec<u8> = if wide { units.iter().flat_map(|u| u.to_le_bytes()).collect() } else { units.iter().map(|u| *u as u8).collect() };
+    let s_off = fixed;
+    let dx_off = (s_off + s.len()).next_multiple_of(4);
+    let len = dx_off + dx.len() * 4;
+    let mut f = vec![(24, 1u32), (36, x as u32), (40, y as u32), (44, units.len() as u32), (48, s_off as u32), (52, opts)];
+    f.push((if no_rect { 56 } else { 72 }, if dx.is_empty() { 0 } else { dx_off as u32 }));
+    let dxb: Vec<u8> = dx.iter().flat_map(|d| d.to_le_bytes()).collect();
+    erec_at(if wide { 84 } else { 83 }, len.next_multiple_of(4), &f, &[(s_off, &s), (dx_off, &dxb)])
+}
+
+#[test]
+fn emf_exttextoutw_reads_utf16_dx_and_the_font() {
+    let recs = [
+        efont(24, 0, 400, 1, 0, "Segoe UI"),
+        erec(37, &h32(1)),
+        erec(22, &h32(0x18 | 2)),
+        erec(24, &h32(0x0000_FF00)),
+        erec(18, &h32(1)),
+        etext(true, 100, 50, &[0x41, 0xD83D, 0xDE00], 0, &[10, 6, 0]),
+    ];
+    let p = parse(&emf(&recs, [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    let t = texts(&p);
+    assert_eq!(t.len(), 1, "{:?}", p.items);
+    let t = t[0];
+    assert_eq!(t.text, "A\u{1F600}");
+    assert_eq!(t.dx, vec![10.0, 6.0], "a surrogate pair takes both advances");
+    assert_eq!((t.font.family.as_str(), t.font.height, t.font.italic), ("Segoe UI", 24.0, true));
+    assert_eq!((t.h_align, t.v_align, t.color, t.background), (HAlign::Right, VAlign::Baseline, [0, 255, 0, 255], None));
+    // Upright, uniformly scaled.
+    let [a, b, c, d, ..] = t.transform;
+    assert!(a > 0.0 && d > 0.0 && b.abs() < 1e-9 && c.abs() < 1e-9 && (a - d).abs() < 1e-9, "{:?}", t.transform);
+}
+
+#[test]
+fn emf_text_options_pdy_no_rect_ansi_and_glyph_indices() {
+    // ETO_PDY: (dx, dy) pairs, of which dx is used. ETO_NO_RECT moves the dx offset to 56.
+    let recs = [etext(true, 0, 0, &[0x61, 0x62], 0x2000 | 0x100, &[7, 1, 9, 2])];
+    let p = parse(&emf(&recs, [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    assert_eq!(texts(&p)[0].dx, vec![7.0, 9.0]);
+    // EXTTEXTOUTA decodes through the font's charset.
+    let recs = [efont(-10, 0, 400, 0, 238, "F"), erec(37, &h32(1)), etext(false, 0, 0, &[0xB9], 0, &[])];
+    let p = parse(&emf(&recs, [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    assert_eq!(texts(&p)[0].text, "ą");
+    // Glyph indices name glyphs of a font we cannot match: left out.
+    let recs = [etext(true, 0, 0, &[5, 6], 0x10, &[])];
+    let p = parse(&emf(&recs, [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    assert!(texts(&p).is_empty());
+}
+
+#[test]
+fn emf_smalltextout_reads_8_bit_and_16_bit_strings() {
+    // x, y, count, options, mode, scales, (no bounds under ETO_NO_RECT), characters.
+    let small = |opts: u32, chars: &[u8]| {
+        let mut v = cat(vec![e32(3), e32(4), h32(2), h32(opts), h32(1), h32(0), h32(0)]);
+        v.extend(chars);
+        erec(108, &v)
+    };
+    let p = parse(&emf(&[small(0x100 | 0x200, b"hi")], [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    assert_eq!(texts(&p)[0].text, "hi");
+    let p = parse(&emf(&[small(0x100, &[b'o', 0, b'k', 0])], [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    assert_eq!(texts(&p)[0].text, "ok");
+}
+
+/// An 8 × 8 one-bit DIB (palette white, black; stored bottom-up): `rows` top to bottom.
+fn mono_dib(rows: [u8; 8]) -> Vec<u8> {
+    let mut v = info_header(8, 8, 1, 32);
+    v.extend([255, 255, 255, 0, 0, 0, 0, 0]);
+    for r in rows.iter().rev() {
+        v.extend([*r, 0, 0, 0]);
+    }
+    v
+}
+
+fn pattern_of(item: &Item) -> &crate::Tile {
+    match item {
+        Item::Pattern { tile, .. } => tile,
+        other => panic!("expected a pattern fill: {other:?}"),
+    }
+}
+
+/// Pixel (x, y) of a tile.
+fn tile_px(t: &crate::Tile, x: usize, y: usize) -> [u8; 4] {
+    let o = (y * t.width as usize + x) * 4;
+    t.rgba[o..o + 4].try_into().unwrap()
+}
+
+#[test]
+fn wmf_dib_pattern_brush_paints_its_rows_top_down() {
+    let brush = wrec(0x0142, &cat(vec![h16(5), h16(0), mono_dib([0xFF, 0x80, 0, 0, 0, 0, 0, 0x01])]));
+    let recs = [
+        brush,
+        // A pen after the brush: the brush took handle 0.
+        wrec(0x02FA, &cat(vec![h16(0), h16(1), h16(0), h32(0x0000_00FF)])),
+        wrec(0x012D, &h16(0)),
+        wrec(0x012D, &h16(1)),
+        wrec(0x041B, &cat(vec![h16(720), h16(1440), h16(0), h16(0)])),
+    ];
+    let p = parse(&wmf(&recs, Some([0, 0, 1440, 720]))).unwrap();
+    assert_eq!(p.items.len(), 2, "the tile fill and the outline: {:?}", p.items);
+    let t = pattern_of(&p.items[0]);
+    assert_eq!((t.width, t.height), (8, 8));
+    for x in 0..8 {
+        assert_eq!(tile_px(t, x, 0), [0, 0, 0, 255], "top row is set: black");
+    }
+    assert_eq!(tile_px(t, 0, 1), [0, 0, 0, 255]);
+    assert_eq!(tile_px(t, 1, 1), [255, 255, 255, 255]);
+    assert_eq!(tile_px(t, 7, 7), [0, 0, 0, 255]);
+    assert_eq!(tile_px(t, 0, 7), [255, 255, 255, 255]);
+    // 96-dpi pixels of a picture in points, laid from the picture's corner.
+    assert!(close(t.cell[0], 0.75) && close(t.cell[1], 0.75) && t.origin == [0.0, 0.0], "{:?} {:?}", t.cell, t.origin);
+    assert_eq!(path_segs(&p.items[1]).2.map(|s| s.0), Some([255, 0, 0, 255]));
+}
+
+#[test]
+fn hatch_brushes_draw_lines_over_the_background_mode() {
+    let hatch = |style: i32| wrec(0x02FC, &cat(vec![h16(2), h32(0x00FF_0000), h16(style)]));
+    let rect = wrec(0x041B, &cat(vec![h16(50), h16(50), h16(0), h16(0)]));
+    // HS_CROSS over a transparent background.
+    let p = wmf200(&[hatch(4), wrec(0x012D, &h16(0)), wrec(0x0102, &h16(1)), rect.clone()]);
+    let t = pattern_of(&p.items[0]);
+    let blue = [0, 0, 255, 255];
+    assert_eq!((tile_px(t, 3, 7), tile_px(t, 7, 3)), (blue, blue));
+    assert_eq!(tile_px(t, 3, 3)[3], 0, "gaps are transparent");
+    // HS_BDIAGONAL over the opaque white background.
+    let p = wmf200(&[hatch(3), wrec(0x012D, &h16(0)), rect.clone()]);
+    let t = pattern_of(&p.items[0]);
+    assert_eq!((tile_px(t, 0, 7), tile_px(t, 7, 0)), (blue, blue));
+    assert_eq!(tile_px(t, 0, 0), [255, 255, 255, 255]);
+    // An unknown hatch style draws no fill.
+    let p = wmf200(&[hatch(9), wrec(0x012D, &h16(0)), rect]);
+    assert!(p.items.iter().all(|i| !matches!(i, Item::Pattern { .. })), "{:?}", p.items);
+}
+
+#[test]
+fn xor_mask_xor_draws_the_pattern_in_the_xor_colour() {
+    // The see-through shadow: XOR a grey polygon, AND a checker pattern, XOR the polygon again.
+    let square = wrec(0x0324, &cat(vec![h16(4), h16(0), h16(0), h16(40), h16(0), h16(40), h16(40), h16(0), h16(40)]));
+    let recs = [
+        wrec(0x0104, &h16(7)),
+        wrec(0x02FC, &cat(vec![h16(0), h32(0x0080_8080), h16(0)])),
+        wrec(0x012D, &h16(0)),
+        square.clone(),
+        wrec(0x0104, &h16(9)),
+        wrec(0x0142, &cat(vec![h16(5), h16(0), mono_dib([0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA])])),
+        wrec(0x012D, &h16(1)),
+        wrec(0x041B, &cat(vec![h16(40), h16(40), h16(0), h16(0)])),
+        wrec(0x0104, &h16(7)),
+        wrec(0x012D, &h16(0)),
+        square,
+    ];
+    let p = wmf200(&recs);
+    assert_eq!(p.items.len(), 2, "only the AND pattern (and its outline) draw: {:?}", p.items);
+    let t = pattern_of(&p.items[0]);
+    // 0x55 = 0101 0101: white, black, …
+    assert_eq!(tile_px(t, 0, 0)[3], 0, "white keeps what is below");
+    assert_eq!(tile_px(t, 1, 0), [128, 128, 128, 255], "black takes the XOR colour");
+}
+
+#[test]
+fn patblt_fills_with_the_brush() {
+    let patblt = |rop: u32| wrec(0x061D, &cat(vec![h32(rop), h16(30), h16(40), h16(10), h16(20)]));
+    let recs = [wrec(0x02FC, &cat(vec![h16(0), h32(0x00FF_0000), h16(0)])), wrec(0x012D, &h16(0)), patblt(0x00F0_0021), patblt(0x0055_0009)];
+    let p = wmf200(&recs);
+    assert_eq!(p.items.len(), 1, "DSTINVERT draws nothing: {:?}", p.items);
+    let (x0, y0, x1, y1) = rect_extent(&p.items[0]);
+    assert!(close(x0, 20.0) && close(y0, 10.0) && close(x1, 60.0) && close(y1, 40.0), "{x0} {y0} {x1} {y1}");
+    assert_eq!(path_segs(&p.items[0]).1, Some([0, 0, 255, 255]));
+}
+
+#[test]
+fn emf_dib_pattern_and_mono_brushes() {
+    let dib = mono_dib([0xF0; 8]);
+    let (info, bits) = dib.split_at(48);
+    let brush = |typ: u32| {
+        let f = [(8, 1u32), (12, 0), (16, 32), (20, info.len() as u32), (24, 32 + info.len() as u32), (28, bits.len() as u32)];
+        erec_at(typ, 32 + dib.len(), &f, &[(32, info), (32 + info.len(), bits)])
+    };
+    let rect = erec(43, &cat(vec![e32(0), e32(0), e32(40), e32(40)]));
+    let null_pen = erec(37, &h32(0x8000_0008));
+    let p = parse(&emf(&[brush(94), erec(37, &h32(1)), null_pen.clone(), rect.clone()], [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    let t = pattern_of(&p.items[0]);
+    assert_eq!((tile_px(t, 0, 0), tile_px(t, 7, 0)), ([0, 0, 0, 255], [255, 255, 255, 255]));
+    // A mono brush paints in the text colour (red) and the background colour (green).
+    let recs = [erec(24, &h32(0xFF)), erec(25, &h32(0xFF00)), brush(93), erec(37, &h32(1)), null_pen, rect];
+    let p = parse(&emf(&recs, [0, 0, 200, 100], [0, 0, 5000, 2500])).unwrap();
+    let t = pattern_of(&p.items[0]);
+    assert_eq!((tile_px(t, 0, 0), tile_px(t, 7, 0)), ([255, 0, 0, 255], [0, 255, 0, 255]));
+}
+
+#[test]
+fn hostile_text_and_brush_records_never_panic() {
+    // A string longer than its record is cut to what the record holds.
+    let mut v = cat(vec![h16(0), h16(0), h16(0x7FFF), h16(0)]);
+    v.extend(b"abcd");
+    let p = wmf200(&[wrec(0x0A32, &v)]);
+    assert_eq!(texts(&p)[0].text, "abcd");
+    // The rectangle flag without room for the rectangle draws nothing.
+    let p = wmf200(&[wrec(0x0A32, &cat(vec![h16(0), h16(0), h16(1), h16(6)]))]);
+    assert!(texts(&p).is_empty());
+    // A face name with no terminator stops at 32 bytes.
+    let p = wmf200(&[wfont(-10, 400, [0, 0, 0], 0, 0, &[b'A'; 40]), wrec(0x012D, &h16(0)), wtext(0, 0, b"x", 0, None, &[])]);
+    assert_eq!(texts(&p)[0].font.family.len(), 32);
+    // A pattern brush whose DIB is cut short, or too big for a tile, still takes its handle slot
+    // and draws no fill.
+    let short = wrec(0x0142, &cat(vec![h16(5), h16(0), info_header(8, 8, 1, 32)]));
+    let mut huge = info_header(300, 300, 1, 0);
+    huge.extend([255, 255, 255, 0, 0, 0, 0, 0]);
+    huge.extend(vec![0u8; 40 * 300]);
+    let huge = wrec(0x0142, &cat(vec![h16(5), h16(0), huge]));
+    for b in [short, huge] {
+        let recs = [
+            b,
+            wrec(0x02FA, &cat(vec![h16(0), h16(1), h16(0), h32(0xFF)])),
+            wrec(0x012D, &h16(0)),
+            wrec(0x012D, &h16(1)),
+            wrec(0x041B, &cat(vec![h16(9), h16(9), h16(0), h16(0)])),
+        ];
+        let p = wmf200(&recs);
+        assert_eq!(p.items.len(), 1, "{:?}", p.items);
+        let (_, fill, stroke, _) = path_segs(&p.items[0]);
+        assert_eq!((fill, stroke.map(|s| s.0)), (Some([255, 255, 255, 255]), Some([255, 0, 0, 255])));
+    }
+    // EMF: the string offset past the record, a huge count, a dx offset past the record.
+    let bad = [
+        erec_at(84, 80, &[(44, 2), (48, 4000), (52, 0)], &[]),
+        erec_at(84, 84, &[(44, u32::MAX), (48, 76), (52, 0)], &[(76, &[b'a', 0, b'b', 0])]),
+        erec_at(84, 80, &[(44, 2), (48, 76), (52, 0), (72, 0xFFFF_FFF0)], &[(76, &[b'a', 0, b'b', 0])]),
+        erec_at(82, 20, &[(8, 1)], &[]),
+        erec_at(94, 32, &[(8, 1), (16, 0xFFFF_FFFF), (20, 40), (24, 0), (28, 0xFFFF_FFFF)], &[]),
+        erec_at(108, 40, &[(16, u32::MAX), (20, 0x300)], &[]),
+    ];
+    for r in bad {
+        let _ = parse(&emf(&[r], [0, 0, 200, 100], [0, 0, 5000, 2500]));
+    }
+    let p = parse(&emf(
+        &[erec_at(84, 84, &[(44, 2), (48, 76), (52, 0), (72, 0xFFFF_FFF0)], &[(76, &[b'a', 0, b'b', 0])])],
+        [0, 0, 200, 100],
+        [0, 0, 5000, 2500],
+    ))
+    .unwrap();
+    assert!(texts(&p)[0].dx.is_empty(), "a dx array past the record is dropped");
+    // Mutated text and brush files.
+    let wfile = wmf(
+        &[
+            wfont(-20, 700, [1, 1, 1], 238, 450, b"Arial"),
+            wrec(0x012D, &h16(0)),
+            wrec(0x0142, &cat(vec![h16(5), h16(0), mono_dib([0x55; 8])])),
+            wrec(0x012D, &h16(1)),
+            wrec(0x012E, &h16(1)),
+            wtext(5, 5, b"Hello", 6, Some([0, 0, 50, 50]), &[1, 2, 3, 4, 5]),
+            wrec(0x041B, &cat(vec![h16(9), h16(9), h16(0), h16(0)])),
+        ],
+        Some([0, 0, 100, 100]),
+    );
+    let efile = emf(
+        &[efont(24, 900, 400, 1, 0, "Segoe UI"), erec(37, &h32(1)), etext(true, 1, 2, &[0x41, 0xD83D, 0xDE00], 0x2000, &[1, 2, 3, 4, 5, 6])],
+        [0, 0, 200, 100],
+        [0, 0, 5000, 2500],
+    );
+    let mut rng = Lcg(0x9E37_79B9_7F4A_7C15);
+    for file in [&wfile, &efile] {
+        for n in 0..=file.len() {
+            let _ = parse(&file[..n]);
+        }
+        for _ in 0..1500 {
+            let mut buf = file.clone();
+            for _ in 0..6 {
+                let at = rng.rnd() as usize % buf.len();
+                buf[at] = rng.rnd() as u8;
+            }
+            let _ = parse(&buf);
+        }
+    }
+}
+
+#[test]
+fn text_items_are_capped_like_any_other() {
+    let t = wtext(0, 0, b"x", 0, None, &[]);
+    let recs: Vec<Vec<u8>> = (0..MAX_ITEMS + 5).map(|_| t.clone()).collect();
+    let p = wmf200(&recs);
+    assert_eq!(p.items.len(), MAX_ITEMS);
+}
+
+#[test]
+fn pattern_brush_pixels_count_against_the_byte_budget() {
+    // 256 × 256 one-bit pattern brushes (256 KiB of RGBA each): far fewer than the object table
+    // holds fit the budget, and the parse stops there.
+    let mut dib = info_header(256, 256, 1, 0);
+    dib.extend([255, 255, 255, 0, 0, 0, 0, 0]);
+    dib.extend(vec![0x55u8; 32 * 256]);
+    let brush = wrec(0x0142, &cat(vec![h16(5), h16(0), dib]));
+    let mut recs: Vec<Vec<u8>> = (0..1100).map(|_| brush.clone()).collect();
+    recs.push(wrec(0x041B, &cat(vec![h16(9), h16(9), h16(0), h16(0)])));
+    let p = wmf200(&recs);
+    assert!(p.items.is_empty(), "the parse stopped at the budget: {:?}", p.items.len());
 }

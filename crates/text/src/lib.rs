@@ -773,9 +773,37 @@ fn symbol_font_char(face: &FontFace, c: &str, font: Option<&str>) -> Option<char
     }
 }
 
+/// The character that draws `c`, a character of text set in the symbol font `font` (Wingdings,
+/// Symbol, Webdings…: its code, or U+F000 + its code), with `face`: the installed symbol font's own
+/// glyph when `face` is that font, else a Unicode look-alike as bullets use. None when `font` is not
+/// a symbol font or `c` is not a symbol code. Metafile text takes this path.
+pub fn symbol_char(face: &FontFace, font: &str, c: char) -> Option<char> {
+    let code = c as u32;
+    if !is_symbol_font(font) || !(code < 0x100 || (0xF000..=0xF0FF).contains(&code)) {
+        return None;
+    }
+    let plain = char::from_u32(code & 0xFF)?;
+    let s = plain.to_string();
+    Some(symbol_font_char(face, &s, Some(font)).unwrap_or_else(|| map_symbol_bullet(&s, Some(font)).chars().next().unwrap_or('•')))
+}
+
 fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
     let f = font.unwrap_or("").to_ascii_lowercase();
     let first = c.chars().next().unwrap_or('•');
+    if f.starts_with("webdings") {
+        let m = match (first as u32) & 0xff {
+            0x6e => '●',
+            0x67 => '■',
+            0x61 => '✓',
+            0x72 => '✕',
+            0x33 => '◀',
+            0x34 => '▶',
+            0x35 => '▲',
+            0x36 => '▼',
+            _ => '•',
+        };
+        return m.to_string();
+    }
     if f.contains("wingdings") || f.contains("symbol") || ('\u{f000}'..='\u{f0ff}').contains(&first) {
         let code = (first as u32) & 0xff;
         // Wingdings 2 and 3 put different shapes at the same codes.

@@ -1,6 +1,9 @@
 //! DeckCraft metafiles (ported from WordCraft's `crates/metafile`): reads Windows Metafiles (WMF)
-//! and Enhanced Metafiles (EMF) into a neutral vector model of filled and stroked paths and RGBA
-//! bitmaps, in a picture frame with y down.
+//! and Enhanced Metafiles (EMF) into a neutral vector model of filled and stroked paths, pattern
+//! fills, RGBA bitmaps and text strings, in a picture frame with y down.
+//!
+//! Text stays font-agnostic: a [`Text`] item names the font the file asks for and carries the
+//! string, its advances and alignment; the renderer resolves the font and draws the glyphs.
 //!
 //! The reader is pure Rust over byte slices (no file system), so it builds for wasm. Every read is
 //! bounds-checked and every count is capped; hostile input yields a shorter picture or an [`Error`],
@@ -16,15 +19,20 @@ mod dib;
 mod emf;
 mod geom;
 mod place;
+mod text;
 mod wmf;
 
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use bytes::Bytes;
 use canvas::Raw;
 use geom::{Op, P};
 pub use place::{MAX_BITMAP_SIDE, PlacedItem};
+pub use text::{Font, HAlign, SYMBOL_CHARSET, Text, VAlign};
 
 /// Items kept from one file. Past the cap the parse stops and keeps what it has.
 pub(crate) const MAX_ITEMS: usize = 200_000;
@@ -61,6 +69,22 @@ pub enum Item {
     },
     /// A bitmap stretched into `rect` = `[x, y, w, h]` (picture units), RGBA8 rows top-down.
     Bitmap { rect: [f32; 4], width: u32, height: u32, rgba: Vec<u8> },
+    /// A path filled with a repeating tile (pattern and hatch brushes). Items filled with the same
+    /// brush share its tile.
+    Pattern { segs: Vec<Seg>, even_odd: bool, tile: Arc<Tile> },
+    /// A text string.
+    Text(Box<Text>),
+}
+
+/// A brush tile: RGBA8 rows top-down (transparent where the brush leaves the background), each
+/// pixel `cell` picture units, with a tile's top-left corner at `origin`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tile {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+    pub cell: [f32; 2],
+    pub origin: [f32; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -94,6 +118,8 @@ pub fn parse(bytes: &[u8]) -> Result<Picture, Error> {
     let (cv, frame) = if emf::is_emf(b) {
         emf::parse(b)?
     } else if wmf::is_wmf(b) {
+        // A WMF converted from an EMF can carry the original in MFCOMMENT escapes; PowerPoint draws
+        // the WMF's own records (its dx rounding shows), so the copy is not used.
         wmf::parse(b)?
     } else {
         return Err(Error::NotMetafile);
@@ -124,6 +150,8 @@ fn build(raw: Vec<Raw>, frame: Option<Frame>) -> Picture {
     let stroke_scale = (sx + sy) / 2.0;
     // No stroke is wider than the picture's diagonal: anything wider is a mapping artefact.
     let diag = size.0.hypot(size.1);
+    // Tiles shared by several fills stay shared.
+    let mut tiles: HashMap<*const canvas::RawTile, (Arc<canvas::RawTile>, Arc<Tile>)> = HashMap::new();
     let items = raw.into_iter().filter_map(|r| match r {
         Raw::Path { ops, fill, stroke, even_odd } => {
             let segs = ops.iter().map(|op| seg(op, tf)).collect::<Option<Vec<Seg>>>()?;
@@ -137,6 +165,44 @@ fn build(raw: Vec<Raw>, frame: Option<Frame>) -> Picture {
             let (x, y) = tf((r[0], r[1]));
             let rect = [f(x)?, f(y)?, f(r[2] * sx)?, f(r[3] * sy)?];
             Some(Item::Bitmap { rect, width: img.w as u32, height: img.h as u32, rgba: img.px })
+        }
+        Raw::Pattern { ops, even_odd, tile } => {
+            let segs = ops.iter().map(|op| seg(op, tf)).collect::<Option<Vec<Seg>>>()?;
+            if segs.len() < 2 {
+                return None;
+            }
+            let key = Arc::as_ptr(&tile);
+            let tile = match tiles.get(&key) {
+                Some((_, t)) => t.clone(),
+                None => {
+                    let (ox, oy) = tf((0.0, 0.0));
+                    let t = Arc::new(Tile {
+                        width: u32::try_from(tile.w).ok()?,
+                        height: u32::try_from(tile.h).ok()?,
+                        rgba: tile.px.clone(),
+                        cell: [f(tile.cell * sx)?, f(tile.cell * sy)?],
+                        origin: [f(ox)?, f(oy)?],
+                    });
+                    // The raw tile is kept with its key, so the address is never reused by another.
+                    tiles.insert(key, (tile.clone(), t.clone()));
+                    t
+                }
+            };
+            Some(Item::Pattern { segs, even_odd, tile })
+        }
+        Raw::Text(mut t) => {
+            // Device to picture: scale by (sx, sy) after moving the frame's corner to the origin.
+            let [a, b, c, d, e, g] = t.transform;
+            let (e, g) = tf((e, g));
+            t.transform = [a * sx, b * sy, c * sx, d * sy, e, g];
+            if !t.transform.iter().all(|v| v.is_finite()) {
+                return None;
+            }
+            if let Some([x0, y0, x1, y1]) = t.clip {
+                let (p, q) = (tf((f64::from(x0), f64::from(y0))), tf((f64::from(x1), f64::from(y1))));
+                t.clip = Some([f(p.0.min(q.0))?, f(p.1.min(q.1))?, f(p.0.max(q.0))?, f(p.1.max(q.1))?]);
+            }
+            Some(Item::Text(t))
         }
     });
     let items = items.collect();
@@ -185,7 +251,7 @@ fn bbox(raw: &[Raw]) -> Option<[f64; 4]> {
     };
     for r in raw {
         match r {
-            Raw::Path { ops, .. } => {
+            Raw::Path { ops, .. } | Raw::Pattern { ops, .. } => {
                 for op in ops {
                     match *op {
                         Op::M(p) | Op::L(p) => grow(p),
@@ -202,6 +268,7 @@ fn bbox(raw: &[Raw]) -> Option<[f64; 4]> {
                 grow((rect[0], rect[1]));
                 grow((rect[0] + rect[2], rect[1] + rect[3]));
             }
+            Raw::Text(t) => grow((t.transform[4], t.transform[5])),
         }
     }
     b

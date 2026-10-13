@@ -748,3 +748,14 @@ fn an_installed_symbol_font_draws_its_own_bullet() {
     assert_eq!(symbol_font_char(&face, "\u{ea}", Some("Wingdings 2")), Some('\u{f0ea}'));
     assert_eq!(symbol_font_char(&face, "\u{ea}", Some("Arial")), None);
 }
+
+#[test]
+fn symbol_char_maps_symbol_font_codes() {
+    // Inter is not a symbol font, so the codes map to look-alikes.
+    let face = FontDb::global().face("Inter", "Regular");
+    assert_eq!(symbol_char(&face, "Arial", 'n'), None, "not a symbol font");
+    assert_eq!(symbol_char(&face, "Webdings", 'n'), Some('\u{25CF}'));
+    assert_eq!(symbol_char(&face, "Webdings", '\u{F06E}'), Some('\u{25CF}'), "the private-use form of the code");
+    assert_eq!(symbol_char(&face, "Wingdings", '\u{F06E}'), Some('\u{25A0}'));
+    assert_eq!(symbol_char(&face, "Wingdings", '\u{100}'), None, "not a symbol code");
+}

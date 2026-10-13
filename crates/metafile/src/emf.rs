@@ -1,11 +1,19 @@
 //! EMF reader (MS-EMF). Records are (type, size in bytes) followed by a payload; offsets inside a
 //! record (bitmap info and bits) are relative to the record start, so each handler reads the record slice.
 
+use std::sync::Arc;
+
 use crate::bytes::Bytes;
-use crate::canvas::{BS_NULL, Brush, Canvas, Obj, PS_NULL, PS_STYLE_MASK, Pen, Xform, colorref};
+use crate::canvas::{BS_HATCHED, BS_NULL, Brush, Canvas, LogFont, Obj, PS_NULL, PS_STYLE_MASK, Pen, Xform, colorref};
 use crate::dib::{self, Blend};
 use crate::geom::{self, ArcKind, P};
+use crate::text::{ETO_GLYPH_INDEX, ETO_PDY, Font, MAX_CHARS, decode_bytes, decode_utf16};
 use crate::{Error, Frame, MAX_PATH_OPS};
+
+/// ExtTextOut options: no rectangle in the record (EMR_SMALLTEXTOUT, EmrText), and 8-bit
+/// characters (EMR_SMALLTEXTOUT).
+const ETO_NO_RECT: u32 = 0x0100;
+const ETO_SMALL_CHARS: u32 = 0x0200;
 
 const EMF_SIGNATURE: u32 = 0x464D_4520;
 /// Hundredths of a millimetre to points.
@@ -100,6 +108,14 @@ fn record(cv: &mut Canvas, typ: u32, r: Bytes) {
         38 => create_pen(cv, r),
         95 => create_ext_pen(cv, r),
         39 => create_brush(cv, r),
+        93 | 94 => create_dib_brush(cv, r, typ == 93),
+        82 => create_font(cv, r),
+        18 => r.u32(8).map(|m| cv.set_bk_mode(m)),
+        22 => r.u32(8).map(|a| cv.set_text_align(a)),
+        24 => r.u32(8).map(|c| cv.set_text_color(c)),
+        25 => r.u32(8).map(|c| cv.set_bk_color(c)),
+        83 | 84 => ext_text_out(cv, r, typ == 84),
+        108 => small_text_out(cv, r),
         40 => r.u32(8).map(|i| cv.delete_object(i)),
         27 => xy32(r, 8).map(|p| cv.move_to(p)),
         54 => xy32(r, 8).map(|p| cv.line_to(p)),
@@ -246,7 +262,109 @@ fn create_brush(cv: &mut Canvas, r: Bytes) -> Option<()> {
     let slot = r.u32(8)? as usize;
     let style = r.u32(12)?;
     let color = r.u32(16)?;
-    cv.add_object(Some(slot), Obj::Brush(Brush { style, color: colorref(color) }));
+    let mut b = Brush::new(style, colorref(color));
+    if style == BS_HATCHED {
+        b.hatch = r.u32(20).unwrap_or(0);
+    }
+    cv.add_object(Some(slot), Obj::Brush(b));
+    Some(())
+}
+
+/// EMR_CREATEDIBPATTERNBRUSHPT (94) and EMR_CREATEMONOBRUSH (93): handle, colour usage, then the
+/// bitmap info and bits as offset/size pairs. A mono brush (or one whose palette holds indices,
+/// DIB_PAL_COLORS) takes the text and background colours. An undecodable bitmap leaves the slot
+/// empty.
+fn create_dib_brush(cv: &mut Canvas, r: Bytes, mono: bool) -> Option<()> {
+    let slot = r.u32(8)? as usize;
+    let usage = r.u32(12)?;
+    let (bo, bl) = (r.u32(16)? as usize, r.u32(20)? as usize);
+    let (po, pl) = (r.u32(24)? as usize, r.u32(28)? as usize);
+    let img = dib::decode(Bytes(r.slice(bo, bl)?), Bytes(r.slice(po, pl)?), false)?;
+    let b = Brush::pattern(img, mono || usage == 1)?;
+    cv.add_object(Some(slot), Obj::Brush(b));
+    Some(())
+}
+
+/// EMR_EXTCREATEFONTINDIRECTW: handle, then a LogFont (MS-EMF 2.2.13): height, width, escapement,
+/// orientation, weight (i32 each), italic, underline, strike-out, charset and four more bytes, then
+/// the face name in 32 UTF-16 units (NUL-terminated).
+fn create_font(cv: &mut Canvas, r: Bytes) -> Option<()> {
+    let slot = r.u32(8)? as usize;
+    let height = r.i32(12)?;
+    let width = r.i32(16).unwrap_or(0);
+    let escapement = r.i32(20).unwrap_or(0);
+    let weight = r.i32(28).unwrap_or(0);
+    let byte = |o: usize| r.0.get(o).copied().unwrap_or(0);
+    let units: Vec<u16> = (0..32).map_while(|i| r.u16(40 + 2 * i)).take_while(|u| *u != 0).collect();
+    let (family, _) = decode_utf16(&units, &[]);
+    let font = Font {
+        family: family.trim().to_string(),
+        height: height as f32,
+        width: width as f32,
+        weight: weight.clamp(0, 1000) as u16,
+        italic: byte(32) != 0,
+        underline: byte(33) != 0,
+        strike: byte(34) != 0,
+        charset: byte(35),
+    };
+    cv.add_object(Some(slot), Obj::Font(Arc::new(LogFont { font, escapement: f64::from(escapement) })));
+    Some(())
+}
+
+/// The dx array at `off` for `n` characters: i32 advances, or (dx, dy) pairs under ETO_PDY (only
+/// dx is used). Empty when absent or short.
+fn dx_array(r: Bytes, off: usize, n: usize, opts: u32) -> Vec<f32> {
+    let step = if opts & ETO_PDY != 0 { 8 } else { 4 };
+    if off == 0 {
+        return Vec::new();
+    }
+    let dx: Vec<f32> = (0..n).map_while(|i| r.i32(off.checked_add(i.checked_mul(step)?)?)).map(|v| v as f32).collect();
+    if dx.len() == n { dx } else { Vec::new() }
+}
+
+/// EMR_EXTTEXTOUTA (83) and EMR_EXTTEXTOUTW (84): bounds, graphics mode and scales, then an EmrText
+/// at 36: reference point, character count, string offset, options, the rectangle (absent under
+/// ETO_NO_RECT) and the dx offset. Offsets count from the record start. Glyph-index strings name
+/// glyphs of a font the reader cannot match, so they are left out.
+fn ext_text_out(cv: &mut Canvas, r: Bytes, wide: bool) -> Option<()> {
+    let at = xy32(r, 36)?;
+    let n = (r.u32(44)? as usize).min(MAX_CHARS);
+    let off = r.u32(48)? as usize;
+    let opts = r.u32(52)?;
+    let (rect, dx_off) = if opts & ETO_NO_RECT != 0 { (None, r.u32(56)?) } else { (rect32(r, 56), r.u32(72)?) };
+    if opts & ETO_GLYPH_INDEX != 0 {
+        return None;
+    }
+    let dx = dx_array(r, dx_off as usize, n, opts);
+    let (text, dx) = if wide {
+        let raw = r.slice(off, n.checked_mul(2)?)?;
+        let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+        decode_utf16(&units, &dx)
+    } else {
+        decode_bytes(r.slice(off, n)?, cv.font_charset(), &dx)
+    };
+    cv.text(at, text, dx, opts, rect);
+    Some(())
+}
+
+/// EMR_SMALLTEXTOUT (MS-EMF 2.3.5.37): x, y, character count, options, graphics mode, scales, the
+/// bounds (absent under ETO_NO_RECT), then the characters: 8-bit under ETO_SMALL_CHARS, else UTF-16.
+fn small_text_out(cv: &mut Canvas, r: Bytes) -> Option<()> {
+    let at = xy32(r, 8)?;
+    let n = (r.u32(16)? as usize).min(MAX_CHARS);
+    let opts = r.u32(20)?;
+    if opts & ETO_GLYPH_INDEX != 0 {
+        return None;
+    }
+    let (rect, off) = if opts & ETO_NO_RECT != 0 { (None, 36) } else { (rect32(r, 36), 52) };
+    let (text, _) = if opts & ETO_SMALL_CHARS != 0 {
+        decode_bytes(r.slice(off, n)?, cv.font_charset(), &[])
+    } else {
+        let raw = r.slice(off, n.checked_mul(2)?)?;
+        let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+        decode_utf16(&units, &[])
+    };
+    cv.text(at, text, Vec::new(), opts, rect);
     Some(())
 }
 
