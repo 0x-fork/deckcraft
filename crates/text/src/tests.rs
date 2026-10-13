@@ -122,7 +122,7 @@ fn kerned_width_beside_spacing(family: &str, spc: f64) -> f64 {
 }
 
 #[test]
-fn character_spacing_in_the_body_stops_kerning() {
+fn character_spacing_in_the_body_keeps_kerning() {
     let kerns = |f: &FontFace| {
         let w = |feat: &[deckcraft_fonts::Feature]| deckcraft_fonts::shape(f, "AVATAR", feat, |c| c).iter().map(|g| g.x_advance).sum::<i32>();
         w(&[]) != w(&deckcraft_fonts::feature("-kern").into_iter().collect::<Vec<_>>())
@@ -133,11 +133,12 @@ fn character_spacing_in_the_body_stops_kerning() {
     };
     let (_, off) = glyphs_and_width(&family, "AVATAR WAVE", Some(0.0));
     let (_, on) = glyphs_and_width(&family, "AVATAR WAVE", Some(12.0));
-    // Small or condensed spacing elsewhere keeps the pairs; 0.6 pt anywhere in the box drops them.
-    for (spc, kerned) in [(0.0, true), (0.5, true), (-0.99, true), (-1.0, true), (-2.0, true), (0.6, false), (1.0, false), (3.0, false)] {
+    assert!(on < off);
+    // Spacing elsewhere in the box leaves the pairs kerned (Calibri, Segoe UI, Times New Roman in
+    // PowerPoint; only Arial drops them).
+    for spc in [0.0, 0.5, -1.0, 0.6, 2.0] {
         let w = kerned_width_beside_spacing(&family, spc);
-        let want = if kerned { on } else { off };
-        assert!((w - want).abs() < 0.01, "{family} spc {spc}: {w} vs {want}");
+        assert!((w - on).abs() < 0.01, "{family} spc {spc}: {w} vs {on}");
     }
 }
 

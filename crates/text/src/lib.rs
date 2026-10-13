@@ -694,17 +694,7 @@ pub fn autonum(scheme: &str, n: u32) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn shape_para(
-    ctx: &Ctx,
-    shape: &Shape,
-    body: &TextBody,
-    pi: usize,
-    scale: f64,
-    opts: &Opts,
-    number: Option<u32>,
-    no_kern: bool,
-    vertical: Upright,
-) -> ParaShaped {
+fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, opts: &Opts, number: Option<u32>, vertical: Upright) -> ParaShaped {
     let db = FontDb::global();
     let Some(para) = body.paragraphs.get(pi) else {
         let face = db.face("Inter", "Regular");
@@ -729,8 +719,7 @@ fn shape_para(
     let mut char_style: Vec<usize> = vec![];
     for run in &para.runs {
         let rp = resolve::run(ctx, shape, para, &run.props);
-        let mut st = make_style(ctx, &rp, scale, opts.prompt_color);
-        st.kern &= !no_kern;
+        let st = make_style(ctx, &rp, scale, opts.prompt_color);
         let t: String = match &run.kind {
             RunKind::Text => run.text.clone(),
             RunKind::Break => "\u{b}".into(),
@@ -1549,8 +1538,7 @@ fn tab_advance(x: f64, stops: &[Tab], default_tab: f64, seg: (f64, f64)) -> f64 
 pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLayout {
     let bp = resolve::body(ctx, shape);
     let autofit = bp.autofit.unwrap_or(AutoFit::None);
-    let no_kern = spacing_stops_kerning(ctx, shape, body);
-    let mut l = layout_scaled(ctx, shape, body, &bp, opts, 1.0, 0.0, no_kern);
+    let mut l = layout_scaled(ctx, shape, body, &bp, opts, 1.0, 0.0);
     if let (AutoFit::Shrink { .. }, false) = (autofit, opts.no_shrink)
         && l.overflow
     {
@@ -1560,7 +1548,7 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
         for _ in 0..12 {
             let mid = (lo + hi) / 2.0;
             let red: f64 = ((1.0 - mid) * 0.8_f64).min(0.2);
-            let t = layout_scaled(ctx, shape, body, &bp, opts, mid, red, no_kern);
+            let t = layout_scaled(ctx, shape, body, &bp, opts, mid, red);
             if t.overflow {
                 hi = mid;
             } else {
@@ -1568,28 +1556,13 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
                 best = Some(t);
             }
         }
-        l = best.unwrap_or_else(|| layout_scaled(ctx, shape, body, &bp, opts, 0.1, 0.2, no_kern));
+        l = best.unwrap_or_else(|| layout_scaled(ctx, shape, body, &bp, opts, 0.1, 0.2));
     }
     l
 }
 
-/// Does character spacing switch pair kerning off in this body? PowerPoint stops kerning every run
-/// of a text body once one of its runs is spaced out by 0.6 pt or more (measured on Arial at 40 pt:
-/// 0.5 pt keeps the pairs kerned, 0.6, 0.8, 1 and 1.5 pt drop them for the whole box, even in
-/// paragraphs without spacing). Condensed spacing mostly keeps them (-0.6, -1, -1.5, -2 and -3 pt;
-/// -1.2 and -2.5 pt did not, which no simple rule explains, so condensing never stops kerning
-/// here: titles condensed by 1 pt are common and kerned).
-fn spacing_stops_kerning(ctx: &Ctx, shape: &Shape, body: &TextBody) -> bool {
-    body.paragraphs.iter().any(|para| {
-        para.runs.iter().any(|run| {
-            let s = resolve::run(ctx, shape, para, &run.props).spacing.unwrap_or(0.0);
-            s >= 0.55
-        })
-    })
-}
-
 #[allow(clippy::too_many_arguments)]
-fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts: &Opts, scale: f64, reduce: f64, no_kern: bool) -> TextLayout {
+fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts: &Opts, scale: f64, reduce: f64) -> TextLayout {
     let r = opts.rect;
     let vert = bp.vert.unwrap_or(TextDir::Horizontal);
     // East Asian vertical text: CJK stands upright in text turned a quarter turn; stacked text
@@ -1652,7 +1625,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             }
             None
         };
-        shaped_paras.push(shape_para(ctx, shape, body, pi, scale, opts, number, no_kern, upright_text));
+        shaped_paras.push(shape_para(ctx, shape, body, pi, scale, opts, number, upright_text));
     }
     for (pi, p) in shaped_paras.iter().enumerate() {
         let props = &p.props;
