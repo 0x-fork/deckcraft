@@ -510,19 +510,77 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok || cancel
         }
         "spelling" => {
-            let v = app.session.execute("review.spelling", &json!({})).unwrap_or_default();
+            // Words skipped with Ignore All while the dialog is open, one per line.
+            let ignored = d.get("ignore", "");
+            let ignore: Vec<&str> = ignored.lines().filter(|l| !l.is_empty()).collect();
+            let v = app.session.execute("review.spelling", &json!({"ignore": ignore})).unwrap_or_default();
             let list = v.as_array().cloned().unwrap_or_default();
+            let info = app.session.execute("review.dictionary", &json!({})).unwrap_or_default();
+            let available = info.get("available").and_then(Value::as_bool).unwrap_or(false);
+            match info.get("found").and_then(Value::as_str) {
+                Some(f) if available => {
+                    ui.label(egui::RichText::new(format!("Dictionary: {}", f.rsplit(['/', '\\']).next().unwrap_or(f))).small().weak())
+                }
+                _ if available => {
+                    ui.label(egui::RichText::new(format!("Dictionary: {}", info.get("lang").and_then(Value::as_str).unwrap_or(""))).small().weak())
+                }
+                _ => ui.label(
+                    egui::RichText::new(format!(
+                        "No {} dictionary is installed, so only common misspellings are found. Put a Hunspell .aff/.dic pair in {}.",
+                        info.get("lang").and_then(Value::as_str).unwrap_or("en-US"),
+                        info.get("folders")
+                            .and_then(Value::as_array)
+                            .and_then(|a| a.get(1).or(a.first()))
+                            .and_then(Value::as_str)
+                            .unwrap_or("a dictionaries folder")
+                    ))
+                    .small()
+                    .weak(),
+                ),
+            };
             if list.is_empty() {
                 ui.label("The spelling check is complete. No issues found.");
             }
-            for item in &list {
-                ui.horizontal(|ui| {
+            let mut add_ignore = None;
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                for item in &list {
                     let w = item.get("word").and_then(Value::as_str).unwrap_or("");
-                    ui.label(format!("Slide {}: “{w}”", item.get("slide").and_then(Value::as_u64).unwrap_or(0) + 1));
-                    if ui.small_button("Go to").clicked() {
-                        let _ = app.run("slide.go", json!({"index": item.get("slide").cloned().unwrap_or_default()}));
+                    let slide = item.get("slide").cloned().unwrap_or_default();
+                    let shape = item.get("shape").cloned().unwrap_or_default();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Slide {}: “{w}”", slide.as_u64().unwrap_or(0) + 1));
+                        if ui.small_button("Go to").clicked() {
+                            let _ = app.run("slide.go", json!({"index": slide}));
+                            let _ = app.run("edit.select", json!({"ids": [shape]}));
+                        }
+                        if ui.small_button("Ignore All").clicked() {
+                            add_ignore = Some(w.to_string());
+                        }
+                    });
+                    let sug: Vec<String> = item
+                        .get("suggestions")
+                        .and_then(Value::as_array)
+                        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+                        .unwrap_or_default();
+                    if !sug.is_empty() {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.add_space(16.0);
+                            ui.label(egui::RichText::new("Change to:").weak());
+                            for to in &sug {
+                                let r = ui.small_button(to.as_str()).on_hover_text("Click to change this one; Shift-click to change all");
+                                if r.clicked() {
+                                    let all = ui.input(|i| i.modifiers.shift);
+                                    let p =
+                                        if all { json!({"word": w, "to": to, "all": true}) } else { json!({"shape": shape, "word": w, "to": to}) };
+                                    run(app, "review.spellingChange", p);
+                                }
+                            }
+                        });
                     }
-                });
+                }
+            });
+            if let Some(w) = add_ignore {
+                d.fields.insert("ignore".into(), format!("{ignored}{w}\n"));
             }
             let (ok, cancel) = buttons(ui, "Close");
             ok || cancel
@@ -829,3 +887,7 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
         Stroke::NONE,
     ));
 }
+
+#[cfg(test)]
+#[path = "spelling_tests.rs"]
+mod spelling_tests;

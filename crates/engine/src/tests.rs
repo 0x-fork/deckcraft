@@ -835,3 +835,39 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn spelling_uses_a_dictionary_suggests_and_changes() {
+    crate::spell::install("xx-TEST", crate::spell::Dictionary::parse(crate::spell::tests::AFF.as_bytes(), crate::spell::tests::DIC.as_bytes()));
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 300, 100], "text": "Making sldie photos, sldie"})).unwrap();
+    let id = r["id"].as_u64().unwrap();
+    let v = s.execute("review.spelling", &json!({"lang": "xx-TEST"})).unwrap();
+    let list = v.as_array().unwrap();
+    assert_eq!(list.len(), 2, "{v}");
+    assert_eq!(list[0]["word"], "sldie");
+    assert_eq!(list[0]["suggestions"][0], "slide");
+    assert!(s.execute("review.spelling", &json!({"lang": "xx-TEST", "ignore": ["SLDIE"]})).unwrap().as_array().unwrap().is_empty());
+    let c = s.execute("review.spellingChange", &json!({"shape": id, "word": "sldie", "to": "slide"})).unwrap();
+    assert_eq!(c["changed"], 1);
+    assert_eq!(s.execute("review.spelling", &json!({"lang": "xx-TEST"})).unwrap().as_array().unwrap().len(), 1);
+    let c = s.execute("review.spellingChange", &json!({"word": "sldie", "to": "slide", "all": true})).unwrap();
+    assert_eq!(c["changed"], 1);
+    assert!(s.execute("review.spelling", &json!({"lang": "xx-TEST"})).unwrap().as_array().unwrap().is_empty());
+    // Whole words only, and one undo step per change.
+    assert_eq!(s.execute("review.spellingChange", &json!({"word": "slid", "to": "x", "all": true})).unwrap()["changed"], 0);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.execute("review.spelling", &json!({"lang": "xx-TEST"})).unwrap().as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn spelling_without_a_dictionary_falls_back_to_common_misspellings() {
+    let mut s = session();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 300, 100], "text": "Teh qzxv"})).unwrap();
+    let v = s.execute("review.spelling", &json!({"lang": "zz-NONE"})).unwrap();
+    assert_eq!(v.as_array().map(Vec::len), Some(1));
+    assert_eq!(v[0]["word"], "Teh");
+    let d = s.execute("review.dictionary", &json!({"lang": "zz-NONE"})).unwrap();
+    assert!(d["found"].is_null());
+    assert_eq!(d["available"], false);
+}
