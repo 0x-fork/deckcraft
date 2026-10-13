@@ -567,6 +567,36 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         .and_then(Value::as_array)
                         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
                         .unwrap_or_default();
+                    if item.get("repeated").and_then(Value::as_bool).unwrap_or(false) && !item.get("notes").and_then(Value::as_bool).unwrap_or(false)
+                    {
+                        ui.horizontal(|ui| {
+                            ui.add_space(16.0);
+                            ui.label(egui::RichText::new("Repeated word").weak());
+                            if ui.small_button("Delete Repeated Word").clicked() {
+                                let from = item.get("deleteFrom").and_then(Value::as_u64).unwrap_or(0) as usize;
+                                let end = item.get("end").and_then(Value::as_u64).unwrap_or(0) as usize;
+                                let para = item.get("para").and_then(Value::as_u64).unwrap_or(0) as usize;
+                                let text = app.session.active().and_then(|st| {
+                                    let sh = st.shape(deckcraft_model::ShapeId(shape.as_u64()? as u32))?;
+                                    let pp = match (item.get("row").and_then(Value::as_u64), item.get("col").and_then(Value::as_u64), &sh.kind) {
+                                        (Some(r), Some(c), deckcraft_model::ShapeKind::Table(tb)) => {
+                                            tb.cell(r as usize, c as usize)?.text.paragraphs.get(para)?.text()
+                                        }
+                                        _ => sh.text.as_ref()?.paragraphs.get(para)?.text(),
+                                    };
+                                    Some(pp.chars().skip(from).take(end.saturating_sub(from)).collect::<String>())
+                                });
+                                if let Some(gap) = text {
+                                    let mut p = json!({"shape": shape, "para": para, "start": from, "word": gap, "to": ""});
+                                    if let (Some(o), Some(r), Some(c)) = (p.as_object_mut(), item.get("row"), item.get("col")) {
+                                        o.insert("row".into(), r.clone());
+                                        o.insert("col".into(), c.clone());
+                                    }
+                                    run(app, "review.spellingChange", p);
+                                }
+                            }
+                        });
+                    }
                     if !sug.is_empty() {
                         ui.horizontal_wrapped(|ui| {
                             ui.add_space(16.0);
@@ -653,22 +683,33 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok || cancel
         }
         "language" => {
+            // Starts from the selected text's language and Do Not Check Spelling.
+            let (cur, np) = selected_language(app);
+            let lang = d.get("lang", &cur);
+            let mut no_proof = d.get("noProof", if np { "1" } else { "" }) == "1";
             ui.label("Mark selected text as:");
-            for l in [
-                "English (United States)",
-                "English (United Kingdom)",
-                "Español",
-                "Français",
-                "Deutsch",
-                "Italiano",
-                "Português",
-                "日本語",
-                "中文",
-                "العربية",
-            ] {
-                let _ = ui.selectable_label(l.starts_with("English (United States)"), l);
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                // The selection's own language first when the list doesn't have it.
+                let own = (!crate::squiggles::LANGS.iter().any(|(_, t)| t.eq_ignore_ascii_case(&cur))).then(|| (cur.clone(), cur.clone()));
+                let all = own.into_iter().chain(crate::squiggles::LANGS.iter().map(|(n, t)| (n.to_string(), t.to_string())));
+                for (name, tag) in all {
+                    let installed = deckcraft_engine::spell::dictionary(&tag).is_some();
+                    let label = if installed { format!("{name}  (dictionary)") } else { name };
+                    if ui.selectable_label(lang.eq_ignore_ascii_case(&tag), label).clicked() {
+                        d.fields.insert("lang".into(), tag);
+                    }
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Spelling is checked for languages marked (dictionary).").small().weak());
+            if ui.checkbox(&mut no_proof, "Do not check spelling or grammar").changed() {
+                d.fields.insert("noProof".into(), if no_proof { "1".into() } else { String::new() });
             }
             let (ok, cancel) = buttons(ui, "OK");
+            if ok {
+                let lang = d.get("lang", &cur);
+                run(app, "format.language", json!({"lang": lang, "noProof": no_proof}));
+            }
             ok || cancel
         }
         "customShow" => {
@@ -926,6 +967,33 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
         Color32::WHITE,
         Stroke::NONE,
     ));
+}
+
+/// The selection's proofing language and whether it's marked Do Not Check Spelling: the run at
+/// the caret, else the first run of the first selected shape; US English when none says.
+pub fn selected_language(app: &SlideApp) -> (String, bool) {
+    let Some(st) = app.session.active() else { return ("en-US".into(), false) };
+    let run = |sh: &deckcraft_model::Shape, at: Option<(usize, usize)>| -> Option<deckcraft_model::RunProps> {
+        let t = sh.text.as_ref()?;
+        if let Some((p, c)) = at {
+            let para = t.paragraphs.get(p)?;
+            let mut n = 0;
+            for r in &para.runs {
+                n += r.char_len();
+                if c <= n {
+                    return Some(r.props.clone());
+                }
+            }
+            return para.runs.last().map(|r| r.props.clone());
+        }
+        t.paragraphs.iter().flat_map(|p| &p.runs).next().map(|r| r.props.clone())
+    };
+    let props = match &st.selection.text {
+        Some(t) if !t.notes && t.cell.is_none() => st.shape(t.shape).and_then(|sh| run(sh, Some(t.caret))),
+        _ => st.selection.shapes.first().and_then(|id| st.shape(*id)).and_then(|sh| run(sh, None)),
+    };
+    let props = props.unwrap_or_default();
+    (props.lang.unwrap_or_else(|| "en-US".into()), props.no_proof == Some(true))
 }
 
 #[cfg(test)]

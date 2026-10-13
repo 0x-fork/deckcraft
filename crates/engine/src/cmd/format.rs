@@ -48,6 +48,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_text_or_shapes,
             color
         ),
+        cmd!(
+            "format.language",
+            "Language",
+            ["Review", "Language"],
+            None,
+            "{lang?, noProof?: bool} (proofing language of the selected text, and Do Not Check Spelling)",
+            has_text_or_shapes,
+            language
+        ),
         cmd!("format.highlight", "Text Highlight Color", ["Home", "Font"], None, "{color? (absent = none)}", has_text_or_shapes, highlight),
         cmd!(
             "format.case",
@@ -292,6 +301,24 @@ fn shrink(s: &mut Session, _p: &Value) -> Result<Value> {
 fn color(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color").ok_or_else(|| bad("format.color", "missing or invalid `color`"))?;
     format_run(s, &move |r| r.fill = Some(Fill::solid(c.clone())))
+}
+fn language(s: &mut Session, p: &Value) -> Result<Value> {
+    let lang = str_param(p, "lang").map(str::to_string);
+    let no_proof = bool_param(p, "noProof");
+    if lang.is_none() && no_proof.is_none() {
+        return Err(bad("format.language", "give `lang` or `noProof`"));
+    }
+    if lang.as_deref().is_some_and(|l| l.is_empty() || l.len() > 35 || !l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')) {
+        return Err(bad("format.language", "`lang` is a language tag such as en-US"));
+    }
+    format_run(s, &move |r| {
+        if let Some(l) = &lang {
+            r.lang = Some(l.clone());
+        }
+        if let Some(n) = no_proof {
+            r.no_proof = n.then_some(true);
+        }
+    })
 }
 fn highlight(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color");

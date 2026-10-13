@@ -20,7 +20,13 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         };
         let p = ui.painter();
         p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
-        p.text(pos2(rect.min.x + 120.0, rect.center().y), Align2::LEFT_CENTER, "English (United States)", theme::font(12.0), t.text_dim);
+        // The selection's proofing language; a click opens Review › Language.
+        let (lang, no_proof) = crate::dialogs::selected_language(app);
+        let name = crate::squiggles::lang_name(&lang) + if no_proof { " (not checked)" } else { "" };
+        let lr = p.text(pos2(rect.min.x + 120.0, rect.center().y), Align2::LEFT_CENTER, &name, theme::font(12.0), t.text_dim);
+        if ui.interact(lr.expand(3.0), ui.id().with("status_lang"), Sense::click()).on_hover_text("Language").clicked() {
+            app.dialog = Some(crate::dialogs::Dialog::new("language"));
+        }
         // Transient status message.
         if let Some((msg, at)) = app.status.clone() {
             if crate::now_ms() - at < 6000.0 {
@@ -170,6 +176,69 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
                     let o = out.galley_pos.to_vec2();
                     crate::squiggles::paint(ui.painter(), egui::pos2(ra.left(), y) + o, egui::pos2(rb.left(), y) + o, 1.0);
                 }
+            }
+            // Right-click on a flagged word: its corrections, Ignore All, Add to Dictionary.
+            if r.secondary_clicked()
+                && let Some(pos) = r.interact_pointer_pos()
+            {
+                let at = out.galley.cursor_from_pos(pos - out.galley_pos).index.0;
+                let hit = app.squiggles.notes(&buf, &lang, None, None).into_iter().find(|(a, b)| at >= *a && at <= *b);
+                app.squiggles.notes_menu = hit.and_then(|(a, _)| {
+                    let before: String = buf.chars().take(a).collect();
+                    let line_start = before.rfind('\n').map_or(0, |i| before[..i].chars().count() + 1);
+                    let line = buf.chars().skip(line_start).take_while(|c| *c != '\n').collect::<String>();
+                    crate::squiggles::menu_word(
+                        &deckcraft_model::Paragraph::new(&line),
+                        &lang,
+                        crate::squiggles::Tag::Notes { start: line_start },
+                        a - line_start,
+                    )
+                });
+            }
+            let mut changed: Option<String> = None;
+            if app.squiggles.notes_menu.is_some() {
+                r.context_menu(|ui| {
+                    let Some(w) = app.squiggles.notes_menu.clone() else { return };
+                    let crate::squiggles::Tag::Notes { start: ls } = w.tag else { return };
+                    let chars: Vec<char> = buf.chars().collect();
+                    let end = ls + w.start + w.word.chars().count();
+                    let splice = |from: usize, to: &str| -> String {
+                        chars[..from.min(chars.len())]
+                            .iter()
+                            .chain(to.chars().collect::<Vec<_>>().iter())
+                            .chain(chars[end.min(chars.len())..].iter())
+                            .collect()
+                    };
+                    if let Some(from) = w.delete_from {
+                        if ui.button(egui::RichText::new("Delete Repeated Word").strong()).clicked() {
+                            changed = Some(splice(ls + from, ""));
+                            ui.close();
+                        }
+                    } else if w.suggestions.is_empty() {
+                        ui.label(egui::RichText::new("(no spelling suggestions)").weak());
+                    }
+                    for to in &w.suggestions {
+                        if ui.button(egui::RichText::new(to).strong()).clicked() {
+                            changed = Some(splice(ls + w.start, to));
+                            ui.close();
+                        }
+                    }
+                    if ui.button("Ignore All").clicked() {
+                        app.squiggles.ignore(&w.word);
+                        ui.close();
+                    }
+                    if w.delete_from.is_none() && ui.button("Add to Dictionary").clicked() {
+                        if let Err(e) = app.session.execute("review.addToDictionary", &json!({"word": w.word})) {
+                            app.set_status(e.to_string());
+                        }
+                        ui.close();
+                    }
+                });
+            }
+            if let Some(new) = changed {
+                buf = new;
+                app.squiggles.notes_menu = None;
+                let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));
             }
             app.notes_buf.2 = buf.clone();
             if r.lost_focus() && buf != current {

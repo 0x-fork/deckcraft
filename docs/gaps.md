@@ -179,12 +179,14 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   (`crates/engine/src/spell.rs`: affixes, cross products, one level of continuation, compounds,
   case rules, suggestions), each run in its own language (`lang` from PPTX), with a user dictionary
   for Add to Dictionary. Red squiggles on the current slide come from a worker thread, with a
-  context menu to correct, ignore or add; table cells and speaker notes are squiggled too (the
-  notes have no context menu yet), and the web build checks on the UI thread a few milliseconds per
+  context menu to correct, ignore or add; table cells and speaker notes are squiggled too, each
+  with a right-click menu; repeated words (`the the`) are flagged with Delete Repeated Word;
+  Review › Language marks the selection's proofing language or Do Not Check Spelling
+  (`lang`/`noProof` round-trip in PPTX). No grammar checking. The web build checks on the UI thread a few milliseconds per
   frame. None ship with DeckCraft, so without one installed (always on Windows and the web) only a
   short list of common misspellings is found.
   Thesaurus (#549) and AutoCorrect (#521) have open PRs.
-- **Estimate:** 1–3 h (bundle openly licensed dictionaries; a notes context menu).
+- **Estimate:** 1–2 h (bundle openly licensed dictionaries).
 
 ### Equations
 - **Evidence:** checklist row missing; PR #55 (OMML editor, +10.5k lines) is open.
@@ -263,6 +265,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Notes spelling menu, Review › Language with Do Not Check Spelling, repeated words |
 | 2026-10-14 | trivial | Spelling squiggles in table cells and notes, and on the web |
 | 2026-10-14 | minor | Spelling squiggles while typing, Add to Dictionary, per-run languages and compounds |
 | 2026-10-14 | minor | Spelling checks with installed Hunspell dictionaries and suggests corrections |

@@ -195,6 +195,8 @@ pub struct Squiggles {
     pub disabled: bool,
     /// The misspelt word a context menu is open on.
     pub menu_word: Option<MenuWord>,
+    /// The same for the notes pane (`Tag::Notes`, `start` in the line).
+    pub notes_menu: Option<MenuWord>,
     /// Words skipped with Ignore All this session (lower-case).
     ignored: Vec<String>,
 }
@@ -206,6 +208,55 @@ pub struct MenuWord {
     pub start: usize,
     pub word: String,
     pub suggestions: Vec<String>,
+    /// A repeated word: Delete Repeated Word removes characters `from..start + word`.
+    pub delete_from: Option<usize>,
+}
+
+/// Proofing languages offered by Review › Language: (name, tag).
+pub const LANGS: &[(&str, &str)] = &[
+    ("English (United States)", "en-US"),
+    ("English (United Kingdom)", "en-GB"),
+    ("English (Australia)", "en-AU"),
+    ("English (Canada)", "en-CA"),
+    ("Español (España)", "es-ES"),
+    ("Español (México)", "es-MX"),
+    ("Français (France)", "fr-FR"),
+    ("Français (Canada)", "fr-CA"),
+    ("Deutsch (Deutschland)", "de-DE"),
+    ("Deutsch (Schweiz)", "de-CH"),
+    ("Italiano", "it-IT"),
+    ("Nederlands", "nl-NL"),
+    ("Português (Brasil)", "pt-BR"),
+    ("Português (Portugal)", "pt-PT"),
+    ("Polski", "pl-PL"),
+    ("Svenska", "sv-SE"),
+    ("Dansk", "da-DK"),
+    ("Norsk bokmål", "nb-NO"),
+    ("Suomi", "fi-FI"),
+    ("Čeština", "cs-CZ"),
+    ("Українська", "uk-UA"),
+    ("Русский", "ru-RU"),
+    ("Беларуская", "be-BY"),
+    ("Türkçe", "tr-TR"),
+    ("Ελληνικά", "el-GR"),
+    ("日本語", "ja-JP"),
+    ("中文(中国)", "zh-CN"),
+    ("한국어", "ko-KR"),
+    ("العربية", "ar-SA"),
+    ("עברית", "he-IL"),
+];
+
+/// The display name of a language tag (the tag itself when it isn't in [`LANGS`]).
+pub fn lang_name(tag: &str) -> String {
+    LANGS.iter().find(|(_, t)| t.eq_ignore_ascii_case(tag)).map_or_else(|| tag.to_string(), |(n, _)| n.to_string())
+}
+
+/// The flagged word (misspelt or repeated) of `pp` starting at `start`, with what the menu offers.
+pub fn menu_word(pp: &Paragraph, default: &str, tag: Tag, start: usize) -> Option<MenuWord> {
+    let w = deckcraft_engine::spell::misspelt(pp, default, &[]).into_iter().find(|w| w.start == start)?;
+    let suggestions =
+        if w.repeated.is_some() { vec![] } else { deckcraft_engine::spell::dictionary(&w.lang).map(|d| d.suggest(&w.text, 5)).unwrap_or_default() };
+    Some(MenuWord { tag, start, word: w.text, suggestions, delete_from: w.repeated })
 }
 
 fn slot(k: Kind) -> usize {
@@ -387,11 +438,8 @@ impl Squiggles {
             // From the line's top (a word is about a line high above its underline) to just below it.
             p.x >= x0 - tol && p.x <= x1 + tol && p.y <= a.y.max(b.y) + tol && p.y >= a.y.min(b.y) - 24.0
         })?;
-        let pp = paragraph_of(st, tag)?;
-        let word: String = pp.text().chars().skip(start).take(end - start).collect();
-        let lang = deckcraft_engine::spell::paragraph_words(&pp, &default_lang(st)).into_iter().find(|w| w.start == start).map(|w| w.lang)?;
-        let suggestions = deckcraft_engine::spell::dictionary(&lang).map(|d| d.suggest(&word, 5)).unwrap_or_default();
-        Some(MenuWord { tag, start, word, suggestions })
+        let _ = end;
+        menu_word(&paragraph_of(st, tag)?, &default_lang(st), tag, start)
     }
 
     /// Wait (tests) until the slide's check for `st` is in.

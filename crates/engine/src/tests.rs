@@ -909,3 +909,24 @@ fn spelling_checks_each_run_in_its_language_and_learns_words() {
     assert_eq!(std::fs::read_to_string(dir.join("user.dic")).unwrap(), "deckcraft\n");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn language_marks_text_and_no_proof_and_repeats_are_reported() {
+    crate::spell::install("xx-LN", crate::spell::Dictionary::parse(b"", b"3\nthe\nend\nis\n"));
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 300, 100], "text": "the the end is nigh"})).unwrap();
+    let id = r["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.execute("format.language", &json!({"lang": "xx-LN"})).unwrap();
+    let v = s.execute("review.spelling", &json!({})).unwrap();
+    let got: Vec<(String, bool)> = v.as_array().unwrap().iter().map(|w| (w["word"].as_str().unwrap().to_string(), w["repeated"] == true)).collect();
+    assert_eq!(got, vec![("the".to_string(), true), ("nigh".to_string(), false)]);
+    assert_eq!(v[0]["deleteFrom"], 3);
+    // Deleting the repeat through the exact-occurrence change.
+    s.execute("review.spellingChange", &json!({"shape": id, "para": 0, "start": 3, "word": " the", "to": ""})).unwrap();
+    let v = s.execute("shape.inspect", &json!({"id": id})).unwrap();
+    assert_eq!(v["shape"]["text"]["paragraphs"][0]["runs"][0]["text"], "the end is nigh");
+    s.execute("format.language", &json!({"noProof": true})).unwrap();
+    assert!(s.execute("review.spelling", &json!({})).unwrap().as_array().unwrap().is_empty());
+    assert!(s.execute("format.language", &json!({"lang": "en US!"})).is_err());
+}
