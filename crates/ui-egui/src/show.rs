@@ -686,6 +686,9 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
 }
 
+/// The media-host voice for slide transition sounds (no shape has this id).
+pub(crate) const TRANSITION_SOUND: ShapeId = ShapeId(u32::MAX);
+
 /// Start the media of a newly shown slide: media from the previous slide stops unless it plays
 /// across slides; media set to start automatically plays. Everything stops at the end.
 fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
@@ -694,14 +697,26 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
         return;
     }
     show.media_slide = cur;
+    let sound = cur.and_then(|i| doc.slides.get(i)).and_then(|s| s.transition.as_ref()).and_then(|t| t.sound);
     let keep: Vec<ShapeId> = match cur {
-        Some(_) => app.media.ids().into_iter().filter(|id| crate::media::find_clip(doc, *id).is_some_and(|c| c.play_across_slides)).collect(),
+        Some(_) => app
+            .media
+            .ids()
+            .into_iter()
+            .filter(|id| crate::media::find_clip(doc, *id).is_some_and(|c| c.play_across_slides))
+            // A transition sound plays to its end, as in PowerPoint, unless the new slide has its own.
+            .chain(sound.is_none().then_some(TRANSITION_SOUND).filter(|id| app.media.is_playing(*id)))
+            .collect(),
         None => vec![],
     };
     for id in app.media.ids() {
         if !keep.contains(&id) {
             app.media.stop(id);
         }
+    }
+    if let Some(media) = sound {
+        let clip = deckcraft_model::MediaClip { media, volume: 1.0, ..Default::default() };
+        app.media.play(doc, TRANSITION_SOUND, &clip, None, crate::media::Owner::Show);
     }
     if let Some(i) = cur {
         for (id, _, clip) in crate::media::slide_media(doc, i) {

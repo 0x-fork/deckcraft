@@ -1389,6 +1389,28 @@ fn transitions(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
+        // Sound in its own column, so the timing column keeps its three rows.
+        rows(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Sound:");
+                let name = cur
+                    .as_ref()
+                    .and_then(|t| t.sound)
+                    .and_then(|m| app.session.active().and_then(|d| d.doc.media(m).map(|i| i.name.clone())))
+                    .unwrap_or_else(|| "[No Sound]".into());
+                egui::ComboBox::from_id_salt("transition_sound").width(120.0).selected_text(name).show_ui(ui, |ui| {
+                    if ui.selectable_label(cur.as_ref().is_none_or(|t| t.sound.is_none()), "[No Sound]").clicked() {
+                        run(app, "transition.sound", json!({"none": true}));
+                    }
+                    let can_pick = app.services.pick_open.is_some();
+                    let r = ui.add_enabled(can_pick, egui::Button::new("Other Sound…"));
+                    if r.clicked() {
+                        app.pick_transition_sound();
+                    }
+                    r.on_disabled_hover_text("Choosing a sound file needs the desktop app");
+                });
+            });
+        });
         rows(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Duration:");

@@ -991,3 +991,48 @@ fn transition_defaults_read_like_powerpoint() {
         assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
     }
 }
+
+/// A tiny 8 kHz mono 16-bit WAV of `n` silent samples.
+fn wav(n: u32) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(b"RIFF");
+    v.extend_from_slice(&(36 + n * 2).to_le_bytes());
+    v.extend_from_slice(b"WAVEfmt ");
+    v.extend_from_slice(&16u32.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&8000u32.to_le_bytes());
+    v.extend_from_slice(&16000u32.to_le_bytes());
+    v.extend_from_slice(&2u16.to_le_bytes());
+    v.extend_from_slice(&16u16.to_le_bytes());
+    v.extend_from_slice(b"data");
+    v.extend_from_slice(&(n * 2).to_le_bytes());
+    v.resize(v.len() + n as usize * 2, 0);
+    v
+}
+
+/// Transitions › Sound: a chosen sound is embedded, saved as `p:sndAc`, read back, and No Sound
+/// removes it; a file that isn't audio is refused.
+#[test]
+fn transition_sound_is_set_saved_and_removed() {
+    use deckcraft_engine::Session;
+    use serde_json::json;
+    let b64 = deckcraft_engine::cmd::base64_encode(&wav(800));
+    let mut s = Session::with_new();
+    s.execute("transition.set", &json!({"kind": "fade"})).unwrap();
+    let r = s.execute("transition.sound", &json!({"data": b64, "name": "chime.wav"})).unwrap();
+    assert_eq!(r["playable"], true, "{r}");
+    let doc = s.doc().unwrap().doc.clone();
+    let m = doc.slides[0].transition.as_ref().and_then(|t| t.sound).expect("sound set");
+    assert_eq!(doc.media(m).map(|i| i.name.as_str()), Some("chime.wav"));
+    let bytes = deckcraft_pptx::export(&doc).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let t = back.slides[0].transition.as_ref().expect("transition");
+    assert_eq!(t.kind, "fade");
+    let m = t.sound.expect("sound survives the save");
+    assert_eq!(back.media(m).map(|i| i.data.len()), Some(wav(800).len()));
+    s.execute("transition.sound", &json!({"none": true})).unwrap();
+    assert!(s.doc().unwrap().doc.slides[0].transition.as_ref().is_some_and(|t| t.sound.is_none()));
+    let not_audio = deckcraft_engine::cmd::base64_encode(b"hello, not a sound");
+    assert!(s.execute("transition.sound", &json!({"data": not_audio, "name": "notes.txt"})).is_err());
+}
