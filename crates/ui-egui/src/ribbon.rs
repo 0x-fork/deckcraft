@@ -1263,6 +1263,16 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
                 }
             }
         });
+        let r = big_button(ui, Icon::ShapeEffects, "Effects", true);
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Effects"));
+        egui::Popup::menu(&r).width(180.0).show(|ui| {
+            for fs in deckcraft_model::theme::builtin_format_schemes() {
+                if ui.button(&fs.name).clicked() {
+                    run(app, "design.effects", json!({"name": fs.name}));
+                    ui.close();
+                }
+            }
+        });
         let r = big_button(ui, Icon::BackgroundStyles, "Background\nStyles", true);
         egui::Popup::menu(&r).show(|ui| {
             egui::Grid::new("bgstyles").show(ui, |ui| {
@@ -2420,3 +2430,7 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
 }
+
+#[cfg(test)]
+#[path = "effects_tests.rs"]
+mod effects_tests;
