@@ -581,6 +581,8 @@ pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {
 }
 
 #[cfg(test)]
+mod soak_tests;
+#[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod tests_keys;

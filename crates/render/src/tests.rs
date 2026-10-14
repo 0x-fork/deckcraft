@@ -1792,3 +1792,29 @@ fn metafile_intersect_clip_rect_hides_the_rest_of_the_picture() {
     assert!(opaque(20, 25), "the clipped half is drawn");
     assert!(!opaque(80, 25), "past the clip the picture stays clear, pixel {:?}", img.get_pixel(80, 25));
 }
+
+#[test]
+fn tiny_chart_does_not_blank_the_slide() {
+    // A chart a few points wide used to panic in `f64::clamp` (gutter min above max), and the
+    // panic guard then blanked the whole slide. Render directly, without the guard.
+    let red = Shape {
+        id: ShapeId(800),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        ..Default::default()
+    };
+    let mut shapes = vec![red];
+    for (i, k) in [ChartType::Column, ChartType::Bar, ChartType::Line, ChartType::Combo, ChartType::Scatter].iter().enumerate() {
+        shapes.push(Shape {
+            id: ShapeId(801 + i as u32),
+            xfrm: Some(Xfrm::new(500.0 + i as f64 * 5.0, 300.0, 0.9, 0.9)),
+            kind: ShapeKind::Chart(Box::new(Chart::sample(*k))),
+            ..Default::default()
+        });
+    }
+    let p = deck_with(shapes);
+    let img = RENDERER.with(|r| r.borrow_mut().slide(&p, &p.slides[0], 0, &RenderOpts { scale: 1.0, ..Default::default() }));
+    let px = img.pixel(200, 150);
+    assert_ne!(px, [255, 255, 255, 255], "the other shape must still draw");
+    assert_eq!(crate::chart::clamp_soft(5.0, 10.5, 0.276), 0.276);
+}

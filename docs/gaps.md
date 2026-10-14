@@ -53,11 +53,13 @@ revision history.
 - **Estimate:** 4–8 h (backend probing outside the process or a safe-mode fallback, a software
   renderer path). Needs a tester with the hardware. **Beta blocker.**
 
-### No soak or long-session testing
-- **Evidence:** unit tests (504), PPTX malformed/fuzz tests and the command panic guard exist; no
-  random command sequences over big decks, no memory or undo-depth soak.
-- **Impact:** unknown crash and slowdown rate in long sessions.
-- **Estimate:** 4–8 h.
+### Soak testing is engine-only
+- **Evidence:** `crates/engine/src/soak_tests.rs` runs seeded random command sequences over a
+  ~100-slide deck (validity, selection, undo/redo exactness, bounded undo, save/reopen in both
+  formats every 100 steps); `DECKCRAFT_SOAK_STEPS` runs it long. It found a chart `clamp` panic
+  that blanked whole slides. Still missing: UI-level (kittest) soak, memory and timing budgets.
+- **Impact:** long-session crash rate is now sampled in CI; slowdowns are not measured.
+- **Estimate:** 2–4 h left.
 
 ## File formats
 
