@@ -89,7 +89,7 @@ impl Textures {
         let id = g.id;
         s.shapes = vec![g];
         let img = deckcraft_render::render_shape(p, &s, id, width_px as f64 / 336.0)?;
-        let tex = ctx.load_texture(format!("smartart-{key}"), to_color_image(&img, false), TextureOptions::LINEAR);
+        let tex = upload(ctx, format!("smartart-{key}"), to_color_image(&img, false));
         if self.smartart.len() > 300 {
             self.smartart.clear();
         }

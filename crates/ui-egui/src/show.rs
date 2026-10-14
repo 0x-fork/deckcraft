@@ -1689,7 +1689,7 @@ fn render_thumb(ctx: &egui::Context, show: &mut Show, doc: &Presentation, i: usi
         i,
         &RenderOpts { scale: w / doc.slide_size.width.max(1.0), size: Some((w as u32, h as u32)), ..Default::default() },
     );
-    let tex = ctx.load_texture(format!("show-grid-{i}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+    let tex = crate::textures::upload(ctx, format!("show-grid-{i}"), crate::textures::to_color_image(&img, false));
     show.thumbs.push((i, tex.clone()));
     Some(tex)
 }
