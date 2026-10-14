@@ -18,6 +18,7 @@ pub mod recovery;
 pub mod sample;
 pub mod sounds;
 pub mod templates;
+pub mod thesaurus;
 pub mod tools;
 
 use std::sync::Arc;
