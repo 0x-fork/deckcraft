@@ -58,8 +58,10 @@ pub fn probe(bytes: &Bytes) -> Result<MediaInfo> {
     };
     if info.audio.is_none() && info.video.is_none() || info.audio.as_ref().is_some_and(|a| a.sample_rate == 0) {
         // Plain audio files (and anything our demuxers didn't describe): symphonia's probe.
-        let (codec, rate, channels, frames) =
-            crate::audio::probe_symphonia(bytes, c.name()).ok_or_else(|| MediaError::Unsupported("this kind of media file".into()))?;
+        let (codec, rate, channels, frames) = std::panic::catch_unwind(|| crate::audio::probe_symphonia(bytes, c.name()))
+            .ok()
+            .flatten()
+            .ok_or_else(|| MediaError::Unsupported("this kind of media file".into()))?;
         info.audio = Some(AudioInfo { codec: codec_label(&codec), sample_rate: rate, channels, decodable: true });
         if info.duration_ms == 0
             && let Some(n) = frames
