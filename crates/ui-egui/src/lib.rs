@@ -144,7 +144,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.guides", "Guides", Some("Alt+F9"), "{on?: bool}"),
     ("view.zoomIn", "Zoom In", Some("Cmd+="), "{}"),
     ("view.zoomOut", "Zoom Out", Some("Cmd+-"), "{}"),
-    ("view.zoom", "Zoom…", None, "{percent}"),
+    ("view.zoom", "Set Zoom", None, "{percent}"),
+    ("view.zoomDialog", "Zoom…", None, "{}"),
     ("view.fit", "Fit to Window", None, "{}"),
     ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|null}"),
     ("view.tab", "Ribbon Tab", None, "{tab}"),
@@ -472,6 +473,7 @@ impl SlideApp {
                 let pct = p.get("percent").and_then(Value::as_f64).ok_or("missing `percent`")?;
                 self.ui.zoom = Some((pct as f32 / 100.0).clamp(0.1, 4.0));
             }
+            "view.zoomDialog" => self.dialog = Some(dialogs::Dialog::new("zoom")),
             "view.fit" => self.ui.zoom = None,
             "view.pane" => {
                 let pane = p.get("pane").and_then(Value::as_str).map(String::from);

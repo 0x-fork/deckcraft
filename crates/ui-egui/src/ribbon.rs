@@ -1848,14 +1848,24 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
         }
     });
     group(ui, |ui| {
-        let r = big_button(ui, Icon::ZoomGlass, "Zoom", true);
-        egui::Popup::menu(&r).show(|ui| {
-            for pct in [400, 200, 150, 100, 75, 66, 50, 33] {
-                if ui.button(format!("{pct}%")).clicked() {
-                    let _ = app.run("view.zoom", json!({"percent": pct}));
+        let (main, arrow) = big_button_ex(ui, Icon::ZoomGlass, "Zoom", true, true, false);
+        if main.on_hover_text("Zoom").clicked() {
+            let _ = app.run("view.zoomDialog", json!({}));
+        }
+        if let Some(a) = arrow {
+            egui::Popup::menu(&a).show(|ui| {
+                for pct in [400, 200, 150, 100, 75, 66, 50, 33] {
+                    if ui.button(format!("{pct}%")).clicked() {
+                        let _ = app.run("view.zoom", json!({"percent": pct}));
+                        ui.close();
+                    }
                 }
-            }
-        });
+                if ui.button("Fit").clicked() {
+                    let _ = app.run("view.fit", json!({}));
+                    ui.close();
+                }
+            });
+        }
         if big_button(ui, Icon::FitToWindow, "Fit to\nWindow", true).clicked() {
             app.ui.zoom = None;
         }

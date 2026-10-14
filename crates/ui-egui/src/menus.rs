@@ -195,6 +195,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Gridlines", "view.gridlines"),
                 ("Guides", "view.guides"),
                 ("-", ""),
+                ("Zoom…", "view.zoomDialog"),
                 ("Zoom In", "view.zoomIn"),
                 ("Zoom Out", "view.zoomOut"),
                 ("Fit to Window", "view.fit"),
