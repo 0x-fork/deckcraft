@@ -2400,3 +2400,20 @@ fn render_an_emf_file_to_look_at() {
     let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
     let _ = std::fs::write(out, img.to_png());
 }
+
+#[test]
+fn single_series_column_chart_varies_colours_by_point() {
+    let render = |vary: bool| {
+        let mut c = Chart::sample(ChartType::Column);
+        c.series.truncate(1);
+        c.vary_colors = vary;
+        let sh = Shape {
+            id: ShapeId(800),
+            xfrm: Some(Xfrm::new(50.0, 50.0, 400.0, 300.0)),
+            kind: ShapeKind::Chart(Box::new(c)),
+            ..Default::default()
+        };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() }).pixels
+    };
+    assert_ne!(render(true), render(false));
+}

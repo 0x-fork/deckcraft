@@ -195,9 +195,8 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
             "surfaceChart" | "surface3DChart" => ChartType::Surface,
             _ => continue,
         };
-        if let Some(v) = g.child_val("varyColors") {
-            c.vary_colors = v == "1" || v == "true";
-        }
+        // A missing <c:varyColors> means "vary by point" (the schema default is true), as PowerPoint draws it.
+        c.vary_colors = g.child_val("varyColors").is_none_or(|v| v == "1" || v == "true");
         // A bar group without c:gapWidth / c:overlap takes the schema's defaults (150 %, 0 %),
         // not the 219 % / -27 % PowerPoint writes into its new charts.
         let bar_group = g.is("barChart") || g.is("bar3DChart");
@@ -617,5 +616,24 @@ mod tests {
     fn explicit_title_wins() {
         let t = "<c:title><c:tx><c:rich><a:p><a:r><a:t>Mine</a:t></a:r></a:p></c:rich></c:tx></c:title>";
         assert_eq!(chart(r#"<c:autoTitleDeleted val="0"/>"#, t, 1).title.as_deref(), Some("Mine"));
+    }
+
+    const NS_CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+    fn vary_xml(vary: &str) -> String {
+        let ser = r#"<c:ser><c:idx val="0"/><c:order val="0"/></c:ser>"#;
+        let bar = format!(r#"<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>{vary}{ser}</c:barChart>"#);
+        format!(r#"<c:chartSpace xmlns:c="{NS_CHART}"><c:chart><c:plotArea>{bar}</c:plotArea></c:chart></c:chartSpace>"#)
+    }
+
+    #[test]
+    fn missing_vary_colors_means_vary_by_point() {
+        assert!(read_chart_xml(vary_xml("").as_bytes()).is_some_and(|c| c.vary_colors));
+    }
+
+    #[test]
+    fn explicit_vary_colors_is_respected() {
+        assert!(read_chart_xml(vary_xml(r#"<c:varyColors val="0"/>"#).as_bytes()).is_some_and(|c| !c.vary_colors));
+        assert!(read_chart_xml(vary_xml(r#"<c:varyColors val="1"/>"#).as_bytes()).is_some_and(|c| c.vary_colors));
     }
 }
