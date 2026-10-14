@@ -687,7 +687,7 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
     pres.rels.add("viewProps", "viewProps.xml", false);
     pres.rels.add("tableStyles", "tableStyles.xml", false);
     x.pkg.xml_part("ppt/presProps.xml", CT_PRES_PROPS, pres_props_xml(p));
-    x.pkg.xml_part("ppt/viewProps.xml", CT_VIEW_PROPS, view_props_xml());
+    x.pkg.xml_part("ppt/viewProps.xml", CT_VIEW_PROPS, view_props_xml(p));
     let ts = crate::tables::table_styles_xml(&x.table_styles, &p.table_styles);
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
     let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), handout_rid.as_deref(), &slide_rids);
@@ -1155,13 +1155,34 @@ fn pres_props_xml(p: &Presentation) -> Vec<u8> {
     w.finish()
 }
 
-fn view_props_xml() -> Vec<u8> {
+fn view_props_xml(p: &Presentation) -> Vec<u8> {
     let mut w = W::new();
     root_open(&mut w, "p:viewPr", A::new());
     w.open0("p:normalViewPr");
     w.empty("p:restoredLeft", A::new().a("sz", 15620));
     w.empty("p:restoredTop", A::new().a("sz", 94660));
     w.close("p:normalViewPr");
+    if !p.guides.is_empty() {
+        // Drawing guides; `pos` is in eighths of a point (576 per inch).
+        w.open0("p:slideViewPr");
+        w.open0("p:cSldViewPr");
+        w.open0("p:cViewPr");
+        w.open0("p:scale");
+        w.empty("a:sx", A::new().a("n", 100).a("d", 100));
+        w.empty("a:sy", A::new().a("n", 100).a("d", 100));
+        w.close("p:scale");
+        w.empty("p:origin", A::new().a("x", 0).a("y", 0));
+        w.close("p:cViewPr");
+        w.open0("p:guideLst");
+        for g in p.guides.iter().take(1000) {
+            let pos = (g.pos * 8.0).round().clamp(-1.0e9, 1.0e9) as i64;
+            let a = if g.vertical { A::new().a("pos", pos) } else { A::new().a("orient", "horz").a("pos", pos) };
+            w.empty("p:guide", a);
+        }
+        w.close("p:guideLst");
+        w.close("p:cSldViewPr");
+        w.close("p:slideViewPr");
+    }
     w.empty("p:gridSpacing", A::new().a("cx", 76200).a("cy", 76200));
     w.close("p:viewPr");
     w.finish()

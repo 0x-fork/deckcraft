@@ -150,6 +150,10 @@ enum Drag {
         start: Point,
         add: bool,
     },
+    /// Dragging drawing guide `index`.
+    Guide {
+        index: usize,
+    },
     Create {
         start: Point,
     },
@@ -211,6 +215,12 @@ pub struct ToolState {
     pub edit_vertex: Option<(usize, usize)>,
     /// The point type last chosen for a vertex (path, index, type): handle drags follow it.
     pub vertex_kind: Option<(usize, usize, String)>,
+    /// Drawing guides are shown (View › Guides): they can be dragged and shapes snap to them.
+    pub guides_visible: bool,
+    /// The guide being dragged and where it is now (slide points); `None` once dropped.
+    pub guide_drag: Option<(usize, f64)>,
+    /// The drawing guide under the pointer, for the cursor.
+    pub guide_hover: Option<usize>,
 }
 
 impl ToolState {
@@ -341,6 +351,8 @@ impl Session {
                     return Ok(Value::Null);
                 }
                 self.tool.hover = self.hit_test(p, tol);
+                self.tool.guide_hover =
+                    if self.tool.hover.is_none() && matches!(self.tool.kind, ToolKind::Select) { self.guide_at(p, tol) } else { None };
                 let line_tool = matches!(&self.tool.kind, ToolKind::Shape { preset } if deckcraft_geom::preset::is_line_like(preset));
                 if line_tool {
                     self.update_sites(p, tol, None);
@@ -538,6 +550,14 @@ impl Session {
                     let _ = self.execute("animation.painterApply", &json!({"ids": [id]}));
                 }
             }
+            None if self.guide_at(p, tol).is_some() => {
+                // Away from every shape a press on a guide picks the guide up.
+                if let Some(index) = self.guide_at(p, tol) {
+                    let pos = st.doc.guides.get(index).map(|g| g.pos).unwrap_or(0.0);
+                    self.tool.drag = Some(Drag::Guide { index });
+                    self.tool.guide_drag = Some((index, pos));
+                }
+            }
             None => {
                 let add = mods.shift || mods.cmd;
                 self.select(|_, sel| {
@@ -557,6 +577,13 @@ impl Session {
     fn drag(&mut self, p: Point, mods: Mods, tol: f64) -> Result<Value> {
         let Some(drag) = self.tool.drag.clone() else { return Ok(Value::Null) };
         match drag {
+            Drag::Guide { index } => {
+                let vertical = self.active().and_then(|d| d.doc.guides.get(index)).is_some_and(|g| g.vertical);
+                let pos = if vertical { p.x } else { p.y };
+                // Guides move in whole points unless snapping is off, as in PowerPoint.
+                let pos = if self.prefs.snap_to_grid && !mods.alt { pos.round() } else { pos };
+                self.tool.guide_drag = Some((index, pos));
+            }
             Drag::Move { ids, start, origs, moved, duplicate, enter_text } => {
                 let mut d = p - start;
                 if !moved && (d.hypot() < tol.max(1.0) || origs.is_empty()) {
@@ -782,6 +809,18 @@ impl Session {
         self.tool.glue = None;
         let mut out = Value::Null;
         match drag {
+            Some(Drag::Guide { index }) => {
+                // Dropped off the slide: the guide is deleted.
+                let (_, pos) = self.tool.guide_drag.take().unwrap_or((index, 0.0));
+                let size = self.doc()?.doc.slide_size;
+                let vertical = self.doc()?.doc.guides.get(index).is_some_and(|g| g.vertical);
+                let limit = if vertical { size.width } else { size.height };
+                out = if pos < 0.0 || pos > limit {
+                    self.execute("guide.delete", &json!({"index": index}))?
+                } else {
+                    self.execute("guide.move", &json!({"index": index, "pos": pos}))?
+                };
+            }
             Some(Drag::Move { moved: false, enter_text: Some((id, at)), .. }) => {
                 // Plain click on text: caret at the click.
                 let st = self.doc()?;
@@ -1114,6 +1153,22 @@ impl Session {
         })
     }
 
+    /// The drawing guide within `tol` of `p` (only while guides are shown).
+    pub fn guide_at(&self, p: Point, tol: f64) -> Option<usize> {
+        if !self.tool.guides_visible {
+            return None;
+        }
+        let st = self.active()?;
+        st.doc
+            .guides
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (i, if g.vertical { (p.x - g.pos).abs() } else { (p.y - g.pos).abs() }))
+            .filter(|(_, d)| *d <= tol.max(2.0))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    }
+
     /// Smart guides: snap `r` edges/centres to the slide and other shapes. Returns the offset to
     /// apply and the guides to draw.
     fn snap_rect(&self, r: Rect, exclude: &[ShapeId], tol: f64, enabled: bool) -> (Vec2, Vec<Guide>) {
@@ -1132,6 +1187,15 @@ impl Session {
             (size.height / 2.0, Rect::new(0.0, size.height / 2.0, size.width, size.height / 2.0)),
             (size.height, Rect::new(0.0, size.height, size.width, size.height)),
         ];
+        if self.tool.guides_visible {
+            for g in &st.doc.guides {
+                if g.vertical {
+                    xs.push((g.pos, Rect::new(g.pos, 0.0, g.pos, size.height)));
+                } else {
+                    ys.push((g.pos, Rect::new(0.0, g.pos, size.width, g.pos)));
+                }
+            }
+        }
         for sh in st.shapes() {
             if exclude.contains(&sh.id) || sh.hidden {
                 continue;
