@@ -1498,6 +1498,7 @@ pub(crate) fn stroke(
     if let Some(d) = &line.dash {
         let pat: Vec<f64> = d.pattern().iter().map(|v| v * lw.max(0.75)).collect();
         let pat = dash_with_caps(pat, cap, sw);
+        let pat = limit_dash_count(path, pat);
         if !pat.is_empty() && pat.iter().all(|v| *v > 0.0) {
             if cap == kurbo::Cap::Square {
                 sk = sk.with_caps(kurbo::Cap::Butt);
@@ -1636,6 +1637,30 @@ fn dash_with_caps(mut pat: Vec<f64>, cap: kurbo::Cap, width: f64) -> Vec<f64> {
         *v = if i.is_multiple_of(2) { (*v - width).max(width * 1e-3) } else { *v + width };
     }
     pat
+}
+
+/// The most dashes one stroke is cut into. Stroking expands every dash into its own outline, so a
+/// tiny dash on a huge shape (a 1 EMU-wide `custDash` on a 2147483647 EMU rectangle) would
+/// otherwise need gigabytes and abort the app when the slide is drawn. Past this count the
+/// pattern is scaled up evenly, which looks the same: the dashes are far below a pixel by then.
+const MAX_DASHES: f64 = 20_000.0;
+
+fn limit_dash_count(path: &BezPath, pat: Vec<f64>) -> Vec<f64> {
+    use kurbo::ParamCurveArclen;
+    let period: f64 = pat.iter().sum();
+    if !(period.is_finite() && period > 0.0) {
+        return pat;
+    }
+    let len: f64 = path.segments().map(|s| s.arclen(1e-2)).sum();
+    let dashes = len / period;
+    if !len.is_finite() {
+        return vec![];
+    }
+    if dashes <= MAX_DASHES {
+        return pat;
+    }
+    let k = dashes / MAX_DASHES;
+    pat.into_iter().map(|v| v * k).collect()
 }
 
 fn end_points(path: &BezPath) -> Option<((Point, Point), (Point, Point))> {
