@@ -613,14 +613,16 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
             m.theme = th.clone();
         }
         let ppp = ui.ctx().pixels_per_point();
-        let px = (w * ppp) as u32;
-        let h = (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)) as u32;
+        let (px, h) = crate::textures::fit_size(
+            (((w * ppp) as u32).max(1), (((w * ppp) as f64) * d.slide_size.height / d.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+            crate::textures::max_side(ui.ctx()),
+        );
         let img = deckcraft_render::render_slide(
             &d,
             idx,
             &deckcraft_render::RenderOpts { scale: px as f64 / d.slide_size.width.max(1.0), size: Some((px, h)), ..Default::default() },
         );
-        let tex = ui.ctx().load_texture(format!("idea-{}", th.name), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+        let tex = crate::textures::upload(ui.ctx(), format!("idea-{}", th.name), crate::textures::to_color_image(&img, false));
         let (r, resp) = ui.allocate_exact_size(vec2(w, w * h as f32 / px.max(1) as f32), Sense::click());
         ui.painter().image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         ui.painter().rect_stroke(

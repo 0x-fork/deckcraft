@@ -339,8 +339,7 @@ fn layout_menu(app: &mut SlideApp, ui: &mut Ui, cmd: &str) {
                             ..Default::default()
                         },
                     );
-                    let tex =
-                        ui.ctx().load_texture(format!("layout-{li}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+                    let tex = crate::textures::upload(ui.ctx(), format!("layout-{li}"), crate::textures::to_color_image(&img, false));
                     ui.painter().image(tex.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 }
                 let t = Tokens::get(ui.ctx());

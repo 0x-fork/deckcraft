@@ -1165,6 +1165,8 @@ fn js_now() -> f64 {
 
 #[cfg(test)]
 mod ime_tests;
+#[cfg(test)]
+mod texture_limit_tests;
 
 #[cfg(test)]
 mod tests {

@@ -314,14 +314,18 @@ fn master_tex(
     visible: deckcraft_render::Region,
 ) -> Option<(egui::TextureHandle, deckcraft_render::Region)> {
     let scale = px.0 as f64 / doc.slide_size.width.max(1.0);
-    let region = deckcraft_render::pasteboard_region(px, scale, deckcraft_render::layout_extent(doc, master, layout), visible);
+    let region = crate::textures::fit_texture(
+        deckcraft_render::pasteboard_region(px, scale, deckcraft_render::layout_extent(doc, master, layout), visible),
+        visible,
+        crate::textures::max_side(ctx),
+    );
     let img = deckcraft_render::render_layout(
         doc,
         master,
         layout,
         &deckcraft_render::RenderOpts { scale, edit: true, offset: region.offset(), size: Some(region.size()), ..Default::default() },
     );
-    Some((ctx.load_texture("master-canvas", crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR), region))
+    Some((crate::textures::upload(ctx, "master-canvas", crate::textures::to_color_image(&img, false)), region))
 }
 
 fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {

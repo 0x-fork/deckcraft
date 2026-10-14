@@ -67,6 +67,66 @@ pub fn to_color_image(img: &Image, grayscale: bool) -> ColorImage {
     ColorImage::new([w, h], px)
 }
 
+/// The largest texture side the renderer (GPU or software fallback) takes; egui panics on
+/// a bigger texture.
+pub fn max_side(ctx: &egui::Context) -> u32 {
+    ctx.input(|i| i.max_texture_side).clamp(1, u32::MAX as usize) as u32
+}
+
+/// `(w, h)` scaled down, keeping its shape, so neither side exceeds `max` (and none is 0).
+/// Render sizes go through this so a huge display, DPI or slide shape doesn't render a
+/// picture the GPU can't hold.
+pub fn fit_size((w, h): (u32, u32), max: u32) -> (u32, u32) {
+    let (w, h, max) = (w.max(1), h.max(1), max.max(1));
+    let big = w.max(h);
+    if big <= max {
+        return (w, h);
+    }
+    let k = max as f64 / big as f64;
+    (((w as f64 * k).floor() as u32).clamp(1, max), ((h as f64 * k).floor() as u32).clamp(1, max))
+}
+
+/// `img` shrunk by whole-pixel box averaging until both sides fit `max`.
+pub fn shrink_to(img: ColorImage, max: u32) -> ColorImage {
+    let [w, h] = img.size;
+    let max = max.max(1) as usize;
+    if w <= max && h <= max {
+        return img;
+    }
+    let f = w.max(h).div_ceil(max);
+    let (nw, nh) = (w.div_ceil(f).max(1), h.div_ceil(f).max(1));
+    let mut px = Vec::with_capacity(nw * nh);
+    for y in 0..nh {
+        for x in 0..nw {
+            let mut acc = [0u32; 4];
+            let mut n = 0u32;
+            for sy in y * f..((y + 1) * f).min(h) {
+                for sx in x * f..((x + 1) * f).min(w) {
+                    if let Some(c) = img.pixels.get(sy * w + sx) {
+                        for (a, v) in acc.iter_mut().zip(c.to_array()) {
+                            *a += v as u32;
+                        }
+                        n += 1;
+                    }
+                }
+            }
+            let n = n.max(1);
+            px.push(egui::Color32::from_rgba_premultiplied((acc[0] / n) as u8, (acc[1] / n) as u8, (acc[2] / n) as u8, (acc[3] / n) as u8));
+        }
+    }
+    ColorImage::new([nw, nh], px)
+}
+
+/// Upload a texture, shrunk to the renderer's limit if need be.
+pub fn upload(ctx: &egui::Context, name: impl Into<String>, img: ColorImage) -> TextureHandle {
+    ctx.load_texture(name, shrink_to(img, max_side(ctx)), TextureOptions::LINEAR)
+}
+
+/// Replace a texture's picture, shrunk to the renderer's limit if need be.
+pub fn replace(ctx: &egui::Context, tex: &mut TextureHandle, img: ColorImage) {
+    tex.set(shrink_to(img, max_side(ctx)), TextureOptions::LINEAR);
+}
+
 fn master_of(p: &Presentation, slide: &Slide) -> Option<Arc<Master>> {
     p.masters.iter().find(|m| m.layout(slide.layout).is_some()).cloned()
 }
@@ -117,7 +177,7 @@ impl Textures {
             _ => estimate,
         };
         // The GPU's (or software fallback's) texture limit: a larger canvas texture panics in egui.
-        let max_side = ctx.input(|i| i.max_texture_side).max(1) as u32;
+        let max_side = max_side(ctx);
         let want = fit_texture(deckcraft_render::pasteboard_region(size, scale, reach, visible), visible, max_side);
         let key = Key {
             slide: Arc::as_ptr(&slide) as usize,
@@ -156,10 +216,10 @@ impl Textures {
         let ci = to_color_image(&img, grayscale);
         let tex = match self.canvas.take() {
             Some(mut e) => {
-                e.tex.set(ci, TextureOptions::LINEAR);
+                replace(ctx, &mut e.tex, ci);
                 e.tex
             }
-            None => ctx.load_texture("slide-canvas", ci, TextureOptions::LINEAR),
+            None => upload(ctx, "slide-canvas", ci),
         };
         self.canvas = Some(Entry { key, tex: tex.clone(), region, _slide: slide, _master: master, stamp: 0 });
         Some((tex, region))
@@ -200,9 +260,10 @@ impl Textures {
             return self.thumbs.get(&key.slide).map(|e| e.tex.clone());
         }
         *budget -= 1;
-        let scale = width_px as f64 / p.slide_size.width.max(1.0);
-        let img = deckcraft_render::render_slide(p, index, &RenderOpts { scale, size: Some((width_px, h)), threads: 0, ..Default::default() });
-        let tex = ctx.load_texture(format!("thumb-{index}"), to_color_image(&img, false), TextureOptions::LINEAR);
+        let (tw, th) = fit_size((width_px, h), max_side(ctx));
+        let scale = tw as f64 / p.slide_size.width.max(1.0);
+        let img = deckcraft_render::render_slide(p, index, &RenderOpts { scale, size: Some((tw, th)), threads: 0, ..Default::default() });
+        let tex = upload(ctx, format!("thumb-{index}"), to_color_image(&img, false));
         // Drop the old entry for this slide address; entries for slides that no longer exist age out.
         let region = key.want;
         self.thumbs.insert(key.slide, Entry { key, tex: tex.clone(), region, _slide: slide, _master: master, stamp: clock });
@@ -244,5 +305,27 @@ mod fit_tests {
         let f = fit_texture(r, Region { x: 4800, y: 0, w: 800, h: 600 }, 2048);
         assert_eq!((f.x, f.w), (-100 + 5000 - 2048, 2048));
         assert_eq!(fit_texture(r, r, 8192), r);
+    }
+
+    #[test]
+    fn render_sizes_and_pictures_shrink_to_the_limit_keeping_their_shape() {
+        assert_eq!(fit_size((195, 10920), 2048), (36, 2048));
+        assert_eq!(fit_size((3000, 1500), 2048), (2048, 1024));
+        assert_eq!(fit_size((800, 600), 2048), (800, 600));
+        assert_eq!(fit_size((0, 0), 0), (1, 1));
+        // A 5000 × 3 picture: half red, half blue, averaged down to 1667 × 1.
+        let img = ColorImage::new(
+            [5000, 3],
+            (0..3)
+                .flat_map(|y| (0..5000).map(move |x| (x, y)))
+                .map(|(x, _)| if x < 2500 { egui::Color32::RED } else { egui::Color32::BLUE })
+                .collect(),
+        );
+        let small = shrink_to(img, 2048);
+        assert_eq!(small.size, [1667, 1]);
+        assert_eq!(small.pixels[0], egui::Color32::RED);
+        assert_eq!(small.pixels[1666], egui::Color32::BLUE);
+        let ok = ColorImage::filled([10, 10], egui::Color32::WHITE);
+        assert_eq!(shrink_to(ok.clone(), 2048).size, ok.size);
     }
 }
