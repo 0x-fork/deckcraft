@@ -126,6 +126,34 @@ pub fn category(kind: &str) -> &'static str {
     }
 }
 
+/// A layout's gallery picture: the graphic drawn with sample nodes (or `nodes`) in a 320 × 200 pt
+/// group at the origin, in the style and colours given, with no text in the samples.
+pub fn preview(kind: &str, style: &str, colors: &str, nodes: Option<&[DiagramNode]>) -> Shape {
+    let sample = |levels: &[u8]| -> Vec<DiagramNode> { levels.iter().map(|l| DiagramNode { level: *l, ..Default::default() }).collect() };
+    let nodes = match nodes {
+        Some(n) if !n.is_empty() => n.to_vec(),
+        _ => match category(kind) {
+            "hierarchy" => sample(&[0, 1, 2, 2, 1]),
+            "matrix" => sample(&[0, 0, 0, 0, 0]),
+            "list" if kind != "blockList" && kind != "tableList" => sample(&[0, 1, 0, 1, 0, 1]),
+            _ => sample(&[0, 0, 0, 0]),
+        },
+    };
+    let d = Diagram { kind: kind.into(), nodes, style: style.into(), colors: colors.into(), ..Default::default() };
+    let area = Xfrm::new(0.0, 0.0, 320.0, 200.0);
+    let mut children = layout(&d, area);
+    for (k, c) in children.iter_mut().enumerate() {
+        c.id = ShapeId(10_000 + k as u32);
+    }
+    Shape {
+        id: ShapeId(9_999),
+        name: "SmartArt preview".into(),
+        xfrm: Some(area),
+        kind: ShapeKind::Group { children, child: area },
+        ..Default::default()
+    }
+}
+
 pub fn is_kind(k: &str) -> bool {
     LAYOUTS.iter().any(|(id, _)| *id == k)
 }

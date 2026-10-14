@@ -553,37 +553,79 @@ pub fn cref_param(c: &deckcraft_model::ColorRef) -> Value {
 
 /// Convert to SmartArt: the layouts by category, three to a row; a click converts the selected
 /// text.
-fn smartart_gallery(app: &mut SlideApp, ui: &mut Ui) {
+/// A layout gallery grouped by category, each layout as a small cached picture with its name.
+/// Clicking runs `cmd` with `{"kind": …}` plus `extra`; hovering shows the layout larger, drawn
+/// with `nodes` (the selected graphic's outline) when given: a live preview without touching the
+/// document.
+fn smartart_gallery(
+    app: &mut SlideApp,
+    ui: &mut Ui,
+    cmd: &str,
+    extra: Value,
+    current: &str,
+    style: &str,
+    colors: &str,
+    nodes: Option<&[deckcraft_model::DiagramNode]>,
+) {
     use deckcraft_engine::cmd::smartart::{LAYOUTS, category};
-    ui.set_min_width(420.0);
-    for (cat, title) in [
-        ("list", "List"),
-        ("process", "Process"),
-        ("cycle", "Cycle"),
-        ("hierarchy", "Hierarchy"),
-        ("relationship", "Relationship"),
-        ("matrix", "Matrix"),
-        ("pyramid", "Pyramid"),
-        ("picture", "Picture"),
-    ] {
-        let kinds: Vec<(&str, &str)> = LAYOUTS.iter().copied().filter(|(k, _)| category(k) == cat).collect();
-        if kinds.is_empty() {
-            continue;
-        }
-        ui.label(egui::RichText::new(title).strong());
-        egui::Grid::new(("smartart_gallery", cat)).num_columns(3).spacing([6.0, 2.0]).show(ui, |ui| {
-            for (i, (k, label)) in kinds.iter().enumerate() {
-                if ui.add_sized([136.0, 22.0], egui::Button::new(*label)).clicked() {
-                    run(app, "smartArt.fromText", json!({"kind": k}));
-                    ui.close();
-                }
-                if i % 3 == 2 {
-                    ui.end_row();
-                }
+    ui.set_min_width(440.0);
+    let slide = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
+    egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| {
+        for (cat, title) in [
+            ("list", "List"),
+            ("process", "Process"),
+            ("cycle", "Cycle"),
+            ("hierarchy", "Hierarchy"),
+            ("relationship", "Relationship"),
+            ("matrix", "Matrix"),
+            ("pyramid", "Pyramid"),
+            ("picture", "Picture"),
+        ] {
+            let kinds: Vec<(&str, &str)> = LAYOUTS.iter().copied().filter(|(k, _)| category(k) == cat).collect();
+            if kinds.is_empty() {
+                continue;
             }
-        });
-        ui.separator();
-    }
+            ui.label(egui::RichText::new(title).strong());
+            egui::Grid::new(("smartart_gallery", cat)).num_columns(4).spacing([6.0, 6.0]).show(ui, |ui| {
+                for (i, (k, label)) in kinds.iter().enumerate() {
+                    let ctx = ui.ctx().clone();
+                    let thumb = app.session.active().and_then(|d| app.textures.smartart(&ctx, &d.doc, slide, k, style, colors, None, 192));
+                    let r = ui
+                        .vertical_centered(|ui| {
+                            ui.set_width(100.0);
+                            let r = match &thumb {
+                                Some(t) => {
+                                    ui.add(egui::Button::image(egui::Image::new(t).fit_to_exact_size(egui::vec2(96.0, 60.0))).selected(*k == current))
+                                }
+                                None => ui.add_sized([96.0, 60.0], egui::Button::new("").selected(*k == current)),
+                            };
+                            ui.add(egui::Label::new(egui::RichText::new(*label).small()).truncate().selectable(false));
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *label));
+                            r.on_hover_text(*label)
+                        })
+                        .inner;
+                    if r.hovered() {
+                        let preview = app.session.active().and_then(|d| app.textures.smartart(&ctx, &d.doc, slide, k, style, colors, nodes, 480));
+                        if let Some(t) = preview {
+                            r.show_tooltip_ui(|ui| {
+                                ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(320.0, 200.0)));
+                            });
+                        }
+                    }
+                    if r.clicked() {
+                        let mut args = extra.clone();
+                        args["kind"] = json!(k);
+                        run(app, cmd, args);
+                        ui.close();
+                    }
+                    if i % 4 == 3 {
+                        ui.end_row();
+                    }
+                }
+            });
+            ui.separator();
+        }
+    });
 }
 
 fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
@@ -697,7 +739,7 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                     }
                 });
                 let r = icon_toggle(ui, Icon::SmartArt, "Convert to SmartArt", enabled(app, "smartArt.fromText"), false);
-                egui::Popup::menu(&r).show(|ui| smartart_gallery(app, ui));
+                egui::Popup::menu(&r).show(|ui| smartart_gallery(app, ui, "smartArt.fromText", json!({}), "", "", "", None));
             });
         });
     });
@@ -2666,12 +2708,9 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
     });
     group(ui, |ui| {
         let (r, _) = small_button_ex(ui, Icon::Layout, "Layouts", gid.is_some(), false, true);
+        let outline = sel.as_ref().map(|(_, d)| d.nodes.clone());
         egui::Popup::menu(&r).show(|ui| {
-            for (k, label) in deckcraft_engine::cmd::smartart::LAYOUTS {
-                if ui.selectable_label(kind == k, label).clicked() {
-                    run(app, "smartArt.layout", json!({"id": gid, "kind": k}));
-                }
-            }
+            smartart_gallery(app, ui, "smartArt.layout", json!({"id": gid}), &kind, &style, &colors, outline.as_deref());
         });
         let (r, _) = small_button_ex(ui, Icon::Layout, "Convert", gid.is_some(), false, true);
         egui::Popup::menu(&r).show(|ui| {
