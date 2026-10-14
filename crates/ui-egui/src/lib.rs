@@ -22,6 +22,7 @@ pub mod panes;
 pub mod qat;
 pub mod ribbon;
 pub mod selpane;
+pub mod settings;
 pub mod show;
 pub mod sorter;
 pub mod status;
@@ -165,6 +166,41 @@ const OBJECTS_MARKER: &str = "\u{2060}";
 fn system_clipboard_text(t: &str) -> String {
     if t.is_empty() { OBJECTS_MARKER.to_string() } else { t.to_string() }
 }
+
+/// The editor's zoom range (1 = 100 %).
+pub const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.1..=4.0;
+
+impl UiState {
+    /// The state with every value usable: `ui.json` is a file on disk, and a damaged or
+    /// hand-edited one must not stop the window from opening. A zoom of 10,000 % asked the
+    /// renderer for a texture larger than memory at start-up; panel sizes, scales and names are
+    /// brought into range the same way, and the recent list is cut to its usual length.
+    pub fn sanitized(mut self) -> UiState {
+        let d = UiState::default();
+        let within = |v: f32, lo: f32, hi: f32, default: f32| if v.is_finite() { v.clamp(lo, hi) } else { default };
+        self.zoom = self.zoom.filter(|z| z.is_finite() && *z > 0.0).map(|z| z.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
+        self.sorter_zoom = within(self.sorter_zoom, 0.5, 3.0, d.sorter_zoom);
+        self.ui_scale = within(self.ui_scale, 0.5, 3.0, d.ui_scale);
+        self.notes_height = within(self.notes_height, 0.0, 2000.0, d.notes_height);
+        self.thumbs_width = within(self.thumbs_width, 60.0, 1000.0, d.thumbs_width);
+        self.pane_width = within(self.pane_width, 240.0, 520.0, d.pane_width);
+        let short = |s: &String| s.len() <= 64;
+        if !short(&self.tab) {
+            self.tab = d.tab;
+        }
+        if !short(&self.format_tab) {
+            self.format_tab = d.format_tab;
+        }
+        self.pane = self.pane.filter(short);
+        self.recent.retain(|p| !p.is_empty() && p.len() <= 4096 && !p.contains('\0'));
+        self.recent.dedup();
+        self.recent.truncate(RECENT_MAX);
+        self
+    }
+}
+
+/// How many recent files File › Open and Home list.
+pub const RECENT_MAX: usize = 12;
 
 /// UI-only commands (id, label, shortcut, params).
 pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
@@ -706,7 +742,7 @@ impl SlideApp {
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
-        self.ui.recent.truncate(12);
+        self.ui.recent.truncate(RECENT_MAX);
         self.ui.view = ViewMode::Normal;
         Ok(())
     }

@@ -419,4 +419,30 @@ mod tests {
         truncated.truncate(40);
         assert!(embedded_sfnt(&truncated).is_none());
     }
+
+    /// A FIFO, a folder and a link loop dressed up as font files: the system scan skips them
+    /// instead of blocking forever on the FIFO (start-up hung when one sat in `~/.fonts`), and
+    /// still finds the real font beside them.
+    #[cfg(unix)]
+    #[test]
+    fn the_font_scan_skips_fifos_folders_and_link_loops() {
+        let dir = std::env::temp_dir().join(format!("deckcraft-fontscan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/legacy-semibold.ttf"), dir.join("sub/real.ttf")).unwrap();
+        let fifo = std::process::Command::new("mkfifo").arg(dir.join("trap.ttf")).status().is_ok_and(|s| s.success());
+        std::fs::create_dir(dir.join("folder.ttf")).unwrap();
+        std::fs::write(dir.join("empty.otf"), b"").unwrap();
+        std::os::unix::fs::symlink(&dir, dir.join("sub/loop")).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let scan_dir = dir.clone();
+        std::thread::spawn(move || {
+            let db = FontDb::with_font_dirs(vec![scan_dir]);
+            let _ = tx.send(db.load_system_fonts());
+        });
+        let n = rx.recv_timeout(std::time::Duration::from_secs(30)).expect("the font scan hung");
+        assert!(n >= 1, "the real font was found");
+        assert!(fifo || n >= 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
