@@ -2343,3 +2343,18 @@ fn charts_in_degenerate_frames_draw_without_panicking() {
         }
     }
 }
+
+/// Renders the EMF at `$DECKCRAFT_EMF_IN` to `$DECKCRAFT_EMF_PNG` (a look-at helper; does nothing
+/// without them).
+#[test]
+fn render_an_emf_file_to_look_at() {
+    let (Ok(src), Ok(out)) = (std::env::var("DECKCRAFT_EMF_IN"), std::env::var("DECKCRAFT_EMF_PNG")) else { return };
+    let Ok(bytes) = std::fs::read(&src) else { return };
+    let mut p = Presentation::default();
+    let media = p.add_media("image1.emf", "image/x-emf", bytes);
+    let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
+    let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(40.0, 40.0, 840.0, 400.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let _ = std::fs::write(out, img.to_png());
+}

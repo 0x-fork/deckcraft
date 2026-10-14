@@ -1933,3 +1933,63 @@ fn emfplus_nested_metafile_image_draws_its_items_into_the_destination() {
     assert_eq!(fill, Some([255, 255, 255, 255]));
     assert!(segs.contains(&Seg::Line(40.0, 20.0)), "{segs:?}");
 }
+
+/// Curves and a region fill, as an EMF+ only file (also written to `$DECKCRAFT_EMF_OUT` to look at).
+fn curves_file() -> Vec<u8> {
+    let pen = prec(0x4008, 0x0200 | 1, &solid_pen(0xFF20_60C0, 3.0));
+    // A closed curve through a diamond's corners, filled orange.
+    let diamond = f32s(&[100.0, 10.0, 190.0, 100.0, 100.0, 190.0, 10.0, 100.0]);
+    let fill = prec(0x4016, 0x8000, &cat(vec![h32(0xFFE0_8020), f32s(&[0.5]), h32(4), diamond.clone()]));
+    let outline = prec(0x4017, 1, &cat(vec![f32s(&[0.5]), h32(4), diamond]));
+    // An open curve (a smoothed line chart): all four segments of five points.
+    let line =
+        prec(0x4018, 1, &cat(vec![f32s(&[0.5]), h32(0), h32(4), h32(5), f32s(&[210.0, 150.0, 260.0, 60.0, 310.0, 120.0, 360.0, 30.0, 410.0, 90.0])]));
+    // A green rectangle region, filled.
+    let region = cat(vec![h32(0xDBC0_1002), h32(0), h32(0x1000_0000), f32s(&[220.0, 160.0, 180.0, 30.0])]);
+    let fill_region = prec(0x4013, 0x8000 | 2, &h32(0xFF30_A040));
+    let mut all = vec![plus_header(false), pen, fill, outline, line, prec(0x4008, 0x0400 | 2, &region), fill_region];
+    all.push(prec(0x4002, 0, &[]));
+    emf(&[plus_comment(&all)], [0, 0, 420, 200], [0; 4])
+}
+
+#[test]
+fn emfplus_cardinal_curves_and_region_fill() {
+    let bytes = curves_file();
+    if let Ok(path) = std::env::var("DECKCRAFT_EMF_OUT") {
+        let _ = std::fs::write(path, &bytes);
+    }
+    let p = parse(&bytes).unwrap();
+    assert_eq!(p.items.len(), 4, "{:?}", p.items.len());
+    // The closed curve: four cubics through the diamond's corners, closed.
+    let (segs, fill, ..) = path_segs(&p.items[0]);
+    assert_eq!(fill, Some([0xE0, 0x80, 0x20, 0xFF]));
+    let cubics: Vec<(f32, f32)> = segs.iter().filter_map(|s| if let Seg::Cubic(.., x, y) = s { Some((*x, *y)) } else { None }).collect();
+    assert_eq!(cubics.len(), 4, "{segs:?}");
+    assert_eq!(segs.last(), Some(&Seg::Close));
+    // The open curve: four cubics and no close; its controls bulge past the straight chords.
+    let (segs, fill, stroke, _) = path_segs(&p.items[2]);
+    assert_eq!((fill, stroke.map(|s| s.0)), (None, Some([0x20, 0x60, 0xC0, 0xFF])));
+    assert_eq!(segs.iter().filter(|s| matches!(s, Seg::Cubic(..))).count(), 4);
+    assert!(!segs.contains(&Seg::Close));
+    // The region fill is its rectangle.
+    let (segs, fill, ..) = path_segs(&p.items[3]);
+    assert_eq!(fill, Some([0x30, 0xA0, 0x40, 0xFF]));
+    assert_eq!(segs.iter().filter(|s| matches!(s, Seg::Line(..))).count(), 3, "{segs:?}");
+}
+
+#[test]
+fn emfplus_curve_offsets_and_degenerate_input_are_safe() {
+    let pen = prec(0x4008, 0x0200 | 1, &solid_pen(0xFF00_0000, 1.0));
+    // Segments from point 2 of 5, asking for more than there are: two segments.
+    let line = prec(0x4018, 1, &cat(vec![f32s(&[0.5]), h32(2), h32(99), h32(5), f32s(&[0.0, 0.0, 10.0, 5.0, 20.0, 0.0, 30.0, 5.0, 40.0, 0.0])]));
+    let p = plus_pic(vec![pen.clone(), line]);
+    let (segs, ..) = path_segs(&p.items[0]);
+    assert_eq!(segs.iter().filter(|s| matches!(s, Seg::Cubic(..))).count(), 2, "{segs:?}");
+    // One point, an offset past the end, a NaN tension, a missing region: nothing, no panic.
+    let one = prec(0x4018, 1, &cat(vec![f32s(&[0.5]), h32(0), h32(1), h32(1), f32s(&[1.0, 1.0])]));
+    let past = prec(0x4018, 1, &cat(vec![f32s(&[0.5]), h32(9), h32(9), h32(2), f32s(&[0.0, 0.0, 9.0, 9.0])]));
+    let nan = prec(0x4017, 1, &cat(vec![f32s(&[f32::NAN]), h32(3), f32s(&[0.0, 0.0, 9.0, 9.0, 0.0, 9.0])]));
+    let no_region = prec(0x4013, 0x8000 | 7, &h32(0xFF00_0000));
+    let p = plus_pic(vec![pen, one, past, nan, no_region]);
+    assert!(p.items.iter().all(|i| path_segs(i).0.iter().filter(|s| matches!(s, Seg::Cubic(..))).count() == 0));
+}
