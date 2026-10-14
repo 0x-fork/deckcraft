@@ -80,7 +80,8 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
                 let h = d.doc.slide_size.height.max(1.0) as f32;
                 (d.doc.slides.len(), d.doc.slide_size.width as f32 / h)
             }).unwrap_or((0, 16.0 / 9.0));
-            s.showing_value(n, aspect, ctx.content_rect())
+            let now = ctx.input(|i| i.time);
+            s.showing_value(n, aspect, ctx.content_rect(), now)
         }),
         "documents": app.session.documents().iter().map(|d| json!({"title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
         "status": app.status.as_ref().map(|s| s.0.clone()),
