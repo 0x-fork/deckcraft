@@ -588,6 +588,10 @@ impl SlideApp {
                     }
                     if let Some(b) = guides {
                         self.ui.guides = b;
+                        // As View › Guides: a presentation without guides gets the two centre guides.
+                        if b && self.session.active().is_some_and(|d| d.doc.guides.is_empty()) {
+                            let _ = self.session.execute("guide.add", &json!({"defaults": true}));
+                        }
                     }
                 } else {
                     self.dialog = Some(dialogs::Dialog::new("gridOptions"));
@@ -1690,7 +1694,7 @@ mod tests {
         harness.run_steps(2);
         assert!(harness.query_by_label_contains("Display grid on screen").is_some());
         assert!(harness.query_by_label_contains("Snap objects to grid").is_some());
-        assert!(harness.query_by_label_contains("Spacing").is_some());
+        assert!(harness.query_by_label_contains("Spacing (pt)").is_some());
         let show_grid = harness
             .query_all_by_role_and_label(egui::accesskit::Role::CheckBox, "Display grid on screen")
             .next()
