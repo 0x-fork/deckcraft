@@ -854,11 +854,22 @@ pub struct MediaItem {
     pub link: Option<String>,
 }
 
+/// A size whose sides may be missing, null or not numbers (NaN then); see `Presentation::slide_size`.
+fn lenient_size<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Size, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    let side = |k: &str| v.get(k).and_then(serde_json::Value::as_f64).unwrap_or(f64::NAN);
+    Ok(Size::new(side("width"), side("height")))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Presentation {
-    /// Slide size in points (default 16:9, 960 × 540).
+    /// Slide size in points (default 16:9, 960 × 540). Read leniently: a missing, null or
+    /// non-numeric side becomes NaN for `deckcraft_format::repair` to replace, instead of the
+    /// whole file failing to open.
+    #[serde(deserialize_with = "lenient_size")]
     pub slide_size: Size,
+    #[serde(deserialize_with = "lenient_size")]
     pub notes_size: Size,
     pub slides: Vec<Arc<Slide>>,
     pub masters: Vec<Arc<Master>>,

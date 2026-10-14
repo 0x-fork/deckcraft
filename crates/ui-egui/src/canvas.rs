@@ -38,7 +38,9 @@ fn mods(ui: &Ui) -> Mods {
 /// The slide's rect on screen for the current zoom.
 pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let Some(d) = app.session.active() else { return (avail, 1.0) };
-    let (sw, sh) = (d.doc.slide_size.width as f32, d.doc.slide_size.height as f32);
+    // Loaded sizes are repaired; a zero or non-finite side would still make the fit infinite.
+    let side = |v: f64| if v.is_finite() { (v as f32).max(1.0) } else { 1.0 };
+    let (sw, sh) = (side(d.doc.slide_size.width), side(d.doc.slide_size.height));
     let margin = 28.0;
     let fit = ((avail.width() - margin * 2.0) / sw).min((avail.height() - margin * 2.0) / sh).max(0.05);
     let scale = app.ui.zoom.unwrap_or(fit);

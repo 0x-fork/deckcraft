@@ -238,8 +238,10 @@ fn state_for(tl: &Timeline, id: ShapeId, step: usize, t: f64, plays: &[TriggerPl
 }
 
 fn fit(avail: Rect, doc: &Presentation) -> Rect {
-    let (sw, sh) = (doc.slide_size.width as f32, doc.slide_size.height as f32);
-    let s = (avail.width() / sw).min(avail.height() / sh);
+    // Loaded sizes are repaired, but a zero side here would make every rectangle NaN.
+    let side = |v: f64| if v.is_finite() { (v as f32).max(1.0) } else { 1.0 };
+    let (sw, sh) = (side(doc.slide_size.width), side(doc.slide_size.height));
+    let s = (avail.width() / sw).min(avail.height() / sh).max(0.0);
     Rect::from_center_size(avail.center(), vec2(sw * s, sh * s))
 }
 

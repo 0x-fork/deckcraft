@@ -1211,6 +1211,8 @@ mod animpane_tests;
 mod ime_tests;
 #[cfg(test)]
 mod ui_soak_tests;
+#[cfg(test)]
+mod slide_size_tests;
 
 #[cfg(test)]
 mod tests {
