@@ -1307,8 +1307,17 @@ pub fn build(name: &str, w: f64, h: f64, adj: &[f64]) -> Option<Geometry> {
             } else {
                 vec![(0.0, 0.0), (w - d, 0.0), (w, h / 2.0), (w - d, h), (0.0, h), (d, h / 2.0)]
             };
-            let tx = if name == "homePlate" { 0.0 } else { d };
-            let mut g = simple(b.poly(&pts).take(), Rect::new(tx, 0.0, w - d / 2.0, h), w, h);
+            // Text rectangles as presetShapeDefinitions give them: homePlate's runs to halfway
+            // along the point; chevron's lies between the notch and the point's base (x1..x2)
+            // and covers the whole width once those meet or cross (`?: dx x1 l`).
+            let text = if name == "homePlate" {
+                Rect::new(0.0, 0.0, w - d / 2.0, h)
+            } else if w - d > d {
+                Rect::new(d, 0.0, w - d, h)
+            } else {
+                Rect::new(0.0, 0.0, w, h)
+            };
+            let mut g = simple(b.poly(&pts).take(), text, w, h);
             g.handles.push(Handle::new(0, Point::new(w, 0.0), Vec2::new(-ss / 1e5, 0.0), v, 0.0, 100000.0 * w / ss.max(1e-9)));
             g
         }
