@@ -3,6 +3,7 @@
 //! ```text
 //! deckcraft-cli info FILE                       # slides, titles, layouts (JSON)
 //! deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] OUT.png|OUT_DIR
+//! N starts at 0. --all writes slide-01.png, slide-02.png, …
 //! deckcraft-cli render-transition FILE --slide N --t T[,T…] [--width PX] OUT.png   # transition frame(s)
 //! deckcraft-cli convert IN OUT                  # .deckcraft ⇄ .pptx, outline .txt, .png (first slide)
 //! deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
@@ -36,6 +37,7 @@ macro_rules! outln {
 
 const USAGE: &str = "usage: deckcraft-cli info FILE
        deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] [--edit] OUT
+       N starts at 0 (the first slide). --all writes slide-01.png, slide-02.png, …
        deckcraft-cli render-transition FILE --slide N --t T[,T...] [--width PX] OUT.png
        deckcraft-cli convert IN OUT
        deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
@@ -274,20 +276,43 @@ fn render(args: &[String]) -> Result<(), String> {
     open(&mut s, input.as_deref(), sample)?;
     let st = s.doc().map_err(|e| e.to_string())?;
     let n = st.doc.slides.len();
-    let list: Vec<usize> = if all { (0..n).collect() } else { vec![slide.unwrap_or(0)] };
+    let list = slide_indices(n, all, slide)?;
     if all {
         std::fs::create_dir_all(&out).map_err(|e| format!("{out}: {e}"))?;
     }
     for i in list {
-        if i >= n {
-            return Err(format!("no slide {i} (the deck has {n})"));
-        }
         let (png, w, h) = deckcraft_engine::cmd::file::render_png(&st.doc, i, scale, edit);
         let path = if all { format!("{out}/slide-{:02}.png", i + 1) } else { out.clone() };
         std::fs::write(&path, png).map_err(|e| format!("{path}: {e}"))?;
         outln!("{path} ({w}×{h})");
     }
     Ok(())
+}
+
+/// Slides `--slide` asks for. `N` is a 0-based index, the same one `slide.go` uses.
+/// `--all` still names files from 1 (`slide-01.png`), which is PowerPoint's slide number.
+fn slide_indices(n: usize, all: bool, slide: Option<usize>) -> Result<Vec<usize>, String> {
+    if all {
+        return Ok((0..n).collect());
+    }
+    let i = slide.unwrap_or(0);
+    if i >= n {
+        return Err(missing_slide(i, n));
+    }
+    Ok(vec![i])
+}
+
+fn missing_slide(i: usize, n: usize) -> String {
+    match n {
+        0 => format!("no slide index {i} (this deck has no slides)"),
+        1 => format!("no slide index {i} (this deck has 1 slide, index 0, which --all names slide-01.png)"),
+        n => {
+            let last = n - 1;
+            format!(
+                "no slide index {i} (this deck has {n} slides, numbered 0 through {last}; --all names them slide-01.png through slide-{n:02}.png)"
+            )
+        }
+    }
 }
 
 /// Frames of slide N's transition (0-based N; from slide N-1, or black for the first slide) at
@@ -544,5 +569,25 @@ mod tests {
         assert!(run(&args(&["--help"])).is_ok());
         assert!(describe(Some("--help")).is_ok());
         assert!(mcp(&args(&["-h"])).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod slide_index_tests {
+    use super::{missing_slide, slide_indices};
+
+    #[test]
+    fn slide_numbers_start_at_zero_and_files_at_one() {
+        assert_eq!(slide_indices(8, false, None).ok().as_deref(), Some(&[0][..]));
+        assert_eq!(slide_indices(8, false, Some(0)).ok().as_deref(), Some(&[0][..]));
+        assert_eq!(slide_indices(8, false, Some(7)).ok().as_deref(), Some(&[7][..]));
+        assert_eq!(slide_indices(8, true, None).ok().as_deref(), Some(&[0, 1, 2, 3, 4, 5, 6, 7][..]));
+        let err = slide_indices(8, false, Some(8)).err().unwrap_or_default();
+        assert!(!err.is_empty(), "index 8 was accepted");
+        assert!(err.contains("numbered 0 through 7"), "{err}");
+        assert!(err.contains("slide-01.png"), "{err}");
+        assert!(err.contains("slide-08.png"), "{err}");
+        assert!(missing_slide(0, 0).contains("no slides"));
+        assert!(missing_slide(1, 1).contains("index 0"));
     }
 }
