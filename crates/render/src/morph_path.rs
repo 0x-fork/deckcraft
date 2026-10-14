@@ -76,9 +76,12 @@ impl Cache {
                 self.morphs.len() - 1
             }
         };
-        let (_, m, used) = &mut self.morphs[k];
-        *used = true;
         let scale = |x: Xfrm| Vec2::new(ratio(w, x.w), ratio(h, x.h));
+        let Some((_, m, used)) = self.morphs.get_mut(k) else {
+            // Not reachable (k was just found or pushed); align afresh rather than panic.
+            return Source::of(pm, s).build().at(pm.t, scale(pm.from_box), scale(pm.to_box));
+        };
+        *used = true;
         m.at(pm.t, scale(pm.from_box), scale(pm.to_box))
     }
 
