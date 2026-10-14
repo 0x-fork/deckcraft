@@ -219,7 +219,8 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   text readable.
 - **Text:** in-place editing with caret, selection, keyboard and mouse; every Home-tab font and
   paragraph control; bullets and numbering; levels; autofit; columns; vertical text; date fields in
-  their own format; hyperlinks drawn in the theme's hyperlink colour and followed in the show.
+  their own format (Insert › Date and Time picks the format and language, or inserts the sample as
+  fixed text); hyperlinks drawn in the theme's hyperlink colour and followed in the show.
   UAX #9 bidi and Arabic shaping with HarfRust, script font slots with per-cluster fallback,
   `justLow` kashida, bidi caret and selection.
 - **Editing:** select, marquee, move, resize, rotate, adjust; smart guides; nudge; duplicate;
@@ -276,6 +277,7 @@ scored done (16 open issues).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Insert › Date and Time noted under what works today. The d556ff9 snapshot (226 commands, 27 dialogs) and the readiness percentages are unchanged |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow gate (all six pass); stays alpha |

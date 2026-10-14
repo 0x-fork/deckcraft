@@ -47,7 +47,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("insert.video", "Video from File…", ["Insert", "Media", "Video"], None, "{path? | data: base64, name?, rect?}", has_slide, video),
         cmd!("insert.wordArt", "WordArt", ["Insert", "Text"], None, "{text?, style?: 0..}", has_slide, word_art),
         cmd!("insert.slideNumber", "Slide Number", ["Insert", "Text"], None, "{}", has_slide, slide_number),
-        cmd!("insert.dateTime", "Date & Time", ["Insert", "Text"], None, "{format?: datetime1..}", has_slide, date_time),
+        cmd!(
+            "insert.dateTime",
+            "Date & Time",
+            ["Insert", "Text"],
+            None,
+            "{format?: datetime1..datetime13, update?: bool, language?: en-US|en-GB|fr-FR|ja-JP|sv-SE} — no keys opens the dialog",
+            has_slide,
+            date_time
+        ),
         cmd!("insert.symbol", "Symbol", ["Insert", "Symbols"], None, "{text: character(s)}", has_slide, symbol),
         cmd!(
             "insert.hyperlink",
@@ -562,10 +570,198 @@ fn field_run(s: &mut Session, field: &str, text: &str) -> Result<Value> {
 fn slide_number(s: &mut Session, _p: &Value) -> Result<Value> {
     field_run(s, "slidenum", "‹#›")
 }
+
+const DATE_FORMATS: [&str; 13] = [
+    "datetime1",
+    "datetime2",
+    "datetime3",
+    "datetime4",
+    "datetime5",
+    "datetime6",
+    "datetime7",
+    "datetime8",
+    "datetime9",
+    "datetime10",
+    "datetime11",
+    "datetime12",
+    "datetime13",
+];
+
+struct DateOpts {
+    format: String,
+    update: bool,
+    /// BCP 47 tag when the caller set `language`; absent keeps the surrounding run's language.
+    lang: Option<String>,
+    sample: String,
+}
+
+/// `true` when the call carries a format, update flag or language (apply it). Empty params open
+/// the dialog instead.
+fn date_time_apply(p: &Value) -> bool {
+    p.as_object().is_some_and(|o| o.contains_key("format") || o.contains_key("update") || o.contains_key("language"))
+}
+
+fn canon_lang(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+        "en" | "en-us" => Some("en-US"),
+        "en-gb" => Some("en-GB"),
+        "fr" | "fr-fr" => Some("fr-FR"),
+        "ja" | "ja-jp" => Some("ja-JP"),
+        "sv" | "sv-se" => Some("sv-SE"),
+        _ => None,
+    }
+}
+
+fn date_opts(p: &Value) -> Result<DateOpts> {
+    if p.get("format").is_some() {
+        let f = str_param(p, "format").filter(|f| DATE_FORMATS.contains(f));
+        if f.is_none() {
+            return Err(bad("insert.dateTime", "`format` must be datetime1..datetime13"));
+        }
+    }
+    if p.get("update").is_some() && bool_param(p, "update").is_none() {
+        return Err(bad("insert.dateTime", "`update` must be true or false"));
+    }
+    let lang = if p.get("language").is_some() {
+        let raw = str_param(p, "language").filter(|l| !l.trim().is_empty());
+        let Some(raw) = raw else {
+            return Err(bad("insert.dateTime", "`language` must be en-US, en-GB, fr-FR, ja-JP or sv-SE"));
+        };
+        Some(canon_lang(raw).ok_or_else(|| bad("insert.dateTime", "`language` must be en-US, en-GB, fr-FR, ja-JP or sv-SE"))?.to_string())
+    } else {
+        None
+    };
+    let format = str_param(p, "format").unwrap_or("datetime1").to_string();
+    let sample = date_sample(&format, lang.as_deref())?;
+    Ok(DateOpts { format, update: bool_or(p, "update", true), lang, sample })
+}
+
+/// The text `format` shows now in `lang`. Errors when that language has no names for the format
+/// (month names and AM/PM are English only). An empty string where there is no clock (wasm).
+fn date_sample(format: &str, lang: Option<&str>) -> Result<String> {
+    use deckcraft_text::datetime::{DateTime, field_text};
+    let probe = DateTime::new(2026, 10, 9, 20, 5, 7);
+    if field_text(format, lang, probe).is_none() {
+        return Err(bad("insert.dateTime", "this format isn't available in that language"));
+    }
+    Ok(DateTime::now_local().and_then(|now| field_text(format, lang, now)).unwrap_or_default())
+}
+
 fn date_time(s: &mut Session, p: &Value) -> Result<Value> {
-    let f = str_param(p, "format").unwrap_or("datetime1").to_string();
-    // Saved with the date it shows now (the text kept where the date can't be computed).
-    field_run(s, &f, &super::design::date_field_text(&f))
+    if !date_time_apply(p) {
+        s.ui_requests.push(crate::UiRequest::Dialog { id: "dateTime".into(), params: json!({}) });
+        return ok();
+    }
+    let opts = date_opts(p)?;
+    let (doc, sel) = {
+        let st = s.doc()?;
+        (st.doc.clone(), st.selection.clone())
+    };
+    let r = apply_date(s, &opts);
+    if r.is_err()
+        && let Some(st) = s.active_mut()
+    {
+        st.doc = doc;
+        st.selection = sel;
+    }
+    r
+}
+
+fn apply_date(s: &mut Session, o: &DateOpts) -> Result<Value> {
+    if s.doc()?.selection.text.is_some() {
+        if o.update {
+            super::text::insert_field(s, &o.format, &o.sample)?;
+            if let Some(lang) = &o.lang {
+                stamp_caret_lang(s, lang)?;
+            }
+        } else {
+            insert_plain(s, &o.sample, o.lang.as_deref())?;
+        }
+        return Ok(json!({"where": "caret", "format": o.format, "update": o.update, "text": o.sample}));
+    }
+    // Not editing: the slide's date placeholder (this slide only). A layout with no date
+    // placeholder gets a text box instead, so the chosen format is still inserted.
+    s.execute("design.headerFooter", &json!({"date": true, "all": false}))?;
+    if !write_date_placeholder(s, o)? {
+        return insert_date_box(s, o);
+    }
+    Ok(json!({"where": "footer", "format": o.format, "update": o.update, "text": o.sample}))
+}
+
+/// Point the current slide's date placeholder at this format (a field, or the sample as plain text).
+fn write_date_placeholder(s: &mut Session, o: &DateOpts) -> Result<bool> {
+    let format = o.format.clone();
+    let sample = o.sample.clone();
+    let lang = o.lang.clone();
+    let update = o.update;
+    s.edit(|doc, sel| {
+        let Some(sl) = doc.slides.get_mut(sel.slide) else { return Ok(false) };
+        let sl = std::sync::Arc::make_mut(sl);
+        let Some(sh) = sl.shapes.iter_mut().find(|x| x.ph_type() == Some(deckcraft_model::PhType::Date)) else {
+            return Ok(false);
+        };
+        let mut props = sh.text.as_ref().and_then(|t| t.paragraphs.first()).and_then(|p| p.runs.first()).map(|r| r.props.clone()).unwrap_or_default();
+        if let Some(lang) = lang {
+            props.lang = Some(lang);
+        }
+        let kind = if update { RunKind::Field { field: format } } else { RunKind::Text };
+        let para = deckcraft_model::Paragraph { runs: vec![deckcraft_model::Run { text: sample, props, kind }], ..Default::default() };
+        let body = sh.text.clone().unwrap_or_default();
+        sh.text = Some(TextBody { paragraphs: vec![para], ..body });
+        Ok(true)
+    })
+}
+
+fn insert_date_box(s: &mut Session, o: &DateOpts) -> Result<Value> {
+    let size = s.doc()?.doc.slide_size;
+    let y = (size.height - 48.0).max(0.0);
+    s.execute("insert.textBox", &json!({"rect": [36.0, y, 360.0, 28.0], "text": ""}))?;
+    if o.update {
+        super::text::insert_field(s, &o.format, &o.sample)?;
+    } else {
+        super::text::insert_text(s, &o.sample, None)?;
+    }
+    if let Some(lang) = &o.lang {
+        stamp_caret_lang(s, lang)?;
+    }
+    Ok(json!({"where": "textBox", "format": o.format, "update": o.update, "text": o.sample}))
+}
+
+/// Insert `text` at the caret. `lang`, when set, is on that run before runs with equal props merge,
+/// so the date stays its own run next to the surrounding text.
+fn insert_plain(s: &mut Session, text: &str, lang: Option<&str>) -> Result<()> {
+    let text = text.to_string();
+    let lang = lang.map(str::to_string);
+    super::text::edit_text(s, move |body, t| {
+        let (a, b) = t.ordered();
+        let at = deckcraft_model::edit::delete(body, a, b);
+        let mut props = deckcraft_model::edit::props_at(body, at);
+        if let Some(lang) = lang.clone() {
+            props.lang = Some(lang);
+        }
+        let c = deckcraft_model::edit::insert(body, at, &text, Some(props));
+        t.anchor = c;
+        t.caret = c;
+    })?;
+    Ok(())
+}
+
+/// Tag the run that ends at the caret with `lang`, so a date field keeps that language when it updates.
+fn stamp_caret_lang(s: &mut Session, lang: &str) -> Result<()> {
+    let lang = lang.to_string();
+    super::text::edit_text(s, move |body, t| {
+        let Some(p) = body.paragraphs.get_mut(t.caret.0) else { return };
+        let mut at = 0usize;
+        for r in &mut p.runs {
+            let n = r.char_len();
+            if n > 0 && at < t.caret.1 && t.caret.1 <= at + n {
+                r.props.lang = Some(lang);
+                return;
+            }
+            at += n;
+        }
+    })?;
+    Ok(())
 }
 
 fn symbol(s: &mut Session, p: &Value) -> Result<Value> {
@@ -797,4 +993,140 @@ fn smart_art(s: &mut Session, p: &Value) -> Result<Value> {
         let _ = s.execute("shape.rename", &json!({"id": gid, "name": format!("SmartArt ({kind})")}));
     }
     Ok(g)
+}
+
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::text::RunKind;
+    use serde_json::json;
+
+    use crate::Session;
+
+    fn session() -> Session {
+        Session::with_new()
+    }
+
+    fn undo(s: &Session) -> usize {
+        s.doc().unwrap().history.undo.len()
+    }
+
+    fn date_run(s: &Session) -> Option<deckcraft_model::Run> {
+        s.doc()
+            .unwrap()
+            .current_slide()
+            .unwrap()
+            .shapes
+            .iter()
+            .find(|x| x.ph_type() == Some(deckcraft_model::PhType::Date))
+            .and_then(|x| x.text.as_ref())
+            .and_then(|t| t.paragraphs.first())
+            .and_then(|p| p.runs.first())
+            .cloned()
+    }
+
+    fn title_field(s: &Session) -> deckcraft_model::Run {
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].text.clone().unwrap();
+        title.paragraphs[0].runs.iter().find(|r| r.text.contains(':') || matches!(r.kind, RunKind::Field { .. })).cloned().unwrap()
+    }
+
+    fn edit_title(s: &mut Session) {
+        let id = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+        s.execute("text.edit", &json!({"id": id})).unwrap();
+        s.execute("text.insert", &json!({"text": "On "})).unwrap();
+    }
+
+    #[test]
+    fn no_params_opens_the_dialog_and_edits_nothing() {
+        let mut s = session();
+        let rev = s.doc().unwrap().revision;
+        for p in [json!({}), serde_json::Value::Null] {
+            s.ui_requests.clear();
+            s.execute("insert.dateTime", &p).unwrap();
+            assert!(matches!(&s.ui_requests[..], [crate::UiRequest::Dialog { id, .. }] if id == "dateTime"));
+            assert_eq!(s.doc().unwrap().revision, rev);
+            assert_eq!(undo(&s), 0);
+            assert!(date_run(&s).is_none());
+        }
+    }
+
+    #[test]
+    fn a_format_at_the_caret_is_one_updating_field() {
+        let mut s = session();
+        edit_title(&mut s);
+        let before = undo(&s);
+        let v = s.execute("insert.dateTime", &json!({"format": "datetime10", "update": true})).unwrap();
+        assert_eq!(v["where"], "caret");
+        let run = title_field(&s);
+        assert!(matches!(run.kind, RunKind::Field { ref field } if field == "datetime10"), "{run:?}");
+        assert!(run.text.contains(':'), "{run:?}");
+        assert_eq!(undo(&s), before + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Date & Time");
+        s.execute("edit.undo", &json!({})).unwrap();
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().text();
+        assert_eq!(title, "On ");
+    }
+
+    #[test]
+    fn update_false_inserts_plain_text_in_the_chosen_language() {
+        let mut s = session();
+        edit_title(&mut s);
+        let before = undo(&s);
+        let now = deckcraft_text::datetime::DateTime::now_local().unwrap();
+        let expect = deckcraft_text::datetime::field_text("datetime1", Some("en-GB"), now).unwrap();
+        s.execute("insert.dateTime", &json!({"format": "datetime1", "update": false, "language": "en-GB"})).unwrap();
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].text.clone().unwrap();
+        let run = title.paragraphs[0].runs.iter().find(|r| r.text == expect).cloned().unwrap();
+        assert_eq!(run.kind, RunKind::Text);
+        assert_eq!(run.props.lang.as_deref(), Some("en-GB"));
+        assert_eq!(undo(&s), before + 1);
+    }
+
+    #[test]
+    fn a_named_format_in_french_and_a_bad_value_change_nothing() {
+        let mut s = session();
+        edit_title(&mut s);
+        let rev = s.doc().unwrap().revision;
+        let undos = undo(&s);
+        let err = s.execute("insert.dateTime", &json!({"format": "datetime2", "language": "fr-FR"})).unwrap_err();
+        assert!(err.to_string().contains("isn't available"), "{err}");
+        assert_eq!(s.doc().unwrap().revision, rev);
+        assert_eq!(undo(&s), undos);
+        for p in [
+            json!({"format": "datetime14"}),
+            json!({"format": "nope"}),
+            json!({"update": "yes"}),
+            json!({"language": "de-DE"}),
+            json!({"language": ""}),
+        ] {
+            let err = s.execute("insert.dateTime", &p).unwrap_err();
+            assert!(err.to_string().contains("insert.dateTime"), "{err}");
+            assert_eq!(s.doc().unwrap().revision, rev);
+            assert_eq!(undo(&s), undos);
+        }
+    }
+
+    #[test]
+    fn without_a_caret_the_date_lands_on_this_slide_only() {
+        let mut s = session();
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        s.execute("slide.go", &json!({"index": 0})).unwrap();
+        let now = deckcraft_text::datetime::DateTime::now_local().unwrap();
+        let clock = deckcraft_text::datetime::field_text("datetime10", Some("en-US"), now).unwrap();
+        let v = s.execute("insert.dateTime", &json!({"format": "datetime10", "language": "en_US"})).unwrap();
+        assert_eq!(v["where"], "footer");
+        let run = date_run(&s).unwrap();
+        assert!(matches!(run.kind, RunKind::Field { ref field } if field == "datetime10"), "{run:?}");
+        assert_eq!(run.text, clock);
+        assert_eq!(run.props.lang.as_deref(), Some("en-US"));
+        s.execute("slide.go", &json!({"index": 1})).unwrap();
+        assert!(date_run(&s).is_none(), "the other slide keeps its own footer");
+        s.execute("slide.go", &json!({"index": 0})).unwrap();
+        let fixed = deckcraft_text::datetime::field_text("datetime12", None, now).unwrap();
+        s.execute("insert.dateTime", &json!({"format": "datetime12", "update": false})).unwrap();
+        let run = date_run(&s).unwrap();
+        assert_eq!((run.kind, run.text), (RunKind::Text, fixed));
+        s.execute("edit.undo", &json!({})).unwrap();
+        let run = date_run(&s).unwrap();
+        assert!(matches!(run.kind, RunKind::Field { .. }), "one undo restores the field");
+    }
 }

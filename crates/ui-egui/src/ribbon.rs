@@ -229,7 +229,12 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
 
 fn big(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
     let en = enabled(app, id);
-    if big_button(ui, icon, label, en).on_hover_text(tip(id, label)).clicked() {
+    let resp = big_button(ui, icon, label, en);
+    if id == "insert.dateTime" {
+        let name = label.replace('\n', " ");
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &name));
+    }
+    if resp.on_hover_text(tip(id, label)).clicked() {
         run(app, id, p);
     }
 }
