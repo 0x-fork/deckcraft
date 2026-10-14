@@ -83,3 +83,78 @@ fn drag_indents_add_move_and_remove_tabs_on_the_ruler() {
     drag(&mut h, Pos2::new(rx(pos), top + 12.0), Pos2::new(rx(pos), top + 80.0));
     assert!(ruler(&mut h)["tabs"].as_array().unwrap().is_empty());
 }
+
+fn editing_harness() -> Harness<'static, SlideApp> {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    let id = s.execute("insert.textBox", &json!({"rect": [100, 150, 500, 40]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("text.edit", &json!({"id": id})).unwrap();
+    s.execute("text.insert", &json!({"text": "Item\t9.50"})).unwrap();
+    let mut app = SlideApp::new(s, Services::default());
+    app.ui.ruler = true;
+    let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut SlideApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(3);
+    h
+}
+
+#[test]
+fn the_tab_selector_picks_the_kind_of_stop_a_click_sets() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = editing_harness();
+    let (slide, k) = (h.state().slide_rect.unwrap(), h.state().canvas_scale);
+    let x0 = ruler(&mut h)["x"].as_f64().unwrap() as f32;
+    let top = h.state().canvas_rect.unwrap().min.y;
+    let rx = |q: f32| slide.min.x + (x0 + q) * k;
+    let corner = h.state().canvas_rect.unwrap().min + egui::vec2(8.0, 8.0);
+    assert!(h.query_by_label("Left Tab").is_some());
+    for _ in 0..3 {
+        click(&mut h, corner);
+    }
+    assert!(h.query_by_label("Decimal Tab").is_some());
+    click(&mut h, Pos2::new(rx(200.0), top + 12.0));
+    let r = ruler(&mut h);
+    assert_eq!(r["tabs"][0]["align"], "dec", "{r}");
+    if let Ok(img) = h.render() {
+        let _ = img.save("/tmp/ruler_decimal.png");
+    }
+}
+
+#[test]
+fn tabs_dialog_sets_clears_and_applies_on_ok() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = editing_harness();
+    h.state_mut().session.execute("format.tabs", &json!({"add": {"pos": 36}})).unwrap();
+    h.state_mut().dialog = Some(crate::dialogs::Dialog::new("tabs"));
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("0.50\"").is_some(), "the existing stop is listed");
+    let d = h.state_mut().dialog.as_mut().unwrap();
+    d.fields.insert("newpos".into(), "2".into());
+    d.fields.insert("default".into(), "0.5".into());
+    h.run_steps(1);
+    h.get_by_label("Center").click();
+    h.run_steps(2);
+    h.get_by_label("Set").click();
+    h.run_steps(2);
+    if let Ok(img) = h.render() {
+        let _ = img.save("/tmp/tabs_dialog.png");
+    }
+    // Nothing changes until OK.
+    assert_eq!(ruler(&mut h)["tabs"].as_array().unwrap().len(), 1);
+    h.query_all_by_label("Clear").next().expect("a Clear button per stop").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(2);
+    assert!(h.state().dialog.is_none());
+    let r = ruler(&mut h);
+    assert_eq!(r["tabs"].as_array().unwrap().len(), 1, "{r}");
+    assert_eq!((r["tabs"][0]["pos"].as_f64(), r["tabs"][0]["align"].as_str()), (Some(144.0), Some("ctr")));
+    assert_eq!(r["defaultTab"].as_f64(), Some(36.0));
+    h.state_mut().session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(ruler(&mut h)["tabs"][0]["pos"].as_f64(), Some(36.0), "one undo step");
+}

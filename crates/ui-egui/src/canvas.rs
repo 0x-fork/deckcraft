@@ -528,25 +528,29 @@ fn ruler_markers(app: &mut SlideApp, ui: &mut Ui, p: &egui::Painter, avail: Rect
         if gone {
             continue;
         }
-        let (x, y) = (sx(q), top.max.y - 2.0);
-        let st = Stroke::new(1.5, t.text);
-        p.line_segment([pos2(x, y - 6.0), pos2(x, y)], st);
-        match align.as_str() {
-            "r" => {
-                p.line_segment([pos2(x - 5.0, y), pos2(x, y)], st);
-            }
-            "ctr" => {
-                p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
-            }
-            "dec" => {
-                p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
-                p.circle_filled(pos2(x + 3.0, y - 4.0), 1.0, t.text);
-            }
-            _ => {
-                p.line_segment([pos2(x, y), pos2(x + 5.0, y)], st);
-            }
-        }
+        tab_glyph(p, pos2(sx(q), top.max.y - 2.0), align, t.text);
     }
+    // The tab selector in the ruler's corner: a click cycles left, center, right, decimal; a click
+    // on the ruler then sets that kind of stop.
+    let kind_id = ui.id().with("ruler_tab_kind");
+    let mut kind: usize = ui.data(|d| d.get_temp(kind_id)).unwrap_or(0);
+    let corner = Rect::from_min_size(avail.min, vec2(16.0, 16.0));
+    let cr = ui.interact(corner, ui.id().with("ruler_tab_selector"), Sense::click());
+    const KINDS: [(&str, &str); 4] = [("l", "Left Tab"), ("ctr", "Center Tab"), ("r", "Right Tab"), ("dec", "Decimal Tab")];
+    if cr.clicked() {
+        kind = (kind + 1) % KINDS.len();
+        ui.data_mut(|d| d.insert_temp(kind_id, kind));
+    }
+    let (kind_align, kind_label) = KINDS[kind % KINDS.len()];
+    cr.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, kind_label));
+    let cr = cr.on_hover_text(format!("{kind_label} (click to change)"));
+    p.rect_stroke(
+        corner.shrink(2.0),
+        CornerRadius::same(2),
+        Stroke::new(1.0, if cr.hovered() { t.accent } else { t.text_faint }),
+        egui::StrokeKind::Inside,
+    );
+    tab_glyph(p, pos2(corner.center().x - 1.0, corner.center().y + 3.0), kind_align, t.text);
     if drag.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
     }
@@ -572,7 +576,37 @@ fn ruler_markers(app: &mut SlideApp, ui: &mut Ui, p: &egui::Painter, avail: Rect
         && at.x >= area.min.x
         && at.x <= area.max.x
     {
-        let _ = app.run("format.tabs", json!({"add": {"pos": to_q(at.x), "align": "l"}}));
+        let near_tab = tabs.iter().any(|(pos, _)| (sx(*pos) - at.x).abs() <= 5.0);
+        if resp.double_clicked() || near_tab {
+            // A double-click on a stop opens the Tabs dialog, as in PowerPoint.
+            if resp.double_clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("tabs"));
+            }
+        } else {
+            let _ = app.run("format.tabs", json!({"add": {"pos": to_q(at.x), "align": kind_align}}));
+        }
+    }
+}
+
+/// A tab-stop mark with its foot at `at`: └ left, ┴ center, ┘ right, ┴ with a dot decimal.
+fn tab_glyph(p: &egui::Painter, at: Pos2, align: &str, col: Color32) {
+    let (x, y) = (at.x, at.y);
+    let st = Stroke::new(1.5, col);
+    p.line_segment([pos2(x, y - 6.0), pos2(x, y)], st);
+    match align {
+        "r" => {
+            p.line_segment([pos2(x - 5.0, y), pos2(x, y)], st);
+        }
+        "ctr" => {
+            p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
+        }
+        "dec" => {
+            p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
+            p.circle_filled(pos2(x + 3.0, y - 4.0), 1.0, col);
+        }
+        _ => {
+            p.line_segment([pos2(x, y), pos2(x + 5.0, y)], st);
+        }
     }
 }
 
@@ -583,6 +617,11 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     let tol = (4.0 / xf.scale) as f64;
     let m = mods(ui);
     let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) else { return };
+    // The rulers have their own controls; a press there mustn't reach the slide (and end text
+    // editing). A drag already under way keeps going over them.
+    if app.ui.ruler && !app.session.tool.dragging() && (pos.y < resp.rect.min.y + 16.0 || pos.x < resp.rect.min.x + 16.0) {
+        return;
+    }
     let p = xf.to_slide(pos);
     let ev = |kind| PointerEvent { kind, x: p.x, y: p.y, mods: m, tol };
     let primary = ui.input(|i| i.pointer.primary_pressed());
