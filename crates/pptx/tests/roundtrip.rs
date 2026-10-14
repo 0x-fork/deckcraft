@@ -991,3 +991,28 @@ fn transition_defaults_read_like_powerpoint() {
         assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
     }
 }
+
+#[test]
+fn color_pulse_keeps_its_effect_colour_and_duration() {
+    let mut p = defaults::new_presentation(None);
+    let s = shape(&mut p, "Pulsed", 10.0, 10.0, 200.0, 100.0);
+    let id = s.id;
+    let first = p.slides[0].id;
+    let sl = p.slide_mut(first).expect("slide");
+    sl.shapes.push(s);
+    let white = ColorRef::rgb(Rgba::rgb(255, 255, 255));
+    sl.animations.push(Animation {
+        shape: id,
+        class: AnimClass::Emphasis,
+        effect: "colorPulse".into(),
+        duration_ms: 1000,
+        color: Some(white.clone()),
+        ..Default::default()
+    });
+    let q = round(&p);
+    let a = &q.slides[0].animations[0];
+    assert_eq!((a.class, a.effect.as_str()), (AnimClass::Emphasis, "colorPulse"));
+    assert_eq!(a.color, Some(white));
+    assert_eq!(a.amount, None, "no grow/shrink scale is invented");
+    assert_eq!(a.duration_ms, 1000);
+}
