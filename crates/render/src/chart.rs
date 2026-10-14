@@ -282,6 +282,26 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         (true, Some((min2, max2, _))) => plot.y1 - (v - min2) / (max2 - min2).max(1e-9) * plot.height(),
         _ => to_v(v),
     };
+    // Minor gridlines, under the major ones: five to a major unit.
+    if c.minor_gridlines {
+        let minor = step / 5.0;
+        let n = (((max - min) / minor.max(1e-12)).round() as i64).clamp(1, 500);
+        let mut g = BezPath::new();
+        for k in (0..=n).filter(|k| k % 5 != 0) {
+            let pos = to_v(min + k as f64 * minor);
+            if horiz {
+                g.move_to((pos, plot.y0));
+                g.line_to((pos, plot.y1));
+            } else {
+                g.move_to((plot.x0, pos));
+                g.line_to((plot.x1, pos));
+            }
+        }
+        ctx.set_transform(m);
+        ctx.set_paint(color(Rgba::rgb(0xF2, 0xF2, 0xF2), 1.0));
+        ctx.set_stroke(kurbo::Stroke::new(0.75));
+        ctx.stroke_path(&g);
+    }
     // Gridlines and value labels.
     for v in ticks((min, max, step)) {
         let pos = to_v(v);
