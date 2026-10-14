@@ -41,15 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("format.size", "Font Size", ["Home", "Font"], None, "{size: pt}", has_text_or_shapes, size),
         cmd!("format.grow", "Increase Font Size", ["Home", "Font"], Some("Cmd+Shift+."), "{}", has_text_or_shapes, grow),
         cmd!("format.shrink", "Decrease Font Size", ["Home", "Font"], Some("Cmd+Shift+,"), "{}", has_text_or_shapes, shrink),
-        cmd!(
-            "format.color",
-            "Font Color",
-            ["Home", "Font"],
-            None,
-            "{color: #RRGGBB | accent1..6 | tx1… | {scheme, lumMod…}}",
-            has_text_or_shapes,
-            color
-        ),
+        cmd!("format.color", "Font Color", ["Home", "Font"], None, "{color: #RRGGBB|accent1..6|tx1…|{scheme, lumMod…}}", has_text_or_shapes, color),
         cmd!(
             "format.textTransparency",
             "Text Transparency",
@@ -186,7 +178,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Text Box Margins",
             ["Format Shape", "Text Box"],
             None,
-            "{left?, top?, right?, bottom?: pt}",
+            "{left?: pt, top?: pt, right?: pt, bottom?: pt}",
             has_text_or_shapes,
             margins
         ),

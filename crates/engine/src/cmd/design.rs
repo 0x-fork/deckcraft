@@ -51,7 +51,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Slide Size",
             ["Design", "Customize"],
             None,
-            "{preset?: widescreen|standard|… | w, h: pt, orientation?: portrait|landscape, scale?: maximize|ensureFit|none}",
+            "{preset: widescreen|standard|…, orientation?: portrait|landscape, scale?: maximize|ensureFit|none} | {w: pt, h: pt, orientation?: portrait|landscape, scale?: maximize|ensureFit|none}",
             has_doc,
             slide_size
         ),
