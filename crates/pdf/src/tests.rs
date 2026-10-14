@@ -178,3 +178,37 @@ fn master_text_keeps_its_own_formatting() {
     p.notes_master = Some(Arc::new(m));
     assert!(export(&p, &PdfOptions { layout: PageLayout::Notes, ..Default::default() }).unwrap().starts_with(b"%PDF"));
 }
+
+#[test]
+fn master_text_wraps_and_keeps_mixed_formatting() {
+    use deckcraft_model::text::{Run, RunProps};
+    use deckcraft_model::{PhType, Rgba};
+    let mut p = deck(1);
+    p.notes_size = deckcraft_model::Size::new(612.0, 792.0);
+    let mut header = ph(PhType::Header, 0.0, 0.0, 200.0, 80.0, "");
+    if let Some(para) = header.text.as_mut().and_then(|t| t.paragraphs.first_mut()) {
+        para.runs = vec![
+            Run::with("Quarterly board pack ", RunProps { size: Some(18.0), bold: Some(true), ..Default::default() }),
+            Run::with(
+                "for internal circulation only, please do not forward",
+                RunProps {
+                    size: Some(9.0),
+                    fill: Some(deckcraft_model::Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgb(200, 0, 0)))),
+                    ..Default::default()
+                },
+            ),
+        ];
+    }
+    let m = deckcraft_model::Master { shapes: vec![header, ph(PhType::SlideNum, 312.0, 760.0, 300.0, 30.0, "")], ..Default::default() };
+    let placed = deckcraft_render::place_master_texts(&p, &m, 4);
+    assert_eq!(placed.len(), 2, "header and page number");
+    let h = &placed[0].layout;
+    assert!(h.lines.len() >= 2, "wraps inside its 200 pt placeholder: {} lines", h.lines.len());
+    let sizes: Vec<f64> = h.runs.iter().filter(|r| !r.glyphs.is_empty()).map(|r| r.size).collect();
+    assert!(sizes.iter().any(|s| (*s - 18.0).abs() < 0.5) && sizes.iter().any(|s| (*s - 9.0).abs() < 0.5), "{sizes:?}");
+    assert!(h.runs.iter().any(|r| r.color == Rgba::rgb(200, 0, 0)));
+    let num: String = placed[1].body.text();
+    assert_eq!(num, "4");
+    p.notes_master = Some(Arc::new(m));
+    assert!(export(&p, &PdfOptions { layout: PageLayout::Notes, ..Default::default() }).unwrap().starts_with(b"%PDF"));
+}

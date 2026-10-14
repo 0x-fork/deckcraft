@@ -384,14 +384,14 @@ impl Exporter<'_> {
         if self.opts.text_layer {
             let view = Affine::translate((b.x0, b.y0)) * Affine::scale(k);
             for pt in deckcraft_render::place_slide(pres, i).texts {
-                self.text_layer(s, &pt, view);
+                self.text_layer(s, &pt, view, false);
             }
             let _ = sh;
         }
     }
 
     /// Invisible glyphs exactly over the rasterised text.
-    fn text_layer(&mut self, s: &mut Surface, pt: &PlacedText, view: Affine) {
+    fn text_layer(&mut self, s: &mut Surface, pt: &PlacedText, view: Affine, visible: bool) {
         for run in &pt.layout.runs {
             if run.glyphs.is_empty() || run.size <= 0.0 {
                 continue;
@@ -431,7 +431,16 @@ impl Exporter<'_> {
                 })
                 .collect();
             s.push_transform(&tf(view * pt.transform * Affine::translate((x0, y0))));
-            s.set_fill(Some(grey(0, 0.0)));
+            s.set_fill(Some(if visible {
+                let c = run.color;
+                Fill {
+                    paint: krilla::color::rgb::Color::new(c.r, c.g, c.b).into(),
+                    opacity: NormalizedF32::new((f64::from(c.a) / 255.0 * run.alpha) as f32).unwrap_or(NormalizedF32::ONE),
+                    ..Default::default()
+                }
+            } else {
+                grey(0, 0.0)
+            }));
             s.draw_glyphs(Point::from_xy(0.0, 0.0), &kg, font, &text, run.size as f32, false);
             s.set_fill(None);
             s.pop();
@@ -530,30 +539,12 @@ impl Exporter<'_> {
     /// page number when the deck has no such master.
     fn page_texts(&mut self, s: &mut Surface, master: Option<&deckcraft_model::Master>, pw: f64, ph: f64, n: usize) {
         let Some(m) = master else { return self.footer(s, pw, ph, n) };
-        for (r, text, right, st) in master_texts(self.pres, m, (pw, ph), n) {
-            let style = match (st.bold, st.italic) {
-                (true, true) => "Bold Italic",
-                (true, false) => "Bold",
-                (false, true) => "Italic",
-                _ => "Regular",
-            };
-            let family = if st.family.is_empty() { deckcraft_fonts::DEFAULT_FAMILY } else { st.family.as_str() };
-            let face = FontDb::global().face(family, style);
-            let Some(font) = self.font(&face) else { continue };
-            let size = st.size;
-            let k = size / face.upem.max(1.0);
-            let line = text.lines().next().unwrap_or("");
-            let w: f64 = line.chars().map(|c| face.advance(face.glyph_for(c)) * k).sum();
-            let x = if right { r.x1 - w } else { r.x0 };
-            let y = r.y0 + (r.height() + size * 0.7) / 2.0;
-            let c = st.color;
-            s.set_fill(Some(Fill {
-                paint: krilla::color::rgb::Color::new(c.r, c.g, c.b).into(),
-                opacity: NormalizedF32::new(f32::from(c.a) / 255.0).unwrap_or(NormalizedF32::ONE),
-                ..Default::default()
-            }));
-            s.draw_text(Point::from_xy(x as f32, y as f32), font, size as f32, line, false, TextDirection::Auto);
-            s.set_fill(None);
+        // Laid out by the text engine in the placeholders, scaled from the notes size to the page:
+        // wrapping, alignment and mixed formatting as the master has them.
+        let pres = self.pres;
+        let view = Affine::scale_non_uniform(pw / pres.notes_size.width.max(1.0), ph / pres.notes_size.height.max(1.0));
+        for pt in deckcraft_render::place_master_texts(pres, m, n) {
+            self.text_layer(s, &pt, view, true);
         }
     }
     fn footer(&mut self, s: &mut Surface, pw: f64, ph: f64, n: usize) {
