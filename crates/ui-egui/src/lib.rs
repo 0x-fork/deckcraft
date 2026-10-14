@@ -3253,4 +3253,38 @@ mod tests {
         flick(&mut harness, egui::vec2(-24.0, 0.0));
         assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(0));
     }
+
+    /// Preferences › Interface size (#767): dragging the slider leaves the interface size alone
+    /// until the pointer lets go, so the slider doesn't grow under the pointer mid-drag.
+    #[test]
+    fn interface_size_applies_when_the_slider_is_let_go() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        harness.state_mut().run("app.preferences", json!({})).unwrap();
+        harness.run_steps(4);
+        let before = harness.state().ui.ui_scale;
+        let rect =
+            harness.query_all_by_role_and_label(egui::accesskit::Role::Slider, "Interface size").next().expect("the Interface size slider").rect();
+        let (from, to) = (rect.left_center() + egui::vec2(4.0, 0.0), rect.right_center() - egui::vec2(4.0, 0.0));
+        harness.hover_at(from);
+        harness.run_steps(1);
+        harness.drag_at(from);
+        harness.run_steps(1);
+        for k in 1..=8 {
+            harness.hover_at(from.lerp(to, k as f32 / 8.0));
+            harness.run_steps(1);
+        }
+        assert_eq!(harness.state().ui.ui_scale, before, "nothing rescales while the slider is held");
+        harness.drop_at(to);
+        harness.run_steps(2);
+        let after = harness.state().ui.ui_scale;
+        assert!(after > before + 0.3, "letting go applies the size dragged to: {before} -> {after}");
+        assert!(harness.state().dialog.is_some(), "Preferences stays open");
+    }
 }
