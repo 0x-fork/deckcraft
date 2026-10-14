@@ -17,6 +17,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (go to slide shows the typed number; previous: trivial, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines are drawn; the charts gap stays open for the data grid, chartex and secondary-axis export; previous: trivial, chart trendlines round-trip; the real-deck corpus stays open; core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options; previous: core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M9 text warps: adjust handles drag; gallery and command remain) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -115,6 +116,7 @@ From the local execution plan (`plan/execution-plan.md`, gitignored). Status as 
 | M7 | Slide show | mostly | second-display placement, laser, record |
 | M8 | Tables and charts | partly | chart data grid, elements, chartex types, draw table |
 | M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), warp adjust handles |
+| M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), warp gallery and command |
 | M10 | Views | done | grid options, New Window |
 | M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), text warps |
 | M10 | Views | done | grid options, Arrange All |
@@ -168,5 +170,6 @@ plan above.
 | 2026-10-14 | trivial | Present workflow notes presenter timer pause/reset, clock and notes size. Display placement stays open |
 | 2026-10-14 | trivial | Present workflow notes See All Slides and zoom |
 | 2026-10-13 | minor | M10: Grid Options dialog; New Window stays open |
+| 2026-10-13 | minor | M9: WordArt adjust handles drag; the Transform gallery and command stay open |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

@@ -92,6 +92,11 @@ pub enum Hit {
         path: usize,
         index: usize,
     },
+    /// WordArt warp adjust (yellow handle). `index` is `adj` / `adjN`.
+    Warp {
+        id: ShapeId,
+        index: usize,
+    },
     /// Line end 0/1 of a line-like shape.
     LineEnd {
         id: ShapeId,
@@ -145,6 +150,14 @@ enum Drag {
         path: usize,
         index: usize,
         out: bool,
+    },
+    /// WordArt: `base` is the adjust list at mouse-down (empty means the preset defaults).
+    Warp {
+        id: ShapeId,
+        index: usize,
+        name: String,
+        base: Vec<f64>,
+        orig: Xfrm,
     },
     Marquee {
         start: Point,
@@ -252,6 +265,45 @@ pub fn box_handles(x: &Xfrm) -> ([Point; 8], Point) {
     (pts, rot)
 }
 
+/// WordArt adjust handles for `sh`, in shape-local points (the text rectangle). Empty when the
+/// resolved body has no warp DeckCraft draws, or the shape has no text to store one on.
+pub fn wordart_handles(
+    doc: &deckcraft_model::Presentation,
+    sel: &crate::Selection,
+    sh: &Shape,
+    w: f64,
+    h: f64,
+) -> Vec<deckcraft_geom::warp::WarpHandle> {
+    if sh.text.is_none() {
+        return Vec::new();
+    }
+    let Some(ctx) = crate::cmd::text::ctx_for(doc, sel) else { return Vec::new() };
+    let bp = deckcraft_model::resolve::body(&ctx, sh);
+    let Some(name) = bp.warp.as_deref().filter(|n| deckcraft_geom::warp::is_supported(n)) else { return Vec::new() };
+    let tr = deckcraft_render::shape_geometry(sh, w, h).text_rect;
+    deckcraft_geom::warp::handles(name, &bp.warp_adj, tr)
+}
+
+/// Write one warp adjust, keeping the others from `base` (empty = the preset defaults).
+fn set_warp_adj(sh: &mut Shape, name: &str, base: &[f64], index: usize, value: f64) {
+    let Some(text) = sh.text.as_mut() else { return };
+    if !value.is_finite() || index > 7 {
+        return;
+    }
+    let defaults = deckcraft_geom::warp::adjust_defaults(name);
+    let n = defaults.len().max(index + 1).min(8);
+    if n == 0 {
+        return;
+    }
+    let mut adj = Vec::with_capacity(n);
+    for i in 0..n {
+        let v = if i == index { value } else { base.get(i).copied().filter(|v| v.is_finite()).or_else(|| defaults.get(i).copied()).unwrap_or(0.0) };
+        adj.push(v);
+    }
+    text.body.warp = Some(name.to_string());
+    text.body.warp_adj = adj;
+}
+
 impl Session {
     pub fn set_tool(&mut self, kind: ToolKind) {
         self.tool.kind = kind;
@@ -302,6 +354,11 @@ impl Session {
                 for hd in &geo.handles {
                     if (x.affine() * hd.pos - p).hypot() <= tol * 1.6 {
                         return Some(Hit::Adjust { id: *id, index: hd.index });
+                    }
+                }
+                for hd in wordart_handles(&st.doc, &st.selection, sh, x.w, x.h) {
+                    if (x.affine() * hd.pos - p).hypot() <= tol * 1.6 {
+                        return Some(Hit::Warp { id: *id, index: hd.index });
                     }
                 }
                 let (pts, rot) = box_handles(&x);
@@ -438,7 +495,7 @@ impl Session {
         {
             let x = xfrm_of(&st.doc, &st.selection, sh);
             if x.bounds().inflate(tol, tol).contains(p)
-                && !matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. }))
+                && !matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::Warp { .. }))
             {
                 let pos = text_pos(st, sh, p);
                 let shift = mods.shift;
@@ -510,6 +567,18 @@ impl Session {
                 let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
                 self.begin("Adjust Shape");
                 self.tool.drag = Some(Drag::Adjust { id, index, orig });
+            }
+            Some(Hit::Warp { id, index }) => {
+                let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
+                let found = st.shape(id).and_then(|sh| {
+                    let ctx = crate::cmd::text::ctx_for(&st.doc, &st.selection)?;
+                    let bp = deckcraft_model::resolve::body(&ctx, sh);
+                    bp.warp.map(|n| (n, bp.warp_adj))
+                });
+                if let Some((name, base)) = found {
+                    self.begin("Adjust WordArt");
+                    self.tool.drag = Some(Drag::Warp { id, index, name, base, orig });
+                }
             }
             Some(Hit::Shape { id, text }) => {
                 let selected = st.selection.shapes.contains(&id);
@@ -727,6 +796,23 @@ impl Session {
                     log::debug!("edit handle: {e}");
                 }
                 return Ok(Value::Null);
+            }
+            Drag::Warp { id, index, name, base, orig } => {
+                let v = {
+                    let st = self.doc()?;
+                    let Some(sh) = st.shape(id) else { return Ok(Value::Null) };
+                    let tr = deckcraft_render::shape_geometry(sh, orig.w, orig.h).text_rect;
+                    let hs = deckcraft_geom::warp::handles(&name, &base, tr);
+                    let Some(h) = hs.iter().find(|h| h.index == index) else { return Ok(Value::Null) };
+                    h.value_at(orig.affine().inverse() * p)
+                };
+                self.edit(|doc, sel| {
+                    let list = crate::shapes_mut(doc, sel).ok_or_else(|| cmd::bad("adjust", "no slide"))?;
+                    if let Some(sh) = deckcraft_model::find_shape_mut(list, id) {
+                        set_warp_adj(sh, &name, &base, index, v);
+                    }
+                    Ok(())
+                })?;
             }
             Drag::Marquee { start, .. } => {
                 self.tool.marquee = Some(Rect::from_points(start, p));

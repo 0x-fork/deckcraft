@@ -28,6 +28,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options dialog; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt adjust handles drag; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -304,6 +305,14 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   band round the face outline (not round the extruded silhouette); no command or pane to apply 3-D).
 - **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 1–2 h (fitting the other rigs and materials
   to PowerPoint renders), plus the Format Shape page.
+  `prstTxWarp` presets render, their adjusts round-trip, and a selected warp shows a yellow handle
+  per adjust that dragging sets; still no Transform gallery or command to apply one, and arc/circle
+  placement can differ from PowerPoint by 1–3 % of the path length), "Bevel and 3-D rotation"
+  (partial: bevels, camera presets and rotations and face lighting render as approximations and
+  `scene3d`/`sp3d` round-trip as raw XML; no extrusion or side faces, only the three-point rig, and
+  no command or pane to apply 3-D).
+- **Estimate:** 4–6 h (edit points), 1–2 h (Transform gallery and command), 6–10 h (3-D extrusion,
+  rigs and materials, Format Shape page).
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks a small built-in list of frequent misspellings
@@ -461,6 +470,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Paragraph dialog sets alignment, indentation, spacing and line spacing in one step; its Tabs… button opens a standalone Tabs dialog |
 | 2026-10-14 | minor | Font dialog sets typeface, size, style, underline, colour, strikethrough, baseline, caps and character spacing in one step |
 | 2026-10-13 | minor | Grid Options dialog sets spacing, snap and whether gridlines and guides show; the on-screen grid follows that spacing |
+| 2026-10-13 | minor | WordArt adjust handles: a selected text warp shows one yellow handle per adjust, and dragging it sets that guide value (gallery and command still open) |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

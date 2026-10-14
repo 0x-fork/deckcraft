@@ -2277,3 +2277,43 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     let h: [u8; 4] = bytes.get(20..24)?.try_into().ok()?;
     Some((u32::from_be_bytes(w), u32::from_be_bytes(h)))
 }
+
+#[test]
+fn wordart_adjust_handle_drags_and_undoes() {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    let id =
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 60.0, 420.0, 200.0], "text": "ARCHED"})).unwrap()["id"].as_u64().unwrap();
+    let sid = model::ShapeId(id as u32);
+    {
+        let st = s.doc_mut().unwrap();
+        let slide = st.selection.slide;
+        let mut doc = (*st.doc).clone();
+        let sh = model::find_shape_mut(&mut std::sync::Arc::make_mut(&mut doc.slides[slide]).shapes, sid).unwrap();
+        sh.text.as_mut().unwrap().body.warp = Some("textArchUp".into());
+        st.doc = std::sync::Arc::new(doc);
+    }
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    let (at, top) = {
+        let st = s.doc().unwrap();
+        let sh = st.shape(sid).unwrap();
+        let x = cmd::xfrm_of(&st.doc, &st.selection, sh);
+        let hs = tools::wordart_handles(&st.doc, &st.selection, sh, x.w, x.h);
+        assert_eq!(hs.len(), 1);
+        let at = x.affine() * hs[0].pos;
+        (at, deckcraft_geom::Point::new(x.center().x, x.y))
+    };
+    assert!(matches!(s.hit_test(at, 4.0), Some(tools::Hit::Warp { index: 0, .. })));
+    let ev = |kind, p: deckcraft_geom::Point| PointerEvent { kind, x: p.x, y: p.y, mods: Mods::default(), tol: 4.0 };
+    s.pointer(ev(PointerKind::Down, at)).unwrap();
+    s.pointer(ev(PointerKind::Drag, top)).unwrap();
+    s.pointer(ev(PointerKind::Up, top)).unwrap();
+    let adj = s.doc().unwrap().shape(sid).unwrap().text.as_ref().unwrap().body.warp_adj.clone();
+    let deg = adj.first().copied().unwrap_or(0.0) / 60_000.0;
+    assert!((deg - 270.0).abs() < 2.0, "{deg} from {adj:?}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    let body = &s.doc().unwrap().shape(sid).unwrap().text.as_ref().unwrap().body;
+    assert_eq!(body.warp.as_deref(), Some("textArchUp"));
+    assert!(body.warp_adj.is_empty(), "undo restores the default adjusts");
+}
