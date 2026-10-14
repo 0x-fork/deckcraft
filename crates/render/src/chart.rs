@@ -650,7 +650,9 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             }
         }
     }
-    draw_trendlines(ctx, rctx, c, m, plot, band, back, ncat, horiz, base, text_col, &to_axis);
+    // A category position (0-based, fractional) as a slot, the way `slot` places the bars.
+    let slot_at = |x: f64| if backwards { ncat as f64 - 1.0 - x + fwd } else { x + back };
+    draw_trendlines(ctx, rctx, c, m, plot, band, &slot_at, ncat, horiz, base, text_col, &to_axis);
     // Axis line.
     let mut ax = BezPath::new();
     if horiz {
@@ -744,7 +746,7 @@ const TREND_INK: [Rgba; 4] = [Rgba::rgb(0x22, 0x22, 0x22), Rgba::rgb(0xB0, 0x30,
 fn map_xy(
     plot: Rect,
     band: f64,
-    back: f64,
+    slot: &impl Fn(f64) -> f64,
     horiz: bool,
     scatter: bool,
     sx0: f64,
@@ -765,7 +767,7 @@ fn map_xy(
         plot.x0 + (x - sx0) / (sx1 - sx0) * plot.width()
     } else {
         let origin = if horiz { plot.y0 } else { plot.x0 };
-        origin + band * (x - 1.0 + back + 0.5)
+        origin + band * (slot(x - 1.0) + 0.5)
     };
     if !along.is_finite() {
         return None;
@@ -811,7 +813,7 @@ fn draw_trendlines(
     m: Affine,
     plot: Rect,
     band: f64,
-    back: f64,
+    slot: &impl Fn(f64) -> f64,
     ncat: usize,
     horiz: bool,
     base: f64,
@@ -861,8 +863,8 @@ fn draw_trendlines(
             let mut any = false;
             for w in samples.windows(2) {
                 let (Some(a), Some(b)) = (
-                    map_xy(plot, band, back, horiz, scatter, sx0, sx1, sec, w[0].0, w[0].1, to_axis),
-                    map_xy(plot, band, back, horiz, scatter, sx0, sx1, sec, w[1].0, w[1].1, to_axis),
+                    map_xy(plot, band, slot, horiz, scatter, sx0, sx1, sec, w[0].0, w[0].1, to_axis),
+                    map_xy(plot, band, slot, horiz, scatter, sx0, sx1, sec, w[1].0, w[1].1, to_axis),
                 ) else {
                     prev = None;
                     continue;
