@@ -473,7 +473,7 @@ pub fn chart_xml(c: &Chart) -> (Vec<u8>, bool) {
         };
         w.open0("c:legend");
         w.val("c:legendPos", p);
-        w.val("c:overlay", 0);
+        w.val("c:overlay", u8::from(c.legend_overlay));
         w.close("c:legend");
     }
     w.val("c:plotVisOnly", 1);
