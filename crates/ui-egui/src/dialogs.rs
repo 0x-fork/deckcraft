@@ -820,6 +820,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, cancel) = buttons(ui, "Insert");
             if ok {
                 run(app, "insert.smartArt", json!({"kind": kind, "items": v.lines().filter(|l| !l.trim().is_empty()).collect::<Vec<_>>()}));
+                app.ui.pane = Some("smartart".into());
             }
             ok || cancel
         }

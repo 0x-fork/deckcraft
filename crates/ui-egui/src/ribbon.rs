@@ -125,6 +125,9 @@ fn contextual(app: &SlideApp) -> Vec<&'static str> {
         v.push("Table Design");
         v.push("Layout");
     }
+    if deckcraft_engine::cmd::smartart::selected(st).is_some() {
+        v.push("SmartArt Design");
+    }
     if shapes.iter().any(|s| matches!(s.kind, ShapeKind::Chart(_))) {
         v.push("Chart Design");
     }
@@ -223,6 +226,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             "Table Design" => table_design(app, ui),
             "Layout" => table_layout(app, ui),
             "Chart Design" => chart_design(app, ui),
+            "SmartArt Design" => smartart_design(app, ui),
             "Playback" => playback(app, ui),
             "Slide Master" => slide_master(app, ui),
             _ => {}
@@ -2575,6 +2579,53 @@ fn chart_design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
         big(app, ui, Icon::EditData, "Edit\nData", "app.dialog", json!({"id": "chartData"}));
+    });
+    arrange_group(app, ui);
+}
+
+/// SmartArt Design: Create Graphic (Text Pane, Add Shape, Promote, Demote, Remove) and Layouts.
+fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
+    let sel = app.session.active().and_then(deckcraft_engine::cmd::smartart::selected);
+    let row = app.ui.smartart_row;
+    let (gid, n, kind) = match &sel {
+        Some((id, d)) => (Some(id.0), d.nodes.len(), d.kind.clone()),
+        None => (None, 0, String::new()),
+    };
+    let at = row.min(n.saturating_sub(1));
+    group(ui, |ui| {
+        if big_button(ui, Icon::SmartArt, "Text\nPane", gid.is_some()).on_hover_text("Type and organise the diagram's text").clicked() {
+            run(app, "view.pane", json!({"pane": "smartart", "toggle": true}));
+        }
+        rows(ui, |ui| {
+            let (r, _) = small_button_ex(ui, Icon::Plus, "Add Shape", gid.is_some(), false, true);
+            egui::Popup::menu(&r).show(|ui| {
+                for (label, pos) in
+                    [("Add Shape After", "after"), ("Add Shape Before", "before"), ("Add Shape Above", "above"), ("Add Shape Below", "below")]
+                {
+                    if ui.button(label).clicked() {
+                        let index = if n == 0 { Value::Null } else { json!(at) };
+                        run(app, "smartArt.addNode", json!({"id": gid, "index": index, "position": pos}));
+                    }
+                }
+            });
+            if small_button(ui, Icon::DecreaseIndent, "Promote", n > 0, false).clicked() {
+                run(app, "smartArt.promote", json!({"id": gid, "index": at}));
+            }
+            if small_button(ui, Icon::IncreaseIndent, "Demote", n > 0, false).clicked() {
+                run(app, "smartArt.demote", json!({"id": gid, "index": at}));
+            }
+        });
+    });
+    group(ui, |ui| {
+        let (r, _) = small_button_ex(ui, Icon::Layout, "Layout", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            for k in deckcraft_engine::cmd::smartart::KINDS {
+                let label = format!("{}{}", k[..1].to_uppercase(), &k[1..]);
+                if ui.selectable_label(kind == k, label).clicked() {
+                    run(app, "smartArt.layout", json!({"id": gid, "kind": k}));
+                }
+            }
+        });
     });
     arrange_group(app, ui);
 }

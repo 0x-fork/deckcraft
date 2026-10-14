@@ -194,7 +194,7 @@ it is the Features row of the dimension table. Automation and Platforms are scor
 | Text | 15 | 80% | ~62% | 18–30 | Font weights beyond Regular/Bold/Italic (#69), Tab in text boxes (#78), IME, true vertical CJK, dictionaries, AutoCorrect, thesaurus, equations (PR #55 open) | [localization-parity.md](localization-parity.md) |
 | Tables | 5 | 89% | ~75% | 3–6 | Draw table, borders and cell effects depth | [parity-checklist.md](parity-checklist.md) |
 | Charts | 7 | 65% | ~45% | 12–20 | Data grid editing, chart elements, the `chartex` types (waterfall, funnel, treemap, sunburst, histogram, box) | [parity-checklist.md](parity-checklist.md) |
-| SmartArt | 4 | 33% | ~25% | 10–16 | Text pane, layout switching, the diagram data model on save | [parity-checklist.md](parity-checklist.md) |
+| SmartArt | 4 | 50% | ~35% | 8–14 | PowerPoint diagrams editable (read their data model), the data model on save, more layouts | [parity-checklist.md](parity-checklist.md) |
 | Pictures | 7 | 48% | ~45% | 12–20 | SVG/EMF/WMF, clipboard paste on Windows/Linux (#53), artistic effects, remove background, compress | [file-format-parity.md](file-format-parity.md) |
 | Media | 4 | 67% | ~60% | 8–14 | WMA/WMV decode, record audio/screen, 3-D models and stock content, playback options lost on PPTX round trip (#74) | [file-format-parity.md](file-format-parity.md) |
 | Transitions | 4 | 92% | ~80% | 4–8 | Transition sounds, 3-D transitions approximated in 2-D | [animation-parity.md](animation-parity.md) |
