@@ -12,7 +12,7 @@ use deckcraft_model::{LayoutId, MasterId, MediaId, Presentation, ShapeId, ShapeK
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{Result, Session};
+use crate::{Result, Session, media_refs};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(
@@ -26,38 +26,13 @@ pub fn specs() -> Vec<CommandSpec> {
     )]
 }
 
-/// Keys under which the model stores a [`MediaId`] (pictures, media, posters, previews, sounds).
-const MEDIA_KEYS: [&str; 4] = ["media", "poster", "preview", "sound"];
-
-/// Rewrite every media id in `v` through `map`.
-fn remap_media(v: &mut Value, map: &HashMap<u32, u32>, depth: usize) {
-    if depth > 256 {
-        return;
-    }
-    match v {
-        Value::Object(o) => {
-            for (k, x) in o.iter_mut() {
-                if MEDIA_KEYS.contains(&k.as_str())
-                    && let Some(n) = x.as_u64().and_then(|n| u32::try_from(n).ok())
-                {
-                    if let Some(to) = map.get(&n) {
-                        *x = json!(to);
-                    }
-                    continue;
-                }
-                remap_media(x, map, depth + 1);
-            }
+/// Point every media id under `x` at its copy in the destination (`map`: source → destination).
+fn remap(map: &HashMap<MediaId, MediaId>) -> impl FnMut(&mut MediaId) + '_ {
+    move |id: &mut MediaId| {
+        if let Some(to) = map.get(id) {
+            *id = *to;
         }
-        Value::Array(a) => a.iter_mut().for_each(|x| remap_media(x, map, depth + 1)),
-        _ => {}
     }
-}
-
-/// `value` with its media ids rewritten, via its JSON form.
-fn with_media<T: serde::Serialize + serde::de::DeserializeOwned>(value: &T, map: &HashMap<u32, u32>) -> Result<T> {
-    let mut v = serde_json::to_value(value).map_err(|e| EngineError::Other(e.to_string()))?;
-    remap_media(&mut v, map, 0);
-    serde_json::from_value(v).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn shape_ids(shapes: &[deckcraft_model::Shape]) -> Vec<ShapeId> {
@@ -132,20 +107,22 @@ fn reuse(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit(|doc, sel| {
         let at = at.unwrap_or(sel.slide + 1).min(doc.slides.len());
         // Media: what the slides use is copied under fresh ids.
-        let mut media_map: HashMap<u32, u32> = HashMap::new();
+        let mut media_map: HashMap<MediaId, MediaId> = HashMap::new();
         // Keep Source Formatting: bring each source master used, once, with fresh ids.
         let mut layout_map: HashMap<LayoutId, LayoutId> = HashMap::new();
         if keep {
             let mut masters_done: Vec<MasterId> = vec![];
             for &i in &picked {
-                let Some((m, _)) = src.master_for(&src.slides[i]) else { continue };
+                let Some((m, _)) = src.slides.get(i).and_then(|sl| src.master_for(sl)) else { continue };
                 if masters_done.contains(&m.id) {
                     continue;
                 }
                 masters_done.push(m.id);
-                let used = serde_json::to_value(m).map_err(|e| EngineError::Other(e.to_string()))?;
+                let mut used = vec![];
+                media_refs::visit::master(m, &mut |id: &MediaId| used.push(*id));
                 copy_media(doc, &src, &used, &mut media_map);
-                let mut m: deckcraft_model::Master = with_media(m, &media_map)?;
+                let mut m = m.clone();
+                media_refs::visit_mut::master(&mut m, &mut remap(&media_map));
                 m.id = MasterId(doc.alloc_id());
                 renumber(doc, &mut m.shapes);
                 for l in &mut m.layouts {
@@ -159,10 +136,10 @@ fn reuse(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let mut new_ids = vec![];
         for (k, &i) in picked.iter().enumerate() {
-            let from = &src.slides[i];
-            let used = serde_json::to_value(from.as_ref()).map_err(|e| EngineError::Other(e.to_string()))?;
-            copy_media(doc, &src, &used, &mut media_map);
-            let mut sl: Slide = with_media(from.as_ref(), &media_map)?;
+            let Some(from) = src.slides.get(i) else { continue };
+            copy_media(doc, &src, &media_refs::slide_media(from), &mut media_map);
+            let mut sl: Slide = from.as_ref().clone();
+            media_refs::visit_mut::slide(&mut sl, &mut remap(&media_map));
             sl.id = SlideId(doc.alloc_id());
             let map = renumber(doc, &mut sl.shapes);
             for a in &mut sl.animations {
@@ -188,39 +165,97 @@ fn reuse(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-/// Copy the source media `used` refers to into `doc` under fresh ids, once each.
-fn copy_media(doc: &mut Presentation, src: &Presentation, used: &Value, map: &mut HashMap<u32, u32>) {
-    let mut ids = vec![];
-    collect_media(used, &mut ids, 0);
-    for id in ids {
+/// Copy the source media `used` into `doc` under fresh ids, once each (identical bytes already in
+/// `doc` are shared; a linked item keeps its link).
+fn copy_media(doc: &mut Presentation, src: &Presentation, used: &[MediaId], map: &mut HashMap<MediaId, MediaId>) {
+    for &id in used {
         if map.contains_key(&id) {
             continue;
         }
-        if let Some(m) = src.media(MediaId(id)) {
-            let new = doc.add_media(&m.name, &m.content_type, m.data.as_ref().clone());
-            map.insert(id, new.0);
-        }
+        let Some(m) = src.media(id) else { continue };
+        let new = if m.link.is_some() {
+            let mut item = m.clone();
+            item.id = MediaId(doc.alloc_id());
+            let new = item.id;
+            doc.media.push(item);
+            new
+        } else {
+            doc.add_media(&m.name, &m.content_type, m.data.as_ref().clone())
+        };
+        map.insert(id, new);
     }
 }
 
-/// The media ids `v` refers to.
-fn collect_media(v: &Value, out: &mut Vec<u32>, depth: usize) {
-    if depth > 256 {
-        return;
-    }
-    match v {
-        Value::Object(o) => {
-            for (k, x) in o {
-                if MEDIA_KEYS.contains(&k.as_str())
-                    && let Some(n) = x.as_u64().and_then(|n| u32::try_from(n).ok())
-                {
-                    out.push(n);
-                } else {
-                    collect_media(x, out, depth + 1);
-                }
-            }
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::style::{Artistic, Fill, PictureFill};
+    use deckcraft_model::text::{Action, Bullet, Hyperlink, TextBody};
+    use deckcraft_model::{Background, MediaClip, Shape, ShapeKind, defaults};
+    use serde_json::json;
+
+    use super::*;
+
+    /// Every kind of media a slide can hold comes along, each pointing at its own bytes: the
+    /// artistic-effect original, a background picture, poster, sounds and picture bullets too.
+    #[test]
+    fn reused_slides_bring_every_media_reference() {
+        let mut src = defaults::new_presentation(None);
+        let blobs: Vec<Vec<u8>> = (0..8u8).map(|i| vec![0xD0, i, i, i]).collect();
+        let ids: Vec<MediaId> =
+            blobs.iter().enumerate().map(|(i, b)| src.add_media(&format!("m{i}.bin"), "application/octet-stream", b.clone())).collect();
+        let id = |i: usize| ids.get(i).copied().unwrap_or_default();
+        let mut text = TextBody::from_text("bullet");
+        if let Some(p) = text.paragraphs.first_mut() {
+            p.props.bullet = Some(Bullet::Picture { media: id(6) });
         }
-        Value::Array(a) => a.iter().for_each(|x| collect_media(x, out, depth + 1)),
-        _ => {}
+        let slide = Arc::make_mut(src.slides.first_mut().expect("slide"));
+        slide.shapes = vec![
+            Shape {
+                id: ShapeId(9001),
+                kind: ShapeKind::Picture {
+                    fill: PictureFill {
+                        media: id(0),
+                        artistic: Some(Artistic { effect: "artisticBlur".into(), original: id(1) }),
+                        ..Default::default()
+                    },
+                },
+                ..Default::default()
+            },
+            Shape {
+                id: ShapeId(9002),
+                kind: ShapeKind::Media(MediaClip { media: id(2), poster: Some(id(3)), ..Default::default() }),
+                ..Default::default()
+            },
+            Shape {
+                id: ShapeId(9003),
+                click: Some(Hyperlink {
+                    action: Action::NextSlide,
+                    tooltip: String::new(),
+                    highlight_click: false,
+                    sound: Some(id(5)),
+                    stop_sound: false,
+                }),
+                text: Some(text),
+                ..Default::default()
+            },
+        ];
+        slide.background = Some(Background::Fill { fill: Fill::Picture(PictureFill { media: id(4), ..Default::default() }) });
+        slide.transition = Some(deckcraft_model::anim::Transition { sound: Some(id(7)), ..Default::default() });
+        let bytes = deckcraft_format::save(&src).expect("save");
+
+        let mut s = Session::with_new();
+        let own = vec![1u8, 2, 3];
+        let own_id = s.edit(|doc, _| Ok(doc.add_media("own.bin", "application/octet-stream", own.clone()))).expect("own media");
+        s.execute("slide.reuse", &json!({"data": super::super::base64_encode(&bytes), "name": "src.deckcraft", "slides": [0]})).expect("reuse");
+        let doc = &s.doc().expect("doc").doc;
+        assert_eq!(doc.media(own_id).map(|m| m.data.as_slice() == own.as_slice()), Some(true), "own media untouched");
+        let reused = doc.slides.get(1).expect("reused slide");
+        let got: Vec<Vec<u8>> =
+            media_refs::slide_media(reused).iter().map(|m| doc.media(*m).map(|m| m.data.as_ref().clone()).unwrap_or_default()).collect();
+        let mut got = got;
+        got.sort();
+        let mut want = blobs.clone();
+        want.sort();
+        assert_eq!(got, want, "every reference resolves to its own copied bytes");
     }
 }

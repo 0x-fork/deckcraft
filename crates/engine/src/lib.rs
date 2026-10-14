@@ -17,6 +17,7 @@ pub mod icons;
 pub mod inkshape;
 pub mod keys;
 pub mod links;
+pub mod media_refs;
 pub mod recovery;
 pub mod sample;
 pub mod sounds;
