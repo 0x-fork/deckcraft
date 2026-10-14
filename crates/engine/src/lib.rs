@@ -10,8 +10,8 @@
 pub mod cmd;
 pub mod connect;
 pub mod drawtable;
-pub mod fonts;
 pub mod file_access;
+pub mod fonts;
 pub mod guard;
 pub mod icons;
 pub mod io;

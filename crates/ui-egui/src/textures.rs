@@ -184,8 +184,7 @@ impl Textures {
         }
         let t0 = crate::now_ms();
         let render = |region: Region| {
-            let opts =
-                RenderOpts {
+            let opts = RenderOpts {
                 scale,
                 edit,
                 gif_times,
