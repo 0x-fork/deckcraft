@@ -18,6 +18,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers; automation counted at 236 commands; the menu measurement and the d556ff9 snapshot still count 226; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (animated GIF export, #171: P2 breadth 36% → 37%, overall unchanged; previous: minor, hours to ~95% per audience added; ready recomputed from written weights, 56% → 55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture and solid options; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -243,6 +244,9 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   Asian or complex-script faces).
   effect schemes (Design ▸ Effects: DeckCraft, Soft, Crisp, Lift, Glow, Plain),
   backgrounds (solid, gradient, picture, pattern), slide size presets.
+  backgrounds (solid, gradient, picture, pattern; a solid fill's transparency; picture
+  transparency, tile, offset, scale, alignment and mirror; Apply to All copies a picture),
+  slide size presets.
 - **Shapes:** ~180 preset geometries with adjustment handles, text boxes, pictures (crop,
   corrections, animated GIFs that play and pause), tables with styles, charts (column, bar, line,
   area, pie, doughnut, scatter and more), basic SmartArt, groups, connectors glued to sites,
@@ -343,6 +347,7 @@ scored done (16 open issues).
 | 2026-10-14 | minor | Design ▸ Effects noted under what works today. Percentages stay 79% / ~60% / ~55%. The d556ff9 snapshot and the menu measurement stay at 226 commands; the live registry is 227 |
 | 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Automation in "what works today" is 236 commands; the menu-bar measurement and the d556ff9 snapshot still count 226. Percentages unchanged |
 | 2026-10-11 | minor | Animated GIF export (#171) moves the checklist's video/GIF row from missing to partial: P2 breadth 36% → 37%; overall breadth (79%), dimension scores and stage unchanged |
+| 2026-10-14 | minor | Format Background picture and solid options noted under what works today. Percentages, the 226-command count and the d556ff9 dialog snapshot stay as they are |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow gate (all six pass); stays alpha |
