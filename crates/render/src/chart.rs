@@ -411,7 +411,9 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         let n = (((max - min) / minor.max(1e-12)).round() as i64).clamp(1, 500);
         let mut g = BezPath::new();
         for k in (0..=n).filter(|k| k % 5 != 0) {
-            let pos = to_v(min + k as f64 * minor);
+            // On a logarithmic axis `min`, `max` and `step` are exponents of the base.
+            let e = min + k as f64 * minor;
+            let pos = to_v(log.map_or(e, |(b, _)| b.powf(e)));
             if horiz {
                 g.move_to((pos, plot.y0));
                 g.line_to((pos, plot.y1));
