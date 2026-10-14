@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             edit_points
         ),
-        cmd!(query "shape.points", "Points", [], None, "{id?} → {id, paths: [[[x, y] slide pt]]} vertices of a freeform", has_selection, points),
+        cmd!(query "shape.points", "Points", [], None, "{id?} → {id, paths: [[[x, y] slide pt]], types: [[smooth|straight|corner]]} vertices of a freeform", has_selection, points),
         cmd!("shape.movePoint", "Move Point", [], None, "{path?: 0, index, x, y: slide pt, id?}", has_selection, move_point),
         cmd!(
             "shape.addPoint",
@@ -34,6 +34,24 @@ pub fn specs() -> Vec<CommandSpec> {
             "{path?: 0, segment: index of the vertex ending it, t?: 0..1 (0.5), id?}",
             has_selection,
             add_point
+        ),
+        cmd!(
+            "shape.pointType",
+            "Point Type",
+            [],
+            None,
+            "{path?: 0, index, type: smooth|straight|corner, id?} — smooth: handles in line and equal; straight: in line; corner: independent",
+            has_selection,
+            point_type
+        ),
+        cmd!(
+            "shape.moveHandle",
+            "Move Handle",
+            [],
+            None,
+            "{path?: 0, index, side: in|out, x, y: slide pt, type?: smooth|straight|corner (default: read from the handles), id?}",
+            has_selection,
+            move_handle
         ),
         cmd!("shape.deletePoint", "Delete Point", [], None, "{path?: 0, index, id?}", has_selection, delete_point),
     ]
@@ -383,6 +401,7 @@ pub(crate) fn prepare(s: &mut Session, id: ShapeId) -> Result<()> {
 
 fn edit_points(s: &mut Session, p: &Value) -> Result<Value> {
     let on = p.get("on").and_then(Value::as_bool).unwrap_or(s.tool.edit_points.is_none());
+    s.tool.edit_vertex = None;
     if !on {
         s.tool.edit_points = None;
         return Ok(json!({"editing": Value::Null}));
@@ -417,7 +436,17 @@ fn points(s: &mut Session, p: &Value) -> Result<Value> {
     let sh = st.shape(id).ok_or_else(|| bad("shape.points", "no such shape"))?;
     let paths: Vec<Vec<[f64; 2]>> =
         slide_vertices(&st.doc, &st.selection, sh).into_iter().map(|v| v.into_iter().map(|q| [q.x, q.y]).collect()).collect();
-    Ok(json!({"id": id.0, "paths": paths}))
+    let types: Vec<Vec<&str>> = match &sh.geom {
+        Geom::Custom { paths } => paths
+            .iter()
+            .map(|cp| {
+                let segs = parse(&cp.d);
+                vertices(&segs).iter().map(|si| point_kind(&segs, *si)).collect()
+            })
+            .collect(),
+        Geom::Preset { .. } => vec![],
+    };
+    Ok(json!({"id": id.0, "paths": paths, "types": types}))
 }
 
 /// Runs `f` on the segments of path `path` of `id` (in shape-local points), then refits the box.
@@ -556,4 +585,202 @@ pub fn segment_at(doc: &deckcraft_model::Presentation, sel: &crate::Selection, s
 /// Moves vertex `index` of path `path` of `id` to slide point `to` (pointer drags).
 pub(crate) fn move_point_raw(s: &mut Session, id: ShapeId, path: usize, index: usize, to: Point) -> Result<Value> {
     move_point(s, &json!({"id": id.0, "path": path, "index": index, "x": to.x, "y": to.y}))
+}
+
+/// Where the control handles of the vertex ending segment `si` live: (segment, point index) for
+/// the incoming and the outgoing one, when those segments are cubics.
+fn handle_slots(segs: &[Seg], si: usize) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
+    let incoming = if matches!(segs.get(si), Some(Seg::M(_))) {
+        (si + 1..segs.len()).take_while(|j| !matches!(segs.get(*j), Some(Seg::M(_)))).find(|j| closes_onto_start(segs, *j))
+    } else {
+        Some(si)
+    };
+    let inc = incoming.filter(|j| matches!(segs.get(*j), Some(Seg::C(..)))).map(|j| (j, 1));
+    let out = Some(si + 1).filter(|j| matches!(segs.get(*j), Some(Seg::C(..)))).map(|j| (j, 0));
+    (inc, out)
+}
+
+fn get_pt(segs: &[Seg], slot: (usize, usize)) -> Option<Point> {
+    match segs.get(slot.0)? {
+        Seg::C(a, b, c) => [*a, *b, *c].get(slot.1).copied(),
+        _ => None,
+    }
+}
+
+fn set_pt(segs: &mut [Seg], slot: (usize, usize), p: Point) {
+    if let Some(s) = segs.get_mut(slot.0)
+        && let Some(q) = s.points_mut().into_iter().nth(slot.1)
+    {
+        *q = p;
+    }
+}
+
+/// Turns segment `j` into a cubic with the same shape.
+fn to_cubic(segs: &mut [Seg], j: usize) {
+    let Some(p0) = seg_start(segs, j) else { return };
+    let c = match segs.get(j).copied() {
+        Some(Seg::L(p1)) => Seg::C(p0.lerp(p1, 1.0 / 3.0), p0.lerp(p1, 2.0 / 3.0), p1),
+        Some(Seg::Q(c, p1)) => Seg::C(p0.lerp(c, 2.0 / 3.0), p1.lerp(c, 2.0 / 3.0), p1),
+        _ => return,
+    };
+    if let Some(s) = segs.get_mut(j) {
+        *s = c;
+    }
+}
+
+/// Sets the point type of the vertex ending segment `si`. Its segments become curves so it has
+/// handles; smooth and straight points get their handles in line through the vertex.
+fn set_type(segs: &mut [Seg], si: usize, kind: &str) {
+    let incoming = if matches!(segs.get(si), Some(Seg::M(_))) {
+        (si + 1..segs.len()).take_while(|j| !matches!(segs.get(*j), Some(Seg::M(_)))).find(|j| closes_onto_start(segs, *j))
+    } else {
+        Some(si)
+    };
+    if let Some(j) = incoming {
+        to_cubic(segs, j);
+    }
+    to_cubic(segs, si + 1);
+    if kind == "corner" {
+        return;
+    }
+    let (Some(v), (Some(hi), Some(ho))) = (segs.get(si).and_then(Seg::end), handle_slots(segs, si)) else { return };
+    let (Some(a), Some(b)) = (get_pt(segs, hi), get_pt(segs, ho)) else { return };
+    let (li, lo) = ((a - v).hypot(), (b - v).hypot());
+    let mut dir = b - a;
+    if dir.hypot() < 1e-9 {
+        // Both handles on the vertex: point them along the neighbours.
+        let prev = seg_start(segs, hi.0).unwrap_or(v);
+        let next = segs.get(ho.0).and_then(Seg::end).unwrap_or(v);
+        dir = next - prev;
+    }
+    let len = dir.hypot();
+    if len < 1e-9 {
+        return;
+    }
+    let u = dir / len;
+    let (li, lo) = if kind == "smooth" {
+        let m = if li + lo > 1e-9 { (li + lo) / 2.0 } else { len / 6.0 };
+        (m, m)
+    } else {
+        (li, lo)
+    };
+    set_pt(segs, hi, v - u * li);
+    set_pt(segs, ho, v + u * lo);
+}
+
+/// The type a vertex's handles show: smooth (in line, equal), straight (in line) or corner.
+pub fn point_kind(segs: &[Seg], si: usize) -> &'static str {
+    let (Some(v), (Some(hi), Some(ho))) = (segs.get(si).and_then(Seg::end), handle_slots(segs, si)) else { return "corner" };
+    let (Some(a), Some(b)) = (get_pt(segs, hi), get_pt(segs, ho)) else { return "corner" };
+    let (da, db) = (a - v, b - v);
+    let (la, lb) = (da.hypot(), db.hypot());
+    if la < 1e-6 || lb < 1e-6 {
+        return "corner";
+    }
+    let cos = da.dot(db) / (la * lb);
+    if cos > -0.9998 {
+        "corner"
+    } else if (la - lb).abs() <= 0.01 * la.max(lb) {
+        "smooth"
+    } else {
+        "straight"
+    }
+}
+
+/// Moves handle `side` of the vertex ending segment `si` to `p`; the other handle follows as
+/// the point's type says.
+fn set_handle(segs: &mut [Seg], si: usize, out: bool, p: Point, kind: Option<&str>) -> bool {
+    let kind = kind.unwrap_or_else(|| point_kind(segs, si));
+    let (hi, ho) = handle_slots(segs, si);
+    let (mine, other) = if out { (ho, hi) } else { (hi, ho) };
+    let Some(mine) = mine else { return false };
+    let Some(v) = segs.get(si).and_then(Seg::end) else { return false };
+    set_pt(segs, mine, p);
+    if let Some(o) = other
+        && kind != "corner"
+        && let Some(q) = get_pt(segs, o)
+    {
+        let d = p - v;
+        let l = d.hypot();
+        if l > 1e-9 {
+            let lo = if kind == "smooth" { l } else { (q - v).hypot() };
+            set_pt(segs, o, v - d / l * lo);
+        }
+    }
+    true
+}
+
+/// Handles of vertex `index` of path `path` of `sh` in slide points: (incoming, outgoing, vertex).
+pub fn slide_handles(
+    doc: &deckcraft_model::Presentation,
+    sel: &crate::Selection,
+    sh: &Shape,
+    path: usize,
+    index: usize,
+) -> Option<(Option<Point>, Option<Point>, Point)> {
+    let Geom::Custom { paths } = &sh.geom else { return None };
+    let cp = paths.get(path)?;
+    let x = xfrm_of(doc, sel, sh);
+    let (sx, sy) = (if cp.w > 0.0 { x.w / cp.w } else { 1.0 }, if cp.h > 0.0 { x.h / cp.h } else { 1.0 });
+    let a = x.affine();
+    let to = |q: Point| a * Point::new(q.x * sx, q.y * sy);
+    let segs = parse(&cp.d);
+    let si = *vertices(&segs).get(index)?;
+    let v = segs.get(si).and_then(Seg::end)?;
+    let (hi, ho) = handle_slots(&segs, si);
+    Some((hi.and_then(|s| get_pt(&segs, s)).map(to), ho.and_then(|s| get_pt(&segs, s)).map(to), to(v)))
+}
+
+fn point_type(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = target(s, p, "shape.pointType")?;
+    let path = p.get("path").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let index = index_param(p, "index", "shape.pointType")?;
+    let kind = match str_param(p, "type") {
+        Some(k @ ("smooth" | "straight" | "corner")) => k.to_string(),
+        _ => return Err(bad("shape.pointType", "`type` is smooth, straight or corner")),
+    };
+    // A straight point's handles can be as long as each other; remember the choice for drags.
+    s.tool.vertex_kind = Some((path, index, kind.clone()));
+    edit_path(s, id, path, "shape.pointType", move |segs, vs, _| {
+        let si = *vs.get(index).ok_or_else(|| bad("shape.pointType", "no such point"))?;
+        set_type(segs, si, &kind);
+        Ok(true)
+    })
+}
+
+fn move_handle(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = target(s, p, "shape.moveHandle")?;
+    let path = p.get("path").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let index = index_param(p, "index", "shape.moveHandle")?;
+    let out = match str_param(p, "side") {
+        Some("out") => true,
+        Some("in") => false,
+        _ => return Err(bad("shape.moveHandle", "`side` is in or out")),
+    };
+    let to = match (f64_param(p, "x"), f64_param(p, "y")) {
+        (Some(x), Some(y)) if x.is_finite() && y.is_finite() => Point::new(x.clamp(-1e5, 1e5), y.clamp(-1e5, 1e5)),
+        _ => return Err(bad("shape.moveHandle", "give `x` and `y` in slide points")),
+    };
+    let kind = str_param(p, "type").filter(|k| matches!(*k, "smooth" | "straight" | "corner")).map(str::to_string);
+    edit_path(s, id, path, "shape.moveHandle", move |segs, vs, x| {
+        let si = *vs.get(index).ok_or_else(|| bad("shape.moveHandle", "no such point"))?;
+        if set_handle(segs, si, out, x.affine().inverse() * to, kind.as_deref()) {
+            Ok(true)
+        } else {
+            Err(bad("shape.moveHandle", "that side of the point has no handle"))
+        }
+    })
+}
+
+/// The type of vertex `index` of path `path` of `sh`.
+pub fn kind_of(sh: &Shape, path: usize, index: usize) -> Option<&'static str> {
+    let Geom::Custom { paths } = &sh.geom else { return None };
+    let segs = parse(&paths.get(path)?.d);
+    let si = *vertices(&segs).get(index)?;
+    Some(point_kind(&segs, si))
+}
+
+/// `shape.moveHandle` for pointer drags.
+pub(crate) fn move_handle_raw(s: &mut Session, p: &Value) -> Result<Value> {
+    move_handle(s, p)
 }

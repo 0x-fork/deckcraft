@@ -79,6 +79,13 @@ pub enum Hit {
         id: ShapeId,
         index: usize,
     },
+    /// A control handle (`out`: the outgoing one) of the selected vertex in Edit Points.
+    Handle {
+        id: ShapeId,
+        path: usize,
+        index: usize,
+        out: bool,
+    },
     /// A vertex of a shape whose points are being edited.
     Vertex {
         id: ShapeId,
@@ -132,6 +139,12 @@ enum Drag {
         id: ShapeId,
         path: usize,
         index: usize,
+    },
+    Handle {
+        id: ShapeId,
+        path: usize,
+        index: usize,
+        out: bool,
     },
     Marquee {
         start: Point,
@@ -194,6 +207,10 @@ pub struct ToolState {
     pub path_closing: bool,
     /// The shape in Edit Points: its vertices are handles instead of the box's.
     pub edit_points: Option<ShapeId>,
+    /// The vertex (path, index) whose control handles show in Edit Points.
+    pub edit_vertex: Option<(usize, usize)>,
+    /// The point type last chosen for a vertex (path, index, type): handle drags follow it.
+    pub vertex_kind: Option<(usize, usize, String)>,
 }
 
 impl ToolState {
@@ -239,9 +256,19 @@ impl Session {
         // In Edit Points, the edited shape's vertices come first.
         if let Some(id) = self.tool.editing_points(st)
             && let Some(sh) = st.shape(id)
-            && let Some((path, index)) = cmd::points::vertex_at(&st.doc, &st.selection, sh, p, tol * 1.6)
         {
-            return Some(Hit::Vertex { id, path, index });
+            if let Some((path, index)) = self.tool.edit_vertex
+                && let Some((hin, hout, _)) = cmd::points::slide_handles(&st.doc, &st.selection, sh, path, index)
+            {
+                for (h, out) in [(hout, true), (hin, false)] {
+                    if h.is_some_and(|q| (q - p).hypot() <= tol * 1.6) {
+                        return Some(Hit::Handle { id, path, index, out });
+                    }
+                }
+            }
+            if let Some((path, index)) = cmd::points::vertex_at(&st.doc, &st.selection, sh, p, tol * 1.6) {
+                return Some(Hit::Vertex { id, path, index });
+            }
         }
         // Handles of selected shapes first.
         if st.selection.text.is_none() || st.selection.shapes.len() == 1 {
@@ -423,9 +450,15 @@ impl Session {
                 if mods.cmd {
                     return self.execute("shape.deletePoint", &json!({"id": id, "path": path, "index": index}));
                 }
+                self.tool.edit_vertex = Some((path, index));
                 self.begin("Edit Points");
                 self.tool.drag = Some(Drag::Vertex { id, path, index });
                 return Ok(json!({"vertex": [path, index]}));
+            }
+            if let Some(Hit::Handle { id, path, index, out }) = hit {
+                self.begin("Edit Points");
+                self.tool.drag = Some(Drag::Handle { id, path, index, out });
+                return Ok(json!({"handle": [path, index]}));
             }
             let st = self.doc()?;
             if let Some(sh) = st.shape(eid)
@@ -437,6 +470,7 @@ impl Session {
                 return Ok(Value::Null);
             }
             self.tool.edit_points = None;
+            self.tool.edit_vertex = None;
         }
         let st = self.doc()?;
         match hit {
@@ -459,7 +493,7 @@ impl Session {
                 self.tool.drag = Some(Drag::Rotate { ids, center, start, origs });
             }
             // Only reached outside Edit Points (handled above).
-            Some(Hit::Vertex { .. }) => {}
+            Some(Hit::Vertex { .. } | Hit::Handle { .. }) => {}
             Some(Hit::Adjust { id, index }) => {
                 let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
                 self.begin("Adjust Shape");
@@ -659,6 +693,14 @@ impl Session {
                 self.edit_vertex(id, path, index, p)?;
                 return Ok(Value::Null);
             }
+            Drag::Handle { id, path, index, out } => {
+                self.tool.drag = Some(Drag::Handle { id, path, index, out });
+                let side = if out { "out" } else { "in" };
+                if let Err(e) = self.execute_inner_move_handle(id, path, index, side, p) {
+                    log::debug!("edit handle: {e}");
+                }
+                return Ok(Value::Null);
+            }
             Drag::Marquee { start, .. } => {
                 self.tool.marquee = Some(Rect::from_points(start, p));
             }
@@ -726,6 +768,11 @@ impl Session {
             log::debug!("edit point: {e}");
         }
         Ok(())
+    }
+
+    fn execute_inner_move_handle(&mut self, id: ShapeId, path: usize, index: usize, side: &str, p: Point) -> Result<Value> {
+        let kind = self.tool.vertex_kind.clone().filter(|(pp, i, _)| (*pp, *i) == (path, index)).map(|k| k.2);
+        cmd::points::move_handle_raw(self, &json!({"id": id.0, "path": path, "index": index, "side": side, "x": p.x, "y": p.y, "type": kind}))
     }
 
     fn up(&mut self, p: Point, mods: Mods) -> Result<Value> {
