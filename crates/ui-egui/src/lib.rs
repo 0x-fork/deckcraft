@@ -151,7 +151,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
     ("view.grayscale", "Grayscale", None, "{on?: bool}"),
-    ("show.start", "Slide Show", Some("F5"), "{from?: index}"),
+    ("show.start", "Slide Show", Some("F5"), "{from?: index, custom?: name}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
     ("app.home", "Home", None, "{on?}"),
@@ -494,8 +494,14 @@ impl SlideApp {
             }
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
             "show.start" => {
-                let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
-                self.start_show(from, false);
+                if let Some(name) = p.get("custom").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                    self.start_custom_show(name, false);
+                } else if p.get("from").is_some() {
+                    let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
+                    self.start_show(from, false);
+                } else {
+                    self.start_show(self.show_start_index(), false);
+                }
             }
             "show.presenter" => self.ui.presenter_view = self.flag(p, self.ui.presenter_view),
             "show.end" => {
@@ -554,10 +560,26 @@ impl SlideApp {
         Ok(Value::Null)
     }
 
+    /// First slide Play from Start should open: the custom show or range, skipping hidden slides.
+    pub fn show_start_index(&self) -> usize {
+        self.session.active().and_then(|d| deckcraft_anim::show_order(&d.doc).first().copied()).unwrap_or(0)
+    }
+
     pub fn start_show(&mut self, from: usize, reading: bool) {
         self.media.stop_owned(media::Owner::Editor);
         if let Some(d) = self.session.active() {
             self.show = Some(show::Show::new(&d.doc, from, reading, self.ui.presenter_view && !reading));
+        }
+    }
+
+    /// Play custom show `name` from its first slide. Set Up Slide Show is left as it was.
+    pub fn start_custom_show(&mut self, name: &str, reading: bool) {
+        let state = self.session.active().and_then(|d| deckcraft_anim::ShowState::play_custom(&d.doc, name));
+        let Some(state) = state else { return };
+        let from = state.slide;
+        self.start_show(from, reading);
+        if let Some(show) = self.show.as_mut() {
+            show.state = state;
         }
     }
 

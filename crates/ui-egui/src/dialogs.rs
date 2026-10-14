@@ -247,10 +247,25 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let nn = check(ui, d, "Show without narration", "nn", sh.without_narration);
             let na = check(ui, d, "Show without animation", "na", sh.without_animation);
             let ut = check(ui, d, "Use timings, if present", "ut", sh.use_timings);
+            let names: Vec<String> = app.session.active().map(|s| s.doc.custom_shows.iter().map(|c| c.name.clone()).collect()).unwrap_or_default();
+            let chosen = d.fields.entry("custom".into()).or_insert_with(|| sh.custom_show.clone().unwrap_or_default()).clone();
+            ui.label("Slides");
+            let label = if chosen.is_empty() { "All slides".to_string() } else { chosen.clone() };
+            egui::ComboBox::from_id_salt("setup_custom").selected_text(label).show_ui(ui, |ui| {
+                if ui.selectable_label(chosen.is_empty(), "All slides").clicked() {
+                    d.fields.insert("custom".into(), String::new());
+                }
+                for n in &names {
+                    if ui.selectable_label(&chosen == n, n).clicked() {
+                        d.fields.insert("custom".into(), n.clone());
+                    }
+                }
+            });
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
                 let ty = d.get("type", "speaker");
-                run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut}));
+                let custom = d.fields.get("custom").cloned().unwrap_or_default();
+                run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut, "custom": custom}));
             }
             ok || cancel
         }
@@ -575,13 +590,21 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         }
         "customShow" => {
             let shows = app.session.active().map(|s| s.doc.custom_shows.clone()).unwrap_or_default();
+            let mut started = false;
             for s in &shows {
                 ui.horizontal(|ui| {
                     ui.label(format!("{} ({} slides)", s.name, s.slides.len()));
+                    if ui.small_button("Show").clicked() {
+                        run(app, "show.start", json!({"custom": s.name}));
+                        started = true;
+                    }
                     if ui.small_button("Delete").clicked() {
                         let _ = app.run("show.customShow", json!({"name": s.name, "delete": true}));
                     }
                 });
+            }
+            if started {
+                return true;
             }
             field(ui, d, "New show name:", "name", "Custom Show 1");
             field(ui, d, "Slides (e.g. 1,3,5):", "slides", "1");

@@ -27,7 +27,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Up Slide Show…",
             ["Slide Show", "Set Up"],
             None,
-            "{type?: speaker|browsed|kiosk, loop?: bool, noNarration?, noAnimation?, useTimings?, from?, to?}",
+            "{type?: speaker|browsed|kiosk, loop?: bool, noNarration?, noAnimation?, useTimings?, from?, to?, custom?: name}",
             has_doc,
             setup
         ),
@@ -245,6 +245,17 @@ fn setup(s: &mut Session, p: &Value) -> Result<Value> {
             (None, None) if p.get("all").is_some() => sh.range = None,
             _ => {}
         }
+        if p.get("all").and_then(Value::as_bool) == Some(true) {
+            sh.range = None;
+            sh.custom_show = None;
+        }
+        if p.get("custom").is_some() {
+            let name = p.get("custom").and_then(Value::as_str).unwrap_or("");
+            sh.custom_show = if name.is_empty() { None } else { Some(name.to_string()) };
+            if sh.custom_show.is_some() {
+                sh.range = None;
+            }
+        }
         Ok(serde_json::to_value(&*sh).unwrap_or_default())
     })
 }
@@ -263,4 +274,24 @@ fn custom_show(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     ok()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn setup_remembers_a_custom_show() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("show.customShow", &json!({"name": "Short", "slides": [0, 1]})).unwrap();
+        let v = s.execute("show.setup", &json!({"custom": "Short"})).unwrap();
+        assert_eq!(v.get("customShow").and_then(Value::as_str), Some("Short"));
+        assert!(s.active().unwrap().doc.show.range.is_none());
+        s.execute("show.setup", &json!({"custom": ""})).unwrap();
+        assert!(s.active().unwrap().doc.show.custom_show.is_none());
+    }
 }
