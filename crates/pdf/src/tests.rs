@@ -220,3 +220,13 @@ fn master_text_wraps_and_keeps_mixed_formatting() {
     p.notes_master = Some(Arc::new(m));
     assert!(export(&p, &PdfOptions { layout: PageLayout::Notes, ..Default::default() }).unwrap().starts_with(b"%PDF"));
 }
+
+#[test]
+fn glyph_ranges_follow_shaping_clusters() {
+    // "fl" ligature: its glyph maps to both characters, the rest stay one to one (#164).
+    assert_eq!(glyph_text_ranges("flash", (0, 5), &[(0, 'f'), (2, 'a'), (3, 's'), (4, 'h')], 4), vec![0..2, 2..3, 3..4, 4..5]);
+    // Two glyphs in one cluster (base and mark) share its range.
+    assert_eq!(glyph_text_ranges("ab", (0, 2), &[(0, 'a'), (0, 'a'), (1, 'b')], 3), vec![0..1, 0..1, 1..2]);
+    // A run starting mid-paragraph, multi-byte characters in visual (right-to-left) order.
+    assert_eq!(glyph_text_ranges("αβγ", (3, 6), &[(5, 'γ'), (4, 'β'), (3, 'α')], 3), vec![4..6, 2..4, 0..2]);
+}
