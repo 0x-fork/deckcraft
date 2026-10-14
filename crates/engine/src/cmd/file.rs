@@ -8,7 +8,16 @@ use crate::{DocState, EngineError, Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        cmd!(noundo "file.new", "New Presentation", ["File"], Some("Cmd+N"), "{theme?: name, size?: [w,h] pt, blank?: bool}", always, new),
+        cmd!(
+            noundo "file.new",
+            "New Presentation",
+            ["File"],
+            Some("Cmd+N"),
+            "{theme?: name, template?: starter name, size?: [w,h] pt, blank?: bool}",
+            always,
+            new
+        ),
+        cmd!(query "file.templates", "Starter Templates", [], None, "{} → [{name, summary, theme, slides}]", always, templates),
         cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path}", always, open),
         cmd!(noundo "file.openBytes", "Open Data", [], None, "{name, data: base64}", always, open_bytes),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?, format?: deckcraft|pptx}", has_doc, save),
@@ -58,18 +67,51 @@ fn theme_named(name: &str) -> Option<deckcraft_model::Theme> {
     deckcraft_model::theme::builtin_themes().into_iter().find(|t| t.name.eq_ignore_ascii_case(name))
 }
 
-fn new(s: &mut Session, p: &Value) -> Result<Value> {
-    let theme = str_param(p, "theme").and_then(theme_named).unwrap_or_default();
-    let size = p
-        .get("size")
+fn slide_size(p: &Value) -> deckcraft_geom::Size {
+    p.get("size")
         .and_then(Value::as_array)
         .and_then(|a| Some(deckcraft_geom::Size::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?)))
         .filter(|s| s.width >= 1.0 && s.height >= 1.0 && s.width < 5000.0 && s.height < 5000.0)
-        .unwrap_or(defaults::WIDE);
-    let doc = defaults::blank_presentation(size, theme, !bool_or(p, "blank", false));
+        .unwrap_or(defaults::WIDE)
+}
+
+fn templates(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({
+        "templates": crate::templates::starters().iter().map(|t| json!({
+            "name": t.name,
+            "summary": t.summary,
+            "theme": t.theme,
+            "slides": t.slides.len(),
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+fn new(s: &mut Session, p: &Value) -> Result<Value> {
+    let template = str_param(p, "template").filter(|t| !t.is_empty());
+    let theme_name = str_param(p, "theme").filter(|t| !t.is_empty());
+    if template.is_some() && theme_name.is_some() {
+        return Err(bad("file.new", "pass `theme` or `template`, not both"));
+    }
+    if template.is_some() && bool_or(p, "blank", false) {
+        return Err(bad("file.new", "a template is not a blank presentation"));
+    }
+    let size = slide_size(p);
+    let (doc, template_name) = if let Some(name) = template {
+        let doc = crate::templates::build(name, size)?;
+        let chosen = crate::templates::find(name).map(|t| t.name);
+        (doc, chosen)
+    } else {
+        let theme = theme_name.and_then(theme_named).unwrap_or_default();
+        (defaults::blank_presentation(size, theme, !bool_or(p, "blank", false)), None)
+    };
+    let slides = doc.slides.len();
     let title = s.next_untitled();
     let i = s.add_document(DocState::new(doc, None, title));
-    Ok(json!({"document": i}))
+    let mut out = json!({"document": i, "slides": slides});
+    if let Some(name) = template_name {
+        out["template"] = json!(name);
+    }
+    Ok(out)
 }
 
 /// Recognise and read presentation bytes (native, PPTX).

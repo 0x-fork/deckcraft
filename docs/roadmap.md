@@ -8,6 +8,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (`corpus_media.rs` keeps 3-D models and animation bounce end; real-deck corpus still open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines round-trip; the real-deck corpus stays open; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Review previous/next comment; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks; the large template gallery stays after beta; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -84,8 +85,8 @@ reference renders, a Windows tester with the affected GPUs, native speakers to r
 SmartArt editing, chartex chart types, the remaining animation effects and motion paths, Notes and
 Handout masters, edit points, text warp and 3-D, proofing dictionaries, Zoom, recording, video and
 GIF export, legacy `.ppt` import and `.odp` (owner decision), GPU rasterization and hardware video
-decode, the other 21 languages with RTL mirroring, a larger original template gallery, and local AI
-features (owner decision on models). Itemized with hours in [gaps.md](gaps.md).
+decode, the other 21 languages with RTL mirroring, a larger template gallery (six original starters
+ship), and local AI features (owner decision on models). Itemized with hours in [gaps.md](gaps.md).
 
 ## Milestones
 
@@ -144,5 +145,6 @@ plan above.
 | 2026-10-14 | trivial | Current focus: `corpus_media.rs` keeps 3-D models and animation bounce end; the real-deck corpus stays open |
 | 2026-10-14 | trivial | Chart trendlines round-trip in an owned corpus slice; the real-deck corpus (item 2) stays open |
 | 2026-10-14 | trivial | Review workflow: previous and next comment across the deck |
+| 2026-10-14 | minor | After beta: six original starter decks exist; a larger template gallery remains |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

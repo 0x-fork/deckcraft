@@ -504,15 +504,14 @@ fn tile(ui: &mut Ui, label: &str, theme: Option<&deckcraft_model::Theme>, big: b
 }
 
 /// The built-in themes and the sample deck, filtered by `query` (after a blank presentation when
-/// `blank`); at most `limit` theme tiles.
-fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: bool) {
+/// `blank`); at most `limit` theme tiles. False when nothing matched.
+fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: bool) -> bool {
     let q = query.trim().to_lowercase();
     let themes: Vec<deckcraft_model::Theme> =
         deckcraft_model::theme::builtin_themes().into_iter().filter(|th| q.is_empty() || th.name.to_lowercase().contains(&q)).collect();
     let sample = q.is_empty() || "sample deck northern lights".contains(&q);
     if themes.is_empty() && !sample {
-        dim(ui, &format!("No themes match “{}”.", query.trim()));
-        return;
+        return false;
     }
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
@@ -538,6 +537,25 @@ fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: 
             }
         }
     });
+    true
+}
+
+/// Starter decks whose name, summary, theme or a slide title matches `query`, at most `limit` tiles.
+fn template_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) -> bool {
+    let list = deckcraft_engine::templates::matching(query);
+    if list.is_empty() {
+        return false;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(10.0, 10.0);
+        for starter in list.into_iter().take(limit) {
+            let theme = deckcraft_model::theme::builtin_themes().into_iter().find(|th| th.name == starter.theme);
+            if tile(ui, starter.name, theme.as_ref(), false).on_hover_text(starter.summary).clicked() {
+                let _ = app.run("file.new", json!({"template": starter.name}));
+            }
+        }
+    });
+    true
 }
 
 /// File name and folder of a recent path, split as text (nothing on disk is read).
@@ -656,6 +674,17 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
     new_tiles(app, ui, "", 5, true);
     ui.add_space(22.0);
     ui.horizontal(|ui| {
+        ui.label(RichText::new("Templates").font(theme::bold(16.0)).color(t.text));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if arrow_link(ui, "More templates") {
+                out.page = Some(Page::New);
+            }
+        });
+    });
+    ui.add_space(6.0);
+    template_tiles(app, ui, "", 3);
+    ui.add_space(22.0);
+    ui.horizontal(|ui| {
         ui.label(RichText::new("Recent").font(theme::bold(16.0)).color(t.text));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             search(ui, &mut bs.query, "Search for a file", 280.0);
@@ -675,7 +704,7 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
     ui.hyperlink_to("Join the ArtCraft community on Discord", deckcraft_engine::links::DISCORD);
 }
 
-/// New: a blank presentation, then every theme with a search box.
+/// New: a blank presentation, then every theme and starter template, with a search box.
 fn new_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     let t = Tokens::get(ui.ctx());
     if tile(ui, "Blank Presentation", None, true).clicked() {
@@ -686,10 +715,20 @@ fn new_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
     let (r, _) = ui.allocate_exact_size(vec2(w, 1.0), Sense::hover());
     ui.painter().line_segment([r.left_center(), r.right_center()], Stroke::new(1.0, t.separator));
     ui.add_space(14.0);
-    search(ui, &mut bs.query, "Search for themes", 380.0);
+    search(ui, &mut bs.query, "Search for themes and templates", 380.0);
     ui.add_space(14.0);
     let q = bs.query.clone();
-    new_tiles(app, ui, &q, usize::MAX, false);
+    let themes = new_tiles(app, ui, &q, usize::MAX, false);
+    let templates = if q.trim().is_empty() || !deckcraft_engine::templates::matching(&q).is_empty() {
+        ui.add_space(18.0);
+        heading(ui, "Templates");
+        template_tiles(app, ui, &q, usize::MAX)
+    } else {
+        false
+    };
+    if !themes && !templates {
+        dim(ui, &format!("No themes or templates match “{}”.", q.trim()));
+    }
 }
 
 /// Open: Recent and Browse on the left; the recent presentations (with a search box) on the right.

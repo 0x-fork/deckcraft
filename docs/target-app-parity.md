@@ -4,6 +4,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (media remainder no longer lists icons: Insert › Icons is a Lucide stroke set; percentages unchanged; previous: minor, hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (227 commands; breadth stays 79%, ready stays ~55%; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (228 commands; previous/next comment; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks; ecosystem stays ~25% until the gallery is large; previous: minor, hours to ~95% per audience added; ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -75,7 +76,7 @@ The weights are what those users actually depend on, written down so the total c
 | Hardware | 5% | ~40% | 25–45 | [hardware-parity.md](hardware-parity.md) | GPU-composited window (wgpu), but CPU slide raster, software-only video decode, presenter view not placed on the second display, no pen pressure, no pinch zoom |
 | Platforms | 5% | ~80% | 5–10 | [ROADMAP.md](../ROADMAP.md) | Ahead in reach: macOS, Windows x64/x86/arm64, Linux (5 formats), FreeBSD and the web, all from one release workflow. Held back by the Windows GPU crashes and Linux/Windows clipboard gaps |
 | Localization | 5% | ~8% | 55–90 + native review | [localization-parity.md](localization-parity.md) | English only; no string catalog. PowerPoint for Mac ships 26 languages. Bidi and Arabic shaping in slide text exist |
-| Ecosystem (templates, add-ins) | 3% | ~25% | 10–20 | [gaps.md](gaps.md) | 8 original themes vs PowerPoint's large template gallery; no add-ins or VBA (out of scope by policy) |
+| Ecosystem (templates, add-ins) | 3% | ~25% | 10–20 | [gaps.md](gaps.md) | 8 original themes and 6 original starter decks; PowerPoint's large template gallery remains; no add-ins or VBA (out of scope by policy) |
 | AI features | 2% | ~10% | 20–40 (owner decision on models) | [gaps.md](gaps.md) | No Designer, Copilot, Speaker Coach, live subtitles or Translate (all Microsoft cloud services). Agents drive every command over MCP instead |
 | **Total** | 100% | **~55%** (Σ weight × ready = 55.3) | **~365–650** | | |
 | Automation (✱, not weighted) | | ahead | 0 | [mcp.md](mcp.md), [control-protocol.md](control-protocol.md) | Every command is scriptable from the CLI, a JSON control channel and MCP, headless or against the running app; PowerPoint for Mac has AppleScript and VBA only |
@@ -214,7 +215,8 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   inheritance (slide → layout → master → theme), sections, notes, comments, custom shows,
   header/footer fields, embedded media, unlimited undo on shared slide snapshots.
 - **Themes:** 8 original themes with colour and font schemes, custom colours and fonts,
-  backgrounds (solid, gradient, picture, pattern), slide size presets.
+  backgrounds (solid, gradient, picture, pattern), slide size presets. File › New also offers 6
+  original starter decks (Briefing, Lesson, Pitch, Field Notes, Quarterly, Evening Talk).
 - **Shapes:** ~180 preset geometries with adjustment handles, text boxes, pictures (crop,
   corrections, animated GIFs that play and pause), tables with styles, charts (column, bar, line,
   area, pie, doughnut, scatter and more), basic SmartArt, groups, connectors glued to sites,
@@ -284,6 +286,7 @@ scored done (16 open issues).
 | 2026-10-14 | minor | Media remainder: Insert › Icons places Lucide stroke icons. 3-D models and stock content remain. Headline percentages unchanged; the checklist row stays missing |
 | 2026-10-14 | trivial | Size and Position dialog. Command count 226 → 227. Breadth stays 79%, ready stays ~55%, UI stays ~60% |
 | 2026-10-14 | trivial | 228 commands; Review lists previous and next comment. Breadth stays 79%; the comments checklist row stays D |
+| 2026-10-14 | minor | Ecosystem evidence: six original starter decks. The dimension stays ~25% because PowerPoint's large gallery is still absent |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow gate (all six pass); stays alpha |
