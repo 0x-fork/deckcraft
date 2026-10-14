@@ -46,6 +46,20 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "review.addToDictionary", "Add to Dictionary", ["Review", "Proofing"], None, "{word} → {word, file} (append to the user dictionary file; not an undo step)", always, add_to_dictionary),
         cmd!(query "review.dictionary", "Spelling Dictionary", ["Review", "Proofing"], None, "{lang?} → {lang, available, found, folders} (whether review.spelling has a dictionary, and which file)", always, dictionary_info),
+        cmd!(query "review.thesaurus", "Thesaurus", ["Review", "Proofing"], None, "{word?: default the selected word, or the word at the caret} → {word, senses: [{word, synonyms}]}", has_doc, thesaurus),
+        cmd!(
+            "review.replaceWord",
+            "Insert Synonym",
+            [],
+            None,
+            "{with}: replace the selected word (or the word at the caret) while editing text",
+            has_text,
+            insert_synonym
+        ),
+        cmd!(noundo "review.compare", "Compare", ["Review", "Compare"], None, "{path} | {name, data: base64} — compare with a revised copy → {name, changes}", has_doc, compare),
+        cmd!(query "review.revisions", "Revisions", [], None, "{} → {name, changes: [{kind: inserted|deleted|changed, slide, revised, details}]}", has_doc, revisions),
+        cmd!("review.accept", "Accept Revision", ["Review", "Compare"], None, "{index} | {all: true}", comparing, accept),
+        cmd!(noundo "review.endCompare", "End Review", ["Review", "Compare"], None, "{}", comparing, end_compare),
         cmd!(noundo "show.fromStart", "Play from Start", ["Slide Show", "Start Slide Show"], Some("Cmd+Shift+Enter"), "{}", has_slide, |s, _| start(s, 0)),
         cmd!(noundo "show.fromCurrent", "Play from Current Slide", ["Slide Show", "Start Slide Show"], Some("Cmd+Enter"), "{}", has_slide, |s, _| {
             let i = s.doc()?.selection.slide;
@@ -578,6 +592,116 @@ fn custom_show(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
+    ok()
+}
+
+/// The selected text when it lies in one paragraph, else the word at the caret.
+fn word_under_caret(s: &Session) -> Option<String> {
+    let st = s.doc().ok()?;
+    let t = st.selection.text.clone()?;
+    let body = super::text::body_of(st, &t)?;
+    let (a, b) = if t.anchor != t.caret { t.ordered() } else { deckcraft_model::edit::word_at(body, t.caret) };
+    if a.0 != b.0 {
+        return None;
+    }
+    let text = body.paragraphs.get(a.0)?.text();
+    let w: String = text.chars().skip(a.1).take(b.1.saturating_sub(a.1)).collect();
+    let w = w.trim().to_string();
+    (!w.is_empty()).then_some(w)
+}
+
+fn thesaurus(s: &mut Session, p: &Value) -> Result<Value> {
+    let word = str_param(p, "word").map(str::to_string).or_else(|| word_under_caret(s)).unwrap_or_default();
+    let senses = crate::thesaurus::lookup(&word);
+    Ok(json!({"word": word, "senses": senses}))
+}
+
+fn insert_synonym(s: &mut Session, p: &Value) -> Result<Value> {
+    let with = str_param(p, "with").filter(|w| !w.trim().is_empty()).ok_or_else(|| bad("review.replaceWord", "missing `with`"))?.to_string();
+    if with.chars().count() > 200 {
+        return Err(bad("review.replaceWord", "too long"));
+    }
+    let collapsed = s.doc()?.selection.text.as_ref().is_some_and(|t| t.anchor == t.caret);
+    if collapsed {
+        s.execute("text.selectWord", &json!({}))?;
+    }
+    s.execute("text.insert", &json!({"text": with}))
+}
+
+fn comparing(s: &Session) -> std::result::Result<(), String> {
+    if s.active().is_some_and(|d| d.compare.is_some()) { Ok(()) } else { Err("not comparing".into()) }
+}
+
+fn revised_bytes(p: &Value) -> Result<(String, Vec<u8>)> {
+    if let Some(data) = str_param(p, "data") {
+        let bytes = base64_decode(data).ok_or_else(|| bad("review.compare", "invalid base64 `data`"))?;
+        return Ok((str_param(p, "name").unwrap_or("Revised").to_string(), bytes));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(path) = str_param(p, "path") {
+        let bytes = std::fs::read(path).map_err(|e| crate::EngineError::Other(format!("{path}: {e}")))?;
+        return Ok((path.to_string(), bytes));
+    }
+    Err(bad("review.compare", "give `path` or `data`"))
+}
+
+fn revisions_json(st: &crate::DocState) -> Result<Value> {
+    let c = st.compare.as_ref().ok_or_else(|| bad("review.revisions", "not comparing"))?;
+    let name = std::path::Path::new(&c.name).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| c.name.clone());
+    Ok(json!({"name": name, "changes": crate::compare::diff(&st.doc, &c.revised, c.by_position), "byPosition": c.by_position}))
+}
+
+fn compare(s: &mut Session, p: &Value) -> Result<Value> {
+    let (name, bytes) = revised_bytes(p)?;
+    let revised = super::file::open_presentation(&name, &bytes)?;
+    let st = s.doc_mut()?;
+    let by_position = crate::compare::unrelated(&st.doc, &revised);
+    st.compare = Some(crate::compare::Compare { name, revised: Arc::new(revised), by_position });
+    s.ui_requests.push(UiRequest::Pane { id: "revisions".into() });
+    revisions_json(s.doc()?)
+}
+
+fn revisions(s: &mut Session, _: &Value) -> Result<Value> {
+    revisions_json(s.doc()?)
+}
+
+fn accept(s: &mut Session, p: &Value) -> Result<Value> {
+    let (rev, by_pos) = s.doc()?.compare.as_ref().map(|c| (c.revised.clone(), c.by_position)).ok_or_else(|| bad("review.accept", "not comparing"))?;
+    let all = bool_param(p, "all").unwrap_or(false);
+    let index = usize_param(p, "index");
+    if !all && index.is_none() {
+        return Err(bad("review.accept", "give `index` or `all`"));
+    }
+    s.edit(|doc, sel| {
+        let mut accepted = 0usize;
+        // Each accept shifts indices, so the list is recomputed; bounded by the slide counts.
+        let limit = doc.slides.len().saturating_add(rev.slides.len()).saturating_add(1);
+        for _ in 0..limit {
+            let changes = crate::compare::diff(doc, &rev, by_pos);
+            let c = if all {
+                changes.into_iter().find(|c| !(c.kind == crate::compare::ChangeKind::Deleted && doc.slides.len() <= 1))
+            } else {
+                changes.into_iter().nth(index.unwrap_or(0))
+            };
+            let Some(c) = c else { break };
+            let Some(at) = crate::compare::accept(doc, &rev, &c) else { break };
+            accepted += 1;
+            sel.slide = at;
+            sel.shapes.clear();
+            sel.text = None;
+            if !all {
+                break;
+            }
+        }
+        if accepted == 0 {
+            return Err(bad("review.accept", "no such revision"));
+        }
+        Ok(json!({"accepted": accepted}))
+    })
+}
+
+fn end_compare(s: &mut Session, _: &Value) -> Result<Value> {
+    s.doc_mut()?.compare = None;
     ok()
 }
 

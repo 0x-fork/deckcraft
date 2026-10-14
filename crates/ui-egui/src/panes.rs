@@ -29,6 +29,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 "comments" => "Comments",
                 "designer" => "Design Ideas",
                 "smartart" => "Text Pane",
+                "thesaurus" => "Thesaurus",
+                "revisions" => "Revisions",
                 _ => "Pane",
             };
             ui.horizontal(|ui| {
@@ -53,6 +55,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 "comments" => comments(app, ui),
                 "designer" => designer(app, ui),
                 "smartart" => smartart(app, ui),
+                "thesaurus" => thesaurus(app, ui),
+                "revisions" => revisions(app, ui),
                 _ => {}
             });
         });
@@ -446,9 +450,14 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                 Some(Fill::Pattern(_)) => "pattern",
                 _ => "auto",
             };
-            for (l, k) in
-                [("No fill", "none"), ("Solid fill", "solid"), ("Gradient fill", "gradient"), ("Pattern fill", "pattern"), ("Automatic", "auto")]
-            {
+            for (l, k) in [
+                ("No fill", "none"),
+                ("Solid fill", "solid"),
+                ("Gradient fill", "gradient"),
+                ("Picture or texture fill", "picture"),
+                ("Pattern fill", "pattern"),
+                ("Automatic", "auto"),
+            ] {
                 if ui.radio(kind == k, l).clicked() {
                     match k {
                         "none" => run(app, "shape.fill", json!({"none": true})),
@@ -459,6 +468,7 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                             json!({"gradient": {"stops": [[0, "accent1"], [1, {"scheme": "accent1", "lumMod": 50000}]], "angle": 90}}),
                         ),
                         "pattern" => run(app, "shape.fill", json!({"pattern": {"preset": "pct25", "fg": "accent1", "bg": "bg1"}})),
+                        "picture" => pick_fill_picture(app),
                         _ => run(app, "shape.fill", json!({"reset": true})),
                     }
                 }
@@ -484,6 +494,9 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     ui.data_mut(|d| d.insert_temp(id, v));
                 }
             });
+            if let Some(Fill::Picture(pf)) = &sh.fill {
+                picture_fill_options(app, ui, sh.id.0, pf);
+            }
             if let Some(Fill::Gradient(g)) = &sh.fill {
                 let sc = scheme(app);
                 if let Some(ng) = crate::fillui::gradient_editor(ui, "shape-grad", g, &sc) {
@@ -622,6 +635,95 @@ fn fx_slider(
             run(app, "shape.effects", json!({key: {prop: v * scale}}));
         }
     });
+}
+
+/// Asks for a picture file and makes it the selected shapes' fill.
+fn pick_fill_picture(app: &mut SlideApp) {
+    if let Some(pick) = app.services.pick_open.as_mut()
+        && let Some(path) = pick("picture")
+        && let Some(Ok(bytes)) = app.services.read.as_ref().map(|r| r(&path))
+    {
+        run(app, "shape.fill", json!({"picture": deckcraft_engine::cmd::base64_encode(&bytes)}));
+    }
+}
+
+/// A number field for one picture-fill option; runs `shape.fill` with `{pictureProps: {key: v × scale}}`
+/// when it changes.
+fn pic_drag(app: &mut SlideApp, ui: &mut Ui, label: &str, value: f64, suffix: &str, key: &str, scale: f64) {
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+        let mut v = value;
+        let r = ui.add(egui::DragValue::new(&mut v).suffix(suffix).max_decimals(1));
+        if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+            run(app, "shape.fill", json!({"pictureProps": {key: v * scale}}));
+        }
+    });
+}
+
+/// Format Shape ▸ Fill ▸ Picture or texture fill: source, tiling, offsets, transparency.
+fn picture_fill_options(app: &mut SlideApp, ui: &mut Ui, id: u32, pf: &deckcraft_model::style::PictureFill) {
+    use deckcraft_model::style::PictureMode;
+    ui.horizontal(|ui| {
+        ui.label("Picture source");
+        if ui.button("Insert…").clicked() {
+            pick_fill_picture(app);
+        }
+    });
+    let mut tile = matches!(pf.mode, PictureMode::Tile { .. });
+    if ui.checkbox(&mut tile, "Tile picture as texture").changed() {
+        run(app, "shape.fill", json!({"pictureProps": {"tile": tile}}));
+    }
+    match &pf.mode {
+        PictureMode::Tile { tx, ty, sx, sy, flip, align } => {
+            pic_drag(app, ui, "Offset X", *tx, " pt", "offsetX", 1.0);
+            pic_drag(app, ui, "Offset Y", *ty, " pt", "offsetY", 1.0);
+            pic_drag(app, ui, "Scale X", sx * 100.0, "%", "scaleX", 0.01);
+            pic_drag(app, ui, "Scale Y", sy * 100.0, "%", "scaleY", 0.01);
+            let aligns = [
+                ("tl", "Top left"),
+                ("t", "Top"),
+                ("tr", "Top right"),
+                ("l", "Left"),
+                ("ctr", "Center"),
+                ("r", "Right"),
+                ("bl", "Bottom left"),
+                ("b", "Bottom"),
+                ("br", "Bottom right"),
+            ];
+            let mirrors = [("none", "None"), ("x", "Horizontal"), ("y", "Vertical"), ("xy", "Both")];
+            for (label, key, opts, cur) in [("Alignment", "align", &aligns[..], align), ("Mirror type", "mirror", &mirrors[..], flip)] {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+                    let shown = opts.iter().find(|(k, _)| k == cur).map_or(opts[0].1, |(_, l)| *l);
+                    egui::ComboBox::from_id_salt(("picfill", id, key)).selected_text(shown).show_ui(ui, |ui| {
+                        for (k, l) in opts {
+                            if ui.selectable_label(*k == cur.as_str(), *l).clicked() {
+                                run(app, "shape.fill", json!({"pictureProps": {key: k}}));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        PictureMode::Stretch { fill_rect } => {
+            for (i, label) in ["Offset left", "Offset top", "Offset right", "Offset bottom"].into_iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+                    let mut v = fill_rect[i] * 100.0;
+                    let r = ui.add(egui::DragValue::new(&mut v).suffix("%").max_decimals(0));
+                    if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+                        let mut rect = *fill_rect;
+                        rect[i] = v / 100.0;
+                        run(app, "shape.fill", json!({"pictureProps": {"stretch": rect}}));
+                    }
+                });
+            }
+        }
+    }
+    let mut rot = !pf.upright;
+    if ui.checkbox(&mut rot, "Rotate with shape").changed() {
+        run(app, "shape.fill", json!({"pictureProps": {"rotateWithShape": rot}}));
+    }
 }
 
 fn background(app: &mut SlideApp, ui: &mut Ui) {
@@ -897,6 +999,61 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
         p.text(pos2(x, r.min.y + 6.0), Align2::CENTER_TOP, format!("{s}s"), theme::font(10.0), t.text_dim);
     }
     let _ = paint_anim_tile;
+}
+
+/// Review › Compare: the revised copy's slide-level changes; click to go there, Accept to take it.
+fn revisions(app: &mut SlideApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let Ok(v) = app.session.execute("review.revisions", &json!({})) else {
+        ui.label(egui::RichText::new("Compare this presentation with a revised copy from Review › Compare.").color(t.text_dim));
+        return;
+    };
+    let changes = v["changes"].as_array().cloned().unwrap_or_default();
+    ui.label(egui::RichText::new(format!("Compared with {}", v["name"].as_str().unwrap_or("?"))).color(t.text_dim));
+    if v["byPosition"].as_bool() == Some(true) {
+        ui.label(egui::RichText::new("Not a copy of this presentation: slides are matched by position.").size(11.0).color(t.text_faint));
+    }
+    ui.add_space(4.0);
+    if changes.is_empty() {
+        ui.label("No differences left.");
+        if ui.button("End Review").clicked() {
+            run(app, "review.endCompare", json!({}));
+            app.ui.pane = None;
+        }
+        return;
+    }
+    if ui.button(format!("Accept All ({})", changes.len())).clicked() {
+        run(app, "review.accept", json!({"all": true}));
+    }
+    ui.separator();
+    for (i, c) in changes.iter().enumerate() {
+        let slide = c["slide"].as_u64().unwrap_or(0);
+        let (head, col) = match c["kind"].as_str().unwrap_or("") {
+            "inserted" => (format!("Slide inserted after {slide}"), Color32::from_rgb(0x2E, 0xA3, 0x6F)),
+            "deleted" => (format!("Slide {} deleted", slide.saturating_add(1)), Color32::from_rgb(0xD8, 0x3F, 0x6B)),
+            _ => (format!("Slide {} changed", slide.saturating_add(1)), Color32::from_rgb(0x2E, 0x6F, 0xD8)),
+        };
+        egui::Frame::NONE.fill(t.chrome).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(4.0, 16.0), Sense::hover());
+                ui.painter().rect_filled(r, CornerRadius::same(2), col);
+                if ui.link(egui::RichText::new(&head).font(theme::bold(12.5))).clicked() {
+                    let max = app.session.active().map(|d| d.doc.slides.len().saturating_sub(1)).unwrap_or(0);
+                    run(app, "slide.go", json!({"index": (slide as usize).min(max)}));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("Accept").clicked() {
+                        run(app, "review.accept", json!({"index": i}));
+                    }
+                });
+            });
+            for d in c["details"].as_array().into_iter().flatten().filter_map(Value::as_str).take(8) {
+                ui.label(egui::RichText::new(format!("• {d}")).size(11.5).color(t.text_dim));
+            }
+        });
+        ui.add_space(4.0);
+    }
 }
 
 fn comments(app: &mut SlideApp, ui: &mut Ui) {
@@ -1206,3 +1363,42 @@ mod tests {
         assert_eq!(solid_alpha(h.state(), b), Some(60_000));
     }
 }
+
+/// Review › Thesaurus: look a word up; clicking a synonym puts it in place of the selected word
+/// when editing text, otherwise looks that synonym up in turn.
+fn thesaurus(app: &mut SlideApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let mut q = app.thesaurus_query.clone();
+    let edit = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search for a word").desired_width(f32::INFINITY));
+    if edit.changed() {
+        app.thesaurus_query = q.clone();
+    }
+    ui.add_space(6.0);
+    let senses = deckcraft_engine::thesaurus::lookup(&q);
+    if q.trim().is_empty() {
+        ui.label(egui::RichText::new("Select a word on the slide, or type one above.").color(t.text_dim));
+        return;
+    }
+    if senses.is_empty() {
+        ui.label(egui::RichText::new(format!("No synonyms for \"{}\".", q.trim())).color(t.text_dim));
+        return;
+    }
+    let editing = app.session.active().is_some_and(|d| d.selection.text.is_some());
+    for sense in senses {
+        ui.label(egui::RichText::new(&sense.word).font(theme::bold(13.0)));
+        for syn in sense.synonyms {
+            let r = ui.add(egui::Button::new(&syn).frame(false)).on_hover_text(if editing { "Insert" } else { "Look up" });
+            if r.clicked() {
+                if editing {
+                    run(app, "review.replaceWord", json!({"with": syn}));
+                }
+                app.thesaurus_query = syn;
+            }
+        }
+        ui.add_space(6.0);
+    }
+}
+
+#[cfg(test)]
+#[path = "thesaurus_tests.rs"]
+mod thesaurus_tests;

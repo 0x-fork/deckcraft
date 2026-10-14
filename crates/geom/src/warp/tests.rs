@@ -277,3 +277,43 @@ fn hostile_adjusts_and_boxes_stay_finite() {
     }
     assert!(warp("textPlain", &[], Rect::new(f64::NAN, 0.0, 1.0, 1.0)).is_none());
 }
+
+#[test]
+fn every_preset_has_one_handle_per_adjust() {
+    let r = rect();
+    for name in CATALOG.iter().map(|p| p.id) {
+        let hs = handles(name, &[], r);
+        assert_eq!(hs.len(), adjust_count(name), "{name}");
+        let defaults = adjust_defaults(name);
+        for h in &hs {
+            assert!(h.pos.x.is_finite() && h.pos.y.is_finite(), "{name}");
+            let back = h.value_at(h.pos);
+            let want = defaults[h.index];
+            assert!((back - want).abs() <= 1.0, "{name} handle {}: {back} vs {want}", h.index);
+        }
+    }
+    assert!(handles("textNoShape", &[], r).is_empty());
+    assert!(handles("textArchUp", &[], Rect::new(0.0, 0.0, f64::NAN, 10.0)).is_empty());
+    assert!(handles("textArchUp", &[], Rect::new(0.0, 0.0, 0.0, 0.0)).is_empty());
+    // A hostile adjust still places a finite handle on the clamped default.
+    let hs = handles("textInflate", &[f64::NAN], r);
+    assert_eq!(hs.len(), 1);
+    assert!(hs[0].pos.x.is_finite() && hs[0].pos.y.is_finite());
+}
+
+#[test]
+fn arch_and_inflate_handles_follow_the_pointer() {
+    let r = rect();
+    let arch = &handles("textArchUp", &[], r)[0];
+    let deg = arch.value_at(Point::new(r.center().x, r.y0)) / 60_000.0;
+    assert!((deg - 270.0).abs() < 0.5, "{deg}");
+    let down = &handles("textArchDown", &[], r)[0];
+    // The arch-down handle starts on the left; a pointer at the bottom is 90°, which is adjust 90
+    // (guide angle 180 − adj).
+    let deg = down.value_at(Point::new(r.center().x, r.y1)) / 60_000.0;
+    assert!((deg - 90.0).abs() < 0.5, "{deg}");
+    let inf = &handles("textInflate", &[], r)[0];
+    let more = inf.value_at(Point::new(inf.pos.x, r.y0 - 80.0));
+    assert!(more > adjust_defaults("textInflate")[0], "{more}");
+    assert!((more - 20_000.0).abs() < 1.0, "{more}");
+}

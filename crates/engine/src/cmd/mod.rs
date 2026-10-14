@@ -7,6 +7,7 @@ pub mod background;
 pub mod design;
 pub mod edit;
 pub mod file;
+pub mod find;
 pub mod format;
 pub mod ideas;
 pub mod insert;
@@ -153,6 +154,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(transition::specs());
         v.extend(animation::specs());
         v.extend(table::specs());
+        v.extend(find::specs());
         v.extend(review::specs());
         v.extend(inspect::specs());
         v.extend(media::specs());

@@ -67,7 +67,7 @@ fn slides_scope(s: &Session, p: &Value) -> bool {
         || s.active().is_some_and(|d| d.selection.shapes.is_empty() && d.selection.text.is_none() && !d.selection.slides.is_empty())
 }
 
-fn media_of_shapes(shapes: &[Shape], out: &mut Vec<MediaId>) {
+pub(crate) fn media_of_shapes(shapes: &[Shape], out: &mut Vec<MediaId>) {
     deckcraft_model::walk(shapes, &mut |s, _| {
         match &s.kind {
             deckcraft_model::ShapeKind::Picture { fill } => out.push(fill.media),

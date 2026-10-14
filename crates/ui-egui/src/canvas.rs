@@ -241,32 +241,18 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             painter.extend(dash);
         }
     }
-    if app.ui.gridlines {
-        let step = 72.0 / 2.0 * scale;
-        let mut x = slide_rect.min.x + step;
-        while x < slide_rect.max.x {
-            painter.line_segment([pos2(x, slide_rect.min.y), pos2(x, slide_rect.max.y)], Stroke::new(0.5, Color32::from_black_alpha(40)));
-            x += step;
-        }
-        let mut y = slide_rect.min.y + step;
-        while y < slide_rect.max.y {
-            painter.line_segment([pos2(slide_rect.min.x, y), pos2(slide_rect.max.x, y)], Stroke::new(0.5, Color32::from_black_alpha(40)));
-            y += step;
-        }
+    if app.ui.gridlines
+        && let Some(step) = grid_line_step(app.session.prefs.grid_spacing, scale)
+    {
+        draw_grid(&painter, slide_rect, step);
     }
+    app.session.tool.guides_visible = app.ui.guides;
     if app.ui.guides {
-        let c = slide_rect.center();
-        painter.line_segment(
-            [pos2(c.x, slide_rect.min.y), pos2(c.x, slide_rect.max.y)],
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 120, 160)),
-        );
-        painter.line_segment(
-            [pos2(slide_rect.min.x, c.y), pos2(slide_rect.max.x, c.y)],
-            Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 120, 120, 160)),
-        );
+        draw_guides(app, &painter, xf, slide_rect, &t);
     }
     if app.ui.ruler {
         ruler(&painter, avail, slide_rect, scale, &t);
+        ruler_markers(app, ui, &painter, avail, xf, &t);
     }
     pointer(app, ui, &resp, xf);
     if !app.anim_preview_active() {
@@ -485,6 +471,236 @@ fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
     }
 }
 
+/// What is being dragged on the ruler.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RulerDrag {
+    /// First-line indent (the top triangle).
+    First,
+    /// Hanging indent (the bottom triangle): moves the left indent, the first line stays put.
+    Hanging,
+    /// Left indent (the box under the hanging triangle): moves both together.
+    Left,
+    /// The tab stop that was at this position (pt from the text area's left).
+    Tab(f64),
+}
+
+/// The paragraph's indents and tab stops on the horizontal ruler while text is being edited,
+/// draggable as in PowerPoint; a click on the ruler adds a left tab, dragging a tab off the
+/// ruler removes it.
+fn ruler_markers(app: &mut SlideApp, ui: &mut Ui, p: &egui::Painter, avail: Rect, xf: Xf, t: &Tokens) {
+    if app.session.active().is_none_or(|d| d.selection.text.is_none()) {
+        return;
+    }
+    let Ok(info) = app.session.execute("format.ruler", &json!({})) else { return };
+    if info["rotated"].as_bool().unwrap_or(true) {
+        return;
+    }
+    let f = |k: &str| info[k].as_f64().filter(|v| v.is_finite()).unwrap_or(0.0);
+    let (x0, width, ml, ind) = (f("x"), f("width"), f("marginLeft"), f("indent"));
+    let tabs: Vec<(f64, String)> = info["tabs"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|t| Some((t["pos"].as_f64()?, t["align"].as_str().unwrap_or("l").to_string()))).collect())
+        .unwrap_or_default();
+    let top = Rect::from_min_max(pos2(avail.min.x + 16.0, avail.min.y), pos2(avail.max.x, avail.min.y + 16.0));
+    let sx = |q: f64| xf.to_screen(Point::new(x0 + q, 0.0)).x;
+    let to_q = |x: f32| ((xf.to_slide(pos2(x, 0.0)).x - x0).clamp(0.0, width.max(0.0)) * 2.0).round() / 2.0;
+    // The text area's span, outlined on the ruler.
+    let area = Rect::from_min_max(pos2(sx(0.0), top.min.y + 2.0), pos2(sx(width), top.max.y - 1.0)).intersect(top);
+    p.rect_stroke(area, CornerRadius::ZERO, Stroke::new(1.0, t.text_faint.gamma_multiply(0.5)), egui::StrokeKind::Inside);
+
+    let resp = ui.interact(top, ui.id().with("ruler_markers"), Sense::click_and_drag());
+    let id = ui.id().with("ruler_drag");
+    let mut drag: Option<RulerDrag> = ui.data(|d| d.get_temp::<RulerDrag>(id));
+    let pointer = resp.interact_pointer_pos().or(resp.hover_pos());
+    if resp.drag_started()
+        && let Some(at) = ui.input(|i| i.pointer.press_origin()).or(resp.interact_pointer_pos())
+    {
+        let near = |q: f64| (sx(q) - at.x).abs() <= 5.0;
+        let y = at.y - top.min.y;
+        drag = if let Some((pos, _)) = tabs.iter().find(|(pos, _)| near(*pos) && y >= 8.0) {
+            Some(RulerDrag::Tab(*pos))
+        } else if y < 6.0 && near(ml + ind) {
+            Some(RulerDrag::First)
+        } else if (6.0..11.0).contains(&y) && near(ml) {
+            Some(RulerDrag::Hanging)
+        } else if y >= 11.0 && near(ml) {
+            Some(RulerDrag::Left)
+        } else {
+            None
+        };
+        ui.data_mut(|d| match drag {
+            Some(v) => {
+                d.insert_temp(id, v);
+            }
+            None => {
+                d.remove::<RulerDrag>(id);
+            }
+        });
+    }
+    // Where each marker is drawn: the dragged one follows the pointer.
+    let live = drag.zip(pointer.filter(|_| resp.dragged())).map(|(d, at)| (d, to_q(at.x), at.y > top.max.y + 20.0));
+    let (mut first, mut left) = (ml + ind, ml);
+    match live {
+        Some((RulerDrag::First, q, _)) => first = q,
+        Some((RulerDrag::Hanging, q, _)) => left = q,
+        Some((RulerDrag::Left, q, _)) => {
+            first = q + ind;
+            left = q;
+        }
+        _ => {}
+    }
+    let col = t.text_dim;
+    let tri = |x: f32, y0: f32, down: bool| {
+        let (a, b) = if down { (y0, y0 + 5.0) } else { (y0 + 5.0, y0) };
+        p.add(egui::Shape::convex_polygon(vec![pos2(x - 4.0, a), pos2(x + 4.0, a), pos2(x, b)], t.card, Stroke::new(1.0, col)));
+    };
+    tri(sx(first), top.min.y + 1.0, true);
+    tri(sx(left), top.min.y + 6.0, false);
+    p.rect(
+        Rect::from_min_max(pos2(sx(left) - 4.0, top.min.y + 11.5), pos2(sx(left) + 4.0, top.max.y - 0.5)),
+        CornerRadius::ZERO,
+        t.card,
+        Stroke::new(1.0, col),
+        egui::StrokeKind::Inside,
+    );
+    for (pos, align) in &tabs {
+        let (q, gone) = match live {
+            Some((RulerDrag::Tab(from), q, off)) if (from - pos).abs() < 0.5 => (q, off),
+            _ => (*pos, false),
+        };
+        if gone {
+            continue;
+        }
+        tab_glyph(p, pos2(sx(q), top.max.y - 2.0), align, t.text);
+    }
+    // The tab selector in the ruler's corner: a click cycles left, center, right, decimal; a click
+    // on the ruler then sets that kind of stop.
+    let kind_id = ui.id().with("ruler_tab_kind");
+    let mut kind: usize = ui.data(|d| d.get_temp(kind_id)).unwrap_or(0);
+    let corner = Rect::from_min_size(avail.min, vec2(16.0, 16.0));
+    let cr = ui.interact(corner, ui.id().with("ruler_tab_selector"), Sense::click());
+    const KINDS: [(&str, &str); 4] = [("l", "Left Tab"), ("ctr", "Center Tab"), ("r", "Right Tab"), ("dec", "Decimal Tab")];
+    if cr.clicked() {
+        kind = (kind + 1) % KINDS.len();
+        ui.data_mut(|d| d.insert_temp(kind_id, kind));
+    }
+    let (kind_align, kind_label) = KINDS[kind % KINDS.len()];
+    cr.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, kind_label));
+    let cr = cr.on_hover_text(format!("{kind_label} (click to change)"));
+    p.rect_stroke(
+        corner.shrink(2.0),
+        CornerRadius::same(2),
+        Stroke::new(1.0, if cr.hovered() { t.accent } else { t.text_faint }),
+        egui::StrokeKind::Inside,
+    );
+    tab_glyph(p, pos2(corner.center().x - 1.0, corner.center().y + 3.0), kind_align, t.text);
+    if drag.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+
+    // Commit on release; a click on bare ruler adds a left tab.
+    if resp.drag_stopped() {
+        if let (Some(d), Some(at)) = (drag, pointer) {
+            let q = to_q(at.x);
+            let r = match d {
+                RulerDrag::First => app.run("format.paragraph", json!({"indentFirst": q - ml})),
+                RulerDrag::Hanging => app.run("format.paragraph", json!({"indentLeft": q, "indentFirst": ml + ind - q})),
+                RulerDrag::Left => app.run("format.paragraph", json!({"indentLeft": q})),
+                RulerDrag::Tab(from) if at.y > top.max.y + 20.0 => app.run("format.tabs", json!({"remove": from})),
+                RulerDrag::Tab(from) => app.run("format.tabs", json!({"move": {"from": from, "to": q}})),
+            };
+            if let Err(e) = r {
+                app.set_status(e);
+            }
+        }
+        ui.data_mut(|d| d.remove::<RulerDrag>(id));
+    } else if resp.clicked()
+        && let Some(at) = resp.interact_pointer_pos()
+        && at.x >= area.min.x
+        && at.x <= area.max.x
+    {
+        let near_tab = tabs.iter().any(|(pos, _)| (sx(*pos) - at.x).abs() <= 5.0);
+        if resp.double_clicked() || near_tab {
+            // A double-click on a stop opens the Tabs dialog, as in PowerPoint.
+            if resp.double_clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("tabs"));
+            }
+        } else {
+            let _ = app.run("format.tabs", json!({"add": {"pos": to_q(at.x), "align": kind_align}}));
+        }
+    }
+}
+
+/// A tab-stop mark with its foot at `at`: └ left, ┴ center, ┘ right, ┴ with a dot decimal.
+fn tab_glyph(p: &egui::Painter, at: Pos2, align: &str, col: Color32) {
+    let (x, y) = (at.x, at.y);
+    let st = Stroke::new(1.5, col);
+    p.line_segment([pos2(x, y - 6.0), pos2(x, y)], st);
+    match align {
+        "r" => {
+            p.line_segment([pos2(x - 5.0, y), pos2(x, y)], st);
+        }
+        "ctr" => {
+            p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
+        }
+        "dec" => {
+            p.line_segment([pos2(x - 4.0, y), pos2(x + 4.0, y)], st);
+            p.circle_filled(pos2(x + 3.0, y - 4.0), 1.0, col);
+        }
+        _ => {
+            p.line_segment([pos2(x, y), pos2(x + 5.0, y)], st);
+        }
+    }
+}
+
+/// The presentation's drawing guides; the one being dragged at its new place, labelled with its
+/// distance from the slide's centre in points.
+fn draw_guides(app: &SlideApp, painter: &egui::Painter, xf: Xf, slide: Rect, t: &Tokens) {
+    let Some(st) = app.session.active() else { return };
+    let size = st.doc.slide_size;
+    let drag = app.session.tool.guide_drag;
+    for (i, g) in st.doc.guides.iter().enumerate() {
+        let (pos, active) = match drag {
+            Some((di, p)) if di == i => (p, true),
+            _ => (g.pos, app.session.tool.guide_hover == Some(i)),
+        };
+        let col = if active { t.accent } else { Color32::from_rgba_unmultiplied(120, 120, 120, 170) };
+        let stroke = Stroke::new(1.0, col);
+        let (a, b) = if g.vertical {
+            let x = xf.to_screen(Point::new(pos, 0.0)).x;
+            (pos2(x, slide.min.y), pos2(x, slide.max.y))
+        } else {
+            let y = xf.to_screen(Point::new(0.0, pos)).y;
+            (pos2(slide.min.x, y), pos2(slide.max.x, y))
+        };
+        // Dashed, like PowerPoint's guides.
+        let len = (b - a).length();
+        let dir = (b - a) / len.max(1.0);
+        let mut d = 0.0;
+        while d < len {
+            painter.line_segment([a + dir * d, a + dir * (d + 4.0).min(len)], stroke);
+            d += 7.0;
+        }
+        if drag.is_some_and(|(di, _)| di == i) {
+            let centre = if g.vertical { size.width / 2.0 } else { size.height / 2.0 };
+            let off = pos - centre;
+            let side = match (g.vertical, off < 0.0, off > 0.0) {
+                (true, true, _) => " left of centre",
+                (true, _, true) => " right of centre",
+                (false, true, _) => " above centre",
+                (false, _, true) => " below centre",
+                _ => " (centre)",
+            };
+            let label = format!("{:.0} pt{side}", off.abs());
+            let at = if g.vertical { pos2(a.x + 6.0, slide.min.y + 6.0) } else { pos2(slide.min.x + 6.0, a.y + 4.0) };
+            let galley = painter.layout_no_wrap(label, theme::font(11.0), t.text);
+            let r = Rect::from_min_size(at, galley.size()).expand(3.0);
+            painter.rect_filled(r, CornerRadius::same(3), t.card);
+            painter.galley(at, galley, t.text);
+        }
+    }
+}
+
 fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     if crate::eyedropper::canvas(app, ui, resp, xf) {
         return;
@@ -500,6 +716,11 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     let tol = (4.0 / xf.scale) as f64;
     let m = mods(ui);
     let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) else { return };
+    // The rulers have their own controls; a press there mustn't reach the slide (and end text
+    // editing). A drag already under way keeps going over them.
+    if app.ui.ruler && !app.session.tool.dragging() && (pos.y < resp.rect.min.y + 16.0 || pos.x < resp.rect.min.x + 16.0) {
+        return;
+    }
     let p = xf.to_slide(pos);
     let ev = |kind| PointerEvent { kind, x: p.x, y: p.y, mods: m, tol };
     let primary = ui.input(|i| i.pointer.primary_pressed());
@@ -538,7 +759,7 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
             _ => egui::CursorIcon::ResizeHorizontal,
         },
         (_, Some(Hit::Rotate { .. })) => egui::CursorIcon::Alias,
-        (_, Some(Hit::Adjust { .. } | Hit::LineEnd { .. })) => egui::CursorIcon::PointingHand,
+        (_, Some(Hit::Adjust { .. } | Hit::Warp { .. } | Hit::LineEnd { .. })) => egui::CursorIcon::PointingHand,
         (_, Some(Hit::Shape { text: true, .. })) => {
             if app.session.active().is_some_and(|d| d.selection.text.is_some()) {
                 egui::CursorIcon::Text
@@ -547,7 +768,11 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
             }
         }
         (_, Some(Hit::Shape { .. })) => egui::CursorIcon::Move,
-        _ => egui::CursorIcon::Default,
+        _ => match app.session.tool.guide_drag.map(|g| g.0).or(app.session.tool.guide_hover) {
+            Some(i) if app.session.active().and_then(|d| d.doc.guides.get(i)).is_some_and(|g| g.vertical) => egui::CursorIcon::ResizeHorizontal,
+            Some(_) => egui::CursorIcon::ResizeVertical,
+            None => egui::CursorIcon::Default,
+        },
     };
     if resp.hovered() {
         ui.ctx().set_cursor_icon(cursor);
@@ -652,6 +877,10 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
             }
             let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
             for hd in &geo.handles {
+                let q = xf.to_screen(a * hd.pos);
+                painter.circle(q, 4.5, Color32::from_rgb(0xFF, 0xD2, 0x3F), Stroke::new(1.0, Color32::from_rgb(0x8A, 0x6A, 0x00)));
+            }
+            for hd in deckcraft_engine::tools::wordart_handles(&st.doc, &st.selection, sh, x.w, x.h) {
                 let q = xf.to_screen(a * hd.pos);
                 painter.circle(q, 4.5, Color32::from_rgb(0xFF, 0xD2, 0x3F), Stroke::new(1.0, Color32::from_rgb(0x8A, 0x6A, 0x00)));
             }
@@ -955,6 +1184,14 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 let _ = app.run("shape.editPoints", json!({"on": true}));
                 ui.close();
             }
+            if ui.button("Font…").clicked() {
+                let _ = app.run("format.fontDialog", json!({}));
+                ui.close();
+            }
+            if ui.button("Paragraph…").clicked() {
+                let _ = app.run("format.paragraphDialog", json!({}));
+                ui.close();
+            }
             ui.menu_button("Bring to Front", |ui| {
                 crate::ribbon::menu_item(app, ui, crate::icons::Icon::BringToFront, "Bring to Front", "arrange.bringToFront", json!({}));
                 crate::ribbon::menu_item(app, ui, crate::icons::Icon::BringForward, "Bring Forward", "arrange.bringForward", json!({}));
@@ -1006,6 +1243,19 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                     }
                 }
             });
+            ui.menu_button("Grid and Guides", |ui| {
+                let mut on = app.ui.guides;
+                if ui.checkbox(&mut on, "Guides").clicked() {
+                    let _ = app.run("view.guides", json!({"on": on}));
+                }
+                for (label, vertical) in [("Add Vertical Guide", true), ("Add Horizontal Guide", false)] {
+                    if ui.button(label).clicked() {
+                        let _ = app.run("guide.add", json!({"vertical": vertical}));
+                        let _ = app.run("view.guides", json!({"on": true}));
+                        ui.close();
+                    }
+                }
+            });
             if ui.button("Reset Slide").clicked() {
                 let _ = app.run("slide.reset", json!({}));
                 ui.close();
@@ -1020,6 +1270,42 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
             }
         }
     });
+}
+
+/// Screen-point distance between grid lines. `spacing` is the grid spacing in slide points;
+/// `scale` maps slide points onto the screen. `None` when the grid would not be a finite set of
+/// lines (bad inputs, or so fine that a line would land on every pixel).
+fn grid_line_step(spacing: f64, scale: f32) -> Option<f32> {
+    if !spacing.is_finite() || !(1.0..=288.0).contains(&spacing) || !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let step = (spacing as f32) * scale;
+    if !step.is_finite() || step < 1.0 {
+        return None;
+    }
+    Some(step)
+}
+
+fn draw_grid(painter: &egui::Painter, slide: Rect, step: f32) {
+    let stroke = Stroke::new(0.5, Color32::from_black_alpha(40));
+    // A denser grid than this paints a grey slab and costs a frame. Skip it.
+    if !grid_fits(slide.width(), step) || !grid_fits(slide.height(), step) {
+        return;
+    }
+    let mut x = slide.min.x + step;
+    while x < slide.max.x {
+        painter.line_segment([pos2(x, slide.min.y), pos2(x, slide.max.y)], stroke);
+        x += step;
+    }
+    let mut y = slide.min.y + step;
+    while y < slide.max.y {
+        painter.line_segment([pos2(slide.min.x, y), pos2(slide.max.x, y)], stroke);
+        y += step;
+    }
+}
+
+fn grid_fits(span: f32, step: f32) -> bool {
+    span.is_finite() && span > 0.0 && step >= 1.0 && span / step <= 800.0
 }
 
 #[cfg(test)]
@@ -1113,4 +1399,24 @@ mod tests {
         h.run_steps(2);
         assert_near(mid, slide_point(&h, c), "zoom out");
     }
+
+    #[test]
+    fn grid_step_follows_spacing_and_rejects_unusable_values() {
+        let step = super::grid_line_step(72.0, 0.5).unwrap_or(0.0);
+        assert!((step - 36.0).abs() < 1e-3, "{step}");
+        assert!(super::grid_line_step(6.0, 1.0).is_some());
+        assert!(super::grid_line_step(0.0, 1.0).is_none());
+        assert!(super::grid_line_step(f64::NAN, 1.0).is_none());
+        assert!(super::grid_line_step(1_000.0, 1.0).is_none());
+        assert!(super::grid_line_step(6.0, 0.0).is_none());
+        assert!(super::grid_line_step(6.0, 0.1).is_none(), "a 6 pt grid at 10% zoom is finer than one screen point");
+    }
 }
+
+#[cfg(test)]
+#[path = "ruler_tests.rs"]
+mod ruler_tests;
+
+#[cfg(test)]
+#[path = "guides_tests.rs"]
+mod guides_tests;

@@ -2,7 +2,7 @@
 //! names and alt text.
 
 use deckcraft_color::{ColorTransform, Rgba, SchemeSlot};
-use deckcraft_model::style::{Dash, Glow, Gradient, GradientShape, GradientStop, LineEnd, PatternFill, PictureFill, Reflection, Shadow};
+use deckcraft_model::style::{Dash, Glow, Gradient, GradientShape, GradientStop, LineEnd, PatternFill, PictureFill, PictureMode, Reflection, Shadow};
 use deckcraft_model::{ColorRef, Effects, Fill, Geom, Line, ShapeStyle};
 use serde_json::{Value, json};
 
@@ -77,7 +77,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Shape Fill",
             ["Shape Format", "Shape Styles"],
             None,
-            "{color? | none?: true | gradient?: {stops: [[pos, color]], angle?, kind?: linear|radial} | picture?: base64 | pattern?: {preset, fg, bg} | transparency?: 0..1 | reset?: true, ids?}",
+            "{color? | none?: true | gradient?: {stops: [[pos, color]], angle?, kind?: linear|radial} | picture?: base64 | pattern?: {preset, fg, bg} | transparency?: 0..1 | reset?: true, ids?}; pictureProps?: {tile?: bool, offsetX?, offsetY?: pt, scaleX?, scaleY?: 0..10, align?: tl|t|tr|l|ctr|r|bl|b|br, mirror?: none|x|y|xy, stretch?: [l, t, r, b] fractions, rotateWithShape?: bool} adjusts a picture fill",
             has_selection,
             fill
         ),
@@ -528,8 +528,9 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
         None
     };
     let transparency = f64_param(p, "transparency");
-    if new_fill.is_none() && transparency.is_none() {
-        return Err(bad("shape.fill", "give `color`, `none`, `gradient`, `pattern`, `picture`, `transparency` or `reset`"));
+    let pic_props = p.get("pictureProps").filter(|v| v.is_object());
+    if new_fill.is_none() && transparency.is_none() && pic_props.is_none() {
+        return Err(bad("shape.fill", "give `color`, `none`, `gradient`, `pattern`, `picture`, `pictureProps`, `transparency` or `reset`"));
     }
     // Transparency on an inherited (style) fill needs the effective colour.
     let st = s.doc()?;
@@ -557,6 +558,14 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(f) = &new_fill {
             sh.fill.clone_from(f);
         }
+        if let (Some(pp), Some(Fill::Picture(pf))) = (pic_props, sh.fill.as_mut()) {
+            picture_props(pf, pp);
+        }
+        if let (Some(t), Some(Fill::Picture(pf))) = (transparency, sh.fill.as_mut()) {
+            let a = 1.0 - t.clamp(0.0, 1.0);
+            pf.alpha = (a < 1.0).then_some(a);
+            return Ok(());
+        }
         if let Some(t) = transparency {
             let base = sh.fill.clone().or_else(|| ctx_fill.iter().find(|(i, _)| *i == sh.id).and_then(|(_, f)| f.clone()));
             if let Some(Fill::Solid { mut color }) = base {
@@ -569,6 +578,54 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })
+}
+
+/// Applies Format Shape ▸ Picture or texture fill options to a picture fill.
+fn picture_props(pf: &mut PictureFill, pp: &Value) {
+    let f = |k: &str| pp.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+    if let Some(up) = pp.get("rotateWithShape").and_then(Value::as_bool) {
+        pf.upright = !up;
+    }
+    match pp.get("tile").and_then(Value::as_bool) {
+        Some(true) if !matches!(pf.mode, PictureMode::Tile { .. }) => {
+            pf.mode = PictureMode::Tile { tx: 0.0, ty: 0.0, sx: 1.0, sy: 1.0, flip: "none".into(), align: "tl".into() };
+        }
+        Some(false) if !matches!(pf.mode, PictureMode::Stretch { .. }) => pf.mode = PictureMode::default(),
+        _ => {}
+    }
+    match &mut pf.mode {
+        PictureMode::Tile { tx, ty, sx, sy, flip, align } => {
+            if let Some(v) = f("offsetX") {
+                *tx = v.clamp(-4000.0, 4000.0);
+            }
+            if let Some(v) = f("offsetY") {
+                *ty = v.clamp(-4000.0, 4000.0);
+            }
+            if let Some(v) = f("scaleX") {
+                *sx = v.clamp(0.01, 10.0);
+            }
+            if let Some(v) = f("scaleY") {
+                *sy = v.clamp(0.01, 10.0);
+            }
+            if let Some(m) = pp.get("mirror").and_then(Value::as_str).filter(|m| matches!(*m, "none" | "x" | "y" | "xy")) {
+                *flip = m.to_string();
+            }
+            if let Some(a) =
+                pp.get("align").and_then(Value::as_str).filter(|a| matches!(*a, "tl" | "t" | "tr" | "l" | "ctr" | "r" | "bl" | "b" | "br"))
+            {
+                *align = a.to_string();
+            }
+        }
+        PictureMode::Stretch { fill_rect } => {
+            if let Some(arr) = pp.get("stretch").and_then(Value::as_array) {
+                for (slot, v) in fill_rect.iter_mut().zip(arr) {
+                    if let Some(v) = v.as_f64().filter(|v| v.is_finite()) {
+                        *slot = v.clamp(-10.0, 0.99);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn line_end(v: &str) -> Option<LineEnd> {

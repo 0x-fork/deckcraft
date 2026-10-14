@@ -2558,3 +2558,109 @@ fn smooth_corners_makes_a_squircle_outline() {
     let sh = back.slides.iter().flat_map(|sl| sl.shapes.iter()).find(|sh| matches!(sh.geom, deckcraft_model::Geom::Custom { .. }));
     assert!(sh.is_some(), "a custom outline in the saved file");
 }
+
+#[test]
+fn wordart_adjust_handle_drags_and_undoes() {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    let id =
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 60.0, 420.0, 200.0], "text": "ARCHED"})).unwrap()["id"].as_u64().unwrap();
+    let sid = model::ShapeId(id as u32);
+    {
+        let st = s.doc_mut().unwrap();
+        let slide = st.selection.slide;
+        let mut doc = (*st.doc).clone();
+        let sh = model::find_shape_mut(&mut std::sync::Arc::make_mut(&mut doc.slides[slide]).shapes, sid).unwrap();
+        sh.text.as_mut().unwrap().body.warp = Some("textArchUp".into());
+        st.doc = std::sync::Arc::new(doc);
+    }
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    let (at, top) = {
+        let st = s.doc().unwrap();
+        let sh = st.shape(sid).unwrap();
+        let x = cmd::xfrm_of(&st.doc, &st.selection, sh);
+        let hs = tools::wordart_handles(&st.doc, &st.selection, sh, x.w, x.h);
+        assert_eq!(hs.len(), 1);
+        let at = x.affine() * hs[0].pos;
+        (at, deckcraft_geom::Point::new(x.center().x, x.y))
+    };
+    assert!(matches!(s.hit_test(at, 4.0), Some(tools::Hit::Warp { index: 0, .. })));
+    let ev = |kind, p: deckcraft_geom::Point| PointerEvent { kind, x: p.x, y: p.y, mods: Mods::default(), tol: 4.0 };
+    s.pointer(ev(PointerKind::Down, at)).unwrap();
+    s.pointer(ev(PointerKind::Drag, top)).unwrap();
+    s.pointer(ev(PointerKind::Up, top)).unwrap();
+    let adj = s.doc().unwrap().shape(sid).unwrap().text.as_ref().unwrap().body.warp_adj.clone();
+    let deg = adj.first().copied().unwrap_or(0.0) / 60_000.0;
+    assert!((deg - 270.0).abs() < 2.0, "{deg} from {adj:?}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    let body = &s.doc().unwrap().shape(sid).unwrap().text.as_ref().unwrap().body;
+    assert_eq!(body.warp.as_deref(), Some("textArchUp"));
+    assert!(body.warp_adj.is_empty(), "undo restores the default adjusts");
+}
+
+#[test]
+fn shape_picture_fill_options_tile_offset_and_round_trip() {
+    use deckcraft_model::style::PictureMode;
+    let mut img = image::RgbaImage::new(4, 4);
+    img.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let pf = |s: &Session| match s.doc().unwrap().selected_shapes()[0].fill.clone() {
+        Some(deckcraft_model::Fill::Picture(pf)) => pf,
+        other => panic!("{other:?}"),
+    };
+    // Options without a picture fill are a no-op, not an error.
+    s.execute("shape.fill", &json!({"pictureProps": {"tile": true}})).unwrap();
+    s.execute("shape.fill", &json!({"picture": cmd::base64_encode(&png)})).unwrap();
+    s.execute("shape.fill", &json!({"pictureProps": {"stretch": [0.1, 0.2, 5, "x"]}})).unwrap();
+    assert_eq!(pf(&s).mode, PictureMode::Stretch { fill_rect: [0.1, 0.2, 0.99, 0.0] });
+    s.execute("shape.fill", &json!({"pictureProps": {"tile": true, "offsetX": 12, "offsetY": -3, "scaleX": 0.5, "scaleY": 50, "align": "ctr", "mirror": "xy", "rotateWithShape": false}})).unwrap();
+    s.execute("shape.fill", &json!({"pictureProps": {"align": "bogus", "offsetX": f64::NAN}, "transparency": 0.4})).unwrap();
+    let want = PictureMode::Tile { tx: 12.0, ty: -3.0, sx: 0.5, sy: 10.0, flip: "xy".into(), align: "ctr".into() };
+    let got = pf(&s);
+    assert_eq!(got.mode, want);
+    assert!(got.upright);
+    assert!((got.alpha.unwrap() - 0.6).abs() < 1e-9);
+    // PPTX round trip keeps the options.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": "p.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let doc = &s.doc().unwrap().doc;
+    let back = doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| match &sh.fill {
+        Some(deckcraft_model::Fill::Picture(pf)) => Some(pf.clone()),
+        _ => None,
+    });
+    let back = back.unwrap();
+    assert_eq!(back.mode, want);
+    assert!(back.upright);
+    assert!((back.alpha.unwrap() - 0.6).abs() < 1e-6);
+}
+
+#[test]
+fn find_and_replace_across_shapes_and_notes() {
+    let mut s = session();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100], "text": "Old plan, old team\nboldly"})).unwrap();
+    s.execute("slide.notes", &json!({"text": "Discuss the old plan"})).unwrap();
+    let q = json!({"text": "old"});
+    let found = s.execute("text.find", &q).unwrap();
+    let n = found.as_array().unwrap().len();
+    assert!(n >= 3, "{found}");
+    let whole = s.execute("text.find", &json!({"text": "old", "wholeWords": true, "matchCase": true})).unwrap();
+    assert_eq!(whole.as_array().unwrap().len(), n - 2, "Old and boldly are not whole lower-case matches");
+
+    let first = found[0].clone();
+    assert_eq!((first["para"].as_u64(), first["start"].as_u64()), (Some(0), Some(0)));
+    s.execute("text.replace", &json!({"text": "old", "with": "New", "at": first})).unwrap();
+    assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+
+    let r = s.execute("text.replace", &json!({"text": "old", "with": "new", "wholeWords": true})).unwrap();
+    assert_eq!(r["replaced"].as_u64(), Some(n as u64 - 2));
+    let text = s.doc().unwrap().doc.slides[0].shapes.iter().filter_map(|x| x.text.as_ref()).map(|t| t.text()).collect::<Vec<_>>().join("|");
+    assert!(text.contains("New plan, new team\nboldly"), "{text}");
+    assert!(s.execute("text.replace", &json!({"text": "zebra", "with": "x"})).is_err());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+}

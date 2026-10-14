@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod compare;
 pub mod connect;
 pub mod drawtable;
 pub mod fonts;
@@ -21,6 +22,7 @@ pub mod sample;
 pub mod sounds;
 pub mod spell;
 pub mod templates;
+pub mod thesaurus;
 pub mod tools;
 
 use std::sync::Arc;
@@ -214,6 +216,8 @@ pub struct DocState {
     pub missing_fonts: Vec<String>,
     /// An input method's composition in progress ([`Composition`]).
     pub composition: Option<Composition>,
+    /// Review › Compare in progress: the revised copy.
+    pub compare: Option<compare::Compare>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -240,6 +244,7 @@ impl DocState {
             title,
             missing_fonts: Vec::new(),
             composition: None,
+            compare: None,
         }
     }
     pub fn is_dirty(&self) -> bool {
