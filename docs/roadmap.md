@@ -19,6 +19,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (canvas animation preview; beta item 9 keeps the timeline; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options; previous: core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M9 text warps: adjust handles drag; gallery and command remain) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (after beta: pen pressure scales ink width, tilt remains; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -102,6 +103,10 @@ Handout masters, edit points, text warp and 3-D, proofing dictionaries, Zoom, re
 GIF export, legacy `.ppt` import and `.odp` (owner decision), GPU rasterization and hardware video
 decode, the other 21 languages with RTL mirroring, a larger template gallery (six original starters
 ship), and local AI features (owner decision on models). Itemized with hours in [gaps.md](gaps.md).
+GIF export, legacy `.ppt` import and `.odp` (owner decision), GPU rasterization, hardware video
+decode, pen tilt (pressure already scales ink width) and pinch zoom, the other 21 languages with
+RTL mirroring, a larger original template gallery, and local AI features (owner decision on
+models). Itemized with hours in [gaps.md](gaps.md).
 
 ## Milestones
 
@@ -175,5 +180,6 @@ plan above.
 | 2026-10-13 | trivial | Canvas animation preview landed; beta item 9 keeps the timeline and preview from the selected effect |
 | 2026-10-13 | minor | M10: Grid Options dialog; New Window stays open |
 | 2026-10-13 | minor | M9: WordArt adjust handles drag; the Transform gallery and command stay open |
+| 2026-10-14 | trivial | After beta: pen pressure scales ink width; tilt and pinch zoom remain |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

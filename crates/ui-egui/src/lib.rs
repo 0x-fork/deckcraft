@@ -186,9 +186,7 @@ fn command_for(purpose: FilePurpose, name: &str, bytes: &[u8]) -> Result<&'stati
         FilePurpose::Picture => Some("insert.picture"),
         FilePurpose::Audio => Some("insert.audio"),
         FilePurpose::Video => Some("insert.video"),
-        FilePurpose::ChangePicture => {
-            deckcraft_engine::cmd::insert::content_type(name, bytes).starts_with("image/").then_some("picture.change")
-        }
+        FilePurpose::ChangePicture => deckcraft_engine::cmd::insert::content_type(name, bytes).starts_with("image/").then_some("picture.change"),
         FilePurpose::Open => open_command(name),
         FilePurpose::Infer => infer_command(name, bytes),
     };
@@ -2686,7 +2684,7 @@ mod tests {
         harness.state_mut().run("app.dialog", json!({"id": "language"})).unwrap();
         // The anchored window settles over its first frames; click once it stays put.
         harness.run_steps(4);
-        harness.get_by_label("Français").click();
+        harness.get_by_label("Français (France)").click();
         harness.run_steps(2);
         harness.get_by_label("OK").click();
         harness.run_steps(2);

@@ -38,7 +38,7 @@ fn picture_fill_shows_transparency_and_tiling() {
     let mut s = Session::with_new();
     s.execute("design.background", &json!({"picture": PNG, "name": "dot.png"})).unwrap();
     let mut h = harness(SlideApp::new(s, Services::default()));
-    let _ = h.get_by_label("Format Background");
+    assert!(h.query_all_by_label("Format Background").next().is_some(), "the pane is open");
     let _ = h.get_by_label("Picture or texture fill");
     assert!(h.query_all_by_label("Transparency").next().is_some());
     h.get_by_label("Tile picture as texture").click();

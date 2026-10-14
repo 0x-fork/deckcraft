@@ -1224,7 +1224,13 @@ impl Session {
             || matches!(
                 self.hit_test(p, tol),
                 Some(
-                    Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::Warp { .. } | Hit::Frame { .. } | Hit::TableColumn { .. } | Hit::TableRow { .. }
+                    Hit::Resize { .. }
+                        | Hit::Rotate { .. }
+                        | Hit::Adjust { .. }
+                        | Hit::Warp { .. }
+                        | Hit::Frame { .. }
+                        | Hit::TableColumn { .. }
+                        | Hit::TableRow { .. }
                 )
             )
         {

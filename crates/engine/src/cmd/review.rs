@@ -46,7 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "review.addToDictionary", "Add to Dictionary", ["Review", "Proofing"], None, "{word} → {word, file} (append to the user dictionary file; not an undo step)", always, add_to_dictionary),
         cmd!(query "review.dictionary", "Spelling Dictionary", ["Review", "Proofing"], None, "{lang?} → {lang, available, found, folders} (whether review.spelling has a dictionary, and which file)", always, dictionary_info),
-        cmd!(query "review.thesaurus", "Thesaurus", ["Review", "Proofing"], None, "{word?: default the selected word, or the word at the caret} → {word, senses: [{word, synonyms}]}", has_doc, thesaurus),
+        cmd!(query "review.thesaurus", "Thesaurus", ["Review", "Proofing"], None, "{word? (default: the selected word, or the word at the caret)} → {word, senses: [{word, synonyms}]}", has_doc, thesaurus),
         cmd!(
             "review.replaceWord",
             "Insert Synonym",

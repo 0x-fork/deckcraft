@@ -27,6 +27,8 @@ Coordinates are slide points (1/72 inch; a 16:9 slide is 960 × 540) unless note
 | `ui.key` / `ui.text` | `{key, shift?, alt?, cmd?}` / `{text}` | Keyboard input (also drives a running slide show: digits then Enter go to that slide, G is See All Slides, Z arms zoom, T pauses the presenter timer, R resets it, `[` and `]` change notes size, Esc clears a slide number, the grid and zoom before it leaves the show) |
 | `ui.pointer` | `{events: [{kind: down\|drag\|up\|move\|doubleclick\|tripleclick, x, y, mods?}], mods?}` | Drive the active tool in slide points through the same code path as the mouse |
 | `ui.key` / `ui.text` | `{key, shift?, alt?, cmd?}` / `{text}` | Keyboard input (also drives a running slide show; Escape stops the canvas animation preview) |
+| `ui.pointer` | `{events: [{kind: down\|drag\|up\|move\|doubleclick\|tripleclick, x, y, mods?, pressure?}], mods?}` | Drive the active tool in slide points through the same code path as the mouse. `pressure` is `0..=1` for a pen; omit it for a mouse |
+| `ui.key` / `ui.text` | `{key, shift?, alt?, cmd?}` / `{text}` | Keyboard input (also drives a running slide show) |
 | `ui.ime` | `{preedit, active?: [start, end]}` / `{commit}` | An input method's composition through egui, as a real one arrives: shown in place on the slide or in a focused field; `{"preedit": ""}` cancels |
 | `ui.move` / `ui.click` / `ui.drag` | screen points | Real egui pointer input — reaches every widget, menu and pane |
 | `ui.set` | `{tab?, view?, pane?, notes?, zoom?, brightness?, ruler?, gridlines?, guides?, …}` | UI state (returns the full state) |

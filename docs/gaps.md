@@ -33,6 +33,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options dialog; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt adjust handles drag; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (pen pressure scales ink width; tilt, pinch and trackpad gestures remain; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -396,7 +397,6 @@ Detail in [ui-parity.md](ui-parity.md).
   Insert Object…). Size and Position, Bullets and Numbering, Action Settings and Date and Time are in.
   Format Background picture options (transparency, tile, offset, scale, alignment, mirror, and Apply
   to All copying a picture) are pane controls on `design.background`, not another dialog. 8–14 h.
-  Insert Object…). Size and Position, Bullets and Numbering, Action Settings and Date and Time are in. 8–14 h.
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60. The Font dialog is in (family, size, style, underline,
   colour, strikethrough, baseline, caps, character spacing, one undo step). Still missing: Bullets
   and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object…. 6–12 h.
@@ -419,6 +419,7 @@ Detail in [hardware-parity.md](hardware-parity.md).
 - **No pen pressure or tilt for ink**; no pinch-zoom (it does not keep the point under the pointer). A two-finger twist does rotate the selected shapes. 3–6 h.
 - **No pen pressure or tilt for ink**; no pinch-zoom. A trackpad swipe turns the page when the
   slide fits the window, and during the show. 2–4 h for pinch-zoom.
+- **Pen pressure scales ink width** when the pointer reports it (a mouse or a missing reading stays at the pen width; a stroke saved as a flat `0.5` still draws at the pen width). Tilt is not read. No pinch-zoom or other trackpad gestures. 2–4 h.
 
 ## Localization
 
@@ -512,6 +513,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Font dialog sets typeface, size, style, underline, colour, strikethrough, baseline, caps and character spacing in one step |
 | 2026-10-13 | minor | Grid Options dialog sets spacing, snap and whether gridlines and guides show; the on-screen grid follows that spacing |
 | 2026-10-13 | minor | WordArt adjust handles: a selected text warp shows one yellow handle per adjust, and dragging it sets that guide value (gallery and command still open) |
+| 2026-10-14 | minor | Pen pressure scales ink width when the pointer reports it; tilt, pinch-zoom and other trackpad gestures remain |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
