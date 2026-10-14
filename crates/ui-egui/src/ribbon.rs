@@ -2648,6 +2648,10 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
         rows(ui, |ui| {
             small(app, ui, Icon::ChangePicture, "Change Picture", "app.insertPictureDialog", json!({}));
             small(app, ui, Icon::ResetPicture, "Reset Picture", "picture.reset", json!({}));
+            let (_, r) = small_button_ex(ui, Icon::CompressPictures, "Compress Pictures", enabled(app, "picture.compress"), false, true);
+            if let Some(r) = r {
+                egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).width(260.0).show(|ui| compress_menu(app, ui));
+            }
         });
     });
     group(ui, |ui| {
@@ -3514,4 +3518,41 @@ fn smooth_corners_row(app: &mut SlideApp, ui: &mut egui::Ui) {
             run(app, "shape.smoothCorners", json!({"smoothing": state.1, "radius": state.0}));
         }
     });
+}
+
+/// Compress Pictures options, as in PowerPoint's dialog: resolution, apply to this picture or
+/// all, delete cropped areas. The choices last for the session.
+fn compress_menu(app: &mut SlideApp, ui: &mut Ui) {
+    let id = egui::Id::new("compress_pictures_opts");
+    let (mut ppi, mut only_selected, mut delete_cropped): (u32, bool, bool) = ui.data_mut(|d| d.get_temp(id).unwrap_or((220, true, true)));
+    ui.label(egui::RichText::new("Compression options").strong());
+    ui.checkbox(&mut only_selected, "Apply only to this picture");
+    ui.checkbox(&mut delete_cropped, "Delete cropped areas of pictures");
+    ui.separator();
+    ui.label(egui::RichText::new("Resolution").strong());
+    for (v, label) in [
+        (330, "HD (330 ppi): good quality for high-definition displays"),
+        (220, "Print (220 ppi): excellent quality on most printers and screens"),
+        (150, "Web (150 ppi): good for web pages and projectors"),
+        (96, "E-mail (96 ppi): minimise document size for sharing"),
+    ] {
+        ui.radio_value(&mut ppi, v, label);
+    }
+    ui.data_mut(|d| d.insert_temp(id, (ppi, only_selected, delete_cropped)));
+    ui.separator();
+    if ui.button("Compress").clicked() {
+        let p = json!({"ppi": ppi, "deleteCropped": delete_cropped, "all": !only_selected});
+        match app.session.execute("picture.compress", &p) {
+            Ok(r) => {
+                let kb = |v: &Value| v.as_u64().unwrap_or(0) / 1024;
+                let msg = match r["pictures"].as_u64().unwrap_or(0) {
+                    0 => "Pictures are already at or below that resolution".to_string(),
+                    n => format!("Compressed {n} picture(s): {} KB → {} KB", kb(&r["before"]), kb(&r["after"])),
+                };
+                app.set_status(msg);
+            }
+            Err(e) => app.set_status(e.to_string()),
+        }
+        ui.close();
+    }
 }

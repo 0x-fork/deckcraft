@@ -349,17 +349,13 @@ selected effect, and most of the effect gallery. Detail in
 - **Estimate:** 3–6 h to review, land and round-trip.
 
 ### Smaller missing rows
-Zoom (summary/section/slide, 6–10 h), reuse slides pane with thumbnails (1–2 h; `slide.reuse` inserts from a file), laser pointer (1–2 h), transition
-sounds (1–2 h), artistic effects (6–10 h), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
-sounds (1–2 h), artistic effects (3–6 h for the other 15 of 22; 7 approximated and round-tripped), remove background (6–10 h; needs a model or a classical
-Zoom (summary/section/slide, 6–10 h), reuse slides pane with thumbnails (1–2 h), transition
-sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; needs a model or a classical
-matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
-show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
-encryption), ink to shape/text (6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
-show (8–12 h), compare presentations beyond slide-level accept (reject, per-object accept,
-markers on the slide: 3–5 h), password protection (4–6 h, ECMA-376 agile
-encryption), ink to shape/text (6–10 h), icons and 3-D models (8–14 h, needs an open icon set).
+Zoom (summary/section/slide, 6–10 h), reuse slides pane with thumbnails (1–2 h; `slide.reuse`
+inserts from a file), laser pointer (1–2 h), transition sounds (1–2 h), artistic effects (3–6 h
+for the other 15 of 22; 7 approximated and round-tripped), remove background (6–10 h; needs a
+model or a classical matte), insert screenshot (2–3 h), record audio/screen and record slide show
+(8–12 h), compare presentations beyond slide-level accept (reject, per-object accept, markers on
+the slide: 3–5 h), password protection (4–6 h, ECMA-376 agile encryption), ink to shape/text
+(6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
 
 ## UI/UX
 

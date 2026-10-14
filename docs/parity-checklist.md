@@ -210,7 +210,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Pictures | Remove background | P2 | M |
 | Pictures | Picture styles and borders | P1 | D |
 | Pictures | Change / reset picture | P1 | D |
-| Pictures | Compress pictures | P2 | M |
+| Pictures | Compress pictures | P2 | D |
 | Pictures | Paste image from clipboard (fails on Windows and Linux, #53) | P0 | P |
 | Pictures | Insert screenshot | P2 | M |
 | Media | Insert audio (any common format) | P0 | D |
