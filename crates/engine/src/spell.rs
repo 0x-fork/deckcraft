@@ -676,6 +676,9 @@ pub struct Word {
     pub end: usize,
     pub text: String,
     pub lang: String,
+    /// The same word twice in a row: this is the second, and deleting `cut..end` removes it with
+    /// the space before it.
+    pub repeated: Option<usize>,
 }
 
 /// The words of `p`, each with its run's language (`lang` on the run, else `default`). Words
@@ -716,7 +719,11 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
             if !part.is_empty()
                 && let Some(c) = chars.get(k)
             {
-                out.push(Word { start: k, end: k + n, text: part.to_string(), lang: lang_of(c.1) });
+                if p.runs.get(c.1).is_some_and(|r| r.props.no_proof == Some(true)) {
+                    // Marked "do not check spelling".
+                } else {
+                    out.push(Word { start: k, end: k + n, text: part.to_string(), lang: lang_of(c.1), repeated: None });
+                }
             }
             k += n + 1;
         }
@@ -724,7 +731,27 @@ pub fn paragraph_words(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Wor
     out
 }
 
-/// The misspelt words of `p`, each checked in its own language (languages with no dictionary
+/// Words that repeat the word just before them (`the the`), with only spaces between, as
+/// PowerPoint flags them. Hyphenated parts and different languages don't count.
+pub fn repeated(p: &deckcraft_model::Paragraph, default: &str) -> Vec<Word> {
+    let words = paragraph_words(p, default);
+    let chars: Vec<char> = p.runs.iter().flat_map(|r| r.content().chars()).collect();
+    let mut out = vec![];
+    for pair in words.windows(2) {
+        let (a, b) = (&pair[0], &pair[1]);
+        let gap = chars.get(a.end..b.start).unwrap_or(&[]);
+        if !gap.is_empty()
+            && gap.iter().all(|c| *c == ' ' || *c == '\u{a0}' || *c == '\t')
+            && a.lang == b.lang
+            && a.text.to_lowercase() == b.text.to_lowercase()
+        {
+            out.push(Word { repeated: Some(a.end), ..b.clone() });
+        }
+    }
+    out
+}
+
+/// The misspelt and repeated words of `p`, each checked in its own language (languages with no dictionary
 /// installed are skipped), leaving out `ignore` (lower-case).
 pub fn misspelt(p: &deckcraft_model::Paragraph, default: &str, ignore: &[String]) -> Vec<Word> {
     let mut dicts: HashMap<String, Option<Arc<Dictionary>>> = HashMap::new();
@@ -735,7 +762,18 @@ pub fn misspelt(p: &deckcraft_model::Paragraph, default: &str, ignore: &[String]
             let d = dicts.entry(w.lang.clone()).or_insert_with(|| dictionary(&w.lang));
             d.as_ref().is_some_and(|d| !is_correct(d, &w.text))
         })
-        .collect()
+        .chain(repeated(p, default))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .fold(vec![], |mut v: Vec<Word>, w| {
+            // A repeated misspelt word is reported once, as repeated.
+            if let Some(i) = v.iter().position(|x| x.start == w.start) {
+                v[i] = w;
+            } else {
+                v.push(w);
+            }
+            v
+        })
 }
 
 /// Use `d` for `lang` from now on in this process (a dictionary the app loaded itself).
@@ -830,6 +868,20 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
                 ("l'été", "de-DE", 34)
             ]
         );
+    }
+
+    #[test]
+    fn repeated_words_and_no_proof_runs() {
+        use deckcraft_model::{Paragraph, Run, RunProps};
+        let p = Paragraph::new("See the the plan, plan. The THE end");
+        let r: Vec<(usize, usize, Option<usize>)> = repeated(&p, "en-US").iter().map(|w| (w.start, w.end, w.repeated)).collect();
+        assert_eq!(r, vec![(8, 11, Some(7)), (28, 31, Some(27))]);
+        let p = Paragraph {
+            runs: vec![Run::new("check "), Run::with("xyzzy qq", RunProps { no_proof: Some(true), ..Default::default() }), Run::new(" done")],
+            ..Default::default()
+        };
+        let w: Vec<String> = paragraph_words(&p, "en-US").into_iter().map(|w| w.text).collect();
+        assert_eq!(w, vec!["check", "done"]);
     }
 
     #[test]

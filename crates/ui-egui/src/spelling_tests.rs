@@ -179,3 +179,101 @@ fn squiggles_in_table_cells_and_notes_and_on_the_ui_thread() {
     let words: Vec<&str> = v.as_array().unwrap().iter().filter_map(|w| w["word"].as_str()).collect();
     assert_eq!(words, vec!["Soth", "Remmeber", "totl"]);
 }
+
+fn right_click(h: &mut Harness<'_, SlideApp>, pos: egui::Pos2) {
+    h.event(egui::Event::PointerMoved(pos));
+    for pressed in [true, false] {
+        h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::default() });
+    }
+    h.run_steps(3);
+}
+
+/// The notes pane's right-click menu corrects a word and deletes a repeated one; the Language
+/// dialog marks text and Do Not Check Spelling clears its squiggles.
+#[test]
+fn notes_menu_language_dialog_and_repeated_words() {
+    use egui::accesskit::Role;
+    let aff = "SET UTF-8\nTRY esianrtolcdugmphbyfvkwzxjq\n";
+    let dic = "6\nthe\nplan\nremember\nis\ngood\nwork\n";
+    deckcraft_engine::spell::install("xx-NM", deckcraft_engine::spell::Dictionary::parse(aff.as_bytes(), dic.as_bytes()));
+    let mut app = SlideApp::new(Session::with_new(), Services::default());
+    app.session.execute("slide.layout", &json!({"layout": "blank"})).ok();
+    let id = app
+        .session
+        .execute("shape.insert", &json!({"preset": "rect", "rect": [80, 120, 700, 160], "text": "the plan is is good wrok"}))
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    app.session.execute("format.size", &json!({"size": 40})).unwrap();
+    app.session.execute("format.language", &json!({"lang": "xx-NM"})).unwrap();
+    let lang = deckcraft_model::RunProps { lang: Some("xx-NM".into()), ..Default::default() };
+    app.session
+        .edit(|doc, _| {
+            std::sync::Arc::make_mut(&mut doc.slides[0]).notes = deckcraft_model::TextBody {
+                paragraphs: vec![deckcraft_model::Paragraph {
+                    runs: vec![deckcraft_model::Run::with("Remmeber the the plan", lang.clone())],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            };
+            Ok(())
+        })
+        .unwrap();
+    let st = app.session.active().unwrap().clone();
+    // "is is" is flagged as repeated, "wrok" as misspelt.
+    assert_eq!(app.squiggles.settle(&st).len(), 2);
+    let mut h = Harness::builder().with_size(egui::vec2(1100.0, 760.0)).build_ui_state(
+        |ui, app: &mut SlideApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(8);
+    if let (Ok(path), Ok(img)) = (std::env::var("DECKCRAFT_PNG_OUT_NOTES"), h.render()) {
+        let _ = img.save(path);
+    }
+    // Right-click the notes' first word.
+    let notes = h.query_all_by_role(Role::MultilineTextInput).next().map(|n| n.rect()).unwrap();
+    right_click(&mut h, egui::pos2(notes.left() + 14.0, notes.top() + 8.0));
+    if let (Ok(path), Ok(img)) = (std::env::var("DECKCRAFT_PNG_OUT_NOTES_MENU"), h.render()) {
+        let _ = img.save(path);
+    }
+    assert_eq!(h.state().squiggles.notes_menu.as_ref().map(|w| w.word.as_str()), Some("Remmeber"));
+    h.get_by_label("Remember").click();
+    h.run_steps(3);
+    let notes_text = |h: &Harness<'_, SlideApp>| h.state().session.active().unwrap().doc.slides[0].notes_text();
+    assert_eq!(notes_text(&h), "Remember the the plan");
+    // The repeated "the": its squiggle starts after "Remember the ".
+    h.run_steps(4);
+    let x = h.query_all_by_role(Role::MultilineTextInput).next().map(|n| n.rect()).unwrap();
+    let mut found = false;
+    for dx in (60..160).step_by(6) {
+        right_click(&mut h, egui::pos2(x.left() + dx as f32, x.top() + 8.0));
+        if h.state().squiggles.notes_menu.as_ref().is_some_and(|w| w.delete_from.is_some()) {
+            found = true;
+            break;
+        }
+        h.event(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() });
+        h.run_steps(2);
+    }
+    assert!(found, "no repeated word menu in the notes");
+    h.get_by_label("Delete Repeated Word").click();
+    h.run_steps(3);
+    assert_eq!(notes_text(&h), "Remember the plan");
+    // Language dialog: Do Not Check Spelling on the shape clears its squiggles.
+    h.state_mut().session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    h.state_mut().dialog = Some(crate::dialogs::Dialog::new("language"));
+    h.run_steps(4);
+    if let (Ok(path), Ok(img)) = (std::env::var("DECKCRAFT_PNG_OUT_LANG"), h.render()) {
+        let _ = img.save(path);
+    }
+    assert_eq!(crate::dialogs::selected_language(h.state()).0, "xx-NM");
+    h.get_by_label("Do not check spelling or grammar").click();
+    h.run_steps(2);
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    assert_eq!(crate::dialogs::selected_language(h.state()), ("xx-NM".to_string(), true));
+    let st = h.state().session.active().unwrap().clone();
+    assert!(h.state_mut().squiggles.settle(&st).is_empty(), "nothing in text marked Do Not Check is flagged, repeats included");
+}

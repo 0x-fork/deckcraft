@@ -785,7 +785,44 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
         }
         // A misspelt word under the pointer: its suggestions, then Ignore All and Add to Dictionary.
         if let Some(w) = app.squiggles.menu_word.clone() {
-            if w.suggestions.is_empty() {
+            if let Some(from) = w.delete_from {
+                if ui.button(egui::RichText::new("Delete Repeated Word").strong()).clicked() {
+                    let cut: String = format!("{}{}", " ".repeat(w.start - from), w.word);
+                    // The gap is spaces; take it from the text so tabs or no-break spaces match.
+                    let gap = app
+                        .session
+                        .active()
+                        .and_then(|st| match w.tag {
+                            crate::squiggles::Tag::Shape { id, para } => st.shape(id)?.text.as_ref()?.paragraphs.get(para).map(|p| p.text()),
+                            crate::squiggles::Tag::Cell { id, row, col, para } => match &st.shape(id)?.kind {
+                                deckcraft_model::ShapeKind::Table(tb) => tb.cell(row, col)?.text.paragraphs.get(para).map(|p| p.text()),
+                                _ => None,
+                            },
+                            crate::squiggles::Tag::Notes { .. } => None,
+                        })
+                        .map(|t| t.chars().skip(from).take(w.start + w.word.chars().count() - from).collect::<String>())
+                        .unwrap_or(cut);
+                    let mut p = json!({"para": 0, "start": from, "word": gap, "to": ""});
+                    if let Some(o) = p.as_object_mut() {
+                        match w.tag {
+                            crate::squiggles::Tag::Shape { id, para } => {
+                                o.insert("shape".into(), json!(id));
+                                o.insert("para".into(), json!(para));
+                            }
+                            crate::squiggles::Tag::Cell { id, row, col, para } => {
+                                o.insert("shape".into(), json!(id));
+                                o.insert("row".into(), json!(row));
+                                o.insert("col".into(), json!(col));
+                                o.insert("para".into(), json!(para));
+                            }
+                            crate::squiggles::Tag::Notes { .. } => {}
+                        }
+                    }
+                    let _ = app.run("review.spellingChange", p);
+                    app.squiggles.menu_word = None;
+                    ui.close();
+                }
+            } else if w.suggestions.is_empty() {
                 ui.label(egui::RichText::new("(no spelling suggestions)").weak());
             }
             for to in &w.suggestions {

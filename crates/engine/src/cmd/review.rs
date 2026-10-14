@@ -34,7 +34,7 @@ pub fn specs() -> Vec<CommandSpec> {
             |s, p| neighbour(s, p, false)
         ),
         cmd!(query "review.accessibility", "Check Accessibility", ["Review", "Accessibility"], None, "{} → [{slide, shape, issue}]", has_doc, accessibility),
-        cmd!(query "review.spelling", "Spelling", ["Review", "Proofing"], Some("F7"), "{lang?, ignore?:[word]} → [{slide, shape?, row?, col?, notes?, para, start, end, word, lang, suggestions}] (shapes, table cells and notes; each run in its own language, lang? for runs without one; Hunspell dictionaries installed on the system, else a built-in list of common misspellings)", has_doc, spelling),
+        cmd!(query "review.spelling", "Spelling", ["Review", "Proofing"], Some("F7"), "{lang?, ignore?:[word]} → [{slide, shape?, row?, col?, notes?, para, start, end, word, lang, suggestions}] (shapes, table cells and notes; repeated words as {repeated, deleteFrom}; runs marked noProof skipped; each run in its own language, lang? for runs without one; Hunspell dictionaries installed on the system, else a built-in list of common misspellings)", has_doc, spelling),
         cmd!(
             "review.spellingChange",
             "Change Spelling",
@@ -308,8 +308,16 @@ fn spelling(s: &mut Session, p: &Value) -> Result<Value> {
     let mut out = vec![];
     // Each misspelt word of `para`, reported with `at` (where the paragraph is) merged in.
     let mut check = |para: &deckcraft_model::Paragraph, at: Value, out: &mut Vec<Value>| {
+        for w in crate::spell::repeated(para, &default) {
+            let mut v = json!({"start": w.start, "end": w.end, "word": w.text, "lang": w.lang, "repeated": true, "deleteFrom": w.repeated, "suggestions": []});
+            if let (Some(o), Some(a)) = (v.as_object_mut(), at.as_object()) {
+                o.extend(a.clone());
+            }
+            out.push(v);
+        }
+        let rep: Vec<usize> = crate::spell::repeated(para, &default).iter().map(|w| w.start).collect();
         for w in crate::spell::paragraph_words(para, &default) {
-            if ignore.contains(&w.text.to_lowercase()) {
+            if ignore.contains(&w.text.to_lowercase()) || rep.contains(&w.start) {
                 continue;
             }
             let dict = dicts.entry(w.lang.clone()).or_insert_with(|| crate::spell::dictionary(&w.lang)).clone();
