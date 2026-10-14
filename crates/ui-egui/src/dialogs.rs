@@ -121,6 +121,186 @@ fn num(d: &mut Dialog, key: &str, default: f64) -> f64 {
     d.get(key, "").trim().trim_end_matches(['"', '%', ' ']).parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(default)
 }
 
+/// What Insert Hyperlink would edit on the current selection.
+#[derive(Clone, Debug, PartialEq)]
+enum CurrentLink {
+    /// Nothing is linked. OK sets a new link (a caret at a word boundary inserts text).
+    None,
+    /// One link covers the text span or every selected shape.
+    One(deckcraft_model::text::Hyperlink),
+    /// The selection mixes different links. OK must not replace them until a new target is chosen.
+    Mixed,
+}
+
+/// Fields the Insert Hyperlink dialog opens with.
+#[derive(Clone, Debug, PartialEq)]
+struct HyperlinkSeed {
+    /// `url`, `email` or `slide`.
+    mode: &'static str,
+    url: String,
+    email: String,
+    slide: usize,
+    tip: String,
+    highlight: bool,
+    /// The action is not a web address, email or slide this dialog edits (or the selection mixes
+    /// links). OK leaves it in place until the user picks a different target.
+    preserve: bool,
+}
+
+impl HyperlinkSeed {
+    /// A new link: the address starts at `https://`, as the dialog always did.
+    fn blank() -> Self {
+        HyperlinkSeed { mode: "url", url: "https://".into(), email: String::new(), slide: 0, tip: String::new(), highlight: false, preserve: false }
+    }
+}
+
+/// Turn one hyperlink into dialog fields. A slide that is no longer in the deck, and actions this
+/// dialog does not edit (next slide, a program, …), are preserved so OK does not retarget them.
+fn seed_of_link(link: &deckcraft_model::text::Hyperlink, slide_ids: &[deckcraft_model::SlideId]) -> HyperlinkSeed {
+    use deckcraft_model::text::Action;
+    let mut seed = HyperlinkSeed {
+        mode: "url",
+        url: String::new(),
+        email: String::new(),
+        slide: 0,
+        tip: link.tooltip.clone(),
+        highlight: link.highlight_click,
+        preserve: true,
+    };
+    match &link.action {
+        Action::Url { url } => {
+            seed.preserve = false;
+            if let Some(email) = url.strip_prefix("mailto:") {
+                seed.mode = "email";
+                seed.email = email.to_string();
+                seed.url = "https://".into();
+            } else {
+                seed.url = url.clone();
+            }
+        }
+        Action::Slide { slide } => {
+            if let Some(i) = slide_ids.iter().position(|id| id == slide) {
+                seed.preserve = false;
+                seed.mode = "slide";
+                seed.slide = i;
+                seed.url = "https://".into();
+            }
+        }
+        _ => {}
+    }
+    seed
+}
+
+fn seed_from(current: CurrentLink, slide_ids: &[deckcraft_model::SlideId]) -> HyperlinkSeed {
+    match current {
+        CurrentLink::None => HyperlinkSeed::blank(),
+        CurrentLink::Mixed => HyperlinkSeed { preserve: true, url: String::new(), ..HyperlinkSeed::blank() },
+        CurrentLink::One(link) => seed_of_link(&link, slide_ids),
+    }
+}
+
+/// Links on the half-open span `[a, b)`. A point span is a new link: Insert Hyperlink inserts
+/// there instead of editing a neighbouring run.
+fn link_covering(body: &deckcraft_model::text::TextBody, a: (usize, usize), b: (usize, usize)) -> CurrentLink {
+    if a == b {
+        return CurrentLink::None;
+    }
+    let mut seen: Option<Option<deckcraft_model::text::Hyperlink>> = None;
+    for (pi, para) in body.paragraphs.iter().enumerate() {
+        if pi < a.0 || pi > b.0 {
+            continue;
+        }
+        let from = if pi == a.0 { a.1 } else { 0 };
+        let to = if pi == b.0 { b.1 } else { usize::MAX };
+        if from >= to {
+            continue;
+        }
+        let mut acc = 0usize;
+        let mut covered = false;
+        for run in &para.runs {
+            let len = run.char_len();
+            let end = acc + len;
+            if len > 0 && end > from && acc < to {
+                covered = true;
+                match &seen {
+                    None => seen = Some(run.props.link.clone()),
+                    Some(prev) if prev == &run.props.link => {}
+                    Some(_) => return CurrentLink::Mixed,
+                }
+            }
+            acc = end;
+        }
+        if !covered && para.char_len() == 0 {
+            match &seen {
+                None => seen = Some(para.end_props.link.clone()),
+                Some(prev) if prev == &para.end_props.link => {}
+                Some(_) => return CurrentLink::Mixed,
+            }
+        }
+    }
+    match seen {
+        Some(Some(link)) => CurrentLink::One(link),
+        _ => CurrentLink::None,
+    }
+}
+
+fn common_click(clicks: impl IntoIterator<Item = Option<deckcraft_model::text::Hyperlink>>) -> CurrentLink {
+    let mut clicks = clicks.into_iter();
+    let Some(first) = clicks.next() else { return CurrentLink::None };
+    for next in clicks {
+        if next != first {
+            return CurrentLink::Mixed;
+        }
+    }
+    match first {
+        Some(link) => CurrentLink::One(link),
+        None => CurrentLink::None,
+    }
+}
+
+/// The link Insert Hyperlink would edit: text when a caret or selection is active, otherwise the
+/// click action shared by the selected shapes.
+fn hyperlink_seed_of(st: Option<&deckcraft_engine::DocState>) -> HyperlinkSeed {
+    let Some(st) = st else { return HyperlinkSeed::blank() };
+    let ids: Vec<deckcraft_model::SlideId> = st.doc.slides.iter().map(|s| s.id).collect();
+    let current = if let Some(t) = &st.selection.text {
+        match deckcraft_engine::cmd::text::body_of(st, t) {
+            Some(body) => {
+                let (a, b) = deckcraft_engine::cmd::text::format_range(st, t);
+                link_covering(body, a, b)
+            }
+            None => CurrentLink::None,
+        }
+    } else {
+        common_click(st.selected_shapes().into_iter().map(|sh| sh.click.clone()))
+    };
+    seed_from(current, &ids)
+}
+
+/// OK writes a link unless the dialog is holding an action it does not edit and the user has not
+/// chosen a new target.
+fn hyperlink_should_apply(seed: &HyperlinkSeed, mode: &str, url: &str, email: &str, slide: usize) -> bool {
+    if !seed.preserve {
+        return true;
+    }
+    if mode != seed.mode {
+        return true;
+    }
+    match mode {
+        "email" => email != seed.email,
+        "slide" => slide != seed.slide,
+        _ => url != seed.url,
+    }
+}
+
+fn hyperlink_command(mode: &str, url: &str, email: &str, slide: usize, tip: &str, highlight: bool) -> Value {
+    match mode {
+        "slide" => json!({"slide": slide, "tooltip": tip, "highlightClick": highlight}),
+        "email" => json!({"url": format!("mailto:{email}"), "tooltip": tip, "highlightClick": highlight}),
+        _ => json!({"url": url, "tooltip": tip, "highlightClick": highlight}),
+    }
+}
+
 /// Returns true when the dialog should close.
 fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     let run = |app: &mut SlideApp, id: &str, p: Value| {
@@ -202,7 +382,9 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             apply || apply_all || d.fields.contains_key("cancel")
         }
         "hyperlink" => {
-            let mode = d.get("mode", "url");
+            let seed = hyperlink_seed_of(app.session.active());
+            let slide_default = seed.slide.to_string();
+            let mode = d.get("mode", seed.mode);
             ui.horizontal(|ui| {
                 if ui.selectable_label(mode == "url", "Web Page or File").clicked() {
                     d.fields.insert("mode".into(), "url".into());
@@ -221,7 +403,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         .active()
                         .map(|s| s.doc.slides.iter().enumerate().map(|(i, sl)| format!("{}. {}", i + 1, sl.title())).collect())
                         .unwrap_or_default();
-                    let sel = d.get("slide", "0").parse::<usize>().unwrap_or(0);
+                    let sel = d.get("slide", &slide_default).parse::<usize>().unwrap_or(0);
                     egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
                         for (i, t) in titles.iter().enumerate() {
                             if ui.selectable_label(sel == i, t).clicked() {
@@ -230,19 +412,20 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         }
                     });
                 }
-                "email" => field(ui, d, "Email address:", "email", ""),
-                _ => field(ui, d, "Address:", "url", "https://"),
+                "email" => field(ui, d, "Email address:", "email", &seed.email),
+                _ => field(ui, d, "Address:", "url", &seed.url),
             }
-            field(ui, d, "ScreenTip:", "tip", "");
+            field(ui, d, "ScreenTip:", "tip", &seed.tip);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
-                let tip = d.get("tip", "");
-                let p = match mode.as_str() {
-                    "slide" => json!({"slide": d.get("slide", "0").parse::<usize>().unwrap_or(0), "tooltip": tip}),
-                    "email" => json!({"url": format!("mailto:{}", d.get("email", "")), "tooltip": tip}),
-                    _ => json!({"url": d.get("url", ""), "tooltip": tip}),
-                };
-                run(app, "insert.hyperlink", p);
+                let mode_now = d.get("mode", seed.mode);
+                let url = d.get("url", &seed.url);
+                let email = d.get("email", &seed.email);
+                let slide = d.get("slide", &slide_default).parse::<usize>().unwrap_or(0);
+                let tip = d.get("tip", &seed.tip);
+                if hyperlink_should_apply(&seed, &mode_now, &url, &email, slide) {
+                    run(app, "insert.hyperlink", hyperlink_command(&mode_now, &url, &email, slide, &tip, seed.highlight));
+                }
             }
             ok || cancel
         }
@@ -1332,3 +1515,144 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
 #[cfg(test)]
 #[path = "size_position_tests.rs"]
 mod size_position_tests;
+
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::text::{Action, Hyperlink, Run, TextBody};
+    use deckcraft_model::{Presentation, SlideId};
+
+    use super::{
+        CurrentLink, HyperlinkSeed, common_click, hyperlink_command, hyperlink_seed_of, hyperlink_should_apply, link_covering, seed_from,
+        seed_of_link,
+    };
+
+    fn link(action: Action, tip: &str) -> Hyperlink {
+        Hyperlink { action, tooltip: tip.into(), highlight_click: false }
+    }
+
+    fn url(address: &str, tip: &str) -> Hyperlink {
+        let mut h = link(Action::Url { url: address.into() }, tip);
+        h.highlight_click = tip == "glow";
+        h
+    }
+
+    #[test]
+    fn no_link_opens_as_a_new_web_address() {
+        let seed = seed_from(CurrentLink::None, &[]);
+        assert_eq!(seed, HyperlinkSeed::blank());
+        assert!(hyperlink_should_apply(&seed, "url", "https://", "", 0));
+    }
+
+    #[test]
+    fn web_email_and_slide_links_fill_the_dialog() {
+        let ids = [SlideId(7), SlideId(9)];
+        let web = seed_of_link(&url("https://example.org", "See"), &ids);
+        assert_eq!(web.mode, "url");
+        assert_eq!(web.url, "https://example.org");
+        assert_eq!(web.tip, "See");
+        assert!(!web.preserve);
+        assert!(hyperlink_should_apply(&web, "url", "https://example.org", "", 0));
+
+        let mail = seed_of_link(&url("mailto:a@b.org", "Write"), &ids);
+        assert_eq!(mail.mode, "email");
+        assert_eq!(mail.email, "a@b.org");
+        assert_eq!(mail.tip, "Write");
+        assert_eq!(hyperlink_command("email", "", "a@b.org", 0, "Write", false)["url"], "mailto:a@b.org");
+
+        let slide = seed_of_link(&link(Action::Slide { slide: SlideId(9) }, "There"), &ids);
+        assert_eq!(slide.mode, "slide");
+        assert_eq!(slide.slide, 1);
+        assert_eq!(slide.tip, "There");
+        assert!(!slide.preserve);
+
+        let glow = url("https://example.org", "glow");
+        assert!(glow.highlight_click);
+        assert!(seed_of_link(&glow, &ids).highlight);
+        assert_eq!(hyperlink_command("url", "https://example.org", "", 0, "glow", true)["highlightClick"], true);
+    }
+
+    #[test]
+    fn actions_this_dialog_does_not_edit_survive_ok() {
+        let next = seed_of_link(&link(Action::NextSlide, "On"), &[]);
+        assert!(next.preserve);
+        assert_eq!(next.tip, "On");
+        assert_eq!(next.url, "");
+        assert!(!hyperlink_should_apply(&next, "url", "", "", 0));
+        assert!(hyperlink_should_apply(&next, "url", "https://example.org", "", 0));
+
+        let gone = seed_of_link(&link(Action::Slide { slide: SlideId(99) }, ""), &[SlideId(1)]);
+        assert!(gone.preserve, "a missing slide is not retargeted to the first slide");
+        assert!(!hyperlink_should_apply(&gone, "url", "", "", 0));
+
+        let mixed = seed_from(CurrentLink::Mixed, &[]);
+        assert!(mixed.preserve);
+        assert!(!hyperlink_should_apply(&mixed, "url", "", "", 0));
+        assert!(hyperlink_should_apply(&mixed, "email", "", "a@b.org", 0));
+    }
+
+    #[test]
+    fn a_text_span_reports_the_link_it_covers() {
+        let mut body = TextBody::from_text("Hello world");
+        body.paragraphs[0].runs.clear();
+        body.paragraphs[0].runs.push(Run::new("Hello "));
+        let mut world = Run::new("world");
+        world.props.link = Some(url("https://example.org", "tip"));
+        body.paragraphs[0].runs.push(world);
+
+        assert_eq!(link_covering(&body, (0, 6), (0, 6)), CurrentLink::None, "a caret inserts; it does not edit the run beside it");
+        match link_covering(&body, (0, 6), (0, 11)) {
+            CurrentLink::One(h) => assert_eq!(h.tooltip, "tip"),
+            other => panic!("linked word, got {other:?}"),
+        }
+        assert_eq!(link_covering(&body, (0, 0), (0, 11)), CurrentLink::Mixed);
+
+        let mut other = url("https://example.org", "tip");
+        other.tooltip = "other".into();
+        assert_eq!(common_click([None, None]), CurrentLink::None);
+        assert!(matches!(common_click([Some(url("https://example.org", "tip"))]), CurrentLink::One(_)));
+        assert_eq!(common_click([Some(url("https://example.org", "tip")), Some(other)]), CurrentLink::Mixed);
+        assert_eq!(common_click(std::iter::empty()), CurrentLink::None);
+    }
+
+    #[test]
+    fn the_open_dialog_reads_the_caret_word_and_the_shape_click() {
+        let mut doc = Presentation::default();
+        let shape_id = {
+            let slide = std::sync::Arc::make_mut(&mut doc.slides[0]);
+            let mut body = TextBody::from_text("Hello world");
+            body.paragraphs[0].runs.clear();
+            body.paragraphs[0].runs.push(Run::new("Hello "));
+            let mut world = Run::new("world");
+            world.props.link = Some(url("https://example.org", "tip"));
+            body.paragraphs[0].runs.push(world);
+            slide.shapes[0].text = Some(body);
+            slide.shapes[0].id
+        };
+        let mut st = deckcraft_engine::DocState::new(doc, None, "t".into());
+        st.selection.text = Some(deckcraft_engine::TextSel { shape: shape_id, anchor: (0, 8), caret: (0, 8), ..Default::default() });
+        let seed = hyperlink_seed_of(Some(&st));
+        assert_eq!(seed.mode, "url");
+        assert_eq!(seed.url, "https://example.org");
+        assert_eq!(seed.tip, "tip");
+        assert!(!seed.preserve);
+
+        st.selection.text = None;
+        st.selection.shapes = vec![shape_id];
+        {
+            let doc = std::sync::Arc::make_mut(&mut st.doc);
+            let slide = std::sync::Arc::make_mut(&mut doc.slides[0]);
+            let shape = slide.shapes.iter_mut().find(|sh| sh.id == shape_id).unwrap();
+            let mut click = url("https://shape.example", "shape tip");
+            click.highlight_click = true;
+            shape.click = Some(click);
+        }
+        let seed = hyperlink_seed_of(Some(&st));
+        assert_eq!(seed.url, "https://shape.example");
+        assert_eq!(seed.tip, "shape tip");
+        assert!(seed.highlight);
+
+        st.selection.text = Some(deckcraft_engine::TextSel { shape: shape_id, anchor: (0, 11), caret: (0, 11), ..Default::default() });
+        let seed = hyperlink_seed_of(Some(&st));
+        assert_eq!(seed, HyperlinkSeed::blank(), "a caret at the end of the word inserts a new link");
+    }
+}

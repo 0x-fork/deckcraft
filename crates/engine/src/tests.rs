@@ -586,6 +586,22 @@ fn hyperlink_on_a_word_or_shape_links_it() {
     assert!(s.doc().unwrap().current_slide().unwrap().shapes[0].click.is_some(), "a selected shape gets the link as its click action");
 }
 
+#[test]
+fn hyperlink_can_keep_highlight_click() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("insert.hyperlink", &json!({"url": "https://example.org", "tooltip": "tip", "highlightClick": true})).unwrap();
+    let click = s.doc().unwrap().current_slide().unwrap().shapes[0].click.clone().unwrap();
+    assert_eq!(click.tooltip, "tip");
+    assert!(click.highlight_click);
+    assert_eq!(click.action, model::text::Action::Url { url: "https://example.org".into() });
+    s.execute("insert.hyperlink", &json!({"url": "https://example.org"})).unwrap();
+    let click = s.doc().unwrap().current_slide().unwrap().shapes[0].click.clone().unwrap();
+    assert!(!click.highlight_click, "omitting the flag still stores false");
+}
+
 /// A .pptx (base64) whose first slide's title is set in `font`.
 fn deck_in_font(font: &str) -> String {
     let mut p = deckcraft_model::Presentation::default();
