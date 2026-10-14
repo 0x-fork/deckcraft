@@ -308,9 +308,8 @@ pub(crate) fn media_bytes(p: &Value, cmd: &str) -> Result<(String, Vec<u8>)> {
         let bytes = base64_decode(d).ok_or_else(|| bad(cmd, "invalid base64 `data`"))?;
         return Ok((str_param(p, "name").unwrap_or("media").to_string(), bytes));
     }
-    #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = str_param(p, "path") {
-        let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+        let bytes = crate::io::read_file(path).map_err(EngineError::Other)?;
         let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "media".into());
         return Ok((name, bytes));
     }

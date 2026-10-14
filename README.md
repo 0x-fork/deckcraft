@@ -75,7 +75,7 @@ Today it can:
 - **Present**: transitions (including Morph), entrance/emphasis/exit and motion-path animations,
   by-paragraph builds, full-screen slide show, presenter view, pen, rehearse timings, media playback.
 - **Exchange files**: open and save PowerPoint `.pptx`, export PDF (slides, notes pages, handouts
-  with selectable text), PNG/JPEG and outlines. Unsaved work is kept by AutoRecover.
+  with selectable text), PNG/JPEG, an animated GIF of the deck and outlines. Unsaved work is kept by AutoRecover.
 - **Automate**: 200+ commands with undo, all scriptable from the CLI, a JSON control channel and an
   MCP server for AI agents.
 
@@ -150,6 +150,7 @@ deckcraft-cli commands format.          # list commands
 deckcraft-cli run --sample --cmd 'slide.new={"layout":"titleOnly","title":"Hello"}' --save hello.deckcraft
 deckcraft-cli mcp                       # MCP server over stdio (headless)
 deckcraft-cli mcp --connect 7990        # drive the running app (deckcraft --control 7990)
+deckcraft-cli mcp --automation-read-root DIR --automation-write-root DIR   # confine the headless agent to folders
 ```
 
 ## Roadmap

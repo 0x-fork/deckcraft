@@ -18,6 +18,7 @@ pub mod fillui;
 pub mod icons;
 pub mod media;
 pub mod menus;
+pub mod notes;
 pub mod opening;
 pub mod panes;
 mod preview;
@@ -36,6 +37,7 @@ pub mod toast;
 pub mod uifonts;
 pub mod widgets;
 
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 
 use deckcraft_engine::{Mods, Session, Target, UiRequest};
@@ -84,6 +86,8 @@ enum FilePurpose {
     Picture,
     Audio,
     Video,
+    /// Change Picture: the picture replaces the selected one (`picture.change`).
+    ChangePicture,
     /// A drop, or any other purpose: decide from the name and bytes.
     Infer,
 }
@@ -183,11 +187,15 @@ fn command_for(purpose: FilePurpose, name: &str, bytes: &[u8]) -> Result<&'stati
         FilePurpose::Picture => Some("insert.picture"),
         FilePurpose::Audio => Some("insert.audio"),
         FilePurpose::Video => Some("insert.video"),
+        FilePurpose::ChangePicture => deckcraft_engine::cmd::insert::content_type(name, bytes).starts_with("image/").then_some("picture.change"),
         FilePurpose::Open => open_command(name),
         FilePurpose::Infer => infer_command(name, bytes),
     };
     cmd.ok_or_else(|| format!("{name}: DeckCraft can't open this kind of file"))
 }
+
+/// How long a transient status message stays visible.
+const STATUS_LINGER_MS: f64 = 6000.0;
 
 /// Platform services injected by the host (desktop or web).
 #[derive(Default)]
@@ -390,6 +398,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
     ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
+    ("app.changePictureDialog", "Change Picture…", None, "{}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
     ("app.reuseSlidesDialog", "Reuse Slides…", None, "{keepFormatting?: bool}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
@@ -480,7 +489,7 @@ pub struct SlideApp {
     pub last_recovery: f64,
     /// Quit was confirmed (changes saved or discarded): let the window close.
     pub quit_confirmed: bool,
-    pub(crate) notes_buf: (u64, usize, String),
+    pub(crate) notes_buf: (u64, usize, notes::Draft),
     /// Faces borrowed from the font database for text the interface fonts can't draw (#101).
     pub ui_fonts: uifonts::UiFonts,
     /// Thumbnail pane drag (slide index, current drop index).
@@ -493,6 +502,11 @@ pub struct SlideApp {
     pub sorter: sorter::State,
     /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
     pub(crate) slides_focused: bool,
+    /// A V key press or a Paste event arrived since the last V release (see `keyboard`).
+    v_seen: bool,
+    /// Which recent paths exist on disk, probed once per path per session (a dead network share
+    /// must not stall every frame). Not persisted.
+    recent_checked: HashMap<String, bool>,
     /// A trackpad twist is in progress (one undo step when it ends).
     twisting: bool,
     /// Next cancellation identity for a browser pick or a dropped file.
@@ -554,13 +568,15 @@ impl SlideApp {
             last_time: 0.0,
             last_recovery: 0.0,
             quit_confirmed: false,
-            notes_buf: (0, usize::MAX, String::new()),
+            notes_buf: (0, usize::MAX, notes::Draft::default()),
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
             doc_window: None,
             sorter: sorter::State::default(),
             slides_focused: false,
+            v_seen: false,
+            recent_checked: HashMap::new(),
             twisting: false,
             next_file_id: 1,
             pending_files: Vec::new(),
@@ -580,6 +596,56 @@ impl SlideApp {
     /// screen and the File tab, where there is no status bar.
     pub fn notify(&mut self, msg: impl Into<String>) {
         self.toast = Some(toast::Toast { text: msg.into(), at: now_ms() });
+    }
+
+    /// The transient status message while it is fresh; clears it once stale. Both the status bar
+    /// and the start screen draw it — the start screen has no status bar, and errors raised there
+    /// (a missing recent file, a failed sample) used to vanish (issue #172).
+    pub fn fresh_status(&mut self) -> Option<String> {
+        let (msg, at) = self.status.clone()?;
+        if now_ms() - at < STATUS_LINGER_MS {
+            Some(msg)
+        } else {
+            self.status = None;
+            None
+        }
+    }
+
+    /// Does this recent path exist on disk? Probed once per path per session and only on
+    /// desktop (the web build has no file system to ask): a stat on a dead network share can
+    /// block for seconds, so it must not repeat on every frame. A stale answer is harmless —
+    /// opening still tries and reports, and a successful open re-probes.
+    pub fn recent_exists(&mut self, path: &str) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            true
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(ok) = self.recent_checked.get(path) {
+                return *ok;
+            }
+            // A stat on a dead network location (UNC share, URL) can block for the OS timeout,
+            // so remote-looking paths are never probed: they stay unmarked and are judged when
+            // opened. A disconnected mapped drive would still stall once — accepted.
+            if path.starts_with("\\\\") || path.contains("://") {
+                return true;
+            }
+            let ok = std::path::Path::new(path).is_file();
+            if self.recent_checked.len() > 64 {
+                let live: std::collections::HashSet<&String> = self.ui.recent.iter().collect();
+                self.recent_checked.retain(|p, _| live.contains(p));
+            }
+            self.recent_checked.insert(path.to_string(), ok);
+            ok
+        }
+    }
+
+    /// Drop a path from the Recent list (its file is gone or the user asked for it).
+    pub fn forget_recent(&mut self, path: &str) {
+        self.ui.recent.retain(|p| p != path);
+        self.recent_checked.remove(path);
     }
 
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
@@ -676,6 +742,7 @@ impl SlideApp {
             "pptx" => ("pptx", "pptx", false),
             "outline" | "txt" => ("txt", "outline", false),
             "deckcraft" => ("deckcraft", "deckcraft", false),
+            "gif" => ("gif", "gif", false),
             other => {
                 self.set_status(format!("DeckCraft can't export “{other}”"));
                 return false;
@@ -699,12 +766,16 @@ impl SlideApp {
         let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
         let bytes = match format {
             "png" | "jpeg" => {
-                let scale = 2.0;
-                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale, ..Default::default() });
-                let dpi = deckcraft_render::dpi_for_scale(scale);
-                Ok(if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) })
+                // Every slide for "all slides", one download each, named like the desktop export (#64).
+                let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
+                let mut any = false;
+                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext) {
+                    any = self.download(&file, Ok(bytes)) || any;
+                }
+                return any;
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
+            "gif" => deckcraft_engine::cmd::file::gif_bytes(&doc, &extra),
             other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
         };
         self.download(&suggested, bytes)
@@ -937,6 +1008,7 @@ impl SlideApp {
                 }
                 self.pick_and_run("picture", "smartArt.picture", p);
             }
+            "app.changePictureDialog" => self.pick_and_insert("picture", "picture.change"),
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
             "app.reuseSlidesDialog" => self.pick_and_reuse(p.get("keepFormatting").and_then(Value::as_bool).unwrap_or(false)),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
@@ -1114,6 +1186,8 @@ impl SlideApp {
 
     /// A presentation was opened from `path`: first in the recent list, shown in Normal view.
     pub(crate) fn note_recent(&mut self, path: &str) {
+        self.status = None; // an older error (a missing file just before this one) must not linger
+        self.recent_checked.remove(path);
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
         self.ui.recent.truncate(RECENT_MAX);
@@ -1168,6 +1242,12 @@ impl SlideApp {
             }
         } else if self.services.open_async.is_some() {
             let id = self.begin_external_file(purpose);
+            // Change Picture: the picture that arrives replaces the selected one (#115).
+            if cmd == "picture.change"
+                && let Some(r) = self.pending_files.iter_mut().find(|r| r.id == id)
+            {
+                r.purpose = FilePurpose::ChangePicture;
+            }
             if let Some(f) = self.services.open_async.as_mut() {
                 f(purpose, id);
             }
@@ -1562,10 +1642,25 @@ impl SlideApp {
 
     /// Keyboard and clipboard for the slide (when no text field has focus).
     fn keyboard(&mut self, ctx: &egui::Context) {
+        let events = ctx.input(|i| i.events.clone());
+        // Ctrl+V with only an image on the clipboard: egui-winit sends no Paste event and swallows the
+        // key press, so the release of a V press never seen is the paste. Tracked even while a text
+        // field has focus, so that a V typed there is not taken for one.
+        let mut image_paste = false;
+        for e in &events {
+            match e {
+                egui::Event::Paste(_) | egui::Event::Key { key: egui::Key::V, pressed: true, .. } => self.v_seen = true,
+                egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. } => {
+                    // Only a release with Command/Ctrl held is a paste: a bare V release is not.
+                    let seen = std::mem::take(&mut self.v_seen);
+                    image_paste = !seen && (modifiers.command || modifiers.ctrl);
+                }
+                _ => {}
+            }
+        }
         if ctx.memory(|m| m.focused().is_some()) || self.dialog.as_ref().is_some_and(|d| d.modal()) || self.palette.is_some() {
             return;
         }
-        let events = ctx.input(|i| i.events.clone());
         if self.backstage.is_some() {
             // The File tab: its own keys (Esc goes back, arrows walk the side menu) and app
             // shortcuts (New, Open, Command Palette…); typing, pasting or deleting would edit the
@@ -1587,6 +1682,13 @@ impl SlideApp {
             }
             self.drain_requests();
             return;
+        }
+        let img = if image_paste { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
+        if let Some(png) = img {
+            let data = deckcraft_engine::cmd::base64_encode(&png);
+            if let Err(e) = self.session.execute("insert.picture", &json!({"name": "Pasted image.png", "data": data})) {
+                self.set_status(e.to_string());
+            }
         }
         for e in events {
             match e {
@@ -1624,6 +1726,12 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    if key == egui::Key::Tab {
+                        // The slide has the keyboard, so Tab is ours (indent, tab character, next
+                        // shape). Left to egui it would also focus the first ribbon widget, and
+                        // every key after it would go there instead of the slide (#78).
+                        ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+                    }
                     if key == egui::Key::Escape && self.anim_preview.is_some() && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
                         self.anim_preview = None;
                         continue;
@@ -1874,6 +1982,25 @@ pub fn now_ms() -> f64 {
     }
 }
 
+/// Images for the browser download: the current slide, or every slide (named `<name>1.png`,
+/// `<name>2.png`... like the native export) when `all`.
+fn web_image_files(doc: &deckcraft_model::Presentation, current: usize, all: bool, name: &str, ext: &str) -> Vec<(String, Vec<u8>)> {
+    let slides: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![current] };
+    let single = slides.len() == 1;
+    let scale = 2.0;
+    let dpi = deckcraft_render::dpi_for_scale(scale);
+    slides
+        .into_iter()
+        .enumerate()
+        .map(|(k, i)| {
+            let img = deckcraft_render::render_slide(doc, i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+            let bytes = if ext == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) };
+            let file = if single { format!("{name}.{ext}") } else { format!("{name}{}.{ext}", k + 1) };
+            (file, bytes)
+        })
+        .collect()
+}
+
 #[cfg(target_arch = "wasm32")]
 fn js_now() -> f64 {
     js_sys::Date::now()
@@ -1912,6 +2039,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use egui_kittest::kittest::Queryable;
 
     fn shape_rot(app: &SlideApp) -> f64 {
         let d = app.session.active().unwrap();
@@ -1955,6 +2083,23 @@ mod tests {
         assert!(harness.state().session.active().unwrap().interaction.is_none());
         harness.state_mut().session.execute("edit.undo", &json!({})).unwrap();
         assert!((shape_rot(harness.state()) - 0.0).abs() < 0.01, "one undo, got {}", shape_rot(harness.state()));
+    }
+
+    /// The browser "PNG images (all slides)" export yields one image per slide, not just the selected one (#64).
+    #[test]
+    fn web_export_all_slides_gives_one_file_per_slide() {
+        let mut doc = deckcraft_model::Presentation::default();
+        if let Some(first) = doc.slides.first().cloned() {
+            doc.slides.push(first.clone());
+            doc.slides.push(first);
+        }
+        assert_eq!(doc.slides.len(), 3);
+        let all = web_image_files(&doc, 1, true, "Deck", "png");
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Deck1.png", "Deck2.png", "Deck3.png"]);
+        let one = web_image_files(&doc, 1, false, "Deck", "png");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].0, "Deck.png");
     }
 
     fn title_text(app: &SlideApp) -> String {
@@ -2026,6 +2171,61 @@ mod tests {
         assert!(harness.state().toast.is_none());
         harness.run_steps(2);
         assert!(harness.state().toast.is_none());
+    }
+
+    /// #115: Change Picture replaced nothing — it inserted a second picture.
+    #[test]
+    fn change_picture_replaces_the_selected_picture() {
+        let svg = |c: &str| {
+            format!("<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='4' fill='{c}'/></svg>").into_bytes()
+        };
+        let media = |app: &SlideApp| {
+            let d = app.session.active().unwrap();
+            let pics: Vec<_> = d.doc.slides[0]
+                .shapes
+                .iter()
+                .filter_map(|s| if let deckcraft_model::ShapeKind::Picture { fill } = &s.kind { Some(fill.media) } else { None })
+                .collect();
+            assert_eq!(pics.len(), 1, "one picture, replaced in place");
+            pics[0]
+        };
+        let insert = |app: &mut SlideApp| {
+            let id =
+                app.session.execute("insert.picture", &json!({"name": "a.svg", "data": deckcraft_engine::cmd::base64_encode(&svg("red"))})).unwrap()
+                    ["id"]
+                    .clone();
+            app.session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+            media(app)
+        };
+
+        // Desktop: the file dialog returns a path.
+        let blue = svg("blue");
+        let services = Services {
+            pick_open: Some(Box::new(|_: &str| Some("b.svg".into()))),
+            read: Some(Box::new(move |_: &str| Ok(blue.clone()))),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        let before = insert(&mut app);
+        app.run("app.changePictureDialog", json!({})).unwrap();
+        assert_ne!(media(&app), before);
+
+        // Web: the browser picker delivers the file through the inbox later.
+        let inbox = Inbox::default();
+        let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let record = started.clone();
+        let services = Services {
+            open_async: Some(Box::new(move |_: &str, id| record.lock().unwrap().push(id))),
+            inbox: Some(inbox.clone()),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        let before = insert(&mut app);
+        app.run("app.changePictureDialog", json!({})).unwrap();
+        let id = started.lock().unwrap()[0];
+        inbox.lock().unwrap().push(InboxEvent::File(InboxFile { id, name: "b.svg".into(), bytes: svg("blue") }));
+        app.drain_inbox();
+        assert_ne!(media(&app), before);
     }
 
     /// #17: Home created a new blank presentation instead of going to the start screen.
@@ -2174,6 +2374,88 @@ mod tests {
         harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
         harness.run_steps(2);
         assert_eq!(harness.state().dialog.as_ref().map(|d| d.id.as_str()), Some("export"));
+    }
+
+    /// #53: Ctrl+V did nothing for an image-only clipboard: egui-winit sends no Paste event for it and
+    /// swallows the key press, so only the V release reaches the app.
+    #[test]
+    fn ctrl_v_pastes_an_image_when_no_paste_event_arrives() {
+        let session = Session::with_new();
+        let png = {
+            let d = session.active().unwrap();
+            deckcraft_engine::cmd::file::render_png(&d.doc, 0, 0.1, false).0
+        };
+        assert!(!png.is_empty());
+        let services = Services { clipboard_image: Some(Box::new(move || Some(png.clone()))), ..Default::default() };
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, services),
+        );
+        harness.run_steps(2);
+        let pictures = |app: &SlideApp| {
+            let d = app.session.active().unwrap();
+            d.doc.slides[0].shapes.iter().filter(|s| matches!(s.kind, deckcraft_model::ShapeKind::Picture { .. })).count()
+        };
+        let v = |pressed| egui::Event::Key { key: egui::Key::V, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        // A text paste (Paste event on the press) does not also paste the image on release.
+        harness.event(egui::Event::Paste("hello".into()));
+        harness.run_steps(2);
+        harness.event(v(false));
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 0);
+        // A V release without Command/Ctrl is not a paste.
+        harness.event(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 0);
+        // What egui-winit sends for Ctrl+V with only an image on the clipboard: the release alone.
+        harness.event(v(false));
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 1);
+    }
+
+    /// #78: after Tab in a text box, typing and deleting no longer reached the text.
+    #[test]
+    fn typing_goes_on_after_tab_in_a_text_box() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            {
+                let mut session = Session::with_new();
+                session.prefs.autocorrect = false;
+                SlideApp::new(session, Services::default())
+            },
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.event(egui::Event::Text("ab".into()));
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("c".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\tc");
+        harness.key_press(egui::Key::Backspace);
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\t");
+        assert!(harness.state().session.active().unwrap().selection.text.is_some(), "still editing");
+        // Tab at the start of a paragraph indents it, and typing goes on there too (#93).
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("d".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\t\nd");
+        let level = |h: &egui_kittest::Harness<SlideApp>| {
+            h.state().session.active().unwrap().doc.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[1].level
+        };
+        assert_eq!(level(&harness), 1);
     }
 
     #[test]
@@ -2502,6 +2784,177 @@ mod tests {
         harness.run_steps(2);
         let st = harness.state().session.active().unwrap();
         assert!(!st.selection.shapes.is_empty(), "canvas select all picks the shapes");
+    }
+
+    fn harness() -> egui_kittest::Harness<'static, SlideApp> {
+        egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::new(), Services::default()),
+        )
+    }
+
+    /// #172: a recent file that no longer exists is marked on File › Home, and clicking it draws
+    /// the open error right there (the status bar is hidden while the backstage is open, so the
+    /// message used to vanish).
+    #[test]
+    fn missing_recent_is_marked_and_its_error_shows() {
+        let mut harness = harness();
+        let missing = "/deckcraft-tests/172/missing.deckcraft";
+        harness.state_mut().ui.recent = vec![missing.to_string()];
+        harness.run_steps(2);
+        // The row is labelled with the file's name. Clicking it raises the open error, and the
+        // drawn message is a second node that mentions the name (the OS text after it varies).
+        harness.get_by_label("missing.deckcraft").click();
+        harness.run_steps(2);
+        assert!(harness.state().toast.is_some(), "the open error was raised");
+        assert!(harness.get_all_by_label_contains("missing.deckcraft").count() >= 2, "the open error is drawn on the page, next to the entry");
+    }
+
+    /// #172: a Recent entry can be removed from the list.
+    #[test]
+    fn recent_entry_can_be_removed() {
+        let mut harness = harness();
+        harness.state_mut().ui.recent = vec!["/deckcraft-tests/172/a.deckcraft".into(), "/deckcraft-tests/172/b.deckcraft".into()];
+        harness.run_steps(2);
+        let removes = harness.get_all_by_label("Remove from Recent").collect::<Vec<_>>();
+        assert_eq!(removes.len(), 2);
+        // The remove button must sit inside the visible part of the row even when the page's
+        // content is wider than the window.
+        assert!(removes[1].rect().right() < 1200.0, "reachable in the 1200-wide window: {:?}", removes[1].rect());
+        removes[1].click();
+        harness.run_steps(1);
+        assert_eq!(harness.state().ui.recent, vec!["/deckcraft-tests/172/a.deckcraft"]);
+    }
+
+    /// The existence probe tells present files from missing ones and never touches remote paths.
+    #[test]
+    fn recent_exists_tells_missing_from_present() {
+        let mut app = SlideApp::new(Session::new(), Services::default());
+        let mut path = std::env::temp_dir();
+        path.push(format!("deckcraft-test-172-{}.deckcraft", std::process::id()));
+        std::fs::write(&path, b"").unwrap();
+        assert!(app.recent_exists(&path.to_string_lossy()), "the file exists");
+        assert!(!app.recent_exists("/deckcraft-tests/172/missing.deckcraft"));
+        assert!(app.recent_exists("\\\\server/share/deck.deckcraft"), "UNC paths are never probed");
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// #339: clicking a language in Review > Language did nothing, and OK didn't mark the text.
+    #[test]
+    fn the_language_dialog_marks_the_selected_text() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.state_mut().session.execute("text.insert", &json!({"text": "Bonjour"})).unwrap();
+        harness.state_mut().session.execute("text.selectAll", &json!({})).unwrap();
+        harness.state_mut().run("app.dialog", json!({"id": "language"})).unwrap();
+        // The anchored window settles over its first frames; click once it stays put.
+        harness.run_steps(4);
+        harness.get_by_label("Français (France)").click();
+        harness.run_steps(2);
+        harness.get_by_label("OK").click();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none());
+        let d = harness.state().session.active().unwrap();
+        let body = d.doc.slides[0].shapes[0].text.as_ref().unwrap();
+        assert_eq!(body.paragraphs[0].runs[0].props.lang.as_deref(), Some("fr-FR"));
+    }
+
+    /// Speaker notes keep their formatting when edited in the notes pane: typing into a bold
+    /// heading, Enter in a bulleted point, then saving as .pptx and reopening.
+    #[test]
+    fn editing_notes_in_the_pane_keeps_their_formatting() {
+        use deckcraft_model::text::{Bullet, ParaProps, Paragraph, Run, RunProps, TextBody};
+        let point = |runs: Vec<Run>| Paragraph {
+            level: 1,
+            props: ParaProps {
+                margin_left: Some(22.5),
+                indent: Some(-22.5),
+                bullet: Some(Bullet::Char { char: "§".into() }),
+                bullet_font: Some("Wingdings".into()),
+                ..Default::default()
+            },
+            runs,
+            ..Default::default()
+        };
+        let bold = RunProps { bold: Some(true), ..Default::default() };
+        let notes = TextBody {
+            paragraphs: vec![
+                Paragraph { runs: vec![Run::with("Metodický prehľad", bold.clone())], ..Default::default() },
+                Paragraph::new("Žiaci pracujú vo dvojiciach."),
+                point(vec![Run::with("Cieľ: ", bold.clone()), Run::new("vysvetliť cyklus")]),
+                point(vec![Run::new("Reflexia")]),
+                Paragraph::new("Pomôcky: počítač"),
+            ],
+            ..Default::default()
+        };
+        let mut session = Session::with_new();
+        session.execute("slide.notes", &json!({"index": 0, "body": notes})).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, Services::default()),
+        );
+        harness.run_steps(2);
+        let id = egui::Id::new("notes_edit");
+        let caret = |h: &mut egui_kittest::Harness<'_, SlideApp>, at: usize| {
+            let mut st = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+            egui::TextEdit::store_state(&h.ctx, id, st);
+        };
+        let chars = |s: &str, of: &str| s.find(of).map(|b| s[..b].chars().count() + of.chars().count()).unwrap();
+        let text = notes.text();
+        harness.ctx.memory_mut(|m| m.request_focus(id));
+        harness.run_steps(1);
+        // Type into the bold heading.
+        caret(&mut harness, chars(&text, "prehľad"));
+        harness.run_steps(1);
+        harness.event(egui::Event::Text(" hodiny".into()));
+        harness.run_steps(1);
+        // Enter after a bulleted point, and type the next one.
+        let text = text.replacen("prehľad", "prehľad hodiny", 1);
+        caret(&mut harness, chars(&text, "cyklus"));
+        harness.run_steps(1);
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text("Nový bod".into()));
+        harness.run_steps(1);
+        // Leave the field: the notes are saved.
+        harness.ctx.memory_mut(|m| m.surrender_focus(id));
+        harness.run_steps(2);
+        let check = |n: &TextBody| {
+            assert_eq!(
+                n.text(),
+                "Metodický prehľad hodiny\nŽiaci pracujú vo dvojiciach.\nCieľ: vysvetliť cyklus\nNový bod\nReflexia\nPomôcky: počítač"
+            );
+            assert_eq!(n.paragraphs[0].runs.len(), 1, "{n:?}");
+            assert_eq!(n.paragraphs[0].runs[0].props.bold, Some(true));
+            assert_eq!(n.paragraphs[1].props, ParaProps::default());
+            assert_eq!(n.paragraphs[2].runs[0].props.bold, Some(true), "the bold label");
+            assert_eq!(n.paragraphs[2].runs[1].props.bold, None);
+            for i in [2, 3, 4] {
+                assert_eq!((n.paragraphs[i].level, &n.paragraphs[i].props), (1, &notes.paragraphs[2].props), "point {i}");
+            }
+            assert_eq!((n.paragraphs[5].level, &n.paragraphs[5].props), (0, &ParaProps::default()));
+        };
+        check(&harness.state().session.active().unwrap().doc.slides[0].notes);
+        // Saved as .pptx and reopened.
+        let s = &mut harness.state_mut().session;
+        let data = s.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].clone();
+        s.execute("file.openBytes", &json!({"name": "notes.pptx", "data": data})).unwrap();
+        check(&s.active().unwrap().doc.slides[0].notes);
     }
 
     fn step_app(services: Services) -> egui_kittest::Harness<'static, SlideApp> {

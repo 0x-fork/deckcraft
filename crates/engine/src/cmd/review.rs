@@ -46,7 +46,7 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "review.addToDictionary", "Add to Dictionary", ["Review", "Proofing"], None, "{word} → {word, file} (append to the user dictionary file; not an undo step)", always, add_to_dictionary),
         cmd!(query "review.dictionary", "Spelling Dictionary", ["Review", "Proofing"], None, "{lang?} → {lang, available, found, folders} (whether review.spelling has a dictionary, and which file)", always, dictionary_info),
-        cmd!(query "review.thesaurus", "Thesaurus", ["Review", "Proofing"], None, "{word?: default the selected word, or the word at the caret} → {word, senses: [{word, synonyms}]}", has_doc, thesaurus),
+        cmd!(query "review.thesaurus", "Thesaurus", ["Review", "Proofing"], None, "{word? (default: the selected word, or the word at the caret)} → {word, senses: [{word, synonyms}]}", has_doc, thesaurus),
         cmd!(
             "review.replaceWord",
             "Insert Synonym",
@@ -639,7 +639,7 @@ fn revised_bytes(p: &Value) -> Result<(String, Vec<u8>)> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = str_param(p, "path") {
-        let bytes = std::fs::read(path).map_err(|e| crate::EngineError::Other(format!("{path}: {e}")))?;
+        let bytes = crate::io::read_file(path).map_err(crate::EngineError::Other)?;
         return Ok((path.to_string(), bytes));
     }
     Err(bad("review.compare", "give `path` or `data`"))

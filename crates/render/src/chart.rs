@@ -44,6 +44,18 @@ fn point_fill(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series
     }
 }
 
+/// Fill of one bar: a `<c:dPt>` fill wins, and a single-series chart that varies colours by point uses one accent per point
+/// (not waterfalls, which are never read from a `<c:barChart>`).
+fn bar_fill(ctx: &Ctx, c: &Chart, si: usize, pi: usize, s: &deckcraft_model::chart::Series) -> Rgba {
+    if s.point_fills.iter().any(|(k, _)| *k == pi) {
+        return point_fill(ctx, c, si, s, pi);
+    }
+    if c.vary_colors && c.series.len() == 1 && s.fill.is_none() && c.kind != ChartType::Waterfall {
+        return series_color(ctx, c, pi);
+    }
+    series_fill(ctx, c, si, Some(s))
+}
+
 fn polyline(pts: &[Point]) -> BezPath {
     let mut p = BezPath::new();
     for (k, q) in pts.iter().enumerate() {
@@ -623,7 +635,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     };
                     series_color(rctx, c, slot)
                 } else {
-                    point_fill(rctx, c, *si, s, i)
+                    bar_fill(rctx, c, *si, i, s)
                 };
                 ctx.set_transform(m);
                 ctx.set_paint(color(fill, 1.0));

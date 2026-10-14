@@ -33,6 +33,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Trim Media dialog follows the selection; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: chart trendlines are drawn; previous: trivial, chart trendlines round-trip; hours to ~95% per audience added; ready ~55%; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Format Background picture options; percentages unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: copy and paste rich text and pictures with other apps; previous: hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (animation preview on the canvas; breadth 79% → 80%, Animations 79% → 85%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Format Shape fill transparency follows the selection; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -222,6 +223,8 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-14 | Design ▸ Effects: named effect schemes (DeckCraft, Soft, Crisp, Lift, Glow, Plain) replace the theme's fills, lines and effects and leave colours and fonts. `design.effects` |
 | 2026-10-14 | Slide Master: Preserve on the open master or layout, and Title and Footers placeholder checkboxes. Two commands (`master.preserve`, `master.placeholders`); dialogs stay 27; breadth stays 79% |
 | 2026-10-14 | Trim Media: start, end and fades open from the selected clip, so OK no longer resets them to zero |
+| 2026-10-14 | Format Background: a solid fill's transparency, and for a picture transparency, tile, offset, scale, alignment and mirror. Apply to All copies a picture background onto every slide. The same `design.background` command; dialogs stay 27 |
+| 2026-10-13 | Editor slide rasters sit on the physical pixel grid, so small text stays sharp on a Retina display instead of being blurred by a linear filter between pixels (#184) |
 | 2026-10-14 | Copy and paste with other apps: bold, italic and underline travel as HTML (Pages keeps them); a shape with no text still copies as DeckCraft objects so Ctrl+V pastes it (#182) |
 | 2026-10-13 | Animations ▸ Preview plays the current slide's animations on the editor canvas (Play All does the same); Escape or a click stops it. Breadth 79% → 80%, Animations 79% → 85% |
 | 2026-10-14 | A two-finger twist on the trackpad rotates the selected shapes, as one undo step. Pinch-zoom is unchanged |
@@ -242,6 +245,9 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-12 | Title bar: Export button next to Save, opening the Export dialog on every platform (a shortcut beside File › Export) |
 | 2026-10-13 | PPTX export writes modern threaded comments (`p188`) next to the flattened legacy part; replies and resolved state survive a round trip, and real PowerPoint decks stop importing their comments twice (#70) |
 | 2026-10-12 | Canvas: a right click selects the shape under the pointer before the context menu opens (`contextclick` pointer kind for the control channel and MCP); in edited text the menu offers text items |
+| 2026-10-12 | Canvas: dragging the frame of a text box being edited moves it (move cursor on the frame, one undo step); the caret zone follows rotated boxes |
+| 2026-10-13 | Start screen: a missing Recent file is marked and its click shows the error there; entries can be removed from the list (#172) |
+| 2026-10-12 | Tables: the caret and text selection show in the cell being edited; clicks and double-clicks place the caret in the clicked cell (and select the word); dragging inner column borders, the right edge and row borders resizes them in one undo step; Tab skips cells hidden under a merge |
 | 2026-10-12 | Objects off the slide show and can be selected and moved around it in Normal view, as in PowerPoint; the show, exports and thumbnails still clip to the slide (#270) |
 | 2026-10-12 | Korean, Japanese and Chinese input: IME composition shown in place and underlined, one undo step per composition, candidate window at the caret (slide text, notes, fields); interface text (title, notes, outline, sections, comments) borrows installed fonts for scripts the interface fonts lack (#101) |
 | 2026-10-12 | Selection Pane like PowerPoint (#133): front-most first, groups fold, drag and drop restacks among siblings, Bring Forward / Send Backward, Show All / Hide All, eye, rename in place, keyboard; Lock (pane padlock, canvas menu) keeps objects from moving, sizing or rotating and round-trips PowerPoint's locking attributes |
@@ -250,6 +256,8 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-12 | File tab (Backstage) like PowerPoint's (#76): File or Alt+F opens Home, New, Open, Info, Save, Save As, Print, Export, Close, Account and Options over the window, Esc or Back returns, arrows walk the side menu; the start screen is File › Home. Pages run the existing file commands; new `file.info`, print slide ranges (`"1-3, 5"`), Print through a PDF, Ctrl+P, and Close/Ctrl+W ask about unsaved changes |
 | 2026-10-12 | WordArt text warps (`prstTxWarp`): all 40 presets drawn, curves fitted to PowerPoint by observation; warp adjusts round-trip |
 | 2026-10-12 | Render: line widths, dashes and arrowheads inside a group no longer scale with the group's child-coordinate mapping, so a group in a small legacy child space (scale about 1600) draws thin lines instead of covering the slide (#233) |
+| 2026-10-12 | `deckcraft-cli help` and each subcommand's `--help` explain the CLI to an agent; `describe` spells out a command's parameters and what it acts on; `commands` lists one command per line |
+| 2026-10-11 | Animated GIF export of the deck: the Export… dialog (Animated GIF), `file.export` format `gif`, CLI and MCP (#171) |
 | 2026-10-10 | Progress docs restructured to the craftrules standard; full re-measure (breadth 79%, ready ~55%, mainstream ~53%, essentials ~62%, alpha). Landed: Animation Painter (#54), Morph geometry outlines (#27), animated GIF playback (#39), hyperlink colour and following links in the show (#37, #45), date fields in their own format (#36), flipped shapes keep readable text (#35), show transition fix (#46), start screen from the Home button (#49), MCP export lists PDF (#65), OmaStore manifest (#57) |
 | 2026-10-09 | v0.4.0 released. UAX #9 bidi and Arabic shaping (#4), Morph with Words and Characters (#5), tables grow to fit and PDF cell text (#14), rotating log file (#7), DX12 default on Windows (#16), H.264/HEVC overflow hardening (#2), PPTX sniffing anywhere in the zip (#19) |
 | 2026-10-08 | v0.2.0 and v0.3.0 released: Windows arm64, Flatpak aarch64, AppImage zsync updates, branded DMG |
@@ -300,6 +308,8 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-14 | trivial | Progress log: Design ▸ Effects |
 | 2026-10-14 | trivial | Progress log: Slide Master Preserve and Title/Footers placeholders. Percentages unchanged |
 | 2026-10-14 | trivial | Progress log: Trim Media dialog follows the selection |
+| 2026-10-14 | trivial | Progress log: Format Background picture and solid options |
+| 2026-10-13 | trivial | Progress log: editor rasters on the Retina pixel grid (#184) |
 | 2026-10-14 | trivial | Progress log: copy and paste rich text and pictures with other apps |
 | 2026-10-13 | trivial | Progress log: animation preview on the editor canvas; breadth 80%, Animations 85% |
 | 2026-10-14 | trivial | Progress log: Format Shape fill transparency follows the selection |
@@ -311,8 +321,10 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | trivial | Progress log: chart workbook round-trip (#335) |
 | 2026-10-13 | trivial | Progress log: wild text cases |
 | 2026-10-13 | trivial | Progress log: slide show for interactive decks |
+| 2026-10-12 | minor | Progress log: table cell editing and border resizing |
 | 2026-10-12 | trivial | Progress log: File tab (Backstage, #76) |
 | 2026-10-12 | trivial | Progress log: lines in scaled groups (#233) |
+| 2026-10-11 | minor | Progress log: animated GIF export (#171); P2 breadth 36% → 37%, overall breadth stays 79% |
 | 2026-10-10 | minor | Readiness-by-audience table with hours to ~95% for full, mainstream and essentials |
 | 2026-10-10 | minor | Added mainstream practitioner (~53%) and essentials user (~62%); features recomputed from written area weights, ready ~56% → ~55% |
 | 2026-10-10 | minor | Stage checked against the new core-workflow gate: passes, stays alpha |

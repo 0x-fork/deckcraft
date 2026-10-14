@@ -181,6 +181,7 @@ fn mime_for(name: &str) -> &'static str {
         Some("png") => "image/png",
         Some("jpg" | "jpeg") => "image/jpeg",
         Some("pdf") => "application/pdf",
+        Some("gif") => "image/gif",
         Some("txt") => "text/plain",
         Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         Some("deckcraft") => "application/zip",

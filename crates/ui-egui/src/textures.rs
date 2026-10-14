@@ -10,7 +10,7 @@ use std::sync::Arc;
 use deckcraft_geom::Rect;
 use deckcraft_model::{Master, Presentation, ShapeId, Slide};
 use deckcraft_render::{Image, Region, RenderOpts};
-use egui::{ColorImage, TextureHandle, TextureOptions};
+use egui::{ColorImage, TextureFilter, TextureHandle, TextureOptions, TextureWrapMode};
 
 #[derive(Clone, PartialEq)]
 struct Key {
@@ -21,6 +21,7 @@ struct Key {
     extra: u64,
     /// The pasteboard region the slide's drawing calls for (canvas only).
     want: Region,
+    skip_text: Option<ShapeId>,
 }
 
 struct Entry {
@@ -95,6 +96,39 @@ impl Textures {
         }
         self.smartart.insert(key, tex.clone());
         Some(tex)
+    }
+}
+
+/// Snap `rect` onto the physical pixel grid.
+///
+/// The editor draws the slide as a texture of device pixels. A rect that starts or ends
+/// between pixels is sampled with a linear filter, so every glyph edge is a blend of two
+/// texels and small text looks soft. On a Retina display that offset is half a point, which
+/// is the whole edge of an editing-size glyph. The slide show draws much larger glyphs, so
+/// the same blend is not visible there (#184).
+pub fn device_pixel_rect(rect: egui::Rect, ppp: f32) -> egui::Rect {
+    if !ppp.is_finite() || ppp <= 0.0 || !rect.is_finite() {
+        return rect;
+    }
+    let snap = |v: f32| {
+        let p = v * ppp;
+        if p.is_finite() { p.round() / ppp } else { v }
+    };
+    let min = egui::pos2(snap(rect.min.x), snap(rect.min.y));
+    let step = 1.0 / ppp;
+    let max = egui::pos2(snap(rect.max.x).max(min.x + step), snap(rect.max.y).max(min.y + step));
+    egui::Rect::from_min_max(min, max)
+}
+
+/// Editor slide textures. Nearest magnification keeps a texel that is stretched by a
+/// fraction of a pixel from blurring the glyph; minification still blends when many texels
+/// share a screen pixel.
+pub fn editor_texture_options() -> TextureOptions {
+    TextureOptions {
+        magnification: TextureFilter::Nearest,
+        minification: TextureFilter::Linear,
+        wrap_mode: TextureWrapMode::ClampToEdge,
+        mipmap_mode: None,
     }
 }
 
@@ -175,6 +209,17 @@ pub fn replace(ctx: &egui::Context, tex: &mut TextureHandle, img: ColorImage) {
     tex.set(shrink_to(img, max_side(ctx)), TextureOptions::LINEAR);
 }
 
+/// [`upload`] for editor slide pictures, drawn on the device pixel grid with
+/// [`editor_texture_options`] (#184).
+pub fn upload_editor(ctx: &egui::Context, name: impl Into<String>, img: ColorImage) -> TextureHandle {
+    ctx.load_texture(name, shrink_to(img, max_side(ctx)), editor_texture_options())
+}
+
+/// [`replace`] for editor slide pictures (#184).
+pub fn replace_editor(ctx: &egui::Context, tex: &mut TextureHandle, img: ColorImage) {
+    tex.set(shrink_to(img, max_side(ctx)), editor_texture_options());
+}
+
 fn master_of(p: &Presentation, slide: &Slide) -> Option<Arc<Master>> {
     p.masters.iter().find(|m| m.layout(slide.layout).is_some()).cloned()
 }
@@ -203,7 +248,8 @@ impl Textures {
     /// The canvas texture for slide `index`, the slide being `size` pixels, and the region it
     /// covers: the slide, grown over the pasteboard to show what reaches off the slide within
     /// `visible` (the canvas, in pixels from the slide's top-left corner). `extra` changes with the
-    /// GIF frames.
+    /// GIF frames. `skip_text` leaves out one shape's text (the prompt of a placeholder being typed
+    /// into).
     #[allow(clippy::too_many_arguments)]
     pub fn slide(
         &mut self,
@@ -216,6 +262,7 @@ impl Textures {
         extra: u64,
         grayscale: bool,
         gif_times: &[(ShapeId, f64)],
+        skip_text: Option<ShapeId>,
         anim: Option<(&deckcraft_anim::Timeline, f64)>,
     ) -> Option<(TextureHandle, Region)> {
         let slide = p.slides.get(index)?.clone();
@@ -243,6 +290,7 @@ impl Textures {
             edit,
             extra: extra ^ grayscale as u64 ^ anim_key(anim),
             want,
+            skip_text,
         };
         if let Some(e) = &self.canvas
             && e.key == key
@@ -261,6 +309,7 @@ impl Textures {
                 offset: region.offset(),
                 size: Some(region.size()),
                 state,
+                skip_text,
                 ..Default::default()
             };
             deckcraft_render::render_slide_drawn(p, index, &opts)
@@ -283,10 +332,10 @@ impl Textures {
         let ci = to_color_image(&img, grayscale);
         let tex = match self.canvas.take() {
             Some(mut e) => {
-                replace(ctx, &mut e.tex, ci);
+                replace_editor(ctx, &mut e.tex, ci);
                 e.tex
             }
-            None => upload(ctx, "slide-canvas", ci),
+            None => upload_editor(ctx, "slide-canvas", ci),
         };
         self.canvas = Some(Entry { key, tex: tex.clone(), region, _slide: slide, _master: master, stamp: 0 });
         Some((tex, region))
@@ -318,6 +367,7 @@ impl Textures {
             edit: false,
             extra: 0,
             want: Region::slide(width_px, h),
+            skip_text: None,
         };
         self.clock += 1;
         let clock = self.clock;
@@ -335,7 +385,7 @@ impl Textures {
         let (tw, th) = fit_size((width_px, h), max_side(ctx));
         let scale = tw as f64 / p.slide_size.width.max(1.0);
         let img = deckcraft_render::render_slide(p, index, &RenderOpts { scale, size: Some((tw, th)), threads: 0, ..Default::default() });
-        let tex = upload(ctx, format!("thumb-{index}"), to_color_image(&img, false));
+        let tex = upload_editor(ctx, format!("thumb-{index}"), to_color_image(&img, false));
         // Drop the old entry for this slide address; entries for slides that no longer exist age out.
         let region = key.want;
         self.thumbs.insert(key.slide, Entry { key, tex: tex.clone(), region, _slide: slide, _master: master, stamp: clock });
@@ -347,6 +397,39 @@ impl Textures {
             }
         }
         Some(tex)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::device_pixel_rect;
+    use egui::{Rect, pos2, vec2};
+
+    fn on_grid(v: f32, ppp: f32) -> bool {
+        let px = v * ppp;
+        (px - px.round()).abs() < 1e-3
+    }
+
+    #[test]
+    fn a_retina_slide_rect_lands_on_device_pixels() {
+        let ppp = 2.0;
+        let r = Rect::from_min_size(pos2(10.3, 20.25), vec2(100.2, 50.4));
+        let s = device_pixel_rect(r, ppp);
+        assert!(on_grid(s.min.x, ppp) && on_grid(s.min.y, ppp) && on_grid(s.max.x, ppp) && on_grid(s.max.y, ppp));
+        assert!(s.width() > 0.0 && s.height() > 0.0);
+        // One texture pixel per device pixel: the snapped size is an integer pixel count.
+        let px = ((s.width() * ppp).round() as u32, (s.height() * ppp).round() as u32);
+        assert!((s.width() / px.0 as f32 * ppp - 1.0).abs() < 1e-3);
+        assert!((s.height() / px.1 as f32 * ppp - 1.0).abs() < 1e-3);
+        let aligned = Rect::from_min_max(pos2(1.0, 2.5), pos2(80.0, 40.0));
+        assert_eq!(device_pixel_rect(aligned, ppp), aligned);
+    }
+
+    #[test]
+    fn a_bad_scale_does_not_move_the_rect() {
+        let r = Rect::from_min_size(pos2(3.0, 4.0), vec2(10.0, 12.0));
+        assert_eq!(device_pixel_rect(r, 0.0), r);
+        assert_eq!(device_pixel_rect(r, f32::NAN), r);
     }
 }
 

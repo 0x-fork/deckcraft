@@ -115,23 +115,32 @@ pub fn tool_definitions() -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export slides: png/jpeg (one slide, or all with all:true), pptx, deckcraft, outline text, or pdf (slides, notes pages or handouts).",
+            "Export slides: png/jpeg (one slide, or all with all:true), pptx, deckcraft, outline text, pdf (slides, notes pages or handouts), or an animated gif of the deck (one frame per slide).",
             obj(
                 json!({
                     "path": string("Output path"),
-                    "format": {"type": "string", "enum": ["png", "jpeg", "pptx", "deckcraft", "outline", "pdf"], "description": "Output format (default: from the path's extension)"},
+                    "format": {"type": "string", "enum": ["png", "jpeg", "pptx", "deckcraft", "outline", "pdf", "gif"], "description": "Output format (default: from the path's extension)"},
                     "slide": int("Slide index for images"),
                     "all": boolean("All slides (images)"),
                     "scale": num("Pixels per point for images (default 2)"),
                     "layout": {"type": "string", "enum": ["slides", "notes", "handouts"], "description": "PDF page layout (default slides)"},
                     "perPage": {"type": "integer", "enum": [1, 2, 3, 4, 6, 9], "description": "PDF handouts: slides per page (default 6)"},
                     "dpi": num("PDF: raster resolution of slide artwork, 36-600 (default 200)"),
-                    "slides": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "PDF: slide indices to export (default all)"},
-                    "includeHidden": boolean("PDF: include hidden slides (default false)"),
+                    "slides": {"type": "array", "items": {"type": "integer", "minimum": 0}, "description": "PDF and GIF: slide indices to export, in order (default all)"},
+                    "includeHidden": boolean("PDF and GIF: include hidden slides (default false)"),
                     "textLayer": boolean("PDF: invisible text layer for search, select and copy (default true)"),
                     "frame": boolean("PDF notes/handouts: thin frame around each slide (default true)"),
                     "paper": {"type": "string", "enum": ["letter", "a4", "legal", "a3"], "description": "PDF notes/handouts: paper size (default letter)"},
-                    "orientation": {"type": "string", "enum": ["portrait", "landscape"], "description": "PDF notes/handouts: page orientation (default portrait)"}
+                    "orientation": {"type": "string", "enum": ["portrait", "landscape"], "description": "PDF notes/handouts: page orientation (default portrait)"},
+                    "width": {
+                        "oneOf": [
+                            {"type": "integer", "minimum": 16, "maximum": 3840},
+                            {"type": "string", "enum": ["small", "medium", "large", "extraLarge"]}
+                        ],
+                        "description": "GIF: frame width in pixels, or a size: small 640, medium 960 (default), large 1280, extraLarge 1920; the height follows the slide's shape"
+                    },
+                    "secondsPerSlide": {"type": "number", "minimum": 0.1, "maximum": 600, "description": "GIF: seconds each slide shows (default 5)"},
+                    "loop": boolean("GIF: loop forever (true, default) or play once (false)")
                 }),
                 &["path"],
             ),

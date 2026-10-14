@@ -94,7 +94,7 @@ fn list(app: &mut SlideApp, ui: &mut Ui) {
             });
         }
         let (row, resp) = ui.allocate_exact_size(vec2(width, th + 16.0), Sense::click_and_drag());
-        let img = Rect::from_min_size(pos2(row.min.x + 30.0, row.min.y + 6.0), vec2(tw, th));
+        let img = crate::textures::device_pixel_rect(Rect::from_min_size(pos2(row.min.x + 30.0, row.min.y + 6.0), vec2(tw, th)), ppp);
         rects.push((i, row));
         let p = ui.painter();
         let id = doc.slides.get(i).map(|s| s.id);
@@ -114,7 +114,7 @@ fn list(app: &mut SlideApp, ui: &mut Ui) {
         if has_anim {
             p.text(pos2(row.min.x + 14.0, img.min.y + 20.0), Align2::CENTER_TOP, "★", theme::font(10.0), t.text_faint);
         }
-        let wpx = (tw * ppp).round() as u32;
+        let wpx = (img.width() * ppp).round() as u32;
         match app.textures.thumb(ui.ctx(), &doc, i, wpx, &mut budget) {
             Some(tex) => {
                 p.image(
@@ -276,10 +276,11 @@ fn master_list(app: &mut SlideApp, ui: &mut Ui) {
                 let tw = (width - indent - 14.0).max(40.0) * if li.is_some() { 0.8 } else { 1.0 };
                 let th = tw * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32;
                 let (row, resp) = ui.allocate_exact_size(vec2(width, th + 12.0), Sense::click());
-                let img = Rect::from_min_size(pos2(row.min.x + indent, row.min.y + 4.0), vec2(tw, th));
                 let ppp = ui.ctx().pixels_per_point();
+                let img = crate::textures::device_pixel_rect(Rect::from_min_size(pos2(row.min.x + indent, row.min.y + 4.0), vec2(tw, th)), ppp);
+                let wpx = ((img.width() * ppp).round() as u32).max(1);
                 let px = crate::textures::fit_size(
-                    (((tw * ppp) as u32).max(1), ((tw * ppp) as f64 * doc.slide_size.height / doc.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+                    (wpx, (wpx as f64 * doc.slide_size.height / doc.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
                     crate::textures::max_side(ui.ctx()),
                 );
                 let pic = deckcraft_render::render_layout(
@@ -293,7 +294,7 @@ fn master_list(app: &mut SlideApp, ui: &mut Ui) {
                         ..Default::default()
                     },
                 );
-                let tex = crate::textures::upload(ui.ctx(), format!("ml-{mi}-{li:?}"), crate::textures::to_color_image(&pic, false));
+                let tex = crate::textures::upload_editor(ui.ctx(), format!("ml-{mi}-{li:?}"), crate::textures::to_color_image(&pic, false));
                 ui.painter().image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 let selected = match (target, li) {
                     (Target::Master { master }, None) => master == mi,

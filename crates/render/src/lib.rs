@@ -309,11 +309,21 @@ pub struct Renderer {
     /// The fill of the group being drawn, with the transform and box it is laid out in: children
     /// filled with the group's fill (`a:grpFill`) show it, as one fill across the whole group.
     group_fill: Option<(Fill, Affine, Rect)>,
+    /// Their aligned outlines, kept from frame to frame.
+    morphs: morph_path::Cache,
 }
 
 impl Default for Renderer {
     fn default() -> Self {
-        Renderer { resources: Resources::new(), paths: Vec::new(), bg: None, drawn: None, view: Affine::IDENTITY, group_fill: None }
+        Renderer {
+            resources: Resources::new(),
+            paths: Vec::new(),
+            bg: None,
+            drawn: None,
+            view: Affine::IDENTITY,
+            group_fill: None,
+            morphs: morph_path::Cache::default(),
+        }
     }
 }
 
@@ -733,6 +743,7 @@ impl Renderer {
             }
         }
         self.paths.clear();
+        self.morphs.sweep();
         self.finish(ctx, w, h)
     }
 
@@ -982,7 +993,7 @@ impl Renderer {
         depth: usize,
     ) {
         let (geo, fades) = match self.paths.iter().find(|p| p.id == s.id) {
-            Some(pm) => morph_path::geometry(pm, s, w, h),
+            Some(pm) => self.morphs.geometry(pm, s, w, h),
             None => (shape_geometry(s, w, h), Vec::new()),
         };
         let fade = |i: usize| fades.get(i).copied().unwrap_or(deckcraft_geom::morph::Fade { fill: 1.0, stroke: 1.0 });
@@ -1410,7 +1421,10 @@ impl Renderer {
             ctx.set_paint(color(c.with_alpha(255), 1.0));
             ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 0.95).with_join(kurbo::Join::Round));
             ctx.stroke_path(&silhouette);
-            ctx.fill_path(&silhouette);
+            // A shape without a fill (an outline, a frame) glows along its line only (#225).
+            if fill_alpha.is_some() || content.is_some() {
+                ctx.fill_path(&silhouette);
+            }
             ctx.pop_layer();
         }
         if let Some(rf) = &e.reflection {

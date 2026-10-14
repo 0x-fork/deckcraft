@@ -35,7 +35,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Sound",
             ["Transitions", "Timing"],
             None,
-            "{builtin?: chime|click|camera|whoosh|drumRoll|laser | path? | data: base64, name?; none?: true (No Sound); stopPrevious?: true; loop?: bool (Loop Until Next Sound); index?} — the sound plays as the slide comes in",
+            "{builtin?: chime|click|camera|whoosh|drumRoll|laser | path? | data: base64, name?, none?: true (No Sound), stopPrevious?: true, loop?: bool (Loop Until Next Sound), index?} — the sound plays as the slide comes in",
             has_slide,
             sound
         ),

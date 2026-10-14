@@ -17,6 +17,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (essentials discount no longer cites the palette Export failure, #79; percentages unchanged; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers; automation counted at 236 commands; the menu measurement and the d556ff9 snapshot still count 226; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture and solid options; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (Preview in editor re-scored done; breadth 79% → 80%, Animations 79% → 85%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (227 commands; previous: minor, hours to ~95% per audience added; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (229 commands; previous: trivial, 227 commands; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -251,7 +252,9 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   latin faces (one scheme on that master, not a library of saved font schemes, and not East
   Asian or complex-script faces).
   effect schemes (Design ▸ Effects: DeckCraft, Soft, Crisp, Lift, Glow, Plain),
-  backgrounds (solid, gradient, picture, pattern), slide size presets.
+  backgrounds (solid, gradient, picture, pattern; a solid fill's transparency; picture
+  transparency, tile, offset, scale, alignment and mirror; Apply to All copies a picture),
+  slide size presets.
 - **Shapes:** ~180 preset geometries with adjustment handles, text boxes, pictures (crop,
   corrections, animated GIFs that play and pause), tables with styles, charts (column, bar, line,
   area, pie, doughnut, scatter and more), basic SmartArt, groups, connectors glued to sites,
@@ -353,6 +356,8 @@ scored done (16 open issues).
 | 2026-10-13 | trivial | Essentials discoverability note: the command palette's Export failure (#79) is fixed; the ×0.95 discount stays for the menu bar and start screen |
 | 2026-10-14 | minor | Design ▸ Effects noted under what works today. Percentages stay 79% / ~60% / ~55%. The d556ff9 snapshot and the menu measurement stay at 226 commands; the live registry is 227 |
 | 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Automation in "what works today" is 236 commands; the menu-bar measurement and the d556ff9 snapshot still count 226. Percentages unchanged |
+| 2026-10-11 | minor | Animated GIF export (#171) moves the checklist's video/GIF row from missing to partial: P2 breadth 36% → 37%; overall breadth (79%), dimension scores and stage unchanged |
+| 2026-10-14 | minor | Format Background picture and solid options noted under what works today. Percentages, the 226-command count and the d556ff9 dialog snapshot stay as they are |
 | 2026-10-13 | trivial | Preview in editor scored done: breadth 79% → 80%, Animations area 79% → 85% |
 | 2026-10-14 | trivial | Command count 227 → 229 (Paragraph dialog and Tabs). Breadth and ready percentages unchanged |
 | 2026-10-14 | trivial | Command count 226 → 227 (Font dialog). Breadth and ready percentages unchanged |

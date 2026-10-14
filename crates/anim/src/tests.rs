@@ -530,6 +530,61 @@ fn morph_pairs_by_name_text_and_geometry() {
 }
 
 #[test]
+fn morph_pairs_leaves_unrelated_text_boxes_alone() {
+    // A text box that leaves and an unrelated one that arrives fade in place (#119).
+    let p = deckcraft_model::defaults::new_presentation(None);
+    let mut a = Slide::default();
+    let mut b = Slide::default();
+    let tb = |id, name, x, text| Shape { xfrm: Some(Xfrm::new(x, 100.0, 200.0, 100.0)), text: Some(TextBody::from_text(text)), ..shape(id, name) };
+    a.shapes = vec![tb(1, "TextBox 1", 0.0, "Gone")];
+    b.shapes = vec![tb(2, "TextBox 2", 400.0, "New")];
+    assert!(morph_pairs(&a, &b).is_empty());
+    let f = morph_frame(&p, &a, &b, 0.5, &|_| false);
+    let xs: Vec<(&str, f64)> = f.shapes.iter().map(|(s, _)| (s.name.as_str(), s.xfrm.map_or(f64::NAN, |x| x.x))).collect();
+    assert_eq!(xs, [("TextBox 1", 0.0), ("TextBox 2", 400.0)]);
+    // Empty shapes of one kind and geometry still pair, and a named text box keeps its partner.
+    a.shapes.push(shape(3, "Rect A"));
+    b.shapes.push(shape(4, "Rect B"));
+    b.shapes[0].name = "TextBox 1".into();
+    assert_eq!(morph_pairs(&a, &b), [(ShapeId(1), ShapeId(2)), (ShapeId(3), ShapeId(4))]);
+}
+
+#[test]
+fn morph_crop_moves_the_image_linearly() {
+    let bx = |x, w| Xfrm::new(x, 0.0, w, 100.0);
+    // Same box, the crop pans from the left half to the right half of a 200-wide image.
+    let c = morph_crop([0.0, 0.0, 0.5, 0.0], bx(0.0, 100.0), [0.5, 0.0, 0.0, 0.0], bx(0.0, 100.0), bx(0.0, 100.0), 0.5);
+    assert!(c.iter().zip([0.25, 0.0, 0.25, 0.0]).all(|(a, b)| (a - b).abs() < 1e-9), "{c:?}");
+    // The box shrinks over an image that stays put: only the right crop grows.
+    let c = morph_crop([0.0; 4], bx(0.0, 100.0), [0.0, 0.0, 0.5, 0.0], bx(0.0, 50.0), bx(0.0, 75.0), 0.5);
+    assert!(c.iter().zip([0.0, 0.0, 0.25, 0.0]).all(|(a, b)| (a - b).abs() < 1e-9), "{c:?}");
+    // Nothing visible on one side: the crops blend.
+    let c = morph_crop([0.5, 0.0, 0.5, 0.0], bx(0.0, 100.0), [0.0; 4], bx(0.0, 100.0), bx(0.0, 100.0), 0.5);
+    assert!(c.iter().all(|v| v.is_finite()) && (c[0] - 0.25).abs() < 1e-9, "{c:?}");
+}
+
+#[test]
+fn morph_frame_morphs_a_picture_crop() {
+    // A picture recropped on the next slide stays one picture whose crop morphs (#118).
+    let p = deckcraft_model::defaults::new_presentation(None);
+    let pic = |id, crop| Shape {
+        kind: deckcraft_model::ShapeKind::Picture { fill: deckcraft_model::style::PictureFill { crop, ..Default::default() } },
+        ..shape(id, "Picture 1")
+    };
+    let mut a = Slide::default();
+    let mut b = Slide::default();
+    a.shapes = vec![pic(1, [0.0, 0.0, 0.5, 0.0])];
+    b.shapes = vec![pic(2, [0.5, 0.0, 0.0, 0.0])];
+    let f = morph_frame(&p, &a, &b, 0.5, &|_| false);
+    assert_eq!(f.shapes.len(), 1);
+    assert!(f.opacity.is_empty());
+    let deckcraft_model::ShapeKind::Picture { fill } = &f.shapes[0].0.kind else { panic!("not a picture") };
+    let want = 0.5 * f.mix;
+    assert!((fill.crop[0] - want).abs() < 1e-9 && (fill.crop[2] - (0.5 - want)).abs() < 1e-9, "{:?}", fill.crop);
+    assert_eq!(morph_frame(&p, &a, &b, 1.0, &|_| false).shapes[0].0.kind, b.shapes[0].kind);
+}
+
+#[test]
 fn morph_xfrm_interpolates() {
     let a = Xfrm { rot: 350.0, ..Xfrm::new(0.0, 0.0, 100.0, 100.0) };
     let b = Xfrm { rot: 10.0, ..Xfrm::new(100.0, 50.0, 200.0, 100.0) };
