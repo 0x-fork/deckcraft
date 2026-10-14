@@ -138,9 +138,10 @@ fn zoom(s: &mut Session, p: &Value) -> Result<Value> {
         let boxes = grid(targets.len(), area, aspect);
         let mut shapes = vec![];
         for ((t, (png, label)), b) in targets.iter().zip(pictures).zip(boxes) {
-            let media = doc.add_media(&format!("zoom-{}.png", t.index + 1), "image/png", png);
+            let media = doc.add_media(&format!("zoom-{}.png", t.index + 1), "image/png", png).ok_or_else(|| bad("insert.zoom", NO_ID_SPACE))?;
+            let id = ShapeId(doc.alloc_id().ok_or_else(|| bad("insert.zoom", NO_ID_SPACE))?);
             shapes.push(Shape {
-                id: ShapeId(doc.alloc_id()),
+                id,
                 name: format!(
                     "{} Zoom {}",
                     if summary {
@@ -171,7 +172,7 @@ fn zoom(s: &mut Session, p: &Value) -> Result<Value> {
             // A new Title Only slide before the first part, as PowerPoint makes it.
             let layout =
                 defaults::layout_of_kind(doc, LayoutType::TitleOnly).or_else(|| doc.slides.get(first_target).map(|x| x.layout)).unwrap_or_default();
-            let mut slide = defaults::new_slide(doc, layout);
+            let mut slide = defaults::new_slide(doc, layout).ok_or_else(|| bad("insert.zoom", NO_ID_SPACE))?;
             if let Some(sh) = slide.shapes.iter_mut().find(|x| x.ph_type().is_some_and(|k| k.is_title())) {
                 sh.text = Some(TextBody::from_text("Summary"));
             }

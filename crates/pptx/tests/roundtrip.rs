@@ -27,12 +27,12 @@ fn png(w: u32, h: u32, rgb: [u8; 3]) -> Vec<u8> {
 }
 
 fn shape(p: &mut Presentation, name: &str, x: f64, y: f64, w: f64, h: f64) -> Shape {
-    Shape { id: ShapeId(p.alloc_id()), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
+    Shape { id: ShapeId(p.alloc_id().expect("ids")), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
 }
 
 fn new_slide(p: &mut Presentation, title: &str) -> Slide {
     let layout = defaults::layout_of_kind(p, deckcraft_model::LayoutType::TitleOnly).unwrap_or_default();
-    let mut s = defaults::new_slide(p, layout);
+    let mut s = defaults::new_slide(p, layout).expect("slide");
     if let Some(t) = s.shapes.first_mut() {
         t.text = Some(TextBody::from_text(title));
     }
@@ -45,9 +45,9 @@ pub fn rich_deck() -> Presentation {
     p.props.title = "Rich deck".into();
     p.props.author = "DeckCraft tests".into();
     p.props.created = "2025-01-02T03:04:05Z".into();
-    let img = p.add_media("image1.png", "image/png", png(40, 30, [200, 40, 40]));
-    let img2 = p.add_media("image2.png", "image/png", png(8, 8, [20, 140, 220]));
-    let video = p.add_media("clip.mp4", "video/mp4", b"\x00\x00\x00\x18ftypmp42not-a-real-video".to_vec());
+    let img = p.add_media("image1.png", "image/png", png(40, 30, [200, 40, 40])).expect("media");
+    let img2 = p.add_media("image2.png", "image/png", png(8, 8, [20, 140, 220])).expect("media");
+    let video = p.add_media("clip.mp4", "video/mp4", b"\x00\x00\x00\x18ftypmp42not-a-real-video".to_vec()).expect("media");
 
     // Slide 1: title slide with notes and formatted text.
     {
@@ -339,7 +339,7 @@ pub fn rich_deck() -> Presentation {
 
     // Slide 6: bulleted content with a by-paragraph build, a slide link and an equation.
     let layout = defaults::layout_of_kind(&p, deckcraft_model::LayoutType::TitleAndContent).unwrap_or_default();
-    let mut s = defaults::new_slide(&mut p, layout);
+    let mut s = defaults::new_slide(&mut p, layout).expect("slide");
     s.shapes[0].text = Some(TextBody::from_text("Build"));
     s.shapes[1].text = Some(TextBody::from_text("One\nTwo\nThree"));
     let body = s.shapes[1].id;
@@ -517,7 +517,7 @@ fn pictures_media_and_ink_round_trip() {
 #[test]
 fn pressured_ink_exports_at_its_mean_width() {
     let mut p = Presentation::default();
-    let id = ShapeId(p.alloc_id());
+    let id = ShapeId(p.alloc_id().expect("id"));
     let slide = std::sync::Arc::make_mut(&mut p.slides[0]);
     slide.shapes.push(Shape {
         id,
@@ -638,7 +638,7 @@ fn every_transition_kind_survives() {
     p.slides.clear();
     for (kind, ..) in deckcraft_model::anim::TRANSITIONS {
         let mut s = base.clone();
-        s.id = SlideId(p.alloc_id());
+        s.id = SlideId(p.alloc_id().expect("ids"));
         s.transition = Some(Transition { kind: kind.to_string(), duration_ms: 1200, ..Default::default() });
         p.slides.push(Arc::new(s));
     }
@@ -820,7 +820,7 @@ fn colour_map_overrides_round_trip() {
 #[test]
 fn a_picture_duotone_round_trips() {
     let mut p = defaults::new_presentation(None);
-    let img = p.add_media("image1.png", "image/png", png(4, 4, [128, 128, 128]));
+    let img = p.add_media("image1.png", "image/png", png(4, 4, [128, 128, 128])).expect("media");
     let mut pic = shape(&mut p, "Duotone", 10.0, 10.0, 100.0, 100.0);
     let mut pf = PictureFill { media: img, ..Default::default() };
     pf.adjust.duotone = Some((ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Shade(30000)), ColorRef::rgb(Rgba::rgb(250, 240, 200))));
@@ -933,7 +933,7 @@ fn transition_deck(list: &[(&str, &str, u32, Option<u32>)]) -> (Presentation, Ve
     p.slides.clear();
     for (kind, option, ms, adv) in list {
         let mut s = base.clone();
-        s.id = SlideId(p.alloc_id());
+        s.id = SlideId(p.alloc_id().expect("ids"));
         s.transition = Some(Transition {
             kind: kind.to_string(),
             option: option.to_string(),
@@ -1157,8 +1157,8 @@ fn float_down_is_preset_47_both_ways() {
 #[test]
 fn embedded_fonts_round_trip() {
     let mut p = Presentation::default();
-    let regular = p.add_media("font1.fntdata", "application/x-fontdata", b"REGULAR-FONT-BYTES-0123456789".to_vec());
-    let bold = p.add_media("font2.fntdata", "application/x-fontdata", b"BOLD-FONT-BYTES-0123456789abcd".to_vec());
+    let regular = p.add_media("font1.fntdata", "application/x-fontdata", b"REGULAR-FONT-BYTES-0123456789".to_vec()).expect("media");
+    let bold = p.add_media("font2.fntdata", "application/x-fontdata", b"BOLD-FONT-BYTES-0123456789abcd".to_vec()).expect("media");
     p.embedded_fonts.push(deckcraft_model::EmbeddedFont {
         typeface: "Deck Test Face".into(),
         panose: Some("020B0604020202020204".into()),
@@ -1812,11 +1812,13 @@ fn smartart_without_a_drawing_keeps_its_parts() {
         "data1.xml",
         "application/vnd.openxmlformats-officedocument.drawingml.diagramData+xml",
         br#"<dgm:dataModel xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><dgm:ptLst><dgm:pt modelId="1"><dgm:t><a:p><a:r><a:t>Manager</a:t></a:r></a:p></dgm:t></dgm:pt></dgm:ptLst><dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" relId="rId6"/></a:ext></dgm:extLst></dgm:dataModel>"#.to_vec(),
-    );
+    ).expect("media");
     let mut parts = vec![("rId2".to_string(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagramData".to_string(), data)];
     for (i, kind) in ["Layout", "QuickStyle", "Colors"].into_iter().enumerate() {
         let xml = format!(r#"<dgm:{kind} xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"/>"#).into_bytes();
-        let m = p.add_media(&format!("{kind}1.xml"), &format!("application/vnd.openxmlformats-officedocument.drawingml.diagram{kind}+xml"), xml);
+        let m = p
+            .add_media(&format!("{kind}1.xml"), &format!("application/vnd.openxmlformats-officedocument.drawingml.diagram{kind}+xml"), xml)
+            .expect("media");
         parts.push((format!("rId{}", i + 3), format!("http://schemas.openxmlformats.org/officeDocument/2006/relationships/diagram{kind}"), m));
     }
     let xml = r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:nvGraphicFramePr><p:cNvPr id="4" name="Diagram 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" r:dm="rId2" r:lo="rId3" r:qs="rId4" r:cs="rId5"/></a:graphicData></a:graphic></p:graphicFrame>"#;
@@ -1841,8 +1843,10 @@ fn smartart_without_a_drawing_keeps_its_parts() {
 #[test]
 fn legacy_ole_object_is_written_in_the_fallback_form() {
     let mut p = defaults::new_presentation(None);
-    let bin = p.add_media("oleObject1.bin", "application/vnd.openxmlformats-officedocument.oleObject", b"\xD0\xCF\x11\xE0not-a-real-ole".to_vec());
-    let prev = p.add_media("image1.png", "image/png", png(4, 3, [10, 20, 30]));
+    let bin = p
+        .add_media("oleObject1.bin", "application/vnd.openxmlformats-officedocument.oleObject", b"\xD0\xCF\x11\xE0not-a-real-ole".to_vec())
+        .expect("media");
+    let prev = p.add_media("image1.png", "image/png", png(4, 3, [10, 20, 30])).expect("media");
     let xml = r#"<p:graphicFrame xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:nvGraphicFramePr><p:cNvPr id="4" name="Object 3"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="914400" cy="914400"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/presentationml/2006/ole"><p:oleObj spid="_x0000_s1026" name="Slide" r:id="rId4" progId="PowerPoint.Slide.8"><p:embed/></p:oleObj></a:graphicData></a:graphic></p:graphicFrame>"#;
     let parts = vec![("rId4".to_string(), "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject".to_string(), bin)];
     let mut s = new_slide(&mut p, "OLE");

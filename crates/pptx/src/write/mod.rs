@@ -501,8 +501,11 @@ fn sanitized(p: &Presentation) -> std::borrow::Cow<'_, Presentation> {
     }
     for m in q.masters.iter_mut() {
         if m.layouts.is_empty() {
-            let id = LayoutId(q.next_id.saturating_add(1));
-            q.next_id = id.0;
+            // An exhausted id space exports without the synthesized layout rather than with a
+            // duplicated one (#407).
+            let Some(raw) = q.next_id.max(1).checked_add(1) else { continue };
+            let id = LayoutId(raw);
+            q.next_id = raw;
             Arc::make_mut(m).layouts.push(Layout {
                 id,
                 name: "Blank".into(),

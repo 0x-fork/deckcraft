@@ -293,6 +293,10 @@ pub fn parse_params(doc: &str) -> std::result::Result<Vec<Param<'_>>, String> {
 
 // ---------- param helpers ----------
 
+/// The deck has used every object id (a hostile file can arrive that way): it cannot grow, and
+/// growing would duplicate ids (#407).
+pub(crate) const NO_ID_SPACE: &str = "the presentation has used every object id and can hold no more";
+
 pub(crate) fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.into(), msg: msg.into() }
 }

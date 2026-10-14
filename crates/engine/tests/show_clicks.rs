@@ -11,7 +11,7 @@ use deckcraft_model::{LayoutType, Presentation, Shape, ShapeId, SlideId, default
 
 fn shape(p: &mut Presentation, name: &str, text: &str, x: f64, y: f64, w: f64, h: f64) -> Shape {
     Shape {
-        id: ShapeId(p.alloc_id()),
+        id: ShapeId(p.alloc_id().expect("id")),
         name: name.into(),
         xfrm: Some(Xfrm::new(x, y, w, h)),
         text: Some(TextBody::from_text(text)),
@@ -45,7 +45,7 @@ fn disappear_on_click(trigger: ShapeId, target: ShapeId) -> Animation {
 
 fn add_slide(p: &mut Presentation, shapes: Vec<Shape>, animations: Vec<Animation>, advance_on_click: bool) -> SlideId {
     let layout = defaults::layout_of_kind(p, LayoutType::Blank).unwrap_or_default();
-    let mut s = defaults::new_slide(p, layout);
+    let mut s = defaults::new_slide(p, layout).expect("slide");
     s.shapes = shapes;
     s.animations = animations;
     s.transition = (!advance_on_click).then(|| Transition { advance_on_click: false, ..Default::default() });
@@ -136,7 +136,7 @@ impl Show {
 fn hide_and_reveal_deck() -> Presentation {
     let mut p = defaults::new_presentation(None);
     start(&mut p);
-    let s2_id = SlideId(p.alloc_id());
+    let s2_id = SlideId(p.alloc_id().expect("id"));
     let _ = s2_id;
     let message = shape(&mut p, "Message", "Both hidden", 100.0, 100.0, 600.0, 300.0);
     let mut button = shape(&mut p, "Button", "Image hidden", 100.0, 100.0, 600.0, 300.0);

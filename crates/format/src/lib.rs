@@ -167,8 +167,9 @@ fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String
     Ok((p, damaged))
 }
 
-/// Make a loaded presentation safe to edit: a master exists, every slide's layout exists,
-/// ids are unique, tables are rectangular.
+/// Make a loaded presentation safe to edit: a master exists, every slide's layout exists, tables
+/// are rectangular, and duplicate ids are re-id'd — unless the deck has used every id, in which
+/// case a duplicate stays (growth is refused; see the comment in the loop).
 pub fn repair(p: &mut Presentation) {
     if p.masters.is_empty() {
         let fresh = defaults::blank_presentation(p.slide_size, Default::default(), false);
@@ -181,7 +182,10 @@ pub fn repair(p: &mut Presentation) {
         let needs_layout = p.slides.get(i).is_some_and(|s| p.layout(s.layout).is_none());
         let dup = p.slides.get(i).is_some_and(|s| !seen.insert(s.id));
         if needs_layout || dup {
-            let new_id = if dup { Some(deckcraft_model::SlideId(p.alloc_id())) } else { None };
+            // An exhausted id space leaves a duplicate slide as it is: the engine refuses to
+            // grow such a deck (edits by id stay ambiguous for the duplicate), and the duplicate
+            // stays visible rather than the file failing to open (#407).
+            let new_id = if dup { p.alloc_id().map(deckcraft_model::SlideId) } else { None };
             if let Some(s) = p.slides.get_mut(i) {
                 let s = Arc::make_mut(s);
                 if needs_layout {
@@ -220,9 +224,10 @@ type OutlineSlides = Vec<(String, Vec<(u8, String)>)>;
 /// Append a Title and Content slide per outline entry; the number made.
 fn add_outline_slides(p: &mut Presentation, slides: OutlineSlides) -> usize {
     let Some(lay) = defaults::layout_of_kind(p, LayoutType::TitleAndContent) else { return 0 };
-    let made = slides.len();
+    let mut made = 0;
     for (title, body) in slides {
-        let mut s = defaults::new_slide(p, lay);
+        // An exhausted id space makes no new slides: what fit is kept (#407).
+        let Some(mut s) = defaults::new_slide(p, lay) else { break };
         if let Some(t) = s.shapes.first_mut() {
             t.text = Some(TextBody::from_text(&title));
         }
@@ -235,6 +240,7 @@ fn add_outline_slides(p: &mut Presentation, slides: OutlineSlides) -> usize {
             }
         }
         p.slides.push(Arc::new(s));
+        made += 1;
     }
     made
 }
@@ -524,7 +530,7 @@ mod tests {
     #[test]
     fn missing_or_corrupt_media_is_reported() {
         let mut p = Presentation::default();
-        let id = p.add_media("a.png", "image/png", b"PICTURE-BYTES-0123456789".to_vec());
+        let id = p.add_media("a.png", "image/png", b"PICTURE-BYTES-0123456789".to_vec()).expect("media");
         let good = save(&p).unwrap();
         assert!(load_checked(&good).unwrap().1.is_empty());
         // Missing member.
@@ -539,7 +545,7 @@ mod tests {
         assert_eq!(damaged.len(), 1, "{damaged:?}");
         // Linked media saved without its bytes isn't damage.
         let mut l = Presentation::default();
-        let lid = l.add_media("v.mp4", "video/mp4", vec![]);
+        let lid = l.add_media("v.mp4", "video/mp4", vec![]).expect("media");
         if let Some(m) = l.media.iter_mut().find(|m| m.id == lid) {
             m.link = Some("file:///movies/v.mp4".into());
         }
@@ -594,7 +600,7 @@ mod tests {
     #[test]
     fn roundtrip_with_media() {
         let mut p = Presentation::default();
-        let id = p.add_media("a.png", "image/png", vec![1, 2, 3, 4]);
+        let id = p.add_media("a.png", "image/png", vec![1, 2, 3, 4]).expect("media");
         let bytes = save(&p).unwrap();
         assert!(sniff(&bytes));
         let q = load(&bytes).unwrap();
@@ -760,6 +766,17 @@ mod tests {
         repair(&mut p);
         assert!(p.validate().is_empty());
         assert_eq!(p.slide_size.width, 960.0);
+    }
+
+    /// A duplicate slide in a deck whose ids are used up cannot be re-id'd: it stays as it is
+    /// (the engine refuses edits to such a deck) instead of a duplicated fresh id (#407).
+    #[test]
+    fn repair_keeps_a_duplicate_it_cannot_reid() {
+        let mut p = Presentation { next_id: u32::MAX, ..Default::default() };
+        p.slides.push(p.slides[0].clone());
+        repair(&mut p);
+        assert_eq!(p.slides.len(), 2, "the duplicate stays visible");
+        assert_eq!(p.slides[0].id, p.slides[1].id, "no fresh id was invented");
     }
 
     #[test]

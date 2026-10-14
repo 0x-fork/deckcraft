@@ -16,7 +16,7 @@ use deckcraft_model::text::{AutoFit, TextBody, TextDir};
 use deckcraft_model::{Presentation, Shape, ShapeId, ShapeKind, Slide, defaults};
 
 fn shape(p: &mut Presentation, name: &str, x: f64, y: f64, w: f64, h: f64) -> Shape {
-    Shape { id: ShapeId(p.alloc_id()), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
+    Shape { id: ShapeId(p.alloc_id().expect("id")), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
 }
 
 fn round(p: &Presentation) -> Presentation {
@@ -41,7 +41,7 @@ fn corpus() -> Presentation {
     p.props.title = "Chart and table corpus".into();
     let mut s = {
         let layout = defaults::layout_of_kind(&p, deckcraft_model::LayoutType::Blank).unwrap_or_default();
-        defaults::new_slide(&mut p, layout)
+        defaults::new_slide(&mut p, layout).expect("slide")
     };
 
     let chart = Chart {

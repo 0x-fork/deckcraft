@@ -684,7 +684,7 @@ fn accept(s: &mut Session, p: &Value) -> Result<Value> {
                 changes.into_iter().nth(index.unwrap_or(0))
             };
             let Some(c) = c else { break };
-            let Some(at) = crate::compare::accept(doc, &rev, &c) else { break };
+            let Some(at) = crate::compare::accept(doc, &rev, &c)? else { break };
             accepted += 1;
             sel.slide = at;
             sel.shapes.clear();

@@ -14,8 +14,9 @@ fn chart_pptx() -> Vec<u8> {
     let mut p = defaults::new_presentation(None);
     p.slides.clear();
     let layout = defaults::layout_of_kind(&p, LayoutType::Blank).unwrap_or_default();
-    let mut slide = defaults::new_slide(&mut p, layout);
-    let mut shape = Shape { id: ShapeId(p.alloc_id()), name: "Pie".into(), xfrm: Some(Xfrm::new(40.0, 40.0, 400.0, 300.0)), ..Default::default() };
+    let mut slide = defaults::new_slide(&mut p, layout).expect("slide");
+    let mut shape =
+        Shape { id: ShapeId(p.alloc_id().expect("id")), name: "Pie".into(), xfrm: Some(Xfrm::new(40.0, 40.0, 400.0, 300.0)), ..Default::default() };
     shape.kind = ShapeKind::Chart(Box::new(Chart::sample(ChartType::Pie)));
     slide.shapes.push(shape);
     p.slides.push(Arc::new(slide));
@@ -190,14 +191,16 @@ fn kept_chart_parts_never_collide_with_written_parts() {
     let picture = png([10, 200, 30]);
     let mut p = defaults::new_presentation(None);
     p.slides.clear();
-    let img = p.add_media("image1.png", "image/png", picture.clone());
+    let img = p.add_media("image1.png", "image/png", picture.clone()).expect("media");
     let layout = defaults::layout_of_kind(&p, LayoutType::Blank).unwrap_or_default();
-    let mut slide = defaults::new_slide(&mut p, layout);
+    let mut slide = defaults::new_slide(&mut p, layout).expect("slide");
     // The chart comes first, so its kept parts are written before the picture.
-    let mut chart = Shape { id: ShapeId(p.alloc_id()), name: "Pie".into(), xfrm: Some(Xfrm::new(40.0, 40.0, 400.0, 300.0)), ..Default::default() };
+    let mut chart =
+        Shape { id: ShapeId(p.alloc_id().expect("id")), name: "Pie".into(), xfrm: Some(Xfrm::new(40.0, 40.0, 400.0, 300.0)), ..Default::default() };
     chart.kind = ShapeKind::Chart(Box::new(Chart::sample(ChartType::Pie)));
     slide.shapes.push(chart);
-    let mut pic = Shape { id: ShapeId(p.alloc_id()), name: "Pic".into(), xfrm: Some(Xfrm::new(500.0, 40.0, 80.0, 80.0)), ..Default::default() };
+    let mut pic =
+        Shape { id: ShapeId(p.alloc_id().expect("id")), name: "Pic".into(), xfrm: Some(Xfrm::new(500.0, 40.0, 80.0, 80.0)), ..Default::default() };
     pic.kind = ShapeKind::Picture { fill: deckcraft_model::style::PictureFill { media: img, ..Default::default() } };
     slide.shapes.push(pic);
     p.slides.push(Arc::new(slide));
@@ -286,8 +289,9 @@ fn an_unchanged_chartex_keeps_its_embedded_workbook() {
     let mut p = defaults::new_presentation(None);
     p.slides.clear();
     let layout = defaults::layout_of_kind(&p, LayoutType::Blank).unwrap_or_default();
-    let mut slide = defaults::new_slide(&mut p, layout);
-    let mut shape = Shape { id: ShapeId(p.alloc_id()), name: "Pie".into(), xfrm: Some(Xfrm::new(40.0, 40.0, 400.0, 300.0)), ..Default::default() };
+    let mut slide = defaults::new_slide(&mut p, layout).expect("slide");
+    let mut shape =
+        Shape { id: ShapeId(p.alloc_id().expect("id")), name: "Pie".into(), xfrm: Some(Xfrm::new(40.0, 40.0, 400.0, 300.0)), ..Default::default() };
     shape.kind = ShapeKind::Chart(Box::new(Chart::sample(ChartType::Waterfall)));
     slide.shapes.push(shape);
     p.slides.push(Arc::new(slide));
