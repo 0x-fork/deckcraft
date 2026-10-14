@@ -205,7 +205,11 @@ fn locks(w: &mut W, tag: &str, s: &Shape, extra: A) {
 }
 
 fn style(w: &mut W, st: &ShapeStyle) {
-    w.open0("p:style");
+    style_tag(w, st, "p:style");
+}
+
+fn style_tag(w: &mut W, st: &ShapeStyle, tag: &str) {
+    w.open0(tag);
     for (tag, (idx, c)) in [("a:lnRef", &st.line_ref), ("a:fillRef", &st.fill_ref), ("a:effectRef", &st.effect_ref)] {
         w.open(tag, A::new().a("idx", idx));
         dml::color(w, c);
@@ -223,12 +227,16 @@ fn style(w: &mut W, st: &ShapeStyle) {
         }
         None => w.empty("a:fontRef", A::new().a("idx", idx)),
     }
-    w.close("p:style");
+    w.close(tag);
 }
 
 /// `p:spPr` contents (also used for pictures and connectors).
 fn sp_pr(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape, geom: bool) {
-    w.open0("p:spPr");
+    sp_pr_tag(w, x, o, s, geom, "p:spPr");
+}
+
+fn sp_pr_tag(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape, geom: bool, tag: &str) {
+    w.open0(tag);
     if let Some(xf) = &s.xfrm {
         dml::xfrm(w, "a:xfrm", xf, None);
     }
@@ -249,7 +257,7 @@ fn sp_pr(w: &mut W, x: &mut Exp, o: &mut Out, s: &Shape, geom: bool) {
             w.raw(&xml);
         }
     }
-    w.close("p:spPr");
+    w.close(tag);
 }
 
 /// Write the children of a shape tree.
@@ -301,6 +309,11 @@ pub fn shape(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, depth
                 style(w, st);
             }
             w.close("p:pic");
+        }
+        ShapeKind::Group { children, child } if s.diagram.is_some() && depth < 32 => {
+            if let Some(d) = &s.diagram {
+                diagram(w, x, o, cx, s, d, children, child);
+            }
         }
         ShapeKind::Group { children, child } => {
             let id = cx.id_for(s);
@@ -462,6 +475,89 @@ fn write_model(
     shape_with_id(w, x, o, cx, &pic, pid);
     w.close("mc:Fallback");
     w.close("mc:AlternateContent");
+}
+
+/// A SmartArt graphic: a graphic frame naming its data, layout, quick style and colour parts,
+/// with the group's shapes as the cached drawing PowerPoint shows until it lays the diagram out.
+#[allow(clippy::too_many_arguments)]
+fn diagram(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, d: &deckcraft_model::Diagram, children: &[Shape], child: &Xfrm) {
+    use crate::dgm;
+    let id = cx.id_for(s);
+    let n = x.next_diagram();
+    let frame = s.xfrm.unwrap_or(*child);
+    let name = |kind: &str| format!("ppt/diagrams/{kind}{n}.xml");
+    // The drawing: the group's shapes in the frame's own coordinates.
+    let dname = name("drawing");
+    let mut dout = Out::new(&dname);
+    let mut dw = W::new();
+    dw.open(
+        "dsp:drawing",
+        A::new().a("xmlns:dgm", dgm::NS_DGM).a("xmlns:dsp", dgm::NS_DSP).a("xmlns:a", crate::opc::NS_A).a("xmlns:r", crate::opc::NS_R),
+    );
+    dw.open0("dsp:spTree");
+    dw.open0("dsp:nvGrpSpPr");
+    dw.empty("dsp:cNvPr", A::new().a("id", 0).a("name", ""));
+    dw.empty0("dsp:cNvGrpSpPr");
+    dw.close("dsp:nvGrpSpPr");
+    dw.empty0("dsp:grpSpPr");
+    let (sx, sy) = (frame.w / child.w.max(1e-6), frame.h / child.h.max(1e-6));
+    let mut k = 0;
+    let mut flat = vec![];
+    walk(children, &mut |c, _| {
+        if matches!(c.kind, ShapeKind::Shape) {
+            flat.push(c.clone());
+        }
+    });
+    for mut c in flat.into_iter().take(10_000) {
+        if let Some(xf) = &mut c.xfrm {
+            *xf = Xfrm { x: (xf.x - child.x) * sx, y: (xf.y - child.y) * sy, w: xf.w * sx, h: xf.h * sy, ..*xf };
+        }
+        k += 1;
+        dw.open("dsp:sp", A::new().a("modelId", format!("{{{:08X}-5D1A-4C0A-9E5B-{k:012X}}}", s.id.0)));
+        dw.open0("dsp:nvSpPr");
+        dw.empty("dsp:cNvPr", A::new().a("id", 0).a("name", ""));
+        dw.empty0("dsp:cNvSpPr");
+        dw.close("dsp:nvSpPr");
+        sp_pr_tag(&mut dw, x, &mut dout, &c, true, "dsp:spPr");
+        if let Some(st) = &c.style {
+            style_tag(&mut dw, st, "dsp:style");
+        }
+        if let Some(tb) = &c.text {
+            dml::text_body(&mut dw, x, &mut dout, "dsp:txBody", tb, false);
+        }
+        dw.close("dsp:sp");
+    }
+    dw.close("dsp:spTree");
+    dw.close("dsp:drawing");
+    x.pkg.xml_part(&dname, dgm::CT_DRAWING, dw.finish());
+    x.pkg.rels(&dname, &dout.rels);
+    let rel = |o: &mut Out, kind: &str, part: &str| o.rels.add_new(kind, &crate::opc::relative(&o.name, part), false);
+    let drawing_rel = rel(o, dgm::RT_DRAWING, &dname);
+    let data = name("data");
+    // Node pictures: on the data model's presentation points, through the data part's rels.
+    let mut mout = Out::new(&data);
+    let pics: Vec<(usize, String)> =
+        d.nodes.iter().enumerate().filter_map(|(k, n)| n.picture.and_then(|m| x.media_rel(&mut mout, m, "image")).map(|r| (k, r))).collect();
+    x.pkg.xml_part(&data, dgm::CT_DATA, dgm::data_xml(d, s.id.0, &drawing_rel, &pics));
+    x.pkg.rels(&data, &mout.rels);
+    let dm = rel(o, "diagramData", &data);
+    let layout = name("layout");
+    let lo_xml = d.layout_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::layout_xml(&d.kind));
+    x.pkg.xml_part(&layout, dgm::CT_LAYOUT, lo_xml);
+    let lo = rel(o, "diagramLayout", &layout);
+    let style = name("quickStyle");
+    x.pkg.xml_part(&style, dgm::CT_STYLE, d.style_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::style_xml(&d.style)));
+    let qs = rel(o, "diagramQuickStyle", &style);
+    let colors = name("colors");
+    x.pkg.xml_part(&colors, dgm::CT_COLORS, d.colors_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::colors_xml(&d.colors)));
+    let cs = rel(o, "diagramColors", &colors);
+    let mut fs = s.clone();
+    fs.xfrm = Some(frame);
+    frame_open(w, x, o, id, &fs);
+    w.open("a:graphicData", A::new().a("uri", "http://schemas.openxmlformats.org/drawingml/2006/diagram"));
+    w.empty("dgm:relIds", A::new().a("xmlns:dgm", dgm::NS_DGM).a("r:dm", dm).a("r:lo", lo).a("r:qs", qs).a("r:cs", cs));
+    w.close("a:graphicData");
+    frame_close(w);
 }
 
 fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {

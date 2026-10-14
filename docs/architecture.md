@@ -6,6 +6,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Edit Photo Album, `insert.photoAlbumEdit`; 228 commands, 28 dialogs; previous: trivial, Photo Album dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors dialog; previous: transition frames) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts dialog; previous: transition frames) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; 28 dialogs, 226 commands; previous: transition frames) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft is built today. The binding rules (layering, everything is a command, thin UI, never
 break wasm, never crash) are in [AGENTS.md](../AGENTS.md) §3–§5; this document describes what
@@ -97,5 +98,6 @@ macOS, Windows, Linux, FreeBSD and web artifacts.
 | 2026-10-14 | trivial | Edit Photo Album (`insert.photoAlbumEdit`) reopens the Photo Album dialog and re-flows those slides (228 commands, 28 dialogs) |
 | 2026-10-14 | minor | Create New Theme Colors (`design.colors` with no params); command count stays 226 |
 | 2026-10-14 | minor | Create New Theme Fonts (`design.fonts` with no params); command count stays 226 |
+| 2026-10-14 | minor | Insert › Date and Time dialog (`insert.dateTime` with no keys). 28 dialogs; command count stays 226 |
 | 2026-10-13 | minor | Transitions: perspective meshes, background/content parts, CPU compositor |
 | 2026-10-10 | major | Created from the code on main (d556ff9) and AGENTS.md §4 |

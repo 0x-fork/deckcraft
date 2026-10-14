@@ -14,6 +14,8 @@ The summary between `<!-- SUMMARY -->
 | P2 | 54 | 13 | 16 | 25 | 39% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
 | P2 | 54 | 14 | 15 | 25 | 40% |
+| P1 | 65 | 39 | 21 | 5 | 76% |
+| P2 | 54 | 14 | 17 | 23 | 42% |
 
 | Area | Parity |
 |---|---|
@@ -25,6 +27,7 @@ The summary between `<!-- SUMMARY -->
 | Views | 90% |
 | Masters & themes | 88% |
 | Shapes | 88% |
+| Shapes | 91% |
 | Format | 83% |
 | Arrange | 100% |
 | Text | 80% |
@@ -32,8 +35,10 @@ The summary between `<!-- SUMMARY -->
 | Charts | 65% |
 | SmartArt | 33% |
 | Pictures | 52% |
+| SmartArt | 50% |
+| Pictures | 48% |
 | Media | 67% |
-| Transitions | 92% |
+| Transitions | 100% |
 | Animations | 79% |
 | Slide show | 66% |
 | Review | 60% |
@@ -183,7 +188,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Charts | Chart elements (title, legend, labels, axes, gridlines) | P1 | P |
 | Charts | Chart styles and colours | P2 | P |
 | SmartArt | Insert SmartArt (lists, processes, cycles, hierarchy) | P1 | P |
-| SmartArt | Text pane and layout switching | P2 | M |
+| SmartArt | Text pane and layout switching | P2 | P |
 | Pictures | Insert picture (PNG, JPEG, GIF, WebP, BMP, TIFF) | P0 | D |
 | Pictures | SVG pictures | P1 | M |
 | Pictures | Crop (and crop to shape, aspect ratio) | P0 | P |

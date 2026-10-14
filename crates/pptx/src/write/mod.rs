@@ -52,6 +52,7 @@ pub struct Exp<'a> {
     n_image: u32,
     n_media: u32,
     n_chart: u32,
+    n_diagram: u32,
     pub slide_parts: HashMap<SlideId, String>,
     pub table_styles: Vec<String>,
     placeholder: Option<String>,
@@ -167,6 +168,11 @@ impl Exp<'_> {
             }
         };
         o.rels.add("image", &opc::relative(&o.name, &part), false)
+    }
+    /// The number of the next SmartArt graphic's parts.
+    pub fn next_diagram(&mut self) -> u32 {
+        self.n_diagram += 1;
+        self.n_diagram
     }
     pub fn chart_rel(&mut self, o: &mut Out, c: &deckcraft_model::Chart) -> String {
         self.n_chart += 1;
@@ -467,6 +473,7 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         n_image: 0,
         n_media: 0,
         n_chart: 0,
+        n_diagram: 0,
         slide_parts: HashMap::new(),
         table_styles: vec![],
         placeholder: None,

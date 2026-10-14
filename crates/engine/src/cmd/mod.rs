@@ -19,6 +19,7 @@ pub mod review;
 pub mod selection;
 pub mod shape;
 pub mod slide;
+pub mod smartart;
 pub mod table;
 pub mod text;
 pub mod transition;
@@ -134,6 +135,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(edit::specs());
         v.extend(slide::specs());
         v.extend(insert::specs());
+        v.extend(smartart::specs());
         v.extend(shape::specs());
         v.extend(background::specs());
         v.extend(picture_style::specs());

@@ -864,8 +864,9 @@ pub(crate) fn format_run(s: &mut Session, f: &(dyn Fn(&mut RunProps) + Send + Sy
 }
 
 /// What `format_run` formats while editing: the selection, or for a bare caret the word it's in
-/// (without its trailing space). Empty when the caret is at a word boundary.
-fn format_range(st: &DocState, t: &TextSel) -> (Pos, Pos) {
+/// (without its trailing space). Empty when the caret is at a word boundary. Insert Hyperlink
+/// edits this same span, so the dialog reads it too.
+pub fn format_range(st: &DocState, t: &TextSel) -> (Pos, Pos) {
     let body = body_of(st, t).cloned().unwrap_or_default();
     let (mut a, mut b) = t.ordered();
     if a == b {

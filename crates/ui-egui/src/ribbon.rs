@@ -125,6 +125,9 @@ fn contextual(app: &SlideApp) -> Vec<&'static str> {
         v.push("Table Design");
         v.push("Layout");
     }
+    if deckcraft_engine::cmd::smartart::selected(st).is_some() {
+        v.push("SmartArt Design");
+    }
     if shapes.iter().any(|s| matches!(s.kind, ShapeKind::Chart(_))) {
         v.push("Chart Design");
     }
@@ -223,6 +226,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             "Table Design" => table_design(app, ui),
             "Layout" => table_layout(app, ui),
             "Chart Design" => chart_design(app, ui),
+            "SmartArt Design" => smartart_design(app, ui),
             "Playback" => playback(app, ui),
             "Slide Master" => slide_master(app, ui),
             _ => {}
@@ -232,7 +236,12 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
 
 fn big(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
     let en = enabled(app, id);
-    if big_button(ui, icon, label, en).on_hover_text(tip(id, label)).clicked() {
+    let resp = big_button(ui, icon, label, en);
+    if id == "insert.dateTime" {
+        let name = label.replace('\n', " ");
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &name));
+    }
+    if resp.on_hover_text(tip(id, label)).clicked() {
         run(app, id, p);
     }
 }
@@ -568,6 +577,83 @@ pub fn cref_param(c: &deckcraft_model::ColorRef) -> Value {
     }
 }
 
+/// Convert to SmartArt: the layouts by category, three to a row; a click converts the selected
+/// text.
+/// A layout gallery grouped by category, each layout as a small cached picture with its name.
+/// Clicking runs `cmd` with `{"kind": …}` plus `extra`; hovering shows the layout larger, drawn
+/// with `nodes` (the selected graphic's outline) when given: a live preview without touching the
+/// document.
+fn smartart_gallery(
+    app: &mut SlideApp,
+    ui: &mut Ui,
+    cmd: &str,
+    extra: Value,
+    current: &str,
+    style: &str,
+    colors: &str,
+    nodes: Option<&[deckcraft_model::DiagramNode]>,
+) {
+    use deckcraft_engine::cmd::smartart::{LAYOUTS, category};
+    ui.set_min_width(440.0);
+    let slide = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
+    egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| {
+        for (cat, title) in [
+            ("list", "List"),
+            ("process", "Process"),
+            ("cycle", "Cycle"),
+            ("hierarchy", "Hierarchy"),
+            ("relationship", "Relationship"),
+            ("matrix", "Matrix"),
+            ("pyramid", "Pyramid"),
+            ("picture", "Picture"),
+        ] {
+            let kinds: Vec<(&str, &str)> = LAYOUTS.iter().copied().filter(|(k, _)| category(k) == cat).collect();
+            if kinds.is_empty() {
+                continue;
+            }
+            ui.label(egui::RichText::new(title).strong());
+            egui::Grid::new(("smartart_gallery", cat)).num_columns(4).spacing([6.0, 6.0]).show(ui, |ui| {
+                for (i, (k, label)) in kinds.iter().enumerate() {
+                    let ctx = ui.ctx().clone();
+                    let thumb = app.session.active().and_then(|d| app.textures.smartart(&ctx, &d.doc, slide, k, style, colors, None, 192));
+                    let r = ui
+                        .vertical_centered(|ui| {
+                            ui.set_width(100.0);
+                            let r = match &thumb {
+                                Some(t) => {
+                                    ui.add(egui::Button::image(egui::Image::new(t).fit_to_exact_size(egui::vec2(96.0, 60.0))).selected(*k == current))
+                                }
+                                None => ui.add_sized([96.0, 60.0], egui::Button::new("").selected(*k == current)),
+                            };
+                            ui.add(egui::Label::new(egui::RichText::new(*label).small()).truncate().selectable(false));
+                            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, *label));
+                            r.on_hover_text(*label)
+                        })
+                        .inner;
+                    if r.hovered() {
+                        let preview = app.session.active().and_then(|d| app.textures.smartart(&ctx, &d.doc, slide, k, style, colors, nodes, 480));
+                        if let Some(t) = preview {
+                            r.show_tooltip_ui(|ui| {
+                                ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(320.0, 200.0)));
+                            });
+                        }
+                    }
+                    if r.clicked() {
+                        let mut args = extra.clone();
+                        args["kind"] = json!(k);
+                        run(app, cmd, args);
+                        ui.close();
+                    }
+                    if i % 4 == 3 {
+                        ui.end_row();
+                    }
+                }
+            });
+            ui.separator();
+        }
+    });
+}
+
 fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
     let en = enabled(app, "format.bullets");
     group(ui, |ui| {
@@ -678,6 +764,8 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                         }
                     }
                 });
+                let r = icon_toggle(ui, Icon::SmartArt, "Convert to SmartArt", enabled(app, "smartArt.fromText"), false);
+                egui::Popup::menu(&r).show(|ui| smartart_gallery(app, ui, "smartArt.fromText", json!({}), "", "", "", None));
             });
         });
     });
@@ -1114,6 +1202,11 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
                 if ui.button(format!("Action Button: {k}")).clicked() {
                     run(app, "insert.actionButton", json!({"kind": k}));
                 }
+            }
+            ui.separator();
+            let has_sel = app.session.active().is_some_and(|s| !s.selection.shapes.is_empty());
+            if ui.add_enabled(has_sel, egui::Button::new("Action Settings…")).clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("action"));
             }
         });
     });
@@ -2803,6 +2896,96 @@ fn chart_design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
         big(app, ui, Icon::EditData, "Edit\nData", "app.dialog", json!({"id": "chartData"}));
+    });
+    arrange_group(app, ui);
+}
+
+/// SmartArt Design: Create Graphic (Text Pane, Add Shape, Promote, Demote, Remove) and Layouts.
+fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
+    let sel = app.session.active().and_then(deckcraft_engine::cmd::smartart::selected);
+    let row = app.ui.smartart_row;
+    let (gid, n, kind, style, colors) = match &sel {
+        Some((id, d)) => (Some(id.0), d.nodes.len(), d.kind.clone(), d.style.clone(), d.colors.clone()),
+        None => (None, 0, String::new(), String::new(), String::new()),
+    };
+    let at = row.min(n.saturating_sub(1));
+    group(ui, |ui| {
+        if big_button(ui, Icon::SmartArt, "Text\nPane", gid.is_some()).on_hover_text("Type and organise the diagram's text").clicked() {
+            run(app, "view.pane", json!({"pane": "smartart", "toggle": true}));
+        }
+        rows(ui, |ui| {
+            let (r, _) = small_button_ex(ui, Icon::Plus, "Add Shape", gid.is_some(), false, true);
+            egui::Popup::menu(&r).show(|ui| {
+                for (label, pos) in [
+                    ("Add Shape After", "after"),
+                    ("Add Shape Before", "before"),
+                    ("Add Shape Above", "above"),
+                    ("Add Shape Below", "below"),
+                    ("Add Assistant", "assistant"),
+                ] {
+                    if ui.button(label).clicked() {
+                        let index = if n == 0 { Value::Null } else { json!(at) };
+                        run(app, "smartArt.addNode", json!({"id": gid, "index": index, "position": pos}));
+                    }
+                }
+            });
+            if small_button(ui, Icon::DecreaseIndent, "Promote", n > 0, false).clicked() {
+                run(app, "smartArt.promote", json!({"id": gid, "index": at}));
+            }
+            if small_button(ui, Icon::IncreaseIndent, "Demote", n > 0, false).clicked() {
+                run(app, "smartArt.demote", json!({"id": gid, "index": at}));
+            }
+        });
+        let pictures = kind.starts_with("picture");
+        if small_button(ui, Icon::Picture, "Insert Picture", pictures && n > 0, false)
+            .on_hover_text("Put a picture in the selected node's picture placeholder")
+            .clicked()
+        {
+            run(app, "app.smartArtPictureDialog", json!({"id": gid, "index": at}));
+        }
+    });
+    group(ui, |ui| {
+        let (r, _) = small_button_ex(ui, Icon::Layout, "Layouts", gid.is_some(), false, true);
+        let outline = sel.as_ref().map(|(_, d)| d.nodes.clone());
+        egui::Popup::menu(&r).show(|ui| {
+            smartart_gallery(app, ui, "smartArt.layout", json!({"id": gid}), &kind, &style, &colors, outline.as_deref());
+        });
+        let (r, _) = small_button_ex(ui, Icon::Layout, "Convert", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            if ui.button("Convert to Text").clicked() {
+                run(app, "smartArt.toText", json!({"id": gid}));
+            }
+            if ui.button("Convert to Shapes").clicked() {
+                run(app, "smartArt.toShapes", json!({"id": gid}));
+            }
+        });
+    });
+    group(ui, |ui| {
+        let (r, _) = small_button_ex(ui, Icon::ChangeChartType, "Change Colors", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            for (k, label) in deckcraft_engine::cmd::smartart::COLORS {
+                if matches!(k, "range23" | "accent1" | "accent1Grad") {
+                    ui.separator();
+                }
+                let on = colors == k || (colors.is_empty() && k == "colorful");
+                if ui.selectable_label(on, label).clicked() {
+                    run(app, "smartArt.colors", json!({"id": gid, "colors": k}));
+                }
+            }
+        });
+        let (r, _) = small_button_ex(ui, Icon::SmartArt, "SmartArt Styles", gid.is_some(), false, true);
+        egui::Popup::menu(&r).show(|ui| {
+            for (k, label) in deckcraft_engine::cmd::smartart::STYLES {
+                if k == "polished" {
+                    ui.separator();
+                    ui.label("3-D");
+                }
+                let on = style == k || (style.is_empty() && k == "flat");
+                if ui.selectable_label(on, label).clicked() {
+                    run(app, "smartArt.style", json!({"id": gid, "style": k}));
+                }
+            }
+        });
     });
     arrange_group(app, ui);
 }

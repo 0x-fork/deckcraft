@@ -586,6 +586,22 @@ fn hyperlink_on_a_word_or_shape_links_it() {
     assert!(s.doc().unwrap().current_slide().unwrap().shapes[0].click.is_some(), "a selected shape gets the link as its click action");
 }
 
+#[test]
+fn hyperlink_can_keep_highlight_click() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("insert.hyperlink", &json!({"url": "https://example.org", "tooltip": "tip", "highlightClick": true})).unwrap();
+    let click = s.doc().unwrap().current_slide().unwrap().shapes[0].click.clone().unwrap();
+    assert_eq!(click.tooltip, "tip");
+    assert!(click.highlight_click);
+    assert_eq!(click.action, model::text::Action::Url { url: "https://example.org".into() });
+    s.execute("insert.hyperlink", &json!({"url": "https://example.org"})).unwrap();
+    let click = s.doc().unwrap().current_slide().unwrap().shapes[0].click.clone().unwrap();
+    assert!(!click.highlight_click, "omitting the flag still stores false");
+}
+
 /// A .pptx (base64) whose first slide's title is set in `font`.
 fn deck_in_font(font: &str) -> String {
     let mut p = deckcraft_model::Presentation::default();
@@ -1912,4 +1928,202 @@ fn table_borders_margins_and_cell_alignment() {
     // One undo step each.
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(table(&s).rows[0].cells[0].anchor.is_none());
+}
+
+#[test]
+fn smartart_text_pane_edits_regenerate_the_diagram() {
+    let mut s = session();
+    let r = s.execute("insert.smartArt", &json!({"kind": "blockList", "items": ["Plan", "\tScope", "Build"]})).unwrap();
+    let gid = r["id"].as_u64().unwrap();
+    let kids = |s: &Session| match s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).map(|x| &x.kind) {
+        Some(deckcraft_model::ShapeKind::Group { children, .. }) => children.clone(),
+        _ => panic!("not a group"),
+    };
+    assert_eq!(kids(&s).len(), 2, "Scope is a bullet inside Plan");
+    let box_before = s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).unwrap().xfrm;
+
+    // Type into the second shape directly, then add a node: the typed text is kept.
+    let build = kids(&s)[1].id.0;
+    s.execute("text.edit", &json!({"id": build, "end": true})).unwrap();
+    s.execute("text.insert", &json!({"text": " it"})).unwrap();
+    let r = s.execute("smartArt.addNode", &json!({"id": gid, "index": 2, "position": "after", "text": "Ship"})).unwrap();
+    assert_eq!(r["index"], 3);
+    let n = s.execute("smartArt.nodes", &json!({"id": gid})).unwrap();
+    let texts: Vec<&str> = n["nodes"].as_array().unwrap().iter().map(|x| x["text"].as_str().unwrap()).collect();
+    assert_eq!(texts, ["Plan", "Scope", "Build it", "Ship"]);
+    assert_eq!(kids(&s).len(), 3);
+
+    // Demote Ship under Build, promote Scope, remove Plan.
+    s.execute("smartArt.demote", &json!({"id": gid, "index": 3})).unwrap();
+    assert_eq!(kids(&s).len(), 2);
+    s.execute("smartArt.promote", &json!({"id": gid, "index": 1})).unwrap();
+    assert_eq!(kids(&s).len(), 3);
+    assert!(s.execute("smartArt.promote", &json!({"id": gid, "index": 0})).is_err());
+    s.execute("smartArt.removeNode", &json!({"id": gid, "index": 0})).unwrap();
+    let n = s.execute("smartArt.nodes", &json!({"id": gid})).unwrap();
+    let lv: Vec<u64> = n["nodes"].as_array().unwrap().iter().map(|x| x["level"].as_u64().unwrap()).collect();
+    assert_eq!(lv, [0, 0, 1]);
+
+    // A child shape also finds its diagram; layouts switch; the box stays put; undo works.
+    let child = kids(&s)[0].id.0;
+    s.execute("smartArt.layout", &json!({"id": child, "kind": "hierarchy"})).unwrap();
+    assert_eq!(kids(&s).len(), 3 + 1, "three boxes and one link");
+    assert_eq!(s.doc().unwrap().shape(deckcraft_model::ShapeId(gid as u32)).unwrap().xfrm, box_before);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(kids(&s).len(), 2);
+
+    // The outline survives a .deckcraft save.
+    let doc = s.doc().unwrap().doc.as_ref().clone();
+    let bytes = deckcraft_format::save(&doc).unwrap();
+    let back = deckcraft_format::load(&bytes).unwrap();
+    assert!(back.slides[0].shapes.iter().any(|x| x.diagram.as_ref().is_some_and(|d| d.nodes.len() == 3)));
+}
+
+#[test]
+fn smartart_round_trips_through_pptx_as_a_diagram() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.smartArt", &json!({"kind": "hierarchy", "items": ["CEO", "\tCTO", "\t\tDev", "\tCFO"]})).unwrap();
+    s.execute("smartArt.style", &json!({"style": "intense"})).unwrap();
+    s.execute("smartArt.colors", &json!({"colors": "accent3"})).unwrap();
+    let doc = s.doc().unwrap().doc.as_ref().clone();
+    let bytes = deckcraft_pptx::export(&doc).unwrap();
+    let names: Vec<String> = {
+        let z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+        z.file_names().map(String::from).collect()
+    };
+    for part in ["data1", "layout1", "quickStyle1", "colors1", "drawing1"] {
+        assert!(names.iter().any(|n| n == &format!("ppt/diagrams/{part}.xml")), "{part} in {names:?}");
+    }
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    assert!(back.validate().is_empty());
+    let g = back.slides[1].shapes.iter().find(|x| x.diagram.is_some()).expect("a SmartArt group");
+    let d = g.diagram.as_ref().unwrap();
+    assert_eq!(d.kind, "hierarchy");
+    assert_eq!((d.style.as_str(), d.colors.as_str()), ("intense", "accent3"), "SmartArt style and colours come back");
+    assert!(d.imported);
+    let outline: Vec<(&str, u8)> = d.nodes.iter().map(|n| (n.text.as_str(), n.level)).collect();
+    assert_eq!(outline, [("CEO", 0), ("CTO", 1), ("Dev", 2), ("CFO", 1)]);
+    assert!(g.children().len() >= 4, "the cached drawing is read back as shapes");
+
+    // The Text Pane works on the imported diagram, and a second round trip keeps the edit.
+    let gid = g.id.0;
+    let path = std::env::temp_dir().join(format!("deckcraft-smartart-{}.pptx", std::process::id()));
+    std::fs::write(&path, &bytes).unwrap();
+    let mut s2 = Session::new();
+    s2.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap();
+    let _ = std::fs::remove_file(&path);
+    s2.execute("slide.go", &json!({"index": 1})).unwrap();
+    s2.execute("smartArt.addNode", &json!({"id": gid, "index": 3, "position": "after", "text": "COO"})).unwrap();
+    let again = deckcraft_pptx::import(&deckcraft_pptx::export(s2.doc().unwrap().doc.as_ref()).unwrap()).unwrap();
+    let d = again.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+    assert_eq!(d.nodes.last().map(|n| (n.text.as_str(), n.level)), Some(("COO", 1)));
+}
+
+#[test]
+fn smartart_pictures_3d_styles_and_colour_variants() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.smartArt", &json!({"kind": "pictureCaption", "items": ["Lakes", "\tBlue", "Hills"]})).unwrap();
+    let pics = |s: &Session| -> Vec<deckcraft_model::Shape> {
+        let st = s.doc().unwrap();
+        let g = st.doc.slides[1].shapes.iter().find(|x| x.diagram.is_some()).unwrap().clone();
+        g.children().iter().filter(|c| c.name == "SmartArt picture").cloned().collect()
+    };
+    assert_eq!(pics(&s).len(), 2, "one picture placeholder per top-level node");
+    assert!(pics(&s).iter().all(|p| !matches!(p.fill, Some(deckcraft_model::Fill::Picture(_)))));
+    // A 1×1 PNG put in through a sub-point lands in its top-level node.
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    s.execute("smartArt.picture", &json!({"index": 1, "name": "p.png", "data": png})).unwrap();
+    let p = pics(&s);
+    assert!(matches!(p[0].fill, Some(deckcraft_model::Fill::Picture(_))));
+    assert!(!matches!(p[1].fill, Some(deckcraft_model::Fill::Picture(_))));
+    // Text edits keep the picture; reset removes it.
+    s.execute("smartArt.addNode", &json!({"text": "Woods"})).unwrap();
+    assert!(matches!(pics(&s)[0].fill, Some(deckcraft_model::Fill::Picture(_))));
+    assert_eq!(pics(&s).len(), 3);
+    // The picture is written to the .pptx drawing.
+    let bytes = deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    assert!(back.validate().is_empty());
+    let bd = back.slides[1].shapes.iter().find_map(|x| x.diagram.as_ref()).unwrap();
+    assert_eq!(bd.kind, "pictureCaption");
+    // The node's picture comes back from the data model's blip, as its media.
+    let m = bd.nodes[0].picture.expect("node picture read back");
+    assert!(back.media(m).is_some_and(|x| !x.data.is_empty()));
+    assert!(bd.nodes.iter().skip(1).all(|n| n.picture.is_none()));
+    s.execute("smartArt.picture", &json!({"index": 0, "reset": true})).unwrap();
+    assert!(pics(&s).iter().all(|p| !matches!(p.fill, Some(deckcraft_model::Fill::Picture(_)))));
+
+    // 3-D styles carry a lit bevel; colour variants round trip through .pptx.
+    s.execute("smartArt.style", &json!({"style": "cartoon"})).unwrap();
+    let st = s.doc().unwrap();
+    let g = st.doc.slides[1].shapes.iter().find(|x| x.diagram.is_some()).unwrap().clone();
+    let raw = g.children().iter().find_map(|c| c.effects.as_ref().and_then(|e| e.raw3d.clone())).expect("3-D XML");
+    assert!(raw.contains("scene3d") && raw.contains("softRound"));
+    for (style, colors) in [("polished", "range34"), ("powder", "accent5Grad"), ("brick", "accent2")] {
+        s.execute("smartArt.style", &json!({"style": style})).unwrap();
+        s.execute("smartArt.colors", &json!({"colors": colors})).unwrap();
+        let back = deckcraft_pptx::import(&deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap()).unwrap();
+        let d = back.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+        assert_eq!((d.style.as_str(), d.colors.as_str()), (style, colors));
+    }
+}
+
+#[test]
+fn smartart_converts_to_and_from_text_and_shapes() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.textBox", &json!({"text": "Goals\nRevenue\nGrowth"})).unwrap();
+    let before = s.doc().unwrap().doc.slides[1].shapes.len();
+    let gid = s.execute("smartArt.fromText", &json!({"kind": "blockList"})).unwrap()["id"].as_u64().unwrap();
+    let st = s.doc().unwrap();
+    assert_eq!(st.doc.slides[1].shapes.len(), before, "the text box is replaced, not added to");
+    let d = st.doc.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+    assert_eq!(d.nodes.iter().map(|n| n.text.as_str()).collect::<Vec<_>>(), ["Goals", "Revenue", "Growth"]);
+
+    // Name and Title: titles show in their own box and survive a .pptx round trip.
+    s.execute("smartArt.layout", &json!({"id": gid, "kind": "nameTitleOrgChart"})).unwrap();
+    s.execute("smartArt.setNodes", &json!({"id": gid, "index": 0, "title": "Lead"})).unwrap();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap()).unwrap();
+    let bd = back.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+    assert_eq!((bd.kind.as_str(), bd.nodes[0].title.as_str()), ("nameTitleOrgChart", "Lead"));
+
+    let tid = s.execute("smartArt.toText", &json!({"id": gid})).unwrap()["id"].as_u64().unwrap();
+    let st = s.doc().unwrap();
+    let tb = st.doc.slides[1].shapes.iter().find(|x| x.id.0 as u64 == tid).unwrap();
+    assert!(tb.diagram.is_none());
+    assert_eq!(tb.text.as_ref().unwrap().paragraphs.len(), 3);
+    // The text keeps the size it had in the graphic.
+    assert!(tb.text.as_ref().unwrap().paragraphs.iter().all(|p| p.runs.iter().all(|r| r.props.size.is_some_and(|z| z > 10.0))));
+
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("smartArt.toShapes", &json!({"id": gid})).unwrap();
+    let st = s.doc().unwrap();
+    let g = st.doc.slides[1].shapes.iter().find(|x| x.id.0 as u64 == gid).unwrap();
+    assert!(g.diagram.is_none() && !g.children().is_empty(), "a plain group of the same shapes");
+}
+
+/// Action Settings: click and hover actions on the selected shape, removed again with `none`.
+#[test]
+fn action_settings_set_click_and_hover() {
+    use deckcraft_model::text::Action;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [0, 0, 50, 50]})).unwrap();
+    let shape = |s: &Session| s.doc().unwrap().selected_shapes()[0].clone();
+    s.execute("shape.action", &json!({"action": "slide", "slide": 0, "highlight": false})).unwrap();
+    let first = s.doc().unwrap().doc.slides[0].id;
+    let sh = shape(&s);
+    assert!(matches!(sh.click.as_ref().map(|h| (&h.action, h.highlight_click)), Some((Action::Slide { slide }, false)) if *slide == first));
+    s.execute("shape.action", &json!({"on": "hover", "action": "url", "url": "https://example.com"})).unwrap();
+    assert!(matches!(shape(&s).hover.map(|h| h.action), Some(Action::Url { url }) if url == "https://example.com"));
+    assert!(shape(&s).click.is_some(), "hover leaves the click action");
+    s.execute("shape.action", &json!({"action": "none"})).unwrap();
+    assert!(shape(&s).click.is_none());
+    // Bad input is refused.
+    assert!(s.execute("shape.action", &json!({"action": "slide", "slide": 99})).is_err());
+    assert!(s.execute("shape.action", &json!({"action": "url"})).is_err());
+    assert!(s.execute("shape.action", &json!({"action": "customShow", "show": "nope"})).is_err());
+    assert!(s.execute("shape.action", &json!({"on": "drag", "action": "next"})).is_err());
 }

@@ -89,7 +89,8 @@ pub struct UiState {
     pub notes: bool,
     pub notes_height: f32,
     pub thumbs_width: f32,
-    /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`.
+    /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`,
+    /// `smartart` (Text Pane).
     pub pane: Option<String>,
     pub pane_width: f32,
     pub ruler: bool,
@@ -104,6 +105,12 @@ pub struct UiState {
     pub ui_scale: f32,
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
+    /// The Text Pane's current SmartArt line (Add Shape, Promote and Demote act on it).
+    pub smartart_row: usize,
+    /// A Text Pane line to focus once it is drawn (after Enter, Tab or Backspace rebuilt the list).
+    pub smartart_focus: Option<usize>,
+    /// The Text Pane's line drafts, for the SmartArt group they were read from.
+    pub smartart_drafts: (u32, Vec<String>),
     pub grayscale: bool,
     /// Comment the Review Previous/Next buttons last landed on: `(slide, index)`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -132,6 +139,9 @@ impl Default for UiState {
             presenter_view: true,
             ui_scale: 1.0,
             format_tab: "fill".into(),
+            smartart_row: 0,
+            smartart_focus: None,
+            smartart_drafts: (0, vec![]),
             grayscale: false,
             comment_focus: None,
         }
@@ -164,7 +174,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.zoomOut", "Zoom Out", Some("Cmd+-"), "{}"),
     ("view.zoom", "Zoom…", None, "{percent}"),
     ("view.fit", "Fit to Window", None, "{}"),
-    ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|null}"),
+    ("view.pane", "Task Pane", None, "{pane: format|animation|selection|comments|designer|background|smartart|null}"),
     ("view.tab", "Ribbon Tab", None, "{tab}"),
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
@@ -187,6 +197,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
+    ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
@@ -596,6 +607,12 @@ impl SlideApp {
             "app.preferences" => self.dialog = Some(dialogs::Dialog::new("preferences")),
             "app.openDialog" => self.pick_and_open(),
             "app.insertPictureDialog" => self.pick_and_insert("picture", "insert.picture"),
+            "app.smartArtPictureDialog" => {
+                if self.services.pick_open.is_none() {
+                    return Err("picking a SmartArt picture needs the desktop app".into());
+                }
+                self.pick_and_run("picture", "smartArt.picture", p);
+            }
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
@@ -667,14 +684,25 @@ impl SlideApp {
     }
 
     fn pick_and_insert(&mut self, purpose: &str, cmd: &str) {
+        self.pick_and_run(purpose, cmd, &json!({}));
+    }
+
+    /// Pick a file and run `cmd` with it (`name` + `data`, or `path`) added to `extra`.
+    fn pick_and_run(&mut self, purpose: &str, cmd: &str, extra: &Value) {
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick(purpose) {
+                let mut args = if extra.is_object() { extra.clone() } else { json!({}) };
                 let r = match self.services.read.as_ref().map(|r| r(&path)) {
                     Some(Ok(bytes)) => {
                         let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-                        self.session.execute(cmd, &json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&bytes)}))
+                        args["name"] = json!(name);
+                        args["data"] = json!(deckcraft_engine::cmd::base64_encode(&bytes));
+                        self.session.execute(cmd, &args)
                     }
-                    _ => self.session.execute(cmd, &json!({"path": path})),
+                    _ => {
+                        args["path"] = json!(path);
+                        self.session.execute(cmd, &args)
+                    }
                 };
                 if let Err(e) = r {
                     self.set_status(e.to_string());
@@ -1243,6 +1271,10 @@ mod replacefonts_tests;
 mod slide_size_tests;
 #[cfg(test)]
 mod ui_soak_tests;
+
+#[cfg(test)]
+#[path = "datetime_tests.rs"]
+mod datetime_tests;
 
 #[cfg(test)]
 mod tests {

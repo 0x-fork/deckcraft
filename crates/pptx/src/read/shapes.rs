@@ -508,6 +508,18 @@ fn smartart(imp: &mut Imp, part: &Part, gd: &El, frame: &Shape, depth: usize) ->
     let mut g = frame.clone();
     let x = frame.xfrm.unwrap_or_default();
     g.kind = ShapeKind::Group { children, child: Xfrm::new(0.0, 0.0, x.w, x.h) };
+    g.diagram = diagram_outline(imp, part, rel_ids, &data.root);
+    // Node pictures, from the blips of the data model's presentation points.
+    if let Some(d) = &mut g.diagram {
+        let rels = imp.pkg.rels(&dm.target);
+        for (k, rid) in crate::dgm::node_pictures(&data.root) {
+            let Some(target) = rels.get(&rid).filter(|r| !r.external).map(|r| r.target.clone()) else { continue };
+            let media = imp.media_for(&target);
+            if let Some(n) = d.nodes.get_mut(k) {
+                n.picture = media;
+            }
+        }
+    }
     Some(g)
 }
 
@@ -615,6 +627,50 @@ fn text_area(geom: &Geom, w: f64, h: f64) -> deckcraft_geom::Rect {
         }
         Geom::Custom { .. } => full,
     }
+}
+
+/// The outline of a SmartArt graphic (for the Text Pane), with its layout, quick style and colour
+/// parts kept to be written back.
+fn diagram_outline(imp: &Imp, part: &Part, rel_ids: &El, data: &El) -> Option<deckcraft_model::Diagram> {
+    let nodes = crate::dgm::outline(data);
+    if nodes.is_empty() {
+        return None;
+    }
+    let raw = |attr: &str| -> Option<String> {
+        let rel = part.rels.get(rel_ids.attr(attr)?)?;
+        let bytes = imp.pkg.get(&rel.target)?;
+        (bytes.len() <= 4 << 20).then(|| String::from_utf8(bytes.to_vec()).ok()).flatten()
+    };
+    let layout_xml = raw("r:lo");
+    let (layout_id, cat) = layout_xml
+        .as_deref()
+        .and_then(|x| crate::xml::parse(x.as_bytes()).ok())
+        .map(|d| {
+            let cat = d.root.child("catLst").and_then(|c| c.child("cat")).and_then(|c| c.attr("type")).unwrap_or("").to_string();
+            (d.root.attr("uniqueId").unwrap_or("").to_string(), cat)
+        })
+        .unwrap_or_default();
+    let lo_type = data
+        .path(&["ptLst"])
+        .and_then(|l| l.children_named("pt").find(|p| p.attr("type") == Some("doc")))
+        .and_then(|p| p.child("prSet"))
+        .and_then(|p| p.attr("loTypeId"))
+        .unwrap_or("");
+    let id = if layout_id.is_empty() { lo_type.to_string() } else { layout_id };
+    let pr = data.path(&["ptLst"]).and_then(|l| l.children_named("pt").find(|p| p.attr("type") == Some("doc"))).and_then(|p| p.child("prSet"));
+    let style = crate::dgm::style_for(pr.and_then(|p| p.attr("qsTypeId")).unwrap_or("")).to_string();
+    let colors = crate::dgm::colors_for(pr.and_then(|p| p.attr("csTypeId")).unwrap_or(""));
+    Some(deckcraft_model::Diagram {
+        kind: crate::dgm::kind_for(&id, &cat).to_string(),
+        nodes,
+        style,
+        colors,
+        imported: true,
+        layout_id: id,
+        layout_xml,
+        style_xml: raw("r:qs"),
+        colors_xml: raw("r:cs"),
+    })
 }
 
 fn table(imp: &mut Imp, part: &Part, tbl: &El) -> Table {
