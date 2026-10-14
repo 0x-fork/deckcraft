@@ -1711,3 +1711,27 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
     let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
     assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
 }
+
+#[test]
+fn table_rows_below_the_slide_are_not_laid_out_and_the_slide_looks_the_same() {
+    // A fuzzed deck's 200 x 200 table of long text took 70 s to draw, most of it off the slide.
+    let table = |rows: usize| {
+        let mut t = Table::new(rows, 2, 400.0, 30.0);
+        for r in 0..rows {
+            for c in 0..2 {
+                t.cell_mut(r, c).unwrap().text = TextBody::from_text(&format!("Row {r} col {c}"));
+            }
+        }
+        Shape { id: ShapeId(611), xfrm: Some(Xfrm::new(50.0, 50.0, 400.0, 30.0 * rows as f64)), kind: ShapeKind::Table(t), ..Default::default() }
+    };
+    let opts = RenderOpts { scale: 0.5, ..Default::default() };
+    crate::table::TEXT_CELLS_DRAWN.with(|n| n.set(0));
+    let big = render_slide(&deck_with(vec![table(500)]), 0, &opts);
+    let drawn = crate::table::TEXT_CELLS_DRAWN.with(|n| n.get());
+    assert!(drawn > 2 * 10 && drawn < 2 * 40, "{drawn} cells drawn");
+    // 30 rows already run past the slide's bottom: the same picture.
+    let small = render_slide(&deck_with(vec![table(30)]), 0, &opts);
+    assert_eq!((big.width, big.height), (small.width, small.height));
+    let diff = (0..big.height).flat_map(|y| (0..big.width).map(move |x| (x, y))).filter(|&(x, y)| big.pixel(x, y) != small.pixel(x, y)).count();
+    assert_eq!(diff, 0);
+}
