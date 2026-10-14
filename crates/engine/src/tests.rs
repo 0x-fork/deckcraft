@@ -344,6 +344,34 @@ fn base64_roundtrip() {
 }
 
 #[test]
+fn new_slide_body_tabs_match_text_set() {
+    let body = "Install from DMG\nLaunch app\n\tCheck signing\n\t\tDeep\nBuild a deck";
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "Test Plan", "body": body})).unwrap();
+    let levels = |s: &Session| {
+        let slide = s.doc().unwrap().current_slide().unwrap();
+        let sh = slide.shapes.iter().find(|x| x.ph_type() == Some(deckcraft_model::PhType::Obj)).unwrap();
+        let rows: Vec<(u8, String)> = sh.text.as_ref().unwrap().paragraphs.iter().map(|p| (p.level, p.text())).collect();
+        (sh.id.0, rows)
+    };
+    let (id, from_new) = levels(&s);
+    assert_eq!(
+        from_new,
+        vec![
+            (0, "Install from DMG".to_string()),
+            (0, "Launch app".to_string()),
+            (1, "Check signing".to_string()),
+            (2, "Deep".to_string()),
+            (0, "Build a deck".to_string()),
+        ]
+    );
+    s.execute("text.set", &json!({"id": id, "text": body})).unwrap();
+    assert_eq!(levels(&s).1, from_new);
+    s.execute("text.set", &json!({"id": id, "text": "\t\t\t\t\t\t\t\t\tCapped"})).unwrap();
+    assert_eq!(levels(&s).1, vec![(8, "Capped".to_string())]);
+}
+
+#[test]
 fn layout_change_keeps_text() {
     let mut s = session();
     s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "B"})).unwrap();
