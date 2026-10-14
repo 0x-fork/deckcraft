@@ -206,6 +206,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
     ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
+    ("app.changePictureDialog", "Change Picture…", None, "{}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
@@ -285,6 +286,8 @@ pub struct SlideApp {
     pub sorter: sorter::State,
     /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
     pub(crate) slides_focused: bool,
+    /// The web picker's next picture replaces the selected one (`app.changePictureDialog`).
+    change_picture: bool,
 }
 
 impl SlideApp {
@@ -331,6 +334,7 @@ impl SlideApp {
             doc_window: None,
             sorter: sorter::State::default(),
             slides_focused: false,
+            change_picture: false,
         }
     }
 
@@ -631,6 +635,7 @@ impl SlideApp {
                 }
                 self.pick_and_run("picture", "smartArt.picture", p);
             }
+            "app.changePictureDialog" => self.pick_and_insert("picture", "picture.change"),
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
@@ -744,6 +749,7 @@ impl SlideApp {
                 }
             }
         } else if let Some(f) = self.services.open_async.as_mut() {
+            self.change_picture = cmd == "picture.change";
             f(purpose);
         }
     }
@@ -829,6 +835,13 @@ impl SlideApp {
         let Some(inbox) = self.services.inbox.clone() else { return };
         let files: Vec<(String, Vec<u8>)> = inbox.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
         for (name, bytes) in files {
+            if std::mem::take(&mut self.change_picture) && deckcraft_engine::cmd::insert::content_type(&name, &bytes).starts_with("image/") {
+                let p = json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&bytes)});
+                if let Err(e) = self.session.execute("picture.change", &p) {
+                    self.set_status(e.to_string());
+                }
+                continue;
+            }
             self.open_or_insert_bytes(&name, &bytes);
         }
     }
@@ -1389,6 +1402,54 @@ mod tests {
         assert!(harness.state().toast.is_none());
         harness.run_steps(2);
         assert!(harness.state().toast.is_none());
+    }
+
+    /// #115: Change Picture replaced nothing — it inserted a second picture.
+    #[test]
+    fn change_picture_replaces_the_selected_picture() {
+        let svg = |c: &str| {
+            format!("<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='4' fill='{c}'/></svg>").into_bytes()
+        };
+        let media = |app: &SlideApp| {
+            let d = app.session.active().unwrap();
+            let pics: Vec<_> = d.doc.slides[0]
+                .shapes
+                .iter()
+                .filter_map(|s| if let deckcraft_model::ShapeKind::Picture { fill } = &s.kind { Some(fill.media) } else { None })
+                .collect();
+            assert_eq!(pics.len(), 1, "one picture, replaced in place");
+            pics[0]
+        };
+        let insert = |app: &mut SlideApp| {
+            let id =
+                app.session.execute("insert.picture", &json!({"name": "a.svg", "data": deckcraft_engine::cmd::base64_encode(&svg("red"))})).unwrap()
+                    ["id"]
+                    .clone();
+            app.session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+            media(app)
+        };
+
+        // Desktop: the file dialog returns a path.
+        let blue = svg("blue");
+        let services = Services {
+            pick_open: Some(Box::new(|_: &str| Some("b.svg".into()))),
+            read: Some(Box::new(move |_: &str| Ok(blue.clone()))),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        let before = insert(&mut app);
+        app.run("app.changePictureDialog", json!({})).unwrap();
+        assert_ne!(media(&app), before);
+
+        // Web: the browser picker delivers the file through the inbox later.
+        let inbox = Inbox::default();
+        let services = Services { open_async: Some(Box::new(|_: &str| {})), inbox: Some(inbox.clone()), ..Default::default() };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        let before = insert(&mut app);
+        app.run("app.changePictureDialog", json!({})).unwrap();
+        inbox.lock().unwrap().push(("b.svg".into(), svg("blue")));
+        app.drain_inbox();
+        assert_ne!(media(&app), before);
     }
 
     /// #17: Home created a new blank presentation instead of going to the start screen.

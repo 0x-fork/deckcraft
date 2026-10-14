@@ -2573,7 +2573,7 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
         rows(ui, |ui| {
-            small(app, ui, Icon::ChangePicture, "Change Picture", "app.insertPictureDialog", json!({}));
+            small(app, ui, Icon::ChangePicture, "Change Picture", "app.changePictureDialog", json!({}));
             small(app, ui, Icon::ResetPicture, "Reset Picture", "picture.reset", json!({}));
         });
     });

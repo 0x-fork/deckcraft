@@ -818,6 +818,14 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 let _ = app.run("shape.lock", json!({"locked": !locked}));
                 ui.close();
             }
+            let picture = app
+                .session
+                .active()
+                .is_some_and(|d| d.selected_shapes().iter().any(|s| matches!(s.kind, deckcraft_model::ShapeKind::Picture { .. })));
+            if picture && ui.button("Change Picture…").clicked() {
+                let _ = app.run("app.changePictureDialog", json!({}));
+                ui.close();
+            }
             if ui.button("Link…").clicked() {
                 app.dialog = Some(crate::dialogs::Dialog::new("hyperlink"));
                 ui.close();
