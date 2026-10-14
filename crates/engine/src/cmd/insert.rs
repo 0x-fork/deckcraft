@@ -54,7 +54,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Link",
             ["Insert", "Links"],
             Some("Cmd+K"),
-            "{url? | slide?: index, tooltip?, text?: shown when nothing is selected, ids?}",
+            "{url? | slide?: index, tooltip?, text?: shown when nothing is selected, highlightClick?, ids?}",
             has_text_or_shapes,
             hyperlink
         ),
@@ -589,7 +589,7 @@ fn hyperlink(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad("insert.hyperlink", "missing `url` or `slide`"));
     };
     let display = str_param(p, "text").map_or(display, str::to_string);
-    let link = Hyperlink { action, tooltip: str_param(p, "tooltip").unwrap_or("").to_string(), highlight_click: false };
+    let link = Hyperlink { action, tooltip: str_param(p, "tooltip").unwrap_or("").to_string(), highlight_click: bool_or(p, "highlightClick", false) };
     if s.doc()?.selection.text.is_some() {
         return super::text::link_text(s, link, &display);
     }
