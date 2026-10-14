@@ -28,7 +28,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("edit.pasteText", "Paste and Match Formatting", ["Edit"], Some("Cmd+Shift+V"), "{text?}", has_doc, paste_text),
         cmd!("edit.duplicate", "Duplicate", ["Edit"], Some("Cmd+D"), "{ids?}", has_selection, duplicate),
         cmd!("edit.delete", "Delete", ["Edit"], Some("Delete"), "{ids?, scope?: slides}", has_doc, delete),
-        cmd!(noundo "edit.selectAll", "Select All", ["Edit"], Some("Cmd+A"), "{}", has_slide, select_all),
+        cmd!(noundo "edit.selectAll", "Select All", ["Edit"], Some("Cmd+A"), "{scope?: slides}", has_slide, select_all),
         cmd!(noundo "edit.deselect", "Deselect", [], Some("Escape"), "{}", has_doc, deselect),
         cmd!(noundo "edit.select", "Select Objects", [], None, "{ids: [id], add?: bool, toggle?: bool}", has_slide, select),
     ]
@@ -530,7 +530,12 @@ fn count(v: &[Shape]) -> usize {
     n
 }
 
-fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
+fn select_all(s: &mut Session, p: &Value) -> Result<Value> {
+    match p.get("scope") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(v)) if v == "slides" => return select_all_slides(s),
+        Some(_) => return Err(bad("edit.selectAll", "scope must be \"slides\"")),
+    }
     if s.doc()?.selection.text.is_some() {
         return s.execute("text.selectAll", &json!({}));
     }
@@ -540,6 +545,22 @@ fn select_all(s: &mut Session, _p: &Value) -> Result<Value> {
     let ids: Vec<ShapeId> = s.doc()?.shapes().iter().filter(|x| !x.hidden && !x.locked).map(|x| x.id).collect();
     s.select(|_, sel| sel.shapes = ids.clone())?;
     Ok(json!({"ids": ids}))
+}
+
+/// Thumbnail-pane / sorter select all: every slide, hidden ones included. The current
+/// slide stays where it is (the canvas must not jump), so this is not `slide.selectSlides`.
+fn select_all_slides(s: &mut Session) -> Result<Value> {
+    if s.doc()?.selection.target != crate::Target::Slides {
+        return Err(bad("edit.selectAll", "the slide list is not shown while editing a master"));
+    }
+    let ids: Vec<SlideId> = s.doc()?.doc.slides.iter().map(|x| x.id).collect();
+    s.select(|_, sel| {
+        sel.slides = ids.clone();
+        sel.shapes.clear();
+        sel.text = None;
+        sel.cells = None;
+    })?;
+    Ok(json!({"selected": ids}))
 }
 
 fn deselect(s: &mut Session, _p: &Value) -> Result<Value> {

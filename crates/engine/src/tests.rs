@@ -1810,3 +1810,43 @@ fn picture_recolor_and_transparent_color() {
     s.execute("picture.recolor", &json!({"ids": [id], "preset": "none"})).unwrap();
     assert_eq!(adj(&s), deckcraft_model::style::PictureAdjust::default());
 }
+
+#[test]
+fn select_all_slides_scope() {
+    let mut s = session();
+    // One slide: selects it, no panic.
+    let r = s.execute("edit.selectAll", &json!({"scope": "slides"})).unwrap();
+    assert_eq!(r["selected"].as_array().map(Vec::len), Some(1));
+    for _ in 0..3 {
+        s.execute("slide.new", &json!({})).unwrap();
+    }
+    s.execute("slide.hide", &json!({"index": 1})).unwrap();
+    s.execute("slide.go", &json!({"index": 1})).unwrap();
+    let before = s.doc().unwrap().selection.slide;
+    s.execute("edit.selectAll", &json!({"scope": "slides"})).unwrap();
+    let st = s.doc().unwrap();
+    let all: Vec<_> = st.doc.slides.iter().map(|x| x.id).collect();
+    assert_eq!(st.selection.slides, all);
+    assert_eq!(st.selection.slide, before, "the current slide must not jump");
+    assert!(st.selection.shapes.is_empty() && st.selection.text.is_none());
+    assert_eq!(st.doc.slides.len(), 4);
+}
+
+#[test]
+fn select_all_slides_leaves_shape_select_all_alone() {
+    let mut s = session();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 50, 50]})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.go", &json!({"index": 0})).unwrap();
+    // No scope: still selects shapes on the current slide.
+    s.execute("edit.selectAll", &json!({})).unwrap();
+    assert!(!s.doc().unwrap().selection.shapes.is_empty());
+    assert!(s.doc().unwrap().selection.slides.len() <= 1);
+}
+
+#[test]
+fn select_all_slides_bad_scope_is_an_error() {
+    let mut s = session();
+    assert!(s.execute("edit.selectAll", &json!({"scope": "everything"})).is_err());
+    assert!(s.execute("edit.selectAll", &json!({"scope": 3})).is_err());
+}
