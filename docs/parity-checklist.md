@@ -110,7 +110,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Shapes | Connectors (straight, elbow, curved) | P0 | D |
 | Shapes | Connector glue to connection sites | P1 | D |
 | Shapes | Freeform, curve and scribble tools | P1 | D |
-| Shapes | Edit points | P1 | M |
+| Shapes | Edit points | P1 | P |
 | Shapes | Merge shapes (union, combine, fragment, intersect, subtract) | P1 | D |
 | Shapes | Change shape | P1 | D |
 | Shapes | Text boxes | P0 | D |

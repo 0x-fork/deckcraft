@@ -203,6 +203,13 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   `scene3d`/`sp3d` round-trip as raw XML; no extrusion or side faces, only the three-point rig, and
   no command or pane to apply 3-D).
 - **Estimate:** 4–6 h (edit points), 1–2 h (warp adjust handles), 6–10 h (3-D extrusion,
+- **Evidence:** checklist rows "Edit points" (P1 partial: Edit Points converts a shape to a freeform, vertices drag, Ctrl/Cmd-click adds or deletes; no point types or Bézier control handles), "Text warp transforms" (partial: all 40
+  `prstTxWarp` presets render and their adjusts round-trip, but there is no Transform gallery or
+  command to apply one, no adjust handles, and arc/circle placement can differ from PowerPoint by
+  1–3 % of the path length), "Bevel and 3-D rotation" (partial: bevels, camera presets and rotations and face lighting
+  render as approximations and `scene3d`/`sp3d` round-trip as raw XML; no extrusion or side faces,
+  only the three-point rig, and no command or pane to apply 3-D).
+- **Estimate:** 2–3 h (edit points: point types, control handles), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
   rigs and materials, Format Shape page).
 
 ### Proofing: spelling, thesaurus, AutoCorrect
@@ -290,6 +297,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | EMF/WMF rectangle clip regions (`INTERSECTCLIPRECT`, `EXCLUDECLIPRECT`, `EXTSELECTCLIPRGN`) limit later drawing. EMF+ records remain |
 | 2026-10-13 | minor | Embedded fonts are read, written and drawn (TrueType, OpenType, Embedded OpenType). The gap is now MicroType Express subsets, which are kept but not drawn |
 | 2026-10-13 | minor | WordArt Transform gallery: Shape Format ▸ Text Effects lists the 40 presets and No Transform; `format.textWarp` applies one (adjust handles still open) |
+| 2026-10-13 | minor | Edit Points: convert to freeform, drag, add and delete vertices (`shape.editPoints`, `shape.movePoint`, `shape.addPoint`, `shape.deletePoint`); left: point types and control handles |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

@@ -1326,3 +1326,102 @@ fn text_transparency_keeps_the_colour_and_sets_alpha() {
     assert!((color.alpha() - 0.5).abs() < 1e-9);
     assert!(s.execute("format.textTransparency", &json!({})).is_err());
 }
+
+#[test]
+fn edit_points_turns_a_preset_into_a_freeform_and_moves_adds_deletes() {
+    use deckcraft_model::Geom;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let r = s.execute("shape.editPoints", &json!({})).unwrap();
+    let id = r["editing"].as_u64().unwrap();
+    assert!(matches!(s.doc().unwrap().selected_shapes()[0].geom, Geom::Custom { .. }));
+    let pts =
+        |s: &mut Session| -> Vec<[f64; 2]> { serde_json::from_value(s.execute("shape.points", &json!({})).unwrap()["paths"][0].clone()).unwrap() };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    let v = pts(&mut s);
+    assert_eq!(v.len(), 4, "{v:?}");
+    assert!(near(v[0], [100.0, 100.0]) && near(v[2], [300.0, 200.0]));
+    // Drag the bottom-right corner out: the box grows to fit, other points stay on the slide.
+    s.execute("shape.movePoint", &json!({"index": 2, "x": 350, "y": 260})).unwrap();
+    let v = pts(&mut s);
+    assert!(near(v[0], [100.0, 100.0]) && near(v[2], [350.0, 260.0]) && near(v[3], [100.0, 200.0]), "{v:?}");
+    let x = s.doc().unwrap().selected_shapes()[0].xfrm.unwrap();
+    assert!((x.w - 250.0).abs() < 1e-6 && (x.h - 160.0).abs() < 1e-6);
+    // Move the first point up-left: the box moves with it.
+    s.execute("shape.movePoint", &json!({"index": 0, "x": 80, "y": 90})).unwrap();
+    let x = s.doc().unwrap().selected_shapes()[0].xfrm.unwrap();
+    assert!((x.x - 80.0).abs() < 1e-6 && (x.y - 90.0).abs() < 1e-6);
+    assert!(near(pts(&mut s)[0], [80.0, 90.0]));
+    // Add a point in the middle of the closing edge (from the last point back to the first) and
+    // of the top edge, then delete one.
+    s.execute("shape.addPoint", &json!({"segment": 0})).unwrap();
+    assert_eq!(pts(&mut s).len(), 5);
+    s.execute("shape.addPoint", &json!({"segment": 1, "t": 0.5})).unwrap();
+    let v = pts(&mut s);
+    assert_eq!(v.len(), 6);
+    assert!(near(v[1], [(80.0 + 300.0) / 2.0, (90.0 + 100.0) / 2.0]), "{v:?}");
+    s.execute("shape.deletePoint", &json!({"index": 1})).unwrap();
+    s.execute("shape.deletePoint", &json!({"index": 0})).unwrap();
+    assert_eq!(pts(&mut s).len(), 4);
+    // Bad input is an error, not a panic; an outline keeps two points.
+    assert!(s.execute("shape.movePoint", &json!({"index": 99, "x": 1, "y": 1})).is_err());
+    assert!(s.execute("shape.movePoint", &json!({"index": 0, "x": f64::NAN, "y": 1})).is_err());
+    s.execute("shape.deletePoint", &json!({"index": 0})).unwrap();
+    s.execute("shape.deletePoint", &json!({"index": 0})).unwrap();
+    assert!(s.execute("shape.deletePoint", &json!({"index": 0})).is_err());
+    // Each edit is one undo step.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(pts(&mut s).len(), 3);
+    // It saves as custom geometry.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": "e.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let back = s.doc().unwrap().doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find(|sh| sh.id.0 == id as u32).map(|sh| sh.geom.clone());
+    assert!(matches!(back, Some(Geom::Custom { .. })), "{back:?}");
+}
+
+#[test]
+fn edit_points_with_the_pointer_and_curves() {
+    use crate::tools::{Mods, PointerEvent, PointerKind};
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    let pts =
+        |s: &mut Session| -> Vec<[f64; 2]> { serde_json::from_value(s.execute("shape.points", &json!({})).unwrap()["paths"][0].clone()).unwrap() };
+    let v = pts(&mut s);
+    assert!(v.len() >= 4, "{v:?}");
+    let ev = |kind, x: f64, y: f64, cmd: bool| PointerEvent { kind, x, y, mods: Mods { cmd, ..Default::default() }, ..Default::default() };
+    // Drag the first vertex 30 pt left: one undo step.
+    let [x0, y0] = v[0];
+    s.pointer(ev(PointerKind::Down, x0, y0, false)).unwrap();
+    s.pointer(ev(PointerKind::Drag, x0 - 15.0, y0, false)).unwrap();
+    s.pointer(ev(PointerKind::Drag, x0 - 30.0, y0, false)).unwrap();
+    s.pointer(ev(PointerKind::Up, x0 - 30.0, y0, false)).unwrap();
+    let w = pts(&mut s);
+    assert!((w[0][0] - (x0 - 30.0)).abs() < 1e-3 && (w[0][1] - y0).abs() < 1e-3, "{w:?}");
+    assert!(w[1..].iter().zip(&v[1..]).all(|(a, b)| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!((pts(&mut s)[0][0] - x0).abs() < 1e-3);
+    // Ctrl-click a vertex deletes it.
+    let n = pts(&mut s).len();
+    let [x1, y1] = pts(&mut s)[1];
+    s.pointer(ev(PointerKind::Down, x1, y1, true)).unwrap();
+    s.pointer(ev(PointerKind::Up, x1, y1, true)).unwrap();
+    assert_eq!(pts(&mut s).len(), n - 1);
+    // Escape leaves Edit Points; then a click on empty slide doesn't touch the shape.
+    s.key("Escape", Mods::default()).unwrap();
+    assert!(s.tool.edit_points.is_none());
+}
+
+#[test]
+fn edit_points_path_parse_and_write() {
+    use crate::cmd::points::{Seg, parse, vertices, write};
+    let segs = parse("M 0 0 L 10 0 C 10 5 5 10 0 10 Z junk L");
+    // The closing edge is made explicit; its end is not a vertex of its own.
+    assert_eq!(segs.len(), 5);
+    assert!(matches!(segs[3], Seg::L(_)));
+    assert_eq!(vertices(&segs), vec![0, 1, 2]);
+    assert_eq!(write(&parse(&write(&segs))), write(&segs));
+    assert!(parse("C 1 2 3").is_empty());
+}
