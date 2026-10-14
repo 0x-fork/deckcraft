@@ -1,5 +1,7 @@
 //! A slide's animation sequence: click steps, effect start times and per-shape state over time.
 
+use std::collections::{HashMap, HashSet};
+
 use deckcraft_model::anim::TextBuild;
 use deckcraft_model::style::Fill;
 use deckcraft_model::{AnimClass, AnimStart, Animation, ColorScheme, Rgba, SchemeSlot, ShapeId, Slide, Xfrm};
@@ -161,25 +163,31 @@ impl Timeline {
         let accent = scheme.map(|s| s.get(SchemeSlot::Accent1)).unwrap_or(Rgba::rgb(0x15, 0x60, 0x82));
 
         let mut tl = Timeline::default();
-        // Sequences in order of first appearance: main first.
-        let mut seqs: Vec<Sequence> = vec![Sequence::Main];
-        for a in &slide.animations {
-            if let Some(tr) = a.trigger {
-                let s = Sequence::Trigger(tr);
-                if !seqs.contains(&s) {
-                    seqs.push(s);
-                }
+        // Group the animations by sequence in one pass, sequences in order of first appearance
+        // (main first), so many distinct triggers cost linear work, not a scan per trigger.
+        let mut seqs: Vec<(Sequence, Vec<usize>)> = vec![(Sequence::Main, Vec::new())];
+        let mut seq_index: HashMap<Sequence, usize> = HashMap::from([(Sequence::Main, 0)]);
+        for (ai, a) in slide.animations.iter().enumerate() {
+            let s = a.trigger.map(Sequence::Trigger).unwrap_or(Sequence::Main);
+            let i = *seq_index.entry(s).or_insert_with(|| {
+                seqs.push((s, Vec::new()));
+                seqs.len() - 1
+            });
+            if let Some((_, members)) = seqs.get_mut(i) {
+                members.push(ai);
             }
         }
-        for seq in seqs {
+        // Paragraph groups already recorded (the list itself keeps their order).
+        let mut grouped: HashSet<(ShapeId, usize, usize)> = HashSet::new();
+        for (seq, members) in seqs {
+            if tl.effects.len() >= MAX_EFFECTS {
+                break;
+            }
             let mut steps: Vec<StepInfo> = Vec::new();
             let mut group_begin = 0.0f64;
             let mut max_end = 0.0f64;
-            for (ai, a) in slide.animations.iter().enumerate() {
-                let aseq = a.trigger.map(Sequence::Trigger).unwrap_or(Sequence::Main);
-                if aseq != seq {
-                    continue;
-                }
+            for ai in members {
+                let Some(a) = slide.animations.get(ai) else { continue };
                 if tl.effects.len() >= MAX_EFFECTS {
                     break;
                 }
@@ -198,7 +206,7 @@ impl Timeline {
                                     owner = Some(i);
                                     v.push(Some(i));
                                 } else if let Some(o) = owner
-                                    && !tl.groups.contains(&(a.shape, i, o))
+                                    && grouped.insert((a.shape, i, o))
                                 {
                                     tl.groups.push((a.shape, i, o));
                                 }
