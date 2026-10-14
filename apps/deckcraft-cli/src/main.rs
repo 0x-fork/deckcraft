@@ -570,6 +570,18 @@ mod tests {
         assert!(describe(Some("--help")).is_ok());
         assert!(mcp(&args(&["-h"])).is_ok());
     }
+
+    #[test]
+    fn render_refuses_an_unknown_option_instead_of_writing_it_as_a_file() {
+        let out = std::env::temp_dir().join("deckcraft-cli-unknown-option.png");
+        let _ = std::fs::remove_file(&out);
+        for flag in ["--bogus", "-x"] {
+            let args: Vec<String> = ["--sample", flag, &out.to_string_lossy()].iter().map(|a| a.to_string()).collect();
+            let e = render(&args).unwrap_err();
+            assert!(e.contains(&format!("unknown option `{flag}`")), "{flag}: {e}");
+            assert!(!out.exists(), "{flag}: rendered anyway");
+        }
+    }
 }
 
 #[cfg(test)]
