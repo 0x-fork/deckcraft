@@ -27,6 +27,9 @@ pub struct Show {
     trans: Option<Transition>,
     tex: Option<(Key, TextureHandle)>,
     next_tex: Option<(usize, TextureHandle)>,
+    /// The next slide's first frame, rendered in the background while this one is shown so
+    /// advancing only uploads it (#240).
+    prefetch: Option<Prefetch>,
     blank: Option<Color32>,
     pen: bool,
     strokes: Vec<Vec<Pos2>>,
@@ -49,7 +52,7 @@ pub struct Show {
     media_cues: Vec<(ShapeId, String)>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Key {
     slide: usize,
     step: usize,
@@ -61,6 +64,76 @@ struct Key {
     plays: Vec<(ShapeId, usize)>,
     /// The frames animated GIFs show.
     gif: u64,
+}
+
+/// A slide frame being rendered on another thread: what it will be (`key`) and where it arrives.
+struct Prefetch {
+    key: Key,
+    rx: std::sync::mpsc::Receiver<egui::ColorImage>,
+}
+
+fn render_threads() -> u16 {
+    if cfg!(target_arch = "wasm32") { 0 } else { std::thread::available_parallelism().map(|n| n.get().min(8) as u16).unwrap_or(0) }
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Slide `idx` at `step`, `t` seconds into it, `size` pixels, with `hidden` media hidden.
+fn render_frame(
+    doc: &Presentation,
+    idx: usize,
+    tl: Timeline,
+    step: usize,
+    t: f64,
+    size: (u32, u32),
+    hidden: Vec<ShapeId>,
+    times: &[(ShapeId, f64)],
+    threads: u16,
+    plays: &[TriggerPlay],
+    stamps: &[StepStamp],
+) -> egui::ColorImage {
+    let f = move |id: ShapeId| {
+        let mut st = state_for(&tl, id, step, t, plays, stamps);
+        if hidden.contains(&id) {
+            st.visible = false;
+        }
+        st
+    };
+    let img = deckcraft_render::render_slide(
+        doc,
+        idx,
+        &RenderOpts {
+            scale: size.0 as f64 / doc.slide_size.width.max(1.0),
+            size: Some(size),
+            state: Some(&f),
+            gif_times: times,
+            threads,
+            ..Default::default()
+        },
+    );
+    crate::textures::to_color_image(&img, false)
+}
+
+/// Media on slide `idx` hidden until it plays, as it is when the slide is entered.
+fn hidden_on_entry(doc: &Presentation, idx: usize) -> Vec<ShapeId> {
+    crate::media::slide_media(doc, idx).into_iter().filter(|(_, _, clip)| clip.hide_while_not_playing).map(|m| m.0).collect()
+}
+
+/// Start rendering slide `next`'s first frame on another thread. `None` on the web (no threads).
+fn start_prefetch(doc: &std::sync::Arc<Presentation>, next: usize, size: (u32, u32)) -> Option<Prefetch> {
+    if cfg!(target_arch = "wasm32") {
+        return None;
+    }
+    let hidden = hidden_on_entry(doc, next);
+    let key = Key { slide: next, step: 0, size, doc: std::sync::Arc::as_ptr(doc) as usize, hidden: hidden.clone(), gif: 0, plays: vec![] };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let doc = doc.clone();
+    // Leave a core for the UI thread.
+    let threads = render_threads().saturating_sub(1).max(1);
+    let spawned = std::thread::Builder::new().name("show-prefetch".into()).spawn(move || {
+        let tl = ShowState::timeline(&doc, next);
+        let _ = tx.send(render_frame(&doc, next, tl, 0, 0.0, size, hidden, &[], threads, &[], &[]));
+    });
+    spawned.ok().map(|_| Prefetch { key, rx })
 }
 
 struct Transition {
@@ -94,6 +167,7 @@ impl Show {
             trans: None,
             tex: None,
             next_tex: None,
+            prefetch: None,
             blank: None,
             pen: false,
             strokes: vec![],
@@ -484,30 +558,18 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let tex = if !animating && show.tex.as_ref().is_some_and(|(k, _)| *k == key) {
             show.tex.as_ref().map(|(_, t)| t.clone())
         } else {
-            let tl = show.timeline(&doc).clone();
-            let hide = hidden.clone();
-            let f = move |id: ShapeId| {
-                let mut st = state_for(&tl, id, step, t, &plays, &stamps);
-                if hide.contains(&id) {
-                    st.visible = false;
-                }
-                st
+            // The frame rendered ahead of time, when it is this one (waiting for it beats starting over).
+            let ready = match show.prefetch.take() {
+                Some(p) if p.key == key && !animating => p.rx.recv().ok(),
+                _ => None,
             };
-            let threads =
-                if cfg!(target_arch = "wasm32") { 0 } else { std::thread::available_parallelism().map(|n| n.get().min(8) as u16).unwrap_or(0) };
-            let img = deckcraft_render::render_slide(
-                &doc,
-                idx,
-                &RenderOpts {
-                    scale: size.0 as f64 / doc.slide_size.width.max(1.0),
-                    size: Some(size),
-                    state: Some(&f),
-                    gif_times: &times,
-                    threads,
-                    ..Default::default()
-                },
-            );
-            let ci = crate::textures::to_color_image(&img, false);
+            let ci = match ready {
+                Some(ci) => ci,
+                None => {
+                    let tl = show.timeline(&doc).clone();
+                    render_frame(&doc, idx, tl, step, t, size, hidden.clone(), &times, render_threads(), &plays, &stamps)
+                }
+            };
             let tex = match show.tex.take() {
                 Some((_, mut h)) => {
                     h.set(ci, egui::TextureOptions::LINEAR);
@@ -518,6 +580,17 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             show.tex = Some((key, tex.clone()));
             Some(tex)
         };
+        // While this slide rests, render the next one's first frame (not one with GIFs, whose
+        // frame depends on when it is entered).
+        if !animating && show.trans.is_none() && !show.preview_only {
+            let next = deckcraft_anim::show_order(&doc).into_iter().find(|i| *i > idx);
+            let wanted = next.filter(|n| app.media.gifs(&doc, *n, now, &app.session.gif_paused).is_empty());
+            if let Some(n) = wanted
+                && show.prefetch.as_ref().is_none_or(|p| p.key.slide != n || p.key.size != size || p.key.doc != std::sync::Arc::as_ptr(&doc) as usize)
+            {
+                show.prefetch = start_prefetch(&doc, n, size);
+            }
+        }
         let mut drew = false;
         let morphing = show.trans.as_ref().is_some_and(|tr| tr.kind == "morph" && tr.from.is_some() && now - tr.start < tr.dur);
         let tl = if morphing { Some(show.timeline(&doc).clone()) } else { None };
@@ -1151,6 +1224,20 @@ mod tests {
         harness.key_press(egui::Key::Escape);
         harness.run_steps(2);
         assert!(harness.state().show.is_none());
+    }
+
+    #[test]
+    fn the_prefetched_frame_is_the_frame_shown_on_entry() {
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({"title": "Second"})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let size = (96, 54);
+        let p = start_prefetch(&doc, 1, size).expect("prefetch starts");
+        assert_eq!(p.key, Key { slide: 1, step: 0, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: vec![], gif: 0, plays: vec![] });
+        let got = p.rx.recv().expect("the frame arrives");
+        let want = render_frame(&doc, 1, ShowState::timeline(&doc, 1), 0, 0.0, size, vec![], &[], 0, &[], &[]);
+        assert_eq!(got.size, want.size);
+        assert_eq!(got.pixels, want.pixels);
     }
 
     #[test]
