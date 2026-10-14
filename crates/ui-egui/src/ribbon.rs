@@ -35,6 +35,11 @@ fn title_geometry(integrated: bool) -> (f32, f32, f32) {
 }
 
 /// Is engine command `id` enabled right now?
+/// Whether `id` names an engine or UI command.
+pub fn known(id: &str) -> bool {
+    deckcraft_engine::find_command(id).is_some() || crate::UI_COMMANDS.iter().any(|c| c.0 == id)
+}
+
 pub fn enabled(app: &SlideApp, id: &str) -> bool {
     match deckcraft_engine::find_command(id) {
         Some(c) => (c.enabled)(&app.session).is_ok(),
@@ -69,24 +74,7 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         child.spacing_mut().item_spacing.x = 2.0;
         let has_doc = app.session.active().is_some();
         let dirty = app.session.active().is_some_and(|d| d.is_dirty());
-        if icon_toggle(&mut child, Icon::Home, "Home", true, app.backstage_open()).clicked() {
-            let _ = app.run("app.home", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::Save, "Save (⌘S)", has_doc, false).clicked() {
-            app.save();
-        }
-        if icon_toggle(&mut child, Icon::Export, "Export…", has_doc, false).clicked() {
-            let _ = app.run("app.exportDialog", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::Undo, "Undo (⌘Z)", enabled(app, "edit.undo"), false).clicked() {
-            run(app, "edit.undo", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::Redo, "Redo (⌘Y)", enabled(app, "edit.redo"), false).clicked() {
-            run(app, "edit.redo", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::PlayFromStart, "Play from Start (F5)", has_doc, false).clicked() {
-            app.start_show(app.show_start_index(), false);
-        }
+        crate::qat::show(app, &mut child);
         let title =
             app.session.active().map(|d| format!("{}{}", d.title(), if dirty { " — Edited" } else { "" })).unwrap_or_else(|| "DeckCraft".into());
         ui.painter().text(rect.center(), Align2::CENTER_CENTER, title, theme::font(13.0), t.text);
@@ -264,14 +252,16 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
 
 fn big(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
     let en = enabled(app, id);
-    let resp = big_button(ui, icon, label, en);
+    let r = big_button(ui, icon, label, en);
     if id == "insert.dateTime" {
         let name = label.replace('\n', " ");
-        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &name));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &name));
     }
-    if resp.on_hover_text(tip(id, label)).clicked() {
-        run(app, id, p);
+    let r = r.on_hover_text(tip(id, label));
+    if r.clicked() {
+        run(app, id, p.clone());
     }
+    crate::qat::ribbon_menu(app, &r, icon, label, id, &p);
 }
 
 /// Photo Album is a split button: the main click starts a new album, the arrow edits one.
@@ -297,9 +287,11 @@ fn photo_album_button(app: &mut SlideApp, ui: &mut Ui) {
 
 fn small(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
     let en = enabled(app, id);
-    if small_button(ui, icon, label, en, false).on_hover_text(tip(id, label)).clicked() {
-        run(app, id, p);
+    let r = small_button(ui, icon, label, en, false).on_hover_text(tip(id, label));
+    if r.clicked() {
+        run(app, id, p.clone());
     }
+    crate::qat::ribbon_menu(app, &r, icon, label, id, &p);
 }
 
 fn toggle(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, on: bool) {
