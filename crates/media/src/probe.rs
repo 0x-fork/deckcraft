@@ -170,7 +170,7 @@ fn probe_ogg(bytes: &Bytes) -> Option<MediaInfo> {
     let s = f.stream_of(deckcraft_ogg::Codec::Opus)?;
     let st = f.streams.get(s)?;
     let head = deckcraft_opus::OpusHead::parse(st.headers.first()?).ok()?;
-    let timing = deckcraft_ogg::OpusTiming::of(st, head.pre_skip as u32);
+    let timing = deckcraft_ogg::OpusTiming::of(st, head.pre_skip as u32).ok()?;
     Some(MediaInfo {
         container: "ogg",
         duration_ms: ms(timing.total as f64 / 48_000.0),
