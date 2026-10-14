@@ -1259,3 +1259,38 @@ fn transition_sound_is_set_saved_and_removed() {
     let not_audio = deckcraft_engine::cmd::base64_encode(b"hello, not a sound");
     assert!(s.execute("transition.sound", &json!({"data": not_audio, "name": "notes.txt"})).is_err());
 }
+
+/// Built-in transition sounds, Loop Until Next Sound and [Stop Previous Sound] are set, saved as
+/// PowerPoint writes them (`p:stSnd loop="1"`, `p:endSnd`) and read back.
+#[test]
+fn transition_sound_options_round_trip() {
+    use deckcraft_engine::Session;
+    use serde_json::json;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("transition.sound", &json!({"builtin": "chime", "loop": true, "index": 0})).unwrap();
+    s.execute("transition.sound", &json!({"builtin": "Chime", "index": 1})).unwrap();
+    s.execute("transition.sound", &json!({"stopPrevious": true, "index": 2})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.media.len(), 1, "the same built-in sound is embedded once");
+    assert_eq!(doc.media[0].name, "Chime.wav");
+    let bytes = deckcraft_pptx::export(&doc).unwrap();
+    let slide1 = {
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+        let mut x = String::new();
+        std::io::Read::read_to_string(&mut z.by_name("ppt/slides/slide1.xml").unwrap(), &mut x).unwrap();
+        x
+    };
+    assert!(slide1.contains(r#"<p:stSnd loop="1">"#) && slide1.contains(r#"name="Chime.wav""#), "{slide1}");
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let t: Vec<_> = back.slides.iter().map(|s| s.transition.clone().unwrap_or_default()).collect();
+    assert!(t[0].sound.is_some() && t[0].sound_loop && !t[0].stop_sound);
+    assert!(t[1].sound.is_some() && !t[1].sound_loop);
+    assert!(t[2].sound.is_none() && t[2].stop_sound, "{:?}", t[2]);
+    // Turning the loop off alone keeps the sound.
+    s.execute("transition.sound", &json!({"loop": false, "index": 0})).unwrap();
+    let t0 = s.doc().unwrap().doc.slides[0].transition.clone().unwrap();
+    assert!(t0.sound.is_some() && !t0.sound_loop);
+    assert!(s.execute("transition.sound", &json!({"builtin": "foghorn"})).is_err());
+}

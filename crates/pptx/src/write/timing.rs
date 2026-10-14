@@ -16,13 +16,18 @@ pub fn transition(w: &mut W, x: &mut Exp, o: &mut Out, t: &Transition) {
         601..=900 => "med",
         _ => "slow",
     };
-    let sound = t.sound.and_then(|m| x.media_rel(o, m, "audio"));
+    let sound = t.sound.and_then(|m| x.media_rel(o, m, "audio").map(|r| (r, x.p.media(m).map(|i| i.name.clone()).unwrap_or_default())));
     let snd = |w: &mut W| {
-        if let Some(r) = &sound {
+        if let Some((r, name)) = &sound {
             w.open0("p:sndAc");
-            w.open0("p:stSnd");
-            w.empty("p:snd", A::new().a("r:embed", r).a("name", "sound.wav"));
+            w.open("p:stSnd", A::new().t("loop", t.sound_loop));
+            let name = if name.is_empty() { "sound.wav" } else { name.as_str() };
+            w.empty("p:snd", A::new().a("r:embed", r).a("name", name));
             w.close("p:stSnd");
+            w.close("p:sndAc");
+        } else if t.stop_sound {
+            w.open0("p:sndAc");
+            w.empty0("p:endSnd");
             w.close("p:sndAc");
         }
     };

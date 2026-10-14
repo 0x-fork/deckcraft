@@ -41,8 +41,10 @@ pub fn transition(imp: &mut Imp, part: &Part, t: &El) -> Option<Transition> {
     });
     if let Some(snd) = t.path(&["sndAc", "stSnd", "snd"]) {
         tr.sound = dml::media_ref(imp, part, snd);
+        tr.sound_loop = t.path(&["sndAc", "stSnd"]).and_then(|s| s.attr("loop")).is_some_and(|v| v == "1" || v == "true");
     }
-    if tr.kind == "none" && tr.advance_on_click && tr.advance_after_ms.is_none() && tr.sound.is_none() {
+    tr.stop_sound = t.path(&["sndAc", "endSnd"]).is_some();
+    if tr.kind == "none" && tr.advance_on_click && tr.advance_after_ms.is_none() && tr.sound.is_none() && !tr.stop_sound {
         return None;
     }
     Some(tr)

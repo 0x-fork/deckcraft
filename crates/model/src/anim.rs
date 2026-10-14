@@ -21,6 +21,12 @@ pub struct Transition {
     pub advance_after_ms: Option<u32>,
     /// Embedded sound media.
     pub sound: Option<crate::MediaId>,
+    /// Loop Until Next Sound (`p:stSnd loop="1"`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub sound_loop: bool,
+    /// [Stop Previous Sound] (`p:endSnd`): the slide stops a sound still playing.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stop_sound: bool,
     /// Unmodelled transition XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
@@ -35,6 +41,8 @@ impl Default for Transition {
             advance_on_click: true,
             advance_after_ms: None,
             sound: None,
+            sound_loop: false,
+            stop_sound: false,
             raw: None,
         }
     }
