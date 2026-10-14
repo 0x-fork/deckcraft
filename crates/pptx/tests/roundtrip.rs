@@ -1036,3 +1036,16 @@ fn linked_pictures_are_written_with_r_link() {
     std::io::Read::read_to_string(&mut zip.by_name("ppt/slides/_rels/slide1.xml.rels").expect("rels"), &mut rels).expect("read");
     assert!(rels.contains(r#"Target="file:///tmp/linked.png" TargetMode="External""#), "{rels}");
 }
+
+/// #210: `.potx` and `.ppsx` were written with the `.pptx` main content type.
+#[test]
+fn templates_and_slide_shows_declare_their_own_main_content_type() {
+    let p = rich_deck();
+    for (ext, kind) in [("pptx", "presentation"), ("potx", "template"), ("ppsx", "slideshow")] {
+        let bytes = deckcraft_pptx::export_as(&p, ext).expect("export");
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).expect("zip");
+        let ct = std::io::read_to_string(z.by_name("[Content_Types].xml").expect("content types")).expect("read");
+        assert!(ct.contains(&format!("presentationml.{kind}.main+xml")), "{ext}: {ct}");
+        assert_eq!(deckcraft_pptx::import(&bytes).expect("import").slides.len(), p.slides.len(), "{ext} reads back");
+    }
+}
