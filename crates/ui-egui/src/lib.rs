@@ -470,10 +470,13 @@ impl SlideApp {
         let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
         let bytes = match format {
             "png" | "jpeg" => {
-                let scale = 2.0;
-                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale, ..Default::default() });
-                let dpi = deckcraft_render::dpi_for_scale(scale);
-                Ok(if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) })
+                // Every slide for "all slides", one download each, named like the desktop export (#64).
+                let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
+                let mut any = false;
+                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext) {
+                    any = self.download(&file, Ok(bytes)) || any;
+                }
+                return any;
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
             other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
@@ -1292,6 +1295,25 @@ pub fn now_ms() -> f64 {
     }
 }
 
+/// Images for the browser download: the current slide, or every slide (named `<name>1.png`,
+/// `<name>2.png`... like the native export) when `all`.
+fn web_image_files(doc: &deckcraft_model::Presentation, current: usize, all: bool, name: &str, ext: &str) -> Vec<(String, Vec<u8>)> {
+    let slides: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![current] };
+    let single = slides.len() == 1;
+    let scale = 2.0;
+    let dpi = deckcraft_render::dpi_for_scale(scale);
+    slides
+        .into_iter()
+        .enumerate()
+        .map(|(k, i)| {
+            let img = deckcraft_render::render_slide(doc, i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+            let bytes = if ext == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) };
+            let file = if single { format!("{name}.{ext}") } else { format!("{name}{}.{ext}", k + 1) };
+            (file, bytes)
+        })
+        .collect()
+}
+
 #[cfg(target_arch = "wasm32")]
 fn js_now() -> f64 {
     js_sys::Date::now()
@@ -1323,6 +1345,23 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    /// The browser "PNG images (all slides)" export yields one image per slide, not just the selected one (#64).
+    #[test]
+    fn web_export_all_slides_gives_one_file_per_slide() {
+        let mut doc = deckcraft_model::Presentation::default();
+        if let Some(first) = doc.slides.first().cloned() {
+            doc.slides.push(first.clone());
+            doc.slides.push(first);
+        }
+        assert_eq!(doc.slides.len(), 3);
+        let all = web_image_files(&doc, 1, true, "Deck", "png");
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Deck1.png", "Deck2.png", "Deck3.png"]);
+        let one = web_image_files(&doc, 1, false, "Deck", "png");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].0, "Deck.png");
+    }
 
     fn title_text(app: &SlideApp) -> String {
         let d = app.session.active().unwrap();
