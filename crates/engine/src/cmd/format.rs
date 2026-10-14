@@ -80,6 +80,15 @@ pub fn specs() -> Vec<CommandSpec> {
             spacing
         ),
         cmd!("format.clear", "Clear All Formatting", ["Home", "Font"], Some("Cmd+Space"), "{}", has_text_or_shapes, clear),
+        cmd!(
+            "format.fontDialog",
+            "Font…",
+            ["Home", "Font"],
+            Some("Cmd+T"),
+            "{family?, size?: pt, bold?: bool, italic?: bool, underline?: none|sng|dbl|heavy|dotted|dash|wavy, color?, strike?: none|sng|dbl, baseline?: none|super|sub|<fraction>, caps?: none|small|all, spacing?: pt} — with none of these, opens the Font dialog",
+            has_text_or_shapes,
+            font_dialog
+        ),
         cmd!("format.textShadow", "Text Shadow", ["Home", "Font"], None, "{on?: bool}", has_text_or_shapes, text_shadow),
         cmd!(
             "format.textOutline",
@@ -373,6 +382,213 @@ fn caps(s: &mut Session, p: &Value) -> Result<Value> {
 fn spacing(s: &mut Session, p: &Value) -> Result<Value> {
     let v = f64_param(p, "pt").unwrap_or(0.0).clamp(-100.0, 400.0);
     format_run(s, &move |r| r.spacing = Some(v))
+}
+
+/// Character formatting applied together, so the Font dialog is one undo step.
+struct FontEdits {
+    family: Option<String>,
+    size: Option<f64>,
+    bold: Option<bool>,
+    italic: Option<bool>,
+    underline: Option<String>,
+    color: Option<deckcraft_model::ColorRef>,
+    strike: Option<Strike>,
+    baseline: Option<f64>,
+    caps: Option<Caps>,
+    spacing: Option<f64>,
+}
+
+impl FontEdits {
+    fn is_empty(&self) -> bool {
+        self.family.is_none()
+            && self.size.is_none()
+            && self.bold.is_none()
+            && self.italic.is_none()
+            && self.underline.is_none()
+            && self.color.is_none()
+            && self.strike.is_none()
+            && self.baseline.is_none()
+            && self.caps.is_none()
+            && self.spacing.is_none()
+    }
+
+    fn write(&self, r: &mut RunProps) {
+        if let Some(f) = &self.family {
+            r.font = Some(f.clone());
+        }
+        if let Some(v) = self.size {
+            r.size = Some(v);
+        }
+        if let Some(v) = self.bold {
+            r.bold = Some(v);
+        }
+        if let Some(v) = self.italic {
+            r.italic = Some(v);
+        }
+        if let Some(u) = &self.underline {
+            r.underline = Some(u.clone());
+        }
+        if let Some(c) = &self.color {
+            r.fill = Some(Fill::solid(c.clone()));
+        }
+        if let Some(v) = self.strike {
+            r.strike = Some(v);
+        }
+        if let Some(v) = self.baseline {
+            r.baseline = Some(v);
+        }
+        if let Some(v) = self.caps {
+            r.caps = Some(v);
+        }
+        if let Some(v) = self.spacing {
+            r.spacing = Some(v);
+        }
+    }
+}
+
+fn font_bool(p: &Value, key: &str) -> Result<Option<bool>> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(bad("format.fontDialog", format!("`{key}` must be a bool"))),
+    }
+}
+
+fn font_str<'a>(p: &'a Value, key: &str) -> Result<Option<&'a str>> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(_) => Err(bad("format.fontDialog", format!("`{key}` must be a string"))),
+    }
+}
+
+fn font_edits(p: &Value) -> Result<FontEdits> {
+    let family = match font_str(p, "family")? {
+        None => None,
+        Some(s) => {
+            let t = s.trim();
+            if t.is_empty() || t.chars().count() > 200 {
+                return Err(bad("format.fontDialog", "`family` must be 1–200 characters"));
+            }
+            Some(t.to_string())
+        }
+    };
+    let size = match p.get("size") {
+        None => None,
+        Some(v) => {
+            let n = v.as_f64().filter(|n| n.is_finite()).ok_or_else(|| bad("format.fontDialog", "`size` must be a finite number"))?;
+            Some(n.clamp(1.0, 4000.0))
+        }
+    };
+    let underline = match font_str(p, "underline")? {
+        None => None,
+        Some(s) => {
+            if !matches!(s, "none" | "sng" | "dbl" | "heavy" | "dotted" | "dash" | "wavy") {
+                return Err(bad("format.fontDialog", "`underline` must be none, sng, dbl, heavy, dotted, dash or wavy"));
+            }
+            Some(s.to_string())
+        }
+    };
+    let color =
+        if p.get("color").is_some() { Some(color_param(p, "color").ok_or_else(|| bad("format.fontDialog", "invalid `color`"))?) } else { None };
+    let strike = match font_str(p, "strike")? {
+        None => None,
+        Some("none") => Some(Strike::None),
+        Some("sng" | "single") => Some(Strike::Single),
+        Some("dbl" | "double") => Some(Strike::Double),
+        Some(_) => return Err(bad("format.fontDialog", "`strike` must be none, sng or dbl")),
+    };
+    let baseline = match p.get("baseline") {
+        None => None,
+        Some(Value::String(s)) => match s.as_str() {
+            "none" => Some(0.0),
+            "super" | "superscript" => Some(0.3),
+            "sub" | "subscript" => Some(-0.25),
+            _ => return Err(bad("format.fontDialog", "`baseline` must be none, super, sub or a fraction")),
+        },
+        Some(Value::Number(n)) => {
+            let f = n.as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad("format.fontDialog", "`baseline` must be finite"))?;
+            Some(f.clamp(-1.0, 1.0))
+        }
+        Some(_) => return Err(bad("format.fontDialog", "`baseline` must be none, super, sub or a fraction")),
+    };
+    let caps = match font_str(p, "caps")? {
+        None => None,
+        Some("none") => Some(Caps::None),
+        Some("small") => Some(Caps::Small),
+        Some("all") => Some(Caps::All),
+        Some(_) => return Err(bad("format.fontDialog", "`caps` must be none, small or all")),
+    };
+    let spacing = match p.get("spacing") {
+        None => None,
+        Some(v) => {
+            let n = v.as_f64().filter(|n| n.is_finite()).ok_or_else(|| bad("format.fontDialog", "`spacing` must be a finite number"))?;
+            Some(n.clamp(-100.0, 400.0))
+        }
+    };
+    Ok(FontEdits { family, size, bold: font_bool(p, "bold")?, italic: font_bool(p, "italic")?, underline, color, strike, baseline, caps, spacing })
+}
+
+/// A colour as a `format.fontDialog` / `format.color` parameter, including transforms.
+fn color_command_value(c: &deckcraft_model::ColorRef) -> Value {
+    use deckcraft_model::ColorBase;
+    let mut o = serde_json::Map::new();
+    for m in &c.mods {
+        if let Some(v) = m.value() {
+            o.insert(m.xml_name().to_string(), json!(v));
+        }
+    }
+    match &c.base {
+        ColorBase::Rgb { rgb } if o.is_empty() => json!(format!("#{}", rgb.hex())),
+        ColorBase::Rgb { rgb } => {
+            o.insert("rgb".into(), json!(format!("#{}", rgb.hex())));
+            Value::Object(o)
+        }
+        ColorBase::Scheme { slot } => {
+            o.insert("scheme".into(), json!(slot.xml_name()));
+            Value::Object(o)
+        }
+        ColorBase::Preset { name } => json!(name),
+        ColorBase::System { last, .. } => json!(format!("#{}", last.hex())),
+    }
+}
+
+fn font_dialog_params(s: &Session) -> Value {
+    let r = current_run(s);
+    let family = s.doc().ok().and_then(|st| super::text::ctx_for(&st.doc, &st.selection).map(|c| resolve::font_family(&c, &r))).unwrap_or_default();
+    let baseline = r.baseline.unwrap_or(0.0);
+    let mut v = json!({
+        "family": family,
+        "size": r.size.unwrap_or(18.0),
+        "bold": r.bold.unwrap_or(false),
+        "italic": r.italic.unwrap_or(false),
+        "underline": r.underline.as_deref().filter(|u| *u != "none").unwrap_or("none"),
+        "strike": match r.strike {
+            Some(Strike::Double) => "dbl",
+            Some(Strike::Single) => "sng",
+            _ => "none",
+        },
+        "baseline": if baseline > 0.0 { "super" } else if baseline < 0.0 { "sub" } else { "none" },
+        "caps": match r.caps {
+            Some(Caps::Small) => "small",
+            Some(Caps::All) => "all",
+            _ => "none",
+        },
+        "spacing": r.spacing.unwrap_or(0.0),
+    });
+    if let Some(Fill::Solid { color }) = &r.fill {
+        v["color"] = color_command_value(color);
+    }
+    v
+}
+
+fn font_dialog(s: &mut Session, p: &Value) -> Result<Value> {
+    let edits = font_edits(p)?;
+    if edits.is_empty() {
+        s.ui_requests.push(crate::UiRequest::Dialog { id: "font".into(), params: font_dialog_params(s) });
+        return ok();
+    }
+    format_run(s, &|r| edits.write(r))
 }
 fn clear(s: &mut Session, _p: &Value) -> Result<Value> {
     format_run(s, &|r| *r = RunProps { lang: r.lang.clone(), link: r.link.clone(), ..Default::default() })
@@ -896,3 +1112,124 @@ fn tabs(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "ruler_tests.rs"]
 mod ruler_tests;
+
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::text::{Caps, Strike};
+    use deckcraft_model::{ColorBase, Fill, SchemeSlot};
+    use serde_json::json;
+
+    use super::*;
+    use crate::{Session, UiRequest};
+
+    fn shape() -> Session {
+        let mut s = Session::with_new();
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 240.0, 80.0], "text": "Hello"})).unwrap();
+        s
+    }
+
+    fn props(s: &Session) -> RunProps {
+        s.doc()
+            .unwrap()
+            .selected_shapes()
+            .first()
+            .and_then(|sh| sh.text.as_ref())
+            .and_then(|t| t.paragraphs.first())
+            .and_then(|p| p.runs.first())
+            .unwrap()
+            .props
+            .clone()
+    }
+
+    #[test]
+    fn font_dialog_applies_character_formatting_in_one_undo() {
+        let mut s = shape();
+        let before = s.doc().unwrap().history.undo.len();
+        s.execute(
+            "format.fontDialog",
+            &json!({
+                "family": "Liberation Serif",
+                "size": 28,
+                "bold": true,
+                "italic": false,
+                "underline": "wavy",
+                "color": "#112233",
+                "strike": "dbl",
+                "baseline": "super",
+                "caps": "small",
+                "spacing": 3
+            }),
+        )
+        .unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), before + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Font…");
+        let r = props(&s);
+        assert_eq!(r.font.as_deref(), Some("Liberation Serif"));
+        assert_eq!(r.size, Some(28.0));
+        assert_eq!(r.bold, Some(true));
+        assert_eq!(r.italic, Some(false));
+        assert_eq!(r.underline.as_deref(), Some("wavy"));
+        assert!(matches!(r.fill, Some(Fill::Solid { color }) if matches!(color.base, ColorBase::Rgb { .. })));
+        assert_eq!(r.strike, Some(Strike::Double));
+        assert_eq!(r.baseline, Some(0.3));
+        assert_eq!(r.caps, Some(Caps::Small));
+        assert_eq!(r.spacing, Some(3.0));
+        s.execute("edit.undo", &json!({})).unwrap();
+        let r = props(&s);
+        assert!(r.font.is_none() && r.size.is_none() && r.bold.is_none() && r.underline.is_none() && r.fill.is_none());
+        assert_eq!(r.strike, None);
+        assert_eq!(r.caps, None);
+    }
+
+    #[test]
+    fn font_dialog_changes_only_the_fields_it_is_given() {
+        let mut s = shape();
+        s.execute("format.bold", &json!({"on": true})).unwrap();
+        s.execute("format.fontDialog", &json!({"size": 22, "color": {"scheme": "accent2", "lumMod": 50000}})).unwrap();
+        let r = props(&s);
+        assert_eq!(r.bold, Some(true));
+        assert_eq!(r.size, Some(22.0));
+        assert!(r.font.is_none() && r.italic.is_none());
+        let Some(Fill::Solid { color }) = r.fill else { panic!("solid fill") };
+        assert!(matches!(color.base, ColorBase::Scheme { slot: SchemeSlot::Accent2 }));
+        assert!(color.mods.iter().any(|m| m.xml_name() == "lumMod"));
+        s.execute("edit.undo", &json!({})).unwrap();
+        let r = props(&s);
+        assert_eq!(r.bold, Some(true));
+        assert!(r.size.is_none() && r.fill.is_none());
+    }
+
+    #[test]
+    fn font_dialog_with_no_fields_asks_the_ui_to_open() {
+        let mut s = shape();
+        s.execute("format.italic", &json!({"on": true})).unwrap();
+        let rev = s.doc().unwrap().revision;
+        let n = s.doc().unwrap().history.undo.len();
+        s.ui_requests.clear();
+        s.execute("format.fontDialog", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().revision, rev);
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
+        let Some(UiRequest::Dialog { id, params }) = s.ui_requests.last() else { panic!("dialog request") };
+        assert_eq!(id, "font");
+        assert_eq!(params["italic"], true);
+        assert_eq!(params["bold"], false);
+        assert!(params["family"].as_str().is_some_and(|f| !f.is_empty()));
+        assert!(params["size"].as_f64().is_some_and(|n| n > 0.0));
+    }
+
+    #[test]
+    fn font_dialog_rejects_bad_fields_without_editing() {
+        let mut s = shape();
+        let n = s.doc().unwrap().history.undo.len();
+        let err = s.execute("format.fontDialog", &json!({"underline": "sparkle"})).unwrap_err();
+        assert!(err.to_string().contains("underline"), "{err}");
+        assert!(s.execute("format.fontDialog", &json!({"size": "large"})).is_err());
+        assert!(s.execute("format.fontDialog", &json!({"bold": 1})).is_err());
+        assert!(s.execute("format.fontDialog", &json!({"family": "  "})).is_err());
+        assert!(s.execute("format.fontDialog", &json!({"color": "not-a-color"})).is_err());
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
+        assert!(props(&s).underline.is_none());
+        s.execute("edit.deselect", &json!({})).unwrap();
+        assert!(s.execute("format.fontDialog", &json!({"bold": true})).is_err());
+    }
+}

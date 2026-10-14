@@ -17,6 +17,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (essentials discount no longer cites the palette Export failure, #79; percentages unchanged; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers; automation counted at 236 commands; the menu measurement and the d556ff9 snapshot still count 226; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (227 commands; previous: minor, hours to ~95% per audience added; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -282,6 +283,7 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Automation:** 228 commands, every one reachable from `deckcraft-cli`, the JSON control channel
 - **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
 - **Automation:** 228 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+- **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
   and MCP.
 - **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
   and MCP. The menu-bar measurement and the d556ff9 snapshot still count 226.
@@ -340,6 +342,7 @@ scored done (16 open issues).
 | 2026-10-13 | trivial | Essentials discoverability note: the command palette's Export failure (#79) is fixed; the ×0.95 discount stays for the menu bar and start screen |
 | 2026-10-14 | minor | Design ▸ Effects noted under what works today. Percentages stay 79% / ~60% / ~55%. The d556ff9 snapshot and the menu measurement stay at 226 commands; the live registry is 227 |
 | 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Automation in "what works today" is 236 commands; the menu-bar measurement and the d556ff9 snapshot still count 226. Percentages unchanged |
+| 2026-10-14 | trivial | Command count 226 → 227 (Font dialog). Breadth and ready percentages unchanged |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow gate (all six pass); stays alpha |

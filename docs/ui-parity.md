@@ -28,6 +28,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -107,6 +108,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Design ▸ Effects | named theme effect schemes | DeckCraft, Soft, Crisp, Lift, Glow and Plain (`design.effects`); colours and fonts stay |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media (start, end and fades follow the selection), SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Font, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 
 ## Direct manipulation
 
@@ -136,8 +138,8 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 ## Keyboard shortcuts
 
 Every common PowerPoint for Mac shortcut is bound (checklist row done): new slide, duplicate,
-group/ungroup, bold/italic/underline, alignment, font size, list levels, Format Painter, show from
-start/current, view switching. Not yet: Cmd+F Find opening a find bar on the slide, Option+drag
+group/ungroup, bold/italic/underline, alignment, font size, list levels, Format Painter, the Font
+dialog (Cmd+T), show from start/current, view switching. Not yet: Cmd+F Find opening a find bar on the slide, Option+drag
 precision without snapping, F6 pane cycling, ribbon KeyTips (Windows).
 
 ### Text editing keys
@@ -186,6 +188,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object; Create New Theme Colors is in) | 8–14 |
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object; Create New Theme Fonts is in) | 8–14 |
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Action Settings, Print, Insert Object) | 8–14 |
+| Missing dialogs (Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 6–12 |
 | Window chrome, system appearance, palette fixes (#41, #71, #79) | 3–5 |
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
 | Window chrome and system appearance (#41, #71) | 3–5 |
@@ -220,6 +223,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme (fills, lines and effects). Not a new dialog; dialogs stay 27 |
 | 2026-10-14 | minor | Slide Master: Preserve, and Title and Footers placeholders, on the open master or layout |
 | 2026-10-14 | trivial | Trim Media dialog: start, end and fades follow the selected clip |
+| 2026-10-14 | minor | Font dialog from Home › Font, the shape menu and Cmd+T |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
