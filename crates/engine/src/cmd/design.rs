@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use deckcraft_geom::Size;
 use deckcraft_model::text::{Run, RunKind, TextBody};
-use deckcraft_model::theme::{builtin_color_schemes, builtin_font_schemes, builtin_themes};
+use deckcraft_model::theme::{builtin_color_schemes, builtin_font_schemes, builtin_format_schemes, builtin_themes};
 use deckcraft_model::{Background, Fill, PhType, Presentation, Shape, ShapeId, defaults};
 use serde_json::{Value, json};
 
@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             browse_theme
         ),
-        cmd!(query "design.themes", "Theme Gallery", [], None, "{} → themes, colour schemes and font schemes", always, themes),
+        cmd!(query "design.themes", "Theme Gallery", [], None, "{} → themes, colour schemes, font schemes and effect schemes", always, themes),
         cmd!(
             "design.colors",
             "Colors",
@@ -35,6 +35,7 @@ pub fn specs() -> Vec<CommandSpec> {
             colors
         ),
         cmd!("design.fonts", "Fonts", ["Design", "Variants"], None, "{} opens Create New Theme Fonts | {name} | {major, minor}", has_doc, fonts),
+        cmd!("design.effects", "Effects", ["Design", "Variants"], None, "{name} (see design.themes)", has_doc, effects),
         cmd!(
             "design.background",
             "Format Background",
@@ -208,6 +209,7 @@ fn themes(_s: &mut Session, _p: &Value) -> Result<Value> {
         "themes": builtin_themes().iter().map(|t| json!({"name": t.name, "major": t.fonts.major.latin, "minor": t.fonts.minor.latin, "colors": t.colors.colors.iter().map(|c| format!("#{}", c.hex())).collect::<Vec<_>>()})).collect::<Vec<_>>(),
         "colorSchemes": builtin_color_schemes().iter().map(|c| c.name.clone()).collect::<Vec<_>>(),
         "fontSchemes": builtin_font_schemes().iter().map(|f| json!({"name": f.name, "major": f.major.latin, "minor": f.minor.latin})).collect::<Vec<_>>(),
+        "effectSchemes": builtin_format_schemes().iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
     }))
 }
 
@@ -414,6 +416,29 @@ fn next_font_scheme(
         }
     }
     Ok(next)
+}
+
+fn effects(s: &mut Session, p: &Value) -> Result<Value> {
+    let name = str_param(p, "name").ok_or_else(|| bad("design.effects", "missing `name`"))?;
+    let scheme = builtin_format_schemes()
+        .into_iter()
+        .find(|f| f.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| bad("design.effects", format!("no effect scheme `{name}`")))?;
+    let stored = scheme.name.clone();
+    let same = {
+        let st = s.doc()?;
+        let mi = master_index(&st.doc, &st.selection);
+        st.doc.masters.get(mi).is_some_and(|m| m.theme.format == scheme)
+    };
+    if same {
+        return Ok(json!({"name": stored}));
+    }
+    s.edit(|doc, sel| {
+        let mi = master_index(doc, sel);
+        Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("design.effects", "no master"))?).theme.format = scheme;
+        Ok(())
+    })?;
+    Ok(json!({"name": stored}))
 }
 
 fn background(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1239,5 +1264,48 @@ mod browse_theme_tests {
         assert_eq!(s.doc().unwrap().doc.masters[0].theme, before);
         assert!(s.execute("design.browseTheme", &json!({"data": "AAAA"})).is_err());
         assert!(s.execute("design.browseTheme", &json!({})).is_err());
+    }
+
+    fn undo_len(s: &crate::Session) -> usize {
+        s.doc().unwrap().history.undo.len()
+    }
+
+    #[test]
+    fn effect_scheme_replaces_format_and_keeps_colours_and_fonts() {
+        let mut s = crate::Session::with_new();
+        let listed = s.execute("design.themes", &json!({})).unwrap();
+        let names: Vec<String> = listed["effectSchemes"].as_array().unwrap().iter().filter_map(|v| v.as_str().map(str::to_string)).collect();
+        assert_eq!(names, ["DeckCraft", "Soft", "Crisp", "Lift", "Glow", "Plain"]);
+
+        let n = undo_len(&s);
+        s.execute("design.effects", &json!({"name": "DeckCraft"})).unwrap();
+        assert_eq!(undo_len(&s), n, "the scheme already on the theme is not an undo step");
+        let err = s.execute("design.effects", &json!({"name": "Office"})).unwrap_err().to_string();
+        assert!(err.contains("no effect scheme"), "{err}");
+        assert!(s.execute("design.effects", &json!({})).is_err());
+        assert_eq!(undo_len(&s), n);
+
+        s.execute("design.theme", &json!({"name": "Harbor"})).unwrap();
+        let before = s.doc().unwrap().doc.masters[0].theme.clone();
+        s.execute("design.effects", &json!({"name": "soft"})).unwrap();
+        let theme = s.doc().unwrap().doc.masters[0].theme.clone();
+        assert_eq!(theme.name, "Harbor");
+        assert_eq!(theme.colors, before.colors);
+        assert_eq!(theme.fonts, before.fonts);
+        assert_eq!(theme.format.name, "Soft");
+        assert!(theme.format.effects[0].outer_shadow.is_some());
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Effects");
+
+        let n = undo_len(&s);
+        s.execute("design.effects", &json!({"name": "Soft"})).unwrap();
+        assert_eq!(undo_len(&s), n, "the same scheme is not an undo step");
+
+        s.execute("design.effects", &json!({"name": "Glow"})).unwrap();
+        let glow = s.doc().unwrap().doc.masters[0].theme.format.effects[2].glow.clone();
+        assert!(glow.is_some_and(|g| (g.radius - 12.0).abs() < 1e-6));
+        s.execute("design.effects", &json!({"name": "Plain"})).unwrap();
+        let plain = s.doc().unwrap().doc.masters[0].theme.format.clone();
+        assert!(plain.effects.iter().all(|e| e.outer_shadow.is_none() && e.glow.is_none()));
+        assert_eq!(plain.lines[2].width, Some(0.75));
     }
 }

@@ -15,6 +15,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (slide show plays a custom show; breadth stays 79%; previous: trivial, presenter timer) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (go to slide shows the typed number; breadth stays 79%; previous: trivial, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (essentials discount no longer cites the palette Export failure, #79; percentages unchanged; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -199,6 +200,9 @@ it is the Features row of the dimension table. Automation and Platforms are scor
 | Views | 4 | 90% | ~80% | 3–6 | Snap to grid and grid options, Arrange All | [ui-parity.md](ui-parity.md) |
 | Masters and themes | 7 | 85% | ~70% | 8–14 | Notes and Handout masters, theme variants, `.thmx`, effect schemes | [parity-checklist.md](parity-checklist.md) |
 | Shapes | 7 | 86% | ~75% | 8–14 | Edit points, warp adjust handles, WordArt depth | [ui-parity.md](ui-parity.md) |
+| Views | 4 | 90% | ~80% | 3–6 | Snap to grid and grid options, New Window | [ui-parity.md](ui-parity.md) |
+| Masters and themes | 7 | 85% | ~70% | 8–14 | Notes and Handout masters, theme variants, `.thmx` | [parity-checklist.md](parity-checklist.md) |
+| Shapes | 7 | 86% | ~75% | 8–14 | Edit points, text warp, WordArt depth | [ui-parity.md](ui-parity.md) |
 | Format (fill, line, effects) | 6 | 81% | ~65% | 8–14 | Format Shape pane depth, bevel and 3-D, picture/texture fill options | [ui-parity.md](ui-parity.md) |
 | Arrange | 3 | 100% | ~90% | 1–2 | Align to slide vs selected as a menu choice, More Rotation Options | [ui-parity.md](ui-parity.md) |
 | Text | 15 | 80% | ~62% | 18–30 | Font weights beyond Regular/Bold/Italic (#69), Tab in text boxes (#78), IME, true vertical CJK, dictionaries, AutoCorrect, thesaurus, equations (PR #55 open) | [localization-parity.md](localization-parity.md) |
@@ -234,6 +238,8 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   Customize Fonts… opens Create New Theme Fonts and edits the open master's heading and body
   latin faces (one scheme on that master, not a library of saved font schemes, and not East
   Asian or complex-script faces).
+  effect schemes (Design ▸ Effects: DeckCraft, Soft, Crisp, Lift, Glow, Plain),
+  backgrounds (solid, gradient, picture, pattern), slide size presets.
 - **Shapes:** ~180 preset geometries with adjustment handles, text boxes, pictures (crop,
   corrections, animated GIFs that play and pause), tables with styles, charts (column, bar, line,
   area, pie, doughnut, scatter and more), basic SmartArt, groups, connectors glued to sites,
@@ -271,6 +277,8 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
 - **Automation:** 228 commands, every one reachable from `deckcraft-cli`, the JSON control channel
   and MCP.
+- **Automation:** 227 commands, every one reachable from `deckcraft-cli`, the JSON control channel
+  and MCP. The menu-bar measurement and the d556ff9 snapshot still count 226.
 - **Platforms:** signed releases for macOS (universal), Windows x64/x86/arm64, Linux
   (AppImage/deb/rpm/tar.gz/Flatpak, x86_64 and aarch64), FreeBSD and the web (v0.4.0, 2026-10-09).
 
@@ -322,6 +330,7 @@ scored done (16 open issues).
 | 2026-10-14 | trivial | Slide show evidence includes presenter timer pause/reset, a local clock and notes size. Breadth stays 79% |
 | 2026-10-14 | trivial | Slide show evidence includes See All Slides and zoom. Breadth stays 79% |
 | 2026-10-13 | trivial | Essentials discoverability note: the command palette's Export failure (#79) is fixed; the ×0.95 discount stays for the menu bar and start screen |
+| 2026-10-14 | minor | Design ▸ Effects noted under what works today. Percentages stay 79% / ~60% / ~55%. The d556ff9 snapshot and the menu measurement stay at 226 commands; the live registry is 227 |
 | 2026-10-10 | minor | Added the readiness-by-audience table: each number gets its own hours to ~95% (full 340–600, mainstream 150–250, essentials 50–90). The full number stays an additive weighted sum; no change to the percentages |
 | 2026-10-10 | minor | Added the mainstream practitioner (~53%) and essentials user (~62%) numbers with written weights, discounts and user evidence. Features dimension recomputed from written area weights (66% judgement → 62.4% weighted mean), which moves ready for real work from ~56% to ~55%; stage unchanged |
 | 2026-10-10 | minor | Stage checked against the core-workflow gate (all six pass); stays alpha |

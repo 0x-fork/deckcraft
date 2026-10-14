@@ -22,6 +22,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for more deck kinds; handout-master text kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (laser pointer in the slide show; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (command palette no longer offers Export without a path, #79; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; checklist row stays P so breadth stays 79%; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -430,6 +431,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Owned PPTX corpus for tables, charts, animations, media, sections and masters. Handout-master text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
 | 2026-10-13 | minor | Laser pointer in the slide show (checklist row Partial). Highlighter, eraser and a laser driven from presenter view remain |
 | 2026-10-13 | trivial | Command palette skips commands that need a value, so Export opens the dialog (#79) |
+| 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme. The checklist row stays P, so breadth stays 79%. Dialogs stay 27 |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
