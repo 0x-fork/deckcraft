@@ -13,6 +13,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons places a Lucide stroke set; 3-D models and stock content remain; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Size and Position dialog; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks on File › New; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for more deck kinds; handout-master text kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -121,11 +122,20 @@ Detail in [file-format-parity.md](file-format-parity.md).
   exist to compare against. `corpus_charts.rs` round-trips one owned slice (a combo chart with
   data labels and trendlines, a merged table with diagonal borders, text columns, autofit,
   vertical text and a WordArt warp). That is still a generated deck, not a corpus of real ones.
+### PPTX corpus is only decks we author
+- **Evidence:** `crates/pptx/tests/corpus_kinds.rs` builds decks in this repo and checks open → save →
+  reopen (package parts and text): tables, charts, animations, media, sections, and several masters
+  and layouts. A handout master with a header, footer, date and slide number used to disappear on
+  save; that text is kept now. There is still no larger corpus and no reference render from PowerPoint.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
   `standards/test-corpora.md`), add render checks, have the owner open outputs in PowerPoint, fix
   what breaks. **Beta blocker.**
+  (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
+- **Estimate:** 20–35 h: build an owned corpus in `storytold/photocraft-corpus` style (craftrules
+  `standards/test-corpora.md`), add import → render → export → re-import checks, have the owner open
+  outputs in PowerPoint, fix what breaks. **Beta blocker.**
 
 ### Round trip loses media playback options and animation rewind (#74, #77)
 - **Evidence:** issues filed 2026-10-10 by an automated reviewer; media playback options and the
@@ -235,8 +245,8 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 - **Estimate:** 4–8 h.
 
 ### Notes and Handout masters
-- **Evidence:** checklist row missing; PPTX writes a notes master but there's no view to edit it,
-  and no handout master at all.
+- **Evidence:** checklist row missing the editing view. PPTX writes a notes master, and a handout
+  master's header, footer, date and slide number are kept. There is no view to edit either master.
 - **Estimate:** 4–6 h.
 
 ### Edit points, text warp, 3-D
@@ -372,6 +382,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Size and Position dialog landed (position, size, rotation, scale, lock aspect, one undo). The dialog gap remains Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object and the rest of the ~60 |
 | 2026-10-14 | minor | File › New has six original starter decks; a large template gallery is still open |
 | 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
+| 2026-10-13 | minor | Owned PPTX corpus for tables, charts, animations, media, sections and masters. Handout-master text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

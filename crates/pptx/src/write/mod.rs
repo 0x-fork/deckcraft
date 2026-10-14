@@ -27,6 +27,7 @@ const CT_SLIDE: &str = "application/vnd.openxmlformats-officedocument.presentati
 const CT_LAYOUT: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml";
 const CT_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml";
 const CT_NOTES_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml";
+const CT_HANDOUT_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.handoutMaster+xml";
 const CT_NOTES: &str = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 const CT_THEME: &str = "application/vnd.openxmlformats-officedocument.theme+xml";
 const CT_PRES_PROPS: &str = "application/vnd.openxmlformats-officedocument.presentationml.presProps+xml";
@@ -570,6 +571,29 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         notes_master_rid = Some(pres.rels.add("notesMaster", &opc::relative("ppt/presentation.xml", notes_master), false));
     }
 
+    // Handout master. Its header, footer, date and slide-number text live on this part; a deck
+    // that has never had one does not gain an empty master on save.
+    let handout_path = "ppt/handoutMasters/handoutMaster1.xml";
+    let mut handout_rid = None;
+    if let Some(hm) = p.handout_master.as_ref() {
+        let tindex = p.masters.len() + 1 + usize::from(notes_master_rid.is_some());
+        let tname = format!("ppt/theme/theme{tindex}.xml");
+        let mut ho = Out::new(handout_path);
+        ho.rels.add("theme", &opc::relative(handout_path, &tname), false);
+        let mut to = Out::new(&tname);
+        let txml = theme::theme_xml(&mut x, &mut to, &hm.theme);
+        x.pkg.xml_part(&tname, CT_THEME, txml);
+        x.pkg.rels(&tname, &to.rels);
+        let mut w = W::new();
+        root_open(&mut w, "p:handoutMaster", A::new());
+        csld(&mut w, &mut x, &mut ho, &hm.name, hm.background.as_ref(), &hm.shapes);
+        clr_map(&mut w, &hm.color_map);
+        w.close("p:handoutMaster");
+        x.pkg.xml_part(handout_path, CT_HANDOUT_MASTER, w.finish());
+        x.pkg.rels(handout_path, &ho.rels);
+        handout_rid = Some(pres.rels.add("handoutMaster", &opc::relative("ppt/presentation.xml", handout_path), false));
+    }
+
     // Comment authors.
     let mut authors: Vec<(String, String, u32)> = vec![];
     let mut n_comments = 0u32;
@@ -642,7 +666,7 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
     x.pkg.xml_part("ppt/viewProps.xml", CT_VIEW_PROPS, view_props_xml());
     let ts = crate::tables::table_styles_xml(&x.table_styles, &p.table_styles);
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
-    let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), &slide_rids);
+    let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), handout_rid.as_deref(), &slide_rids);
     x.pkg.xml_part("ppt/presentation.xml", main_ct, pxml);
     // Kept parts never replace a part the writer makes.
     let kept: Vec<_> = p
@@ -981,7 +1005,7 @@ fn write_embedded_fonts(x: &mut Exp, o: &mut Out) -> Vec<WrittenFont> {
     out
 }
 
-fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, slides: &[String]) -> Vec<u8> {
+fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, handout: Option<&str>, slides: &[String]) -> Vec<u8> {
     let fonts = write_embedded_fonts(x, o);
     let p = x.p;
     let mut w = W::new();
@@ -996,6 +1020,11 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
         w.open0("p:notesMasterIdLst");
         w.empty("p:notesMasterId", A::new().a("r:id", n));
         w.close("p:notesMasterIdLst");
+    }
+    if let Some(h) = handout {
+        w.open0("p:handoutMasterIdLst");
+        w.empty("p:handoutMasterId", A::new().a("r:id", h));
+        w.close("p:handoutMasterIdLst");
     }
     if !slides.is_empty() {
         w.open0("p:sldIdLst");

@@ -9,6 +9,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for text effects, body layout, theme effects, fills, bevels and connectors; a run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, survive a save; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (3-D model parts and animation bounce end round-trip; `corpus_media.rs` covers SmartArt and OLE XML, media bookmarks and trims, sections, fields, ink and timing) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines round-trip; previously trivial: groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for tables, charts, animations, media, sections and masters; handout-master text kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -28,6 +29,7 @@ PowerPoint opens and saves; Viewer = opens only).
 | `.pptx` presentation | Editor | yes | yes | Broad (see below); an owned corpus covers comments, links and actions, custom shows, rotated groups and placeholders that inherit from the layout. Embedded fonts and a corpus of decks from outside this repo are still open | `crates/pptx/tests/roundtrip.rs`, `corpus_elements.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
 | `.pptx` presentation | Editor | yes | yes | Broad (see below); an owned corpus covers text effects, autofit, columns, vertical and RTL text, tabs, line spacing, theme effects, gradient and pattern fills, bevels and connectors. A corpus of decks from outside this repo is still open | `crates/pptx/tests/roundtrip.rs`, `corpus_style.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
 | `.pptx` presentation | Editor | yes | yes | Broad (see below); never measured on real decks | `crates/pptx/tests/roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs` (30 tests), `corpus_media.rs`; opened in PowerPoint by hand 2026-10-06 |
+| `.pptx` presentation | Editor | yes | yes | Broad (see below); corpus is decks we author, not measured against PowerPoint renders | `crates/pptx/tests/corpus_kinds.rs`, `roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
 | `.potx` template | Editor | yes (as a presentation) | no: written with the `.pptx` content type | `file.saveTemplate` is Save As under another name | none |
 | `.ppsx` slide show | Editor | yes (as a presentation) | no: written as `.pptx` content | Doesn't start in show mode | none |
 | `.pptm` / `.potm` / `.ppsm` macro-enabled | Editor | no | no | Should open and keep `vbaProject.bin` without running it | none |
@@ -76,6 +78,8 @@ the round trip even though DeckCraft doesn't model it.
 | Themes: colour, font (Latin/EA/CS), effect schemes, background styles | yes | yes | Unknown theme parts kept |
 | Notes slides and notes master | yes | yes | Header, footer, date and slide-number text on the notes master is kept. No notes-master editing view |
 | Handout master | no | no | |
+| Notes slides and notes master | yes | yes | No notes-master editing view |
+| Handout master | yes | yes | Header, footer, date and slide-number text is kept. No handout-master editing view |
 | Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group, and text, keep their size in points whatever the group's child-coordinate scale (#233). |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
 | Lines: dash, compound, caps, joins, arrowheads | yes | yes | |
@@ -115,6 +119,10 @@ the round trip even though DeckCraft doesn't model it.
    every transition and animation) in a corpus repo. `crates/pptx/tests/corpus.rs` already checks
    open → save → reopen (parts and text) for decks we author. Still needed: render checks and a
    PowerPoint reference render for each (owner runs PowerPoint).
+1. A larger owned corpus (corporate templates, SmartArt, chartex charts, EMF, embedded fonts,
+   every transition and animation) in a corpus repo, with a PowerPoint reference render for each.
+   `crates/pptx/tests/corpus_kinds.rs` already checks tables, charts, animations, media, sections
+   and masters/layouts (open → save → reopen).
 2. The round-trip losses above (#70, #74, #77).
 3. SVG rendering. EMF+ records inside EMF/WMF are still not drawn.
 
@@ -132,6 +140,7 @@ the round trip even though DeckCraft doesn't model it.
 | 2026-10-14 | minor | Chart trendlines round-trip (`corpus_charts.rs`); merges, diagonal borders, columns, autofit, vertical text and WordArt warp are in that slice |
 | 2026-10-13 | minor | Add-in tags on the presentation, slides and shapes read and written |
 | 2026-10-13 | minor | Custom XML parts, the sensitivity label and custom properties kept on save |
+| 2026-10-13 | minor | Owned corpus round-trip for tables, charts, animations, media, sections and masters. Handout-master header, footer, date and slide-number text is written back |
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |

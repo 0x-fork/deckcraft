@@ -9,6 +9,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines round-trip; the real-deck corpus stays open; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Review previous/next comment; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks; the large template gallery stays after beta; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers more deck kinds; handout-master text kept; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -52,6 +53,9 @@ points and lead the beta plan.
    `corpus_media.rs` keeps SmartArt and OLE XML, media bookmarks and trims, sections, fields, ink,
    3-D models and animation bounce end. Comment threads, media options and rewind on save
    (#70, #74, #77), relationship-bearing SmartArt and OLE (#203), and EMF/WMF and SVG are still open. 31–55 h.
+2. **PPTX on real decks:** `crates/pptx/tests/corpus_kinds.rs` round-trips tables, charts, animations,
+   media, sections and masters/layouts, and keeps a handout master's header and footer. Still open:
+   a larger corpus, comment threads, media options and rewind (#70, #74, #77), EMF/WMF and SVG. 31–55 h.
 3. **Review the open PRs:** equations (#55), browser print (#66), Morph alignment (#67), macOS
    open-with (#68), font lookup (#80), Ukrainian (#34, after the catalog exists). 4–8 h.
 
@@ -125,6 +129,7 @@ on common paths. On 2026-10-07 it was ~80% there with these blockers:
 | PPTX fidelity on a corpus of real decks | First owned check in CI; notes-master header and footer kept. A larger corpus is still beta item 2 |
 | PPTX fidelity on a corpus of real decks | Owned check for comments, links, custom shows, groups and inherited placeholders. A larger corpus, embedded fonts and #70/#74/#77 stay open; beta item 2 |
 | PPTX fidelity on a corpus of real decks | Owned check for text effects, body layout, theme effects, fills, bevels and connectors. A larger corpus, embedded fonts and #70/#74/#77 stay open; beta item 2 |
+| PPTX fidelity on a corpus of real decks | First owned check of tables, charts, animations, media, sections and masters; handout-master text kept. A larger corpus is still beta item 2 |
 | Presenter view and Animation Pane polish | Still open; beta items 9 and 10 |
 | Soak and fuzz the editor | Still open; beta item 1 |
 | UI fidelity pass on the most-used ribbon groups and dialogs; first run | Partly (start-screen fixes #20, #49); beta item 11 |
@@ -146,5 +151,6 @@ plan above.
 | 2026-10-14 | trivial | Chart trendlines round-trip in an owned corpus slice; the real-deck corpus (item 2) stays open |
 | 2026-10-14 | trivial | Review workflow: previous and next comment across the deck |
 | 2026-10-14 | minor | After beta: six original starter decks exist; a larger template gallery remains |
+| 2026-10-13 | trivial | Owned PPTX corpus covers tables, charts, animations, media, sections and masters; handout-master text kept. Beta item 2 stays open for a larger corpus |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |
