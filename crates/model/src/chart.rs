@@ -314,7 +314,12 @@ impl Chart {
     /// A value axis label in the axis' number format and the chart's language.
     pub fn axis_label(&self, secondary: bool, v: f64) -> String {
         let code = if secondary { &self.y2_format } else { &self.y_format };
-        crate::numfmt::format(code.as_deref().unwrap_or("General"), v, self.lang.as_deref())
+        // A 100 % stacked chart's value axis counts in percent unless the file says otherwise.
+        let code = match code.as_deref() {
+            None | Some("General") if !secondary && self.kind.percent() => "0%",
+            c => c.unwrap_or("General"),
+        };
+        crate::numfmt::format(code, v, self.lang.as_deref())
     }
 
     /// A data label of series `s`: its number format, else its axis', in the chart's language.
@@ -478,6 +483,16 @@ mod tests {
         c.series[0].number_format = Some(r#"#,##0\ "₽""#.into());
         assert_eq!(c.data_label(&c.series[0], 516_600_000.0), "516\u{a0}600\u{a0}000 ₽");
         assert_eq!(c.data_label(&c.series[1], 0.0), "- ₽");
+    }
+
+    #[test]
+    fn full_percent_axes_count_in_percent() {
+        let mut c = Chart::sample(ChartType::PercentColumn);
+        assert_eq!(c.axis_label(false, 0.5), "50%");
+        c.y_format = Some("0.0%".into());
+        assert_eq!(c.axis_label(false, 0.5), "50.0%");
+        let c = Chart::sample(ChartType::Column);
+        assert_eq!(c.axis_label(false, 0.5), "0.5");
     }
 
     #[test]

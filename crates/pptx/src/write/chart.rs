@@ -289,7 +289,10 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     if let Some(t) = &c.axis_titles.1 {
         title(w, t);
     }
-    w.empty("c:numFmt", A::new().a("formatCode", if c.kind.percent() { "0%" } else { "General" }).a("sourceLinked", 1));
+    match c.y_format.as_deref().filter(|f| !f.is_empty()) {
+        Some(f) => w.empty("c:numFmt", A::new().a("formatCode", f).a("sourceLinked", 0)),
+        None => w.empty("c:numFmt", A::new().a("formatCode", if c.kind.percent() { "0%" } else { "General" }).a("sourceLinked", 1)),
+    }
     w.val("c:majorTickMark", "none");
     w.val("c:minorTickMark", "none");
     w.val("c:tickLblPos", "nextTo");
