@@ -208,6 +208,14 @@ fn fit(avail: Rect, doc: &Presentation) -> Rect {
 
 /// A transition layer as an egui mesh: [`deckcraft_anim::layer_mesh`]'s triangles (perspective
 /// cards subdivided so their pictures stay straight) with per-vertex opacity.
+/// Where presenter view's "Next" preview goes: the column's width below its label, kept inside
+/// the top 60% of the column. A portrait slide used to get the full width and a height many
+/// times the window (a white slab over the notes and past the window edge).
+fn next_rect(right: Rect, doc: &Presentation) -> Rect {
+    let area = Rect::from_min_max(right.min + vec2(0.0, 22.0), pos2(right.max.x, right.min.y + 22.0 + (right.height() - 22.0).max(0.0) * 0.6));
+    Rect::from_min_size(area.min, fit(area, doc).size())
+}
+
 fn quad_mesh(tex: Option<egui::TextureId>, rect: Rect, l: &Layer, color: Color32) -> Mesh {
     let mut m = match tex {
         Some(id) => Mesh::with_texture(id),
@@ -835,10 +843,7 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                 if let Some(t) = &cur_tex {
                     ui.painter().image(t.id(), cr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 }
-                let nr = Rect::from_min_size(
-                    right.min + vec2(0.0, 22.0),
-                    vec2(right.width(), right.width() * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32),
-                );
+                let nr = next_rect(right, doc);
                 ui.painter().text(right.min, Align2::LEFT_TOP, "Next", theme::font(13.0), Color32::from_gray(170));
                 match &next_tex {
                     Some(t) => {
@@ -890,5 +895,22 @@ mod tests {
         assert_eq!(tr.old.as_ref().map(TextureHandle::id), Some(red.id()));
         assert_eq!(tr.from, Some(0));
         assert!(show.tex.is_none(), "the new slide gets a texture of its own instead of overwriting the old one");
+    }
+
+    #[test]
+    fn the_next_preview_fits_its_column_whatever_the_slide_shape() {
+        let right = Rect::from_min_size(pos2(700.0, 100.0), vec2(400.0, 600.0));
+        let mut s = deckcraft_engine::Session::with_new();
+        for (w, h) in [(72, 4032), (4032, 72), (960, 540)] {
+            s.execute("design.slideSize", &json!({"w": w, "h": h})).unwrap();
+            let doc = s.active().unwrap().doc.clone();
+            let r = next_rect(right, &doc);
+            assert!(right.contains_rect(r), "{w}x{h}: {r:?}");
+            let aspect = r.height() / r.width();
+            assert!((aspect - h as f32 / w as f32).abs() / (h as f32 / w as f32) < 0.01, "{w}x{h}: {r:?}");
+        }
+        // 16:9 still takes the column's full width.
+        let doc = s.active().unwrap().doc.clone();
+        assert_eq!(next_rect(right, &doc).width(), 400.0);
     }
 }

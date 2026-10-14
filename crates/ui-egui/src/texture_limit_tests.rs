@@ -51,3 +51,19 @@ fn a_very_tall_slide_in_the_editor_views_and_presenter_view() {
     h.run_steps(4);
     assert!(h.state().show.is_some());
 }
+
+/// Presenter view of a portrait slide: the "Next" preview keeps the slide's shape inside its
+/// column. It took the column's full width and 56 times that in height, a white slab over the
+/// notes and past the window.
+#[test]
+fn presenter_view_keeps_a_portrait_next_slide_in_its_column() {
+    let mut h = harness(tall_deck(), egui::vec2(1280.0, 800.0));
+    h.run_steps(3);
+    h.state_mut().run("show.presenter", json!({"on": true})).unwrap();
+    h.state_mut().run("show.start", json!({"from": 0})).unwrap();
+    h.run_steps(4);
+    let img = h.render().unwrap();
+    // Right of the Next column's narrow preview, below where a landscape one would end.
+    let px = img.get_pixel(1000, 600).0;
+    assert!(px[0] < 128 && px[1] < 128 && px[2] < 128, "the Next preview spills over the column: {px:?}");
+}
