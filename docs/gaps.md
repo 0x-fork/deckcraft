@@ -13,6 +13,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons places a Lucide stroke set; 3-D models and stock content remain; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Size and Position dialog; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks on File › New; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previous: minor, chart trendlines round-trip; 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -219,6 +220,11 @@ Detail in [file-format-parity.md](file-format-parity.md).
   or lines), stock charts as high-low lines with close dashes or up/down bars and saved as
   `c:stockChart`, and combo charts start as columns with a line. Secondary-axis writing and
   trendlines are tracked separately.
+  whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are drawn: linear,
+  exponential, logarithmic, polynomial, power and moving average, with forecast and the equation
+  and R² label. A moving average is drawn with neither label. A combo chart's secondary value axis
+  is read (`y2_*`, `Series.secondary_axis`) and
+  is not written back when the chart is rebuilt.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
@@ -373,6 +379,8 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
 | 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
 | 2026-10-14 | trivial | Corpus slice: themes, masters, effects and links; text Mouse Over actions round-trip |
+| 2026-10-14 | trivial | A moving average trendline is drawn without an equation or an R² label |
+| 2026-10-14 | minor | Chart trendlines are drawn (six types, forecast, equation and R²). The charts gap stays open for the data grid, chartex and secondary-axis export; the real-deck corpus gap stays open |
 | 2026-10-14 | minor | Chart trendlines round-trip. The real-deck corpus gap stays open; secondary-axis export and drawing trendlines stay in the charts gap |
 | 2026-10-14 | trivial | 3-D contours |
 | 2026-10-14 | trivial | 3-D light rigs and materials; extrusion sides lit per side |

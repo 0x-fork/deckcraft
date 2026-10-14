@@ -2,7 +2,7 @@
 
 use deckcraft_color::{ColorTransform, Rgba, SchemeSlot};
 use deckcraft_model::Shape;
-use deckcraft_model::chart::{Chart, ChartType, axis_scale};
+use deckcraft_model::chart::{Chart, ChartType, TrendlineType, axis_scale};
 use deckcraft_model::resolve::Ctx;
 use deckcraft_model::style::{ColorRef, Fill};
 use deckcraft_model::text::{Align, Anchor, Bullet, TextBody};
@@ -403,11 +403,15 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         }
     }
     let ncat = c.categories.len().max(c.series.iter().map(|s| s.values.len()).max().unwrap_or(0)).max(1);
-    let band = if horiz { plot.height() / ncat as f64 } else { plot.width() / ncat as f64 };
+    // Forecast reserves empty category slots so the line can run past the data. Charts with no
+    // forecast keep the old band.
+    let (back, fwd) = forecast_pad(c);
+    let nspan = ncat as f64 + back + fwd;
+    let band = if horiz { plot.height() / nspan } else { plot.width() / nspan };
     // Category labels: wrapped onto two lines when they don't fit their band (long date ranges).
     let wraps = !horiz && c.categories.iter().any(|n| n.chars().count() as f64 * base * 0.5 > band);
     for (i, name) in c.categories.iter().enumerate() {
-        let mid = if horiz { plot.y0 + band * (i as f64 + 0.5) } else { plot.x0 + band * (i as f64 + 0.5) };
+        let mid = if horiz { plot.y0 + band * (i as f64 + back + 0.5) } else { plot.x0 + band * (i as f64 + back + 0.5) };
         if horiz {
             label(
                 ctx,
@@ -461,7 +465,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             for (bi, (si, s)) in bars.iter().enumerate() {
                 let sec = c.on_secondary(s);
                 let v = s.values.get(i).copied().flatten().unwrap_or(0.0) / total;
-                let start = band * i as f64 + (band - group) / 2.0 + if stacked { 0.0 } else { bar * bi as f64 };
+                let start = band * (i as f64 + back) + (band - group) / 2.0 + if stacked { 0.0 } else { bar * bi as f64 };
                 let (a, b) = if waterfall {
                     c.waterfall_bars().get(i).copied().unwrap_or_default()
                 } else if stacked {
@@ -566,9 +570,9 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     let xs: Vec<f64> = s.x_values.iter().flatten().copied().collect();
                     let (xl, xh) = (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max));
                     let xv = s.x_values.get(i).copied().flatten().unwrap_or(i as f64);
-                    if xh > xl { plot.x0 + (xv - xl) / (xh - xl) * plot.width() } else { plot.x0 + band * (i as f64 + 0.5) }
+                    if xh > xl { plot.x0 + (xv - xl) / (xh - xl) * plot.width() } else { plot.x0 + band * (i as f64 + back + 0.5) }
                 }
-                _ => plot.x0 + band * (i as f64 + 0.5),
+                _ => plot.x0 + band * (i as f64 + back + 0.5),
             };
             pts.push(Point::new(x, to_axis(sec, v)));
         }
@@ -606,6 +610,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             }
         }
     }
+    draw_trendlines(ctx, rctx, c, m, plot, band, back, ncat, horiz, base, text_col, &to_axis);
     // Axis line.
     let mut ax = BezPath::new();
     if horiz {
@@ -626,6 +631,255 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
 pub(crate) fn clamp_soft(v: f64, lo: f64, hi: f64) -> f64 {
     let v = if v < lo { lo } else { v };
     if v > hi { hi } else { v }
+}
+
+/// A corner of `plot` whose box stays clear of `pts` (the drawn trendline).
+fn caption_at(plot: Rect, box_w: f64, box_h: f64, pts: &[Point], n: usize) -> (f64, f64) {
+    let pad = 4.0;
+    let shift = n as f64 * (box_h + 2.0);
+    let x_right = (plot.x1 - box_w - pad).max(plot.x0 + pad);
+    let y_bottom = (plot.y1 - box_h - pad - shift).max(plot.y0 + pad);
+    let y_top = (plot.y0 + pad + shift).min(y_bottom);
+    let corners = [(plot.x0 + pad, y_top), (x_right, y_top), (plot.x0 + pad, y_bottom), (x_right, y_bottom)];
+    let mut best = corners[0];
+    let mut best_d = -1.0;
+    for (x, y) in corners {
+        let mut min_d = f64::MAX;
+        for p in pts {
+            let dx = if p.x < x {
+                x - p.x
+            } else if p.x > x + box_w {
+                p.x - (x + box_w)
+            } else {
+                0.0
+            };
+            let dy = if p.y < y {
+                y - p.y
+            } else if p.y > y + box_h {
+                p.y - (y + box_h)
+            } else {
+                0.0
+            };
+            min_d = min_d.min((dx * dx + dy * dy).sqrt());
+        }
+        if pts.is_empty() {
+            min_d = 1.0;
+        }
+        if min_d > best_d {
+            best_d = min_d;
+            best = (x, y);
+        }
+    }
+    best
+}
+
+fn pad_units(v: Option<f64>) -> f64 {
+    v.filter(|v| v.is_finite() && *v > 0.0).map(|v| v.min(3.0)).unwrap_or(0.0)
+}
+
+/// Empty category slots reserved for a trendline forecast, capped so the data still fills the plot.
+fn forecast_pad(c: &Chart) -> (f64, f64) {
+    if matches!(c.kind, ChartType::Scatter | ChartType::Bubble) {
+        return (0.0, 0.0);
+    }
+    let mut back = 0.0_f64;
+    let mut fwd = 0.0_f64;
+    for s in &c.series {
+        if matches!(c.series_kind(s), ChartType::Scatter | ChartType::Bubble) {
+            continue;
+        }
+        for t in s.trendlines.iter().take(8) {
+            if t.kind == TrendlineType::MovingAvg {
+                continue;
+            }
+            back = back.max(pad_units(t.backward));
+            fwd = fwd.max(pad_units(t.forward));
+        }
+    }
+    (back, fwd)
+}
+
+const TREND_INK: [Rgba; 4] = [Rgba::rgb(0x22, 0x22, 0x22), Rgba::rgb(0xB0, 0x30, 0x30), Rgba::rgb(0x1A, 0x5C, 0x7A), Rgba::rgb(0xA0, 0x68, 0x00)];
+
+fn map_xy(
+    plot: Rect,
+    band: f64,
+    back: f64,
+    horiz: bool,
+    scatter: bool,
+    sx0: f64,
+    sx1: f64,
+    sec: bool,
+    x: f64,
+    y: f64,
+    to_axis: &impl Fn(bool, f64) -> f64,
+) -> Option<Point> {
+    if !x.is_finite() || !y.is_finite() {
+        return None;
+    }
+    let value = to_axis(sec, y);
+    if !value.is_finite() {
+        return None;
+    }
+    let along = if scatter && sx1 > sx0 {
+        plot.x0 + (x - sx0) / (sx1 - sx0) * plot.width()
+    } else {
+        let origin = if horiz { plot.y0 } else { plot.x0 };
+        origin + band * (x - 1.0 + back + 0.5)
+    };
+    if !along.is_finite() {
+        return None;
+    }
+    Some(if horiz && !scatter { Point::new(value, along) } else { Point::new(along, value) })
+}
+
+/// The part of segment `a`–`b` that lies inside `r`.
+fn clip_seg(a: Point, b: Point, r: Rect) -> Option<(Point, Point)> {
+    let (mut t0, mut t1) = (0.0, 1.0);
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let p = [-dx, dx, -dy, dy];
+    let q = [a.x - r.x0, r.x1 - a.x, a.y - r.y0, r.y1 - a.y];
+    for i in 0..4 {
+        let (pi, qi) = (p[i], q[i]);
+        if pi.abs() < 1e-12 {
+            if qi < 0.0 {
+                return None;
+            }
+        } else {
+            let t = qi / pi;
+            if pi < 0.0 {
+                if t > t1 {
+                    return None;
+                } else if t > t0 {
+                    t0 = t;
+                }
+            } else if t < t0 {
+                return None;
+            } else if t < t1 {
+                t1 = t;
+            }
+        }
+    }
+    Some((Point::new(a.x + t0 * dx, a.y + t0 * dy), Point::new(a.x + t1 * dx, a.y + t1 * dy)))
+}
+
+fn draw_trendlines(
+    ctx: &mut RenderContext,
+    rctx: &Ctx,
+    c: &Chart,
+    m: Affine,
+    plot: Rect,
+    band: f64,
+    back: f64,
+    ncat: usize,
+    horiz: bool,
+    base: f64,
+    text_col: Rgba,
+    to_axis: &impl Fn(bool, f64) -> f64,
+) {
+    let mut label_n = 0usize;
+    for s in &c.series {
+        if s.trendlines.is_empty() {
+            continue;
+        }
+        let kind = c.series_kind(s);
+        let scatter = matches!(kind, ChartType::Scatter | ChartType::Bubble);
+        let sec = c.on_secondary(s);
+        let mut xs = Vec::new();
+        let mut ys = Vec::new();
+        for i in 0..ncat {
+            let Some(y) = s.values.get(i).copied().flatten().filter(|v| v.is_finite()) else { continue };
+            let x = if scatter {
+                let Some(x) = s.x_values.get(i).copied().flatten().filter(|v| v.is_finite()) else { continue };
+                x
+            } else {
+                (i + 1) as f64
+            };
+            xs.push(x);
+            ys.push(y);
+        }
+        // The same x extent the scatter marks use, so the fit sits on the points.
+        let (sx0, sx1) = if scatter {
+            let mut lo = f64::MAX;
+            let mut hi = f64::MIN;
+            for v in s.x_values.iter().copied().flatten().filter(|v| v.is_finite()) {
+                lo = lo.min(v);
+                hi = hi.max(v);
+            }
+            (lo, hi)
+        } else {
+            (0.0, 0.0)
+        };
+        for (ti, t) in s.trendlines.iter().take(8).enumerate() {
+            let Some(fit) = t.fit(&xs, &ys) else { continue };
+            let (x0, x1) = fit.span(t.forward, t.backward);
+            let samples = fit.samples(x0, x1);
+            let mut path = BezPath::new();
+            let mut prev: Option<Point> = None;
+            let mut ink_pts = Vec::new();
+            let mut any = false;
+            for w in samples.windows(2) {
+                let (Some(a), Some(b)) = (
+                    map_xy(plot, band, back, horiz, scatter, sx0, sx1, sec, w[0].0, w[0].1, to_axis),
+                    map_xy(plot, band, back, horiz, scatter, sx0, sx1, sec, w[1].0, w[1].1, to_axis),
+                ) else {
+                    prev = None;
+                    continue;
+                };
+                let Some((ca, cb)) = clip_seg(a, b, plot) else {
+                    prev = None;
+                    continue;
+                };
+                let cont = prev.is_some_and(|p| (p.x - ca.x).abs() < 0.6 && (p.y - ca.y).abs() < 0.6);
+                if cont {
+                    path.line_to(cb);
+                } else {
+                    path.move_to(ca);
+                    path.line_to(cb);
+                }
+                prev = Some(cb);
+                if ink_pts.len() < 64 {
+                    ink_pts.push(ca);
+                    ink_pts.push(cb);
+                }
+                any = true;
+            }
+            if !any {
+                continue;
+            }
+            ctx.set_transform(m);
+            let ink = TREND_INK.get(ti % TREND_INK.len()).copied().unwrap_or(Rgba::rgb(0x22, 0x22, 0x22));
+            ctx.set_paint(color(ink, 1.0));
+            ctx.set_stroke(kurbo::Stroke::new(1.6).with_dashes(0.0, [6.0, 3.5]).with_caps(kurbo::Cap::Round));
+            ctx.stroke_path(&path);
+            let caption = t.caption(&fit);
+            if caption.is_empty() {
+                continue;
+            }
+            let lines = caption.chars().filter(|ch| *ch == '\n').count() + 1;
+            let box_h = base * 1.3 * lines as f64 + 2.0;
+            let widest = caption.lines().map(|l| l.chars().count()).max().unwrap_or(1) as f64;
+            let box_w = (widest * base * 0.62).clamp(48.0, plot.width() * 0.72);
+            let (x, y) = caption_at(plot, box_w, box_h, &ink_pts, label_n);
+            ctx.set_transform(m);
+            ctx.set_paint(color(Rgba::WHITE, 1.0));
+            ctx.fill_rect(&Rect::new(x, y, x + box_w, y + box_h));
+            label(
+                ctx,
+                rctx,
+                m,
+                &caption,
+                Rect::new(x, y, x + box_w, y + box_h),
+                (base * 0.9).clamp(8.0, 13.0),
+                Align::Left,
+                Anchor::Top,
+                text_col,
+                false,
+            );
+            label_n += 1;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -662,5 +916,37 @@ mod tests {
         let (o, plot) = legend_layout("r", (60.0, 100.0), AREA, 10.0, true);
         assert_eq!(plot, AREA);
         assert_eq!(o.x, 340.0);
+    }
+
+    #[test]
+    fn clip_keeps_the_part_inside_the_plot() {
+        let r = Rect::new(0.0, 0.0, 100.0, 50.0);
+        let (a, b) = clip_seg(Point::new(-50.0, 25.0), Point::new(150.0, 25.0), r).expect("clipped");
+        assert!((a.x - 0.0).abs() < 1e-6 && (b.x - 100.0).abs() < 1e-6);
+        assert!((a.y - 25.0).abs() < 1e-6);
+        assert!(clip_seg(Point::new(-10.0, -10.0), Point::new(-1.0, -1.0), r).is_none());
+        let (a, b) = clip_seg(Point::new(10.0, 10.0), Point::new(40.0, 20.0), r).expect("inside");
+        assert!((a.x - 10.0).abs() < 1e-6 && (b.x - 40.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn caption_keeps_clear_of_a_line_into_the_top_right() {
+        let plot = Rect::new(0.0, 0.0, 200.0, 100.0);
+        let pts = [Point::new(20.0, 80.0), Point::new(180.0, 15.0)];
+        let (x, y) = caption_at(plot, 60.0, 20.0, &pts, 0);
+        assert!(x > 100.0 && y > 40.0, "label on the line at {x} {y}");
+    }
+
+    #[test]
+    fn forecast_reserves_at_most_three_category_slots() {
+        use deckcraft_model::chart::Trendline;
+        let mut c = Chart::sample(ChartType::Line);
+        c.series[0].trendlines.push(Trendline { forward: Some(10.0), backward: Some(0.5), ..Default::default() });
+        assert_eq!(forecast_pad(&c), (0.5, 3.0));
+        c.series[0].trendlines[0].kind = TrendlineType::MovingAvg;
+        assert_eq!(forecast_pad(&c), (0.0, 0.0));
+        c.kind = ChartType::Scatter;
+        c.series[0].trendlines[0].kind = TrendlineType::Linear;
+        assert_eq!(forecast_pad(&c), (0.0, 0.0));
     }
 }

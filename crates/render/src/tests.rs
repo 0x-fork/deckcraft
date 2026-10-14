@@ -1,5 +1,5 @@
 use super::*;
-use deckcraft_model::chart::ChartType;
+use deckcraft_model::chart::{ChartType, Trendline, TrendlineType};
 use deckcraft_model::style::ColorRef;
 use deckcraft_model::text::TextBody;
 use deckcraft_model::{Chart, Geom, Presentation, Shape, ShapeId, ShapeKind, ShapeStyle, Table, Xfrm};
@@ -153,6 +153,110 @@ fn combo_chart_draws_columns_and_a_line_on_its_own_axis() {
     assert!(!green(480, 400, 500), "line along the bottom");
     let col = img.pixel(480, 480);
     assert!(col[0] < 250 || col[1] < 250 || col[2] < 250, "no column: {col:?}");
+}
+
+fn trend_chart(title: &str, kind: ChartType, ys: &[f64], trend: Trendline, y_max: f64) -> Chart {
+    let mut c = Chart::sample(kind);
+    c.title = Some(title.into());
+    c.legend = None;
+    c.categories = vec!["A".into(), "B".into(), "C".into(), "D".into()];
+    c.series.truncate(1);
+    c.series[0].name = "Data".into();
+    c.series[0].values = ys.iter().copied().map(Some).collect();
+    c.y_min = Some(0.0);
+    c.y_max = Some(y_max);
+    c.series[0].trendlines = vec![trend];
+    c
+}
+
+fn trend_line(kind: TrendlineType) -> Trendline {
+    Trendline { kind, disp_eq: true, disp_r_sqr: true, ..Default::default() }
+}
+
+/// Six charts, one trendline type each. `draw` drops the trendlines. `forecast` extends the linear fit.
+fn trend_gallery(draw: bool, forecast: bool) -> Image {
+    let mut linear = trend_line(TrendlineType::Linear);
+    if forecast {
+        linear.forward = Some(1.0);
+        linear.backward = Some(0.5);
+    }
+    let mut poly = trend_line(TrendlineType::Poly);
+    poly.order = Some(2);
+    let mut ma = trend_line(TrendlineType::MovingAvg);
+    ma.period = Some(2);
+    let mut charts = vec![
+        trend_chart("Linear", ChartType::Column, &[3.0, 5.0, 7.0, 9.0], linear, 12.0),
+        trend_chart("Exponential", ChartType::LineMarkers, &[1.0, 2.0, 4.0, 8.0], trend_line(TrendlineType::Exp), 10.0),
+        trend_chart(
+            "Logarithmic",
+            ChartType::LineMarkers,
+            &[1.0_f64.ln(), 2.0_f64.ln(), 3.0_f64.ln(), 4.0_f64.ln()],
+            trend_line(TrendlineType::Log),
+            2.0,
+        ),
+        trend_chart("Polynomial", ChartType::LineMarkers, &[1.0, 4.0, 9.0, 16.0], poly, 18.0),
+        trend_chart("Power", ChartType::LineMarkers, &[2.0, 2.0 * 2.0_f64.sqrt(), 2.0 * 3.0_f64.sqrt(), 4.0], trend_line(TrendlineType::Power), 6.0),
+        trend_chart("Moving average", ChartType::LineMarkers, &[2.0, 8.0, 4.0, 10.0], ma, 12.0),
+    ];
+    if !draw {
+        for c in &mut charts {
+            c.series[0].trendlines.clear();
+        }
+    }
+    let shapes = charts
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| Shape {
+            id: ShapeId(800 + i as u32),
+            xfrm: Some(Xfrm::new(12.0 + (i % 3) as f64 * 316.0, 12.0 + (i / 3) as f64 * 264.0, 304.0, 252.0)),
+            kind: ShapeKind::Chart(Box::new(c)),
+            ..Default::default()
+        })
+        .collect();
+    render_slide(&deck_with(shapes), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+}
+
+#[test]
+fn trendlines_draw_through_the_points_with_a_label() {
+    let on = trend_gallery(true, false);
+    let off = trend_gallery(false, false);
+    assert_eq!((on.width, on.height), (960, 540));
+    let dark = on
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(off.pixels.as_chunks::<4>().0)
+        .filter(|(a, b)| a[0] < 50 && a[1] < 50 && a[2] < 50 && b[0] as i32 - a[0] as i32 > 20)
+        .count();
+    assert!(dark > 40, "dashed trendline ink {dark}");
+    // A scatter fit uses the real x values and still paints the dash.
+    let mut scatter = trend_chart("Scatter", ChartType::Scatter, &[2.0, 4.0, 6.0, 8.0], trend_line(TrendlineType::Linear), 10.0);
+    scatter.series[0].x_values = (1..=4).map(|x| Some(x as f64)).collect();
+    let sh = Shape {
+        id: ShapeId(810),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 480.0, 360.0)),
+        kind: ShapeKind::Chart(Box::new(scatter.clone())),
+        ..Default::default()
+    };
+    let with = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    scatter.series[0].trendlines.clear();
+    let sh =
+        Shape { id: ShapeId(810), xfrm: Some(Xfrm::new(0.0, 0.0, 480.0, 360.0)), kind: ShapeKind::Chart(Box::new(scatter)), ..Default::default() };
+    let without = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let scatter_dark = with
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(without.pixels.as_chunks::<4>().0)
+        .filter(|(a, b)| a[0] < 50 && a[1] < 50 && a[2] < 50 && b[0] as i32 - a[0] as i32 > 20)
+        .count();
+    assert!(scatter_dark > 20, "scatter trendline ink {scatter_dark}");
+    if std::env::var_os("DECKCRAFT_TREND_SHOT").is_some() {
+        let png = trend_gallery(true, true).to_png();
+        std::fs::write("/tmp/deckcraft-trendlines.png", &png).expect("write trendline screenshot");
+    }
 }
 
 #[test]
