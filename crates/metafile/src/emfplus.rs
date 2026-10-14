@@ -737,15 +737,21 @@ impl Painter {
                 })
                 .collect()
         };
+        // The nested picture's own clip regions are not carried over: each item takes the
+        // canvas's current clip.
         for item in &pic.items {
             if cv.full() {
                 break;
             }
             let raw = match item {
-                Item::Path { segs, fill, stroke, even_odd } => {
-                    Raw::Path { ops: ops(segs), fill: *fill, stroke: stroke.map(|(c, w)| (c, f64::from(w) * scale)), even_odd: *even_odd }
-                }
-                Item::Pattern { segs, even_odd, tile } => Raw::Pattern {
+                Item::Path { segs, fill, stroke, even_odd, .. } => Raw::Path {
+                    ops: ops(segs),
+                    fill: *fill,
+                    stroke: stroke.map(|(c, w)| (c, f64::from(w) * scale)),
+                    even_odd: *even_odd,
+                    region: None,
+                },
+                Item::Pattern { segs, even_odd, tile, .. } => Raw::Pattern {
                     ops: ops(segs),
                     even_odd: *even_odd,
                     tile: Arc::new(RawTile {
@@ -754,12 +760,13 @@ impl Painter {
                         px: tile.rgba.clone(),
                         cell: f64::from(tile.cell[0]) * scale,
                     }),
+                    region: None,
                 },
-                Item::Bitmap { rect, width, height, rgba } => {
+                Item::Bitmap { rect, width, height, rgba, .. } => {
                     let (a, b) = (pt(rect[0], rect[1]), pt(rect[0] + rect[2], rect[1] + rect[3]));
                     let mut img = Rgba { w: *width as usize, h: *height as usize, bottom_up: false, px: rgba.clone() };
                     crate::dib::flip(&mut img, a.0 > b.0, a.1 > b.1);
-                    Raw::Bitmap { rect: [a.0.min(b.0), a.1.min(b.1), (b.0 - a.0).abs(), (b.1 - a.1).abs()], img }
+                    Raw::Bitmap { rect: [a.0.min(b.0), a.1.min(b.1), (b.0 - a.0).abs(), (b.1 - a.1).abs()], img, region: None }
                 }
                 Item::Text(t) => {
                     let mut t = t.clone();
@@ -768,7 +775,7 @@ impl Painter {
                         let (p, q) = (pt(x0, y0), pt(x1, y1));
                         t.clip = Some([p.0.min(q.0) as f32, p.1.min(q.1) as f32, p.0.max(q.0) as f32, p.1.max(q.1) as f32]);
                     }
-                    Raw::Text(t)
+                    Raw::Text { text: t, region: None }
                 }
             };
             cv.push_device(raw);

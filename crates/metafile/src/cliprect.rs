@@ -143,10 +143,10 @@ fn bbox_inside(b: [f64; 4], clip: &[P]) -> bool {
 pub(crate) fn clip_raw(raw: Raw, clip: &[P]) -> Vec<Raw> {
     let Some(cb) = pts_bbox(clip).filter(|_| clip.len() >= 3) else { return Vec::new() };
     match raw {
-        Raw::Path { ops, fill, stroke, even_odd } => {
+        Raw::Path { ops, fill, stroke, even_odd, region } => {
             let Some(b) = ops_bbox(&ops) else { return Vec::new() };
             if bbox_inside(b, clip) {
-                return vec![Raw::Path { ops, fill, stroke, even_odd }];
+                return vec![Raw::Path { ops, fill, stroke, even_odd, region }];
             }
             if disjoint(b, cb) {
                 return Vec::new();
@@ -156,34 +156,34 @@ pub(crate) fn clip_raw(raw: Raw, clip: &[P]) -> Vec<Raw> {
             if fill.is_some() {
                 let f = clip_fill(&subs, clip);
                 if !f.is_empty() {
-                    out.push(Raw::Path { ops: f, fill, stroke: None, even_odd });
+                    out.push(Raw::Path { ops: f, fill, stroke: None, even_odd, region: region.clone() });
                 }
             }
             if stroke.is_some() {
                 let s = clip_stroke(&subs, clip);
                 if !s.is_empty() {
-                    out.push(Raw::Path { ops: s, fill: None, stroke, even_odd });
+                    out.push(Raw::Path { ops: s, fill: None, stroke, even_odd, region });
                 }
             }
             out
         }
-        Raw::Pattern { ops, even_odd, tile } => {
+        Raw::Pattern { ops, even_odd, tile, region } => {
             let Some(b) = ops_bbox(&ops) else { return Vec::new() };
             if bbox_inside(b, clip) {
-                return vec![Raw::Pattern { ops, even_odd, tile }];
+                return vec![Raw::Pattern { ops, even_odd, tile, region }];
             }
             if disjoint(b, cb) {
                 return Vec::new();
             }
             let f = clip_fill(&flatten(&ops), clip);
-            if f.is_empty() { Vec::new() } else { vec![Raw::Pattern { ops: f, even_odd, tile }] }
+            if f.is_empty() { Vec::new() } else { vec![Raw::Pattern { ops: f, even_odd, tile, region }] }
         }
-        Raw::Bitmap { rect, img } => crop(rect, img, clip).map(|(rect, img)| vec![Raw::Bitmap { rect, img }]).unwrap_or_default(),
-        Raw::Text(mut t) => {
+        Raw::Bitmap { rect, img, region } => crop(rect, img, clip).map(|(rect, img)| vec![Raw::Bitmap { rect, img, region }]).unwrap_or_default(),
+        Raw::Text { text: mut t, region } => {
             // Text clips to a rectangle: the one around the polygon.
             let cur = t.clip.map_or(cb, |[a, b, d, e]| intersect(cb, [f64::from(a), f64::from(b), f64::from(d), f64::from(e)]));
             t.clip = Some(cur.map(|v| v as f32));
-            vec![Raw::Text(t)]
+            vec![Raw::Text { text: t, region }]
         }
     }
 }
