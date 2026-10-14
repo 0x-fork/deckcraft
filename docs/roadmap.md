@@ -6,6 +6,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers comments, links, custom shows, groups and inherited placeholders; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (`corpus_media.rs` keeps 3-D models and animation bounce end; real-deck corpus still open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines round-trip; the real-deck corpus stays open; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -137,5 +138,6 @@ plan above.
 | 2026-10-13 | trivial | Owned PPTX corpus covers comments, links and actions, custom shows, rotated groups and inherited placeholders. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
 | 2026-10-13 | trivial | Owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
 | 2026-10-14 | trivial | Current focus: `corpus_media.rs` keeps 3-D models and animation bounce end; the real-deck corpus stays open |
+| 2026-10-14 | trivial | Chart trendlines round-trip in an owned corpus slice; the real-deck corpus (item 2) stays open |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

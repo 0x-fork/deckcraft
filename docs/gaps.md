@@ -9,6 +9,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for comments, links, custom shows, groups and inherited placeholders; paragraph defaults and action sounds kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors; run effect lists and bevel presets kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end round-trip; the real-deck corpus and #70/#74/#77 stay open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines round-trip; previous: minor, 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -109,10 +110,14 @@ Detail in [file-format-parity.md](file-format-parity.md).
   (saved as freeform lines), `.glb` 3-D models, and animation repeat, bounce end and triggers.
   Playback options (#74) and rewind (#77) are still lost.
 - **Evidence:** every PPTX test (`crates/pptx/tests`, 30 tests) uses decks DeckCraft generates;
+- **Evidence:** every PPTX test (`crates/pptx/tests`) uses decks DeckCraft generates;
   the 2026-10-07 alpha checklist already listed this as open. No reference renders from PowerPoint
   exist to compare against. `crates/pptx/tests/corpus_themes.rs` starts on PowerPoint-shaped XML:
   themes and two masters with their layouts, shadow/glow/soft-edge/reflection effects, and text
   and shape hyperlinks and actions (text Mouse Over actions were dropped; now kept).
+  exist to compare against. `corpus_charts.rs` round-trips one owned slice (a combo chart with
+  data labels and trendlines, a merged table with diagonal borders, text columns, autofit,
+  vertical text and a WordArt warp). That is still a generated deck, not a corpus of real ones.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -197,7 +202,9 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
-  whisker) aren't read.
+  whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are not drawn. A combo
+  chart's secondary value axis is read (`y2_*`, `Series.secondary_axis`) and is not written back
+  when the chart is rebuilt.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
@@ -342,6 +349,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
 | 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
 | 2026-10-14 | trivial | Corpus slice: themes, masters, effects and links; text Mouse Over actions round-trip |
+| 2026-10-14 | minor | Chart trendlines round-trip. The real-deck corpus gap stays open; secondary-axis export and drawing trendlines stay in the charts gap |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
