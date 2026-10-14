@@ -1711,6 +1711,10 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     // The presenter clock only moves when this window is drawn again.
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let mut actions = vec![];
+    // The presenter window is dark; default buttons draw dark text on it (#221).
+    let button = |ui: &mut Ui, s: &str| {
+        ui.add(egui::Button::new(egui::RichText::new(s).size(15.0).color(Color32::WHITE)).fill(Color32::from_gray(60)).min_size(vec2(0.0, 30.0)))
+    };
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
@@ -1733,13 +1737,13 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                     ui.add_space(20.0);
                     ui.label(egui::RichText::new(format!("Slide {} of {}", cur + 1, doc.slides.len())).size(16.0).color(Color32::from_gray(200)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("End Show").clicked() {
+                        if button(ui, "End Show").clicked() {
                             *keep = false;
                         }
-                        if ui.button("Next ▶").clicked() {
+                        if button(ui, "Next ▶").clicked() {
                             actions.push(show.state.next(doc));
                         }
-                        if ui.button("◀ Previous").clicked() {
+                        if button(ui, "◀ Previous").clicked() {
                             actions.push(show.state.prev(doc));
                         }
                     });
