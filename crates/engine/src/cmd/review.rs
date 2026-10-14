@@ -398,7 +398,6 @@ fn replace_word(s: &mut Session, p: &Value) -> Result<Value> {
     s.execute("text.insert", &json!({"text": with}))
 }
 
-
 fn comparing(s: &Session) -> std::result::Result<(), String> {
     if s.active().is_some_and(|d| d.compare.is_some()) { Ok(()) } else { Err("not comparing".into()) }
 }

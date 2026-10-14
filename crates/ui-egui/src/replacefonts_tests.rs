@@ -50,7 +50,8 @@ fn ribbon_button_opens_the_dialog_and_replaces() {
         d.fields.insert("to".into(), "Lato".into());
     }
     h.run_steps(2);
-    h.get_by_label("Replace").click();
+    // The ribbon has a Replace button too (Find and Replace); the dialog's is drawn last.
+    h.query_all_by_label("Replace").last().expect("the dialog's Replace button").click();
     h.run_steps(3);
     assert_eq!(run_font(&h).as_deref(), Some("Lato"));
     // The dialog stays open with a confirmation, like PowerPoint's.

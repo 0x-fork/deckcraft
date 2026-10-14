@@ -1154,7 +1154,6 @@ fn grid_fits(span: f32, step: f32) -> bool {
     span.is_finite() && span > 0.0 && step >= 1.0 && span / step <= 800.0
 }
 
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]

@@ -3,55 +3,33 @@
 > **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 80%** over 191 features.
+**Weighted breadth parity: 82%** over 193 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 39 | 20 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 14 | 15 | 25 | 40% |
-| P1 | 65 | 39 | 21 | 5 | 76% |
-| P2 | 54 | 14 | 17 | 23 | 42% |
-| P2 | 54 | 14 | 14 | 26 | 39% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
+| P1 | 66 | 43 | 18 | 5 | 79% |
+| P2 | 55 | 16 | 20 | 19 | 47% |
 
 | Area | Parity |
 |---|---|
 | Application shell | 81% |
 | Files | 71% |
 | Slides | 90% |
-| Views | 93% |
-| Views | 95% |
-| Masters & themes | 85% |
-| Views | 90% |
+| Views | 98% |
 | Masters & themes | 88% |
-| Shapes | 88% |
 | Shapes | 91% |
 | Format | 83% |
 | Arrange | 100% |
-| Text | 80% |
+| Text | 82% |
 | Tables | 95% |
-| Text | 81% |
-| Text | 81% |
-| Tables | 89% |
 | Charts | 65% |
-| SmartArt | 33% |
-| Pictures | 52% |
 | SmartArt | 50% |
-| Pictures | 48% |
+| Pictures | 52% |
 | Media | 67% |
 | Transitions | 100% |
 | Animations | 79% |
 | Slide show | 68% |
-| Review | 60% |
-| Slide show | 66% |
 | Review | 70% |
 | Draw | 33% |
 | Undo & clipboard | 100% |

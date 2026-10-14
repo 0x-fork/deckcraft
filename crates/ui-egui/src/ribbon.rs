@@ -1160,18 +1160,17 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
         big(app, ui, Icon::Picture, "Picture", "app.insertPictureDialog", json!({}));
     });
     drawing_group(app, ui);
+    // Editing, as in PowerPoint: Find, Replace and Replace Fonts, then the Selection Pane.
     group(ui, |ui| {
         ui.vertical(|ui| {
             small(app, ui, Icon::Search, "Find", "app.find", json!({}));
             small(app, ui, Icon::Spelling, "Replace", "app.replace", json!({}));
+            if small_button(ui, Icon::Fonts, "Replace Fonts…", enabled(app, "font.replace"), false).clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("replaceFonts"));
+            }
         });
-    });
-    group(ui, |ui| {
         // Also under Arrange, but that is disabled until something is selected (#132).
         big(app, ui, Icon::SelectionPane, "Selection\nPane", "view.pane", json!({"pane": "selection"}));
-        if small_button(ui, Icon::Fonts, "Replace Fonts…", enabled(app, "font.replace"), false).clicked() {
-            app.dialog = Some(crate::dialogs::Dialog::new("replaceFonts"));
-        }
     });
     group(ui, |ui| {
         big(app, ui, Icon::DesignIdeas, "Design\nIdeas", "view.pane", json!({"pane": "designer"}));
