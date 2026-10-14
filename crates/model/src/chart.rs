@@ -369,6 +369,9 @@ impl Chart {
     /// stacked series as running sums from zero, 100 % series as 0–1. `(0, 0)` without finite
     /// values; `None` when no series uses the axis.
     fn plotted_extent(&self, secondary: bool) -> Option<(f64, f64)> {
+        if self.kind == ChartType::Waterfall {
+            return (!secondary).then(|| self.value_range());
+        }
         let ser: Vec<&Series> = self.series.iter().filter(|s| self.on_secondary(s) == secondary).collect();
         if ser.is_empty() {
             return (!secondary && self.kind != ChartType::Combo).then_some((0.0, 0.0));
