@@ -74,6 +74,10 @@ pub struct ShowState {
     pub(crate) last_now: Option<f64>,
     /// What was played on each visited slide (index into `presentation.slides`).
     pub(crate) runs: BTreeMap<usize, SlideRun>,
+    /// One-shot visit order (Custom Show from the dialog or a click). `None` uses [`show_order`].
+    order: Option<Vec<usize>>,
+    /// Name of the custom show being played, when there is one.
+    custom: Option<String>,
 }
 
 /// Slide indices the show visits in order: the custom show or range from Set Up Slide Show, minus
@@ -92,6 +96,18 @@ pub fn show_order(pres: &Presentation) -> Vec<usize> {
         },
     };
     base.into_iter().filter(|i| pres.slides.get(*i).is_some_and(|s| !s.hidden)).collect()
+}
+
+/// Visible slides of custom show `name`, in that show's order.
+fn custom_indices(pres: &Presentation, name: &str) -> Option<Vec<usize>> {
+    let cs = pres.custom_shows.iter().find(|c| c.name == name)?;
+    let order: Vec<usize> = cs
+        .slides
+        .iter()
+        .filter_map(|id| pres.slides.iter().position(|s| s.id == *id))
+        .filter(|&i| pres.slides.get(i).is_some_and(|s| !s.hidden))
+        .collect();
+    if order.is_empty() { None } else { Some(order) }
 }
 
 fn looping(pres: &Presentation) -> bool {
@@ -115,7 +131,46 @@ impl ShowState {
         } else {
             s.ended = true;
         }
+        if let Some(name) = pres.show.custom_show.clone() {
+            s.custom = Some(name);
+        }
         s
+    }
+
+    /// Play custom show `name` from its first slide, without changing Set Up Slide Show.
+    /// `None` when that show is missing or has no visible slides.
+    pub fn play_custom(pres: &Presentation, name: &str) -> Option<ShowState> {
+        let order = custom_indices(pres, name)?;
+        let &first = order.first()?;
+        let mut s = ShowState::start_at(pres, first);
+        s.order = Some(order);
+        s.custom = Some(name.to_string());
+        Some(s)
+    }
+
+    /// Name of the custom show this playback is limited to.
+    pub fn custom_name(&self) -> Option<&str> {
+        self.custom.as_deref().filter(|s| !s.is_empty())
+    }
+
+    /// The slide that follows the current one in this show.
+    pub fn peek_next(&self, pres: &Presentation) -> Option<usize> {
+        self.next_index(pres)
+    }
+
+    pub fn first_index(&self, pres: &Presentation) -> Option<usize> {
+        self.visit(pres).first().copied()
+    }
+
+    pub fn last_index(&self, pres: &Presentation) -> Option<usize> {
+        self.visit(pres).last().copied()
+    }
+
+    fn visit(&self, pres: &Presentation) -> Vec<usize> {
+        match &self.order {
+            Some(order) => order.iter().copied().filter(|&i| pres.slides.get(i).is_some_and(|s| !s.hidden)).collect(),
+            None => show_order(pres),
+        }
     }
 
     /// The timeline of slide `i`.
@@ -165,7 +220,7 @@ impl ShowState {
     }
 
     fn next_index(&self, pres: &Presentation) -> Option<usize> {
-        let order = show_order(pres);
+        let order = self.visit(pres);
         match order.iter().position(|&i| i == self.slide) {
             Some(p) => order.get(p + 1).copied(),
             None => order.iter().copied().find(|&i| i > self.slide),
@@ -173,7 +228,7 @@ impl ShowState {
     }
 
     fn prev_index(&self, pres: &Presentation) -> Option<usize> {
-        let order = show_order(pres);
+        let order = self.visit(pres);
         match order.iter().position(|&i| i == self.slide) {
             Some(p) => p.checked_sub(1).and_then(|q| order.get(q).copied()),
             None => order.iter().copied().rev().find(|&i| i < self.slide),
@@ -202,7 +257,7 @@ impl ShowState {
                 self.enter(pres, i);
                 ShowAction::Slide(i)
             }
-            None if looping(pres) => match show_order(pres).first() {
+            None if looping(pres) => match self.visit(pres).first() {
                 Some(&i) => {
                     self.enter(pres, i);
                     ShowAction::Slide(i)
@@ -252,7 +307,7 @@ impl ShowState {
         }
         let target = match self.prev_index(pres) {
             Some(i) => Some(i),
-            None if looping(pres) => show_order(pres).last().copied().filter(|&i| i != self.slide),
+            None if looping(pres) => self.visit(pres).last().copied().filter(|&i| i != self.slide),
             None => None,
         };
         match target {
@@ -289,11 +344,18 @@ impl ShowState {
             Action::Slide { slide } => pres.slides.iter().position(|s| s.id == *slide),
             Action::NextSlide => self.next_index(pres),
             Action::PreviousSlide => self.prev_index(pres),
-            Action::FirstSlide => show_order(pres).first().copied(),
-            Action::LastSlide => show_order(pres).last().copied(),
+            Action::FirstSlide => self.visit(pres).first().copied(),
+            Action::LastSlide => self.visit(pres).last().copied(),
             Action::LastViewed => last_viewed,
-            // Custom shows, programs and media actions aren't followed (yet).
-            Action::CustomShow { .. } | Action::Program { .. } | Action::PlayMedia => None,
+            Action::CustomShow { name, .. } => {
+                let Some(order) = custom_indices(pres, name) else { return LinkJump::None };
+                let Some(&i) = order.first() else { return LinkJump::None };
+                self.order = Some(order);
+                self.custom = Some(name.clone());
+                return LinkJump::Show(self.goto(pres, i));
+            }
+            // Programs and media actions aren't followed.
+            Action::Program { .. } | Action::PlayMedia => None,
         };
         match target {
             Some(i) => LinkJump::Show(self.goto(pres, i)),

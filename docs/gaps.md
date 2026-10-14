@@ -19,6 +19,8 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; dialogs 27 → 28; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; dialogs 27 → 28; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Date and Time dialog; 28 dialogs; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for more deck kinds; handout-master text kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (laser pointer in the slide show; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -127,6 +129,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
   exist to compare against. `corpus_charts.rs` round-trips one owned slice (a combo chart with
   data labels and trendlines, a merged table with diagonal borders, text columns, autofit,
   vertical text and a WordArt warp). That is still a generated deck, not a corpus of real ones.
+- **Evidence:** `crates/pptx/tests/corpus_kinds.rs` builds decks in this repo and checks open → save →
+  reopen (package parts and text): tables, charts, animations, media, sections, and several masters
+  and layouts. A handout master with a header, footer, date and slide number used to disappear on
+  save; that text is kept now. There is still no larger corpus and no reference render from PowerPoint.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -249,9 +255,14 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 - **Estimate:** 4–8 h.
 
 ### Notes and Handout masters
-- **Evidence:** checklist row missing; PPTX writes a notes master but there's no view to edit it,
-  and no handout master at all.
-- **Estimate:** 4–6 h.
+- **Evidence:** View ▸ Handout Master and View ▸ Notes Master edit both masters (placeholders,
+  background, a slides-per-page preview for handouts) and PPTX keeps them. Notes pages (view and
+  PDF) place the slide and notes where the notes master does and print its header, date, footer
+  and page number in their own fonts, sizes and colours; PDF handouts print the handout master's.
+  Notes Master view previews the slide in its slide-image placeholder. PDF pages lay master text
+  out with the text engine (wrapping, mixed formatting), and the Notes Page view draws the same
+  layout. Left: the view draws it in the interface font (sizes, colours and weights kept).
+- **Estimate:** done for beta.
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -289,6 +300,10 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 ### Smaller missing rows
 Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), laser pointer (1–2 h), transition
 sounds (1–2 h), artistic effects (6–10 h), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
+sounds (1–2 h), artistic effects (3–6 h for the other 15 of 22; 7 approximated and round-tripped), remove background (6–10 h; needs a model or a classical
+Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), transition
+sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; needs a model or a classical
+matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
 encryption), ink to shape/text (6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
 
@@ -404,6 +419,15 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Create New Theme Colors is in (dialogs 27 → 28). Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object stay open |
 | 2026-10-14 | minor | Create New Theme Fonts is in (dialogs 27 → 28): heading and body latin on the open master. Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object stay open |
 | 2026-10-14 | minor | Insert › Date and Time dialog. Dialog count 27 → 28; Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object are still missing |
+| 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
+| 2026-10-14 | trivial | Notes Page view draws master text wrapped, as the PDF does |
+| 2026-10-14 | trivial | PDF master header/footer text wraps and keeps mixed formatting |
+| 2026-10-14 | trivial | Notes Master slide preview; master header/footer text keeps its formatting |
+| 2026-10-14 | minor | Notes pages and PDF handouts follow the notes and handout masters |
+| 2026-10-14 | minor | Notes Master view: the masters gap is now notes pages and PDF handouts following the masters |
+| 2026-10-14 | minor | Handout Master view: the masters gap is now the Notes Master view and handout text in PDF |
+| 2026-10-13 | minor | Owned PPTX corpus for tables, charts, animations, media, sections and masters. Handout-master text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
+| 2026-10-13 | minor | Laser pointer in the slide show (checklist row Partial). Highlighter, eraser and a laser driven from presenter view remain |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

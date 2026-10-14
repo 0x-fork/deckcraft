@@ -40,7 +40,7 @@ The summary between `<!-- SUMMARY -->
 | Media | 67% |
 | Transitions | 100% |
 | Animations | 79% |
-| Slide show | 66% |
+| Slide show | 68% |
 | Review | 60% |
 | Draw | 33% |
 | Undo & clipboard | 100% |
@@ -194,6 +194,8 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Pictures | Crop (and crop to shape, aspect ratio) | P0 | P |
 | Pictures | Corrections, colour, transparency (recolor and Set Transparent Color done; sharpen/soften and colour temperature pending) | P1 | P |
 | Pictures | Artistic effects | P2 | M |
+| Pictures | Corrections, colour, transparency | P1 | P |
+| Pictures | Artistic effects | P2 | P |
 | Pictures | Remove background | P2 | M |
 | Pictures | Picture styles and borders | P1 | D |
 | Pictures | Change / reset picture | P1 | D |
@@ -224,7 +226,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slide show | Navigation (keys, click, go to slide, blank screen) | P0 | D |
 | Slide show | Presenter view (notes, next slide, timer) | P0 | P |
 | Slide show | Pen and highlighter ink during the show | P1 | P |
-| Slide show | Laser pointer | P2 | M |
+| Slide show | Laser pointer | P2 | P |
 | Slide show | Rehearse timings | P2 | D |
 | Slide show | Custom shows | P2 | D |
 | Slide show | Set up show (loop, kiosk, without animation) | P1 | D |

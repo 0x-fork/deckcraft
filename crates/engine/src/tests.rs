@@ -2127,3 +2127,125 @@ fn action_settings_set_click_and_hover() {
     assert!(s.execute("shape.action", &json!({"action": "customShow", "show": "nope"})).is_err());
     assert!(s.execute("shape.action", &json!({"on": "drag", "action": "next"})).is_err());
 }
+
+#[test]
+fn artistic_effects_apply_change_remove_and_round_trip() {
+    use deckcraft_model::ShapeKind;
+    let mut img = image::RgbaImage::new(40, 30);
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        *p = if x < 20 { image::Rgba([200, 30, 30, 255]) } else { image::Rgba([20, 20, 220, if y < 5 { 0 } else { 255 }]) };
+    }
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.picture", &json!({"name": "a.png", "data": cmd::base64_encode(&png)})).unwrap();
+    let fill = |s: &Session| match &s.doc().unwrap().selected_shapes()[0].kind {
+        ShapeKind::Picture { fill } => fill.clone(),
+        k => panic!("{k:?}"),
+    };
+    let original = fill(&s).media;
+    assert!(s.execute("picture.artisticEffect", &json!({"effect": "artisticBogus"})).is_err());
+    // Every effect draws something of the same size and keeps transparency.
+    for (e, _) in cmd::artistic::EFFECTS {
+        s.execute("picture.artisticEffect", &json!({"effect": e})).unwrap();
+        let f = fill(&s);
+        assert_eq!(f.artistic.as_ref().map(|a| (a.effect.as_str(), a.original)), Some((*e, original)));
+        assert_ne!(f.media, original);
+        let data = s.doc().unwrap().doc.media(f.media).unwrap().data.clone();
+        let out = image::load_from_memory(&data).unwrap().to_rgba8();
+        assert_eq!(out.dimensions(), (40, 30));
+        assert_eq!(out.get_pixel(30, 1)[3], 0, "{e}");
+    }
+    // A pencil sketch is grey.
+    s.execute("picture.artisticEffect", &json!({"effect": "artisticPencilGrayscale"})).unwrap();
+    let data = s.doc().unwrap().doc.media(fill(&s).media).unwrap().data.clone();
+    let out = image::load_from_memory(&data).unwrap().to_rgba8();
+    assert!(out.pixels().all(|p| p[0] == p[1] && p[1] == p[2]));
+    // Saved and reopened, the effect and the original are both there.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    let mut t = Session::new();
+    t.execute("file.openBytes", &json!({"name": "a.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let back = t.doc().unwrap().doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| match &sh.kind {
+        ShapeKind::Picture { fill } => Some(fill.clone()),
+        _ => None,
+    });
+    let back = back.unwrap();
+    let art = back.artistic.clone().unwrap();
+    assert_eq!(art.effect, "artisticPencilGrayscale");
+    assert_eq!(*t.doc().unwrap().doc.media(art.original).unwrap().data, png);
+    // None (and Reset Picture) puts the original back.
+    s.execute("picture.artisticEffect", &json!({"effect": "none"})).unwrap();
+    assert_eq!((fill(&s).media, fill(&s).artistic), (original, None));
+    s.execute("picture.artisticEffect", &json!({"effect": "artisticBlur"})).unwrap();
+    s.execute("picture.reset", &json!({})).unwrap();
+    assert_eq!((fill(&s).media, fill(&s).artistic), (original, None));
+}
+
+#[test]
+fn handout_master_view_edits_and_round_trips() {
+    use deckcraft_model::PhType;
+    let mut s = Session::with_new();
+    assert!(s.doc().unwrap().doc.handout_master.is_none());
+    assert!(s.execute("handout.placeholders", &json!({"footer": false})).is_err(), "only in the view");
+    let r = s.execute("view.handoutMaster", &json!({})).unwrap();
+    assert_eq!(r["created"], true);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.target, Target::Handout);
+    assert_eq!(crate::page_size(st), st.doc.notes_size);
+    let kinds: Vec<_> = st.shapes().iter().filter_map(|x| x.ph_type()).collect();
+    assert_eq!(kinds, [PhType::Header, PhType::Date, PhType::Footer, PhType::SlideNum]);
+    // Hide the footer, then show it again; undo restores the hidden state.
+    let r = s.execute("handout.placeholders", &json!({"footer": false})).unwrap();
+    assert_eq!(r["footer"], false);
+    assert_eq!(s.doc().unwrap().shapes().len(), 3);
+    s.execute("handout.placeholders", &json!({"footer": true})).unwrap();
+    assert_eq!(s.doc().unwrap().shapes().len(), 4);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().shapes().len(), 3);
+    // Shapes drawn in the view land on the handout master, not the slide.
+    let slide_shapes = s.doc().unwrap().doc.slides[0].shapes.len();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [20, 300, 100, 40]})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.handout_master.as_ref().unwrap().shapes.len(), 4);
+    assert_eq!(s.doc().unwrap().doc.slides[0].shapes.len(), slide_shapes);
+    assert!(crate::master_page(&s.doc().unwrap().doc, Target::Handout).is_some_and(|p| p.masters.len() == 1 && p.slide_size == p.notes_size));
+    s.execute("view.closeMaster", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.target, Target::Slides);
+    // Reopening doesn't make a second master, and it survives PPTX.
+    assert_eq!(s.execute("view.handoutMaster", &json!({})).unwrap()["created"], false);
+    let bytes = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let hm = back.handout_master.expect("handout master kept");
+    assert_eq!(hm.shapes.len(), 4);
+    assert!(hm.shapes.iter().any(|x| x.ph_type() == Some(PhType::SlideNum)));
+}
+
+#[test]
+fn notes_master_view_edits_and_saves() {
+    use deckcraft_model::PhType;
+    let mut s = Session::with_new();
+    assert!(s.execute("notes.placeholders", &json!({"header": false})).is_err(), "only in the view");
+    assert_eq!(s.execute("view.notesMaster", &json!({})).unwrap()["created"], true);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.target, Target::NotesMaster);
+    assert_eq!(crate::page_size(st), st.doc.notes_size);
+    let kinds: Vec<_> = st.shapes().iter().filter_map(|x| x.ph_type()).collect();
+    assert_eq!(kinds, [PhType::Header, PhType::Date, PhType::SlideImage, PhType::Body, PhType::Footer, PhType::SlideNum]);
+    let r = s.execute("notes.placeholders", &json!({"header": false, "date": false})).unwrap();
+    assert_eq!((r["header"].as_bool(), r["body"].as_bool()), (Some(false), Some(true)));
+    assert_eq!(s.doc().unwrap().shapes().len(), 4);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().shapes().len(), 6);
+    s.execute("notes.placeholders", &json!({"header": false})).unwrap();
+    // A shape added in the view is on the notes master and is saved, even with no notes in the deck.
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [20, 20, 60, 60]})).unwrap();
+    assert!(s.doc().unwrap().doc.slides.iter().all(|sl| sl.notes.is_empty()));
+    assert!(crate::master_page(&s.doc().unwrap().doc, Target::NotesMaster).is_some());
+    let bytes = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let nm = back.notes_master.expect("notes master written");
+    assert_eq!(nm.shapes.len(), 6, "{:?}", nm.shapes.iter().map(|x| &x.name).collect::<Vec<_>>());
+    assert!(!nm.shapes.iter().any(|x| x.ph_type() == Some(PhType::Header)));
+    s.execute("view.closeMaster", &json!({})).unwrap();
+    assert_eq!(s.execute("view.notesMaster", &json!({})).unwrap()["created"], false);
+}

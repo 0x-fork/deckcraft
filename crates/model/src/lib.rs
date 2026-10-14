@@ -324,6 +324,9 @@ pub struct Shape {
     pub decorative: bool,
     pub click: Option<text::Hyperlink>,
     pub hover: Option<text::Hyperlink>,
+    /// Add-in tags (`p:custDataLst` → `ppt/tags/tagN.xml`): name/value pairs kept for round trip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<(String, String)>,
     /// Unmodelled XML kept for round-trip (extension lists etc.).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
@@ -402,6 +405,7 @@ impl Default for Shape {
             decorative: false,
             click: None,
             hover: None,
+            tags: vec![],
             raw_ext: None,
             diagram: None,
         }
@@ -594,7 +598,10 @@ pub struct Slide {
     /// the layout.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_map: Option<Vec<(String, String)>>,
-    /// Unmodelled XML kept for round-trip (custom data, tags).
+    /// Add-in tags (`p:custDataLst` → `ppt/tags/tagN.xml`): name/value pairs kept for round trip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<(String, String)>,
+    /// Unmodelled XML kept for round-trip (custom data).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
 }
@@ -614,6 +621,7 @@ impl Default for Slide {
             notes: TextBody::default(),
             comments: vec![],
             color_map: None,
+            tags: vec![],
             raw_ext: None,
         }
     }
@@ -913,6 +921,21 @@ fn lenient_size<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<S
     Ok(Size::new(side("width"), side("height")))
 }
 
+/// An XML package part DeckCraft doesn't model, kept as written.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct KeptPart {
+    /// Part name from the package root (`customXml/item1.xml`).
+    pub name: String,
+    /// Content type; empty for a relationships part.
+    pub content_type: String,
+    pub xml: String,
+    /// Full relationship type linking it, empty when only its sibling parts point at it.
+    pub rel_type: String,
+    /// Linked from the package root rather than from the presentation part.
+    pub from_root: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Presentation {
@@ -943,6 +966,13 @@ pub struct Presentation {
     /// Table styles defined in the file (`ppt/tableStyles.xml`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub table_styles: Vec<table::TableStyleDef>,
+    /// Add-in tags (`p:custDataLst` → `ppt/tags/tagN.xml`): name/value pairs kept for round trip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<(String, String)>,
+    /// Package parts kept verbatim for round trip: custom XML data (SharePoint metadata), the
+    /// sensitivity label and custom document properties.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub kept_parts: Vec<KeptPart>,
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
@@ -977,6 +1007,10 @@ impl Presentation {
         }
         for md in &self.media {
             m = m.max(md.id.0);
+        }
+        for extra in [self.notes_master.as_deref(), self.handout_master.as_deref()].into_iter().flatten() {
+            m = m.max(extra.id.0);
+            walk(&extra.shapes, &mut |sh, _| m = m.max(sh.id.0));
         }
         self.next_id = m;
     }

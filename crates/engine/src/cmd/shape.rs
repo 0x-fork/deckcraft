@@ -923,6 +923,9 @@ fn picture_reset(s: &mut Session, p: &Value) -> Result<Value> {
             fill.adjust = Default::default();
             fill.crop = [0.0; 4];
             fill.alpha = None;
+            if let Some(a) = fill.artistic.take() {
+                fill.media = a.original;
+            }
         }
         sh.effects = None;
         sh.line = None;
@@ -938,6 +941,7 @@ fn picture_change(s: &mut Session, p: &Value) -> Result<Value> {
         if let deckcraft_model::ShapeKind::Picture { fill } = &mut sh.kind {
             fill.media = media;
             fill.crop = [0.0; 4];
+            fill.artistic = None;
         }
         Ok(())
     })

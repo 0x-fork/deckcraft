@@ -703,6 +703,37 @@ fn show_custom_show_and_range() {
 }
 
 #[test]
+fn playing_a_custom_show_stays_on_its_slides() {
+    use deckcraft_model::text::Action;
+    let mut p = pres(5);
+    p.custom_shows = vec![CustomShow { name: "Ends".into(), slides: vec![SlideId(1000), SlideId(1004)] }];
+    assert!(p.show.custom_show.is_none());
+    let mut s = ShowState::play_custom(&p, "Ends").expect("the show exists");
+    assert_eq!(s.custom_name(), Some("Ends"));
+    assert_eq!(s.slide, 0);
+    assert_eq!(s.peek_next(&p), Some(4));
+    assert_eq!(s.next(&p), ShowAction::Slide(4));
+    assert_eq!(s.next(&p), ShowAction::End);
+    assert_eq!(s.prev(&p), ShowAction::Slide(4));
+    assert_eq!(s.prev(&p), ShowAction::Slide(0));
+    assert!(ShowState::play_custom(&p, "Missing").is_none());
+    assert!(p.show.custom_show.is_none(), "one-shot playback does not change Set Up");
+
+    Arc::make_mut(&mut p.slides[4]).hidden = true;
+    let only = ShowState::play_custom(&p, "Ends").expect("the visible slide remains");
+    assert_eq!(only.first_index(&p), Some(0));
+    assert_eq!(only.last_index(&p), Some(0));
+
+    let mut s = ShowState::new(&p);
+    p.slides[4] = Arc::new(Slide { id: SlideId(1004), ..Default::default() });
+    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Ends".into(), returns: true }, None), LinkJump::Show(ShowAction::Slide(0)));
+    assert_eq!(s.custom_name(), Some("Ends"));
+    assert_eq!(s.next(&p), ShowAction::Slide(4));
+    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Missing".into(), returns: true }, None), LinkJump::None);
+    assert_eq!(s.slide, 4, "an unknown custom show leaves the current slide");
+}
+
+#[test]
 fn show_steps_through_builds() {
     let mut p = pres(2);
     Arc::make_mut(&mut p.slides[0]).shapes = vec![shape(1, "A")];

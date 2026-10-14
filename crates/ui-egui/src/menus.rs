@@ -17,7 +17,7 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
     }
     let id = match (key, m.cmd, m.shift, m.alt) {
         (F5, _, false, _) => {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             return true;
         }
         (F5, _, true, _) | (Enter, true, false, false) => {
@@ -26,7 +26,7 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
             return true;
         }
         (Enter, true, true, _) => {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             return true;
         }
         (S, true, false, false) => {
@@ -206,6 +206,8 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Slide Show", "show.start"),
                 ("-", ""),
                 ("Slide Master", "view.slideMaster"),
+                ("Handout Master", "view.handoutMaster"),
+                ("Notes Master", "view.notesMaster"),
                 ("-", ""),
                 ("Ruler", "view.ruler"),
                 ("Gridlines", "view.gridlines"),

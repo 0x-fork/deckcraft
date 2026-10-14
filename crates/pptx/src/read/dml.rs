@@ -126,6 +126,17 @@ pub fn blip_fill(imp: &mut Imp, part: &Part, bf: &El) -> Option<PictureFill> {
     let media = blip.and_then(|b| media_ref(imp, part, b));
     let media = media?;
     let mut pf = PictureFill { media, upright: !bf.bool("rotWithShape").unwrap_or(true), ..Default::default() };
+    if let Some(layer) = blip.and_then(|b| b.child("extLst")).and_then(|x| x.find("imgLayer"))
+        && let Some(effect) = layer
+            .elements()
+            .filter(|e| e.local() == "imgEffect")
+            .flat_map(|e| e.elements())
+            .map(|e| e.local().to_string())
+            .find(|n| n.starts_with("artistic"))
+        && let Some(original) = media_ref(imp, part, layer)
+    {
+        pf.artistic = Some(deckcraft_model::style::Artistic { effect, original });
+    }
     if let Some(b) = blip {
         for e in b.elements() {
             match e.local() {

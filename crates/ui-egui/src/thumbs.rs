@@ -11,6 +11,10 @@ use crate::theme::{self, Tokens};
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let in_master = app.session.active().is_some_and(|d| d.selection.target != Target::Slides);
+    // Handout Master view has one page and no thumbnails, as in PowerPoint.
+    if app.session.active().is_some_and(|d| d.selection.target.is_page_master()) {
+        return;
+    }
     let panel = egui::Panel::left("thumbs")
         .resizable(true)
         .default_size(app.ui.thumbs_width)

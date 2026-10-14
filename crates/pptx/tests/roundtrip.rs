@@ -234,6 +234,7 @@ pub fn rich_deck() -> Presentation {
             alpha: Some(0.5),
             adjust: PictureAdjust { brightness: 0.2, contrast: -0.1, grayscale: true, ..Default::default() },
             upright: false,
+            artistic: None,
         },
     };
     let mut tiled = shape(&mut p, "Tiled", 350.0, 120.0, 200.0, 150.0);
@@ -1374,4 +1375,38 @@ fn color_pulse_keeps_its_effect_colour_and_duration() {
     assert_eq!(a.color, Some(white));
     assert_eq!(a.amount, None, "no grow/shrink scale is invented");
     assert_eq!(a.duration_ms, 1000);
+}
+
+#[test]
+fn notes_master_placeholders_and_colour_map_survive_save() {
+    let mut p = defaults::new_presentation(None);
+    let mut box1 = shape(&mut p, "Confidential", 100000.0, 200000.0, 3000000.0, 400000.0);
+    box1.text = Some(TextBody::from_text("Company confidential"));
+    let map: Vec<(String, String)> = [("bg1", "dk1"), ("tx1", "lt1"), ("bg2", "dk2"), ("tx2", "lt2")]
+        .iter()
+        .chain(
+            [
+                ("accent1", "accent1"),
+                ("accent2", "accent2"),
+                ("accent3", "accent3"),
+                ("accent4", "accent4"),
+                ("accent5", "accent5"),
+                ("accent6", "accent6"),
+                ("hlink", "hlink"),
+                ("folHlink", "folHlink"),
+            ]
+            .iter(),
+        )
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+    let m = deckcraft_model::Master { name: "Notes Master".into(), shapes: vec![box1], color_map: map.clone(), ..Default::default() };
+    p.notes_master = Some(Arc::new(m));
+    // No slide has notes: the notes master must still be written.
+    let q = round(&p);
+    let nm = q.notes_master.as_deref().expect("notes master kept");
+    assert_eq!(nm.shapes.len(), 1, "own shapes, not the defaults");
+    let sh = &nm.shapes[0];
+    assert_eq!(sh.name, "Confidential");
+    assert_eq!(sh.text.as_ref().map(|t| t.text()), Some("Company confidential".to_string()));
+    assert_eq!(nm.color_map, map);
 }

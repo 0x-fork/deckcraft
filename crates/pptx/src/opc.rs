@@ -339,6 +339,10 @@ impl PackageOut {
         }
         self.files.push((rels_path(part), rels.to_xml(), true));
     }
+    /// Add a part with no content type of its own (a relationships part).
+    pub fn raw(&mut self, name: &str, data: Vec<u8>) {
+        self.files.push((name.to_string(), data, true));
+    }
     /// Add a binary part; its extension gets a Default content type.
     pub fn binary(&mut self, name: &str, content_type: &str, data: Vec<u8>) {
         let ext = name.rsplit('.').next().unwrap_or("bin").to_ascii_lowercase();

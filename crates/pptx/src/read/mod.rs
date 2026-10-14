@@ -178,6 +178,89 @@ fn choice_has_model3d(el: &El, rels: &Rels) -> bool {
     rec(el, rels, 0)
 }
 
+/// Add-in tags named by `holder`'s `p:custDataLst`: the name/value pairs of each tags part.
+pub fn tags(imp: &Imp, part: &Part, holder: &El) -> Vec<(String, String)> {
+    let Some(list) = holder.child("custDataLst") else { return vec![] };
+    let mut out = Vec::new();
+    for t in list.children_named("tags").take(100) {
+        let Some(doc) = t.attr("r:id").and_then(|id| part.rels.get(id)).and_then(|r| imp.pkg.xml(&r.target)) else { continue };
+        for tag in doc.root.children_named("tag").take(10_000) {
+            if let Some(name) = tag.attr("name") {
+                out.push((name.to_string(), tag.attr("val").unwrap_or("").to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// Relationship types whose parts are kept verbatim, and whether they hang off the package root.
+const KEPT_RELS: [(&str, bool); 3] = [
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml", false),
+    ("http://schemas.microsoft.com/office/2020/02/relationships/classificationlabels", true),
+    ("http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties", true),
+];
+
+/// A part we may keep: outside `ppt/` and the properties the writer makes itself.
+fn keepable(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    !n.is_empty()
+        && !n.contains("..")
+        && !n.starts_with("ppt/")
+        && n != "docprops/core.xml"
+        && n != "docprops/app.xml"
+        && !n.starts_with("[content_types]")
+}
+
+/// Custom XML data, sensitivity labels and custom properties, with the parts they relate to
+/// (`itemProps`) and their relationships parts, as written.
+fn kept_parts(pkg: &Package, pres_path: &str) -> Vec<deckcraft_model::KeptPart> {
+    use deckcraft_model::KeptPart;
+    let mut out: Vec<KeptPart> = Vec::new();
+    let text = |name: &str| pkg.get(name).and_then(|b| std::str::from_utf8(b).ok()).map(str::to_string);
+    for (holder, from_root) in [("", true), (pres_path, false)] {
+        let Some(doc) = pkg.xml(&opc::rels_path(holder)) else { continue };
+        let base = opc::dir_of(holder);
+        for r in doc.root.children_named("Relationship") {
+            let (Some(ty), Some(target)) = (r.attr("Type"), r.attr("Target")) else { continue };
+            if r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("external"))
+                || !KEPT_RELS.iter().any(|(t, root)| *t == ty && *root == from_root)
+            {
+                continue;
+            }
+            let name = opc::resolve(&base, target);
+            if !keepable(&name) || out.iter().any(|k| k.name.eq_ignore_ascii_case(&name)) || out.len() >= 400 {
+                continue;
+            }
+            let Some(xml) = text(&name) else { continue };
+            out.push(KeptPart {
+                content_type: pkg.content_type(&name).unwrap_or_default(),
+                name: name.clone(),
+                xml,
+                rel_type: ty.to_string(),
+                from_root,
+            });
+            // The part's own relationships (customXml item → itemProps) and their targets.
+            let rp = opc::rels_path(&name);
+            if let Some(rels_xml) = text(&rp) {
+                for sub in pkg.rels(&name).items.iter().filter(|s| !s.external && keepable(&s.target)) {
+                    if let Some(x) = text(&sub.target)
+                        && !out.iter().any(|k| k.name.eq_ignore_ascii_case(&sub.target))
+                    {
+                        out.push(KeptPart {
+                            content_type: pkg.content_type(&sub.target).unwrap_or_default(),
+                            name: sub.target.clone(),
+                            xml: x,
+                            ..Default::default()
+                        });
+                    }
+                }
+                out.push(KeptPart { name: rp, xml: rels_xml, ..Default::default() });
+            }
+        }
+    }
+    out
+}
+
 /// Replace every `mc:AlternateContent` by the children of the branch we can read best.
 /// A 3-D model choice is left in place (even when its `Requires` prefix is not one we otherwise
 /// understand) so the shape reader can keep the model and its fallback picture. Ink content parts
@@ -467,6 +550,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             p.raw_ext = Some(kept);
         }
     }
+    p.tags = tags(&imp, &pres_part, pres_el);
     // Custom shows.
     if let Some(l) = pres_el.child("custShowLst") {
         for cs in l.children_named("custShow") {
@@ -517,6 +601,35 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         }
         p.notes_master = Some(Arc::new(m));
     }
+    // Handout master (header, footer, date and slide number for printed handouts).
+    if let Some(r) = pres_part.rels.first_of("handoutMaster")
+        && let Some(d) = load(&pkg, &r.target)
+    {
+        let part = Part::new(&pkg, &r.target, &d);
+        let mut ctx = shapes::IdCtx::default();
+        let mut m = Master { id: MasterId(imp.alloc()), name: "Handout Master".into(), ..Default::default() };
+        if let Some(t) = part.rels.first_of("theme")
+            && let Some(td) = pkg.xml(&t.target)
+        {
+            let tp = Part::new(&pkg, &t.target, &td);
+            m.theme = theme::read_theme(&mut imp, &tp, &td.root);
+        } else if let Some(first) = p.masters.first() {
+            m.theme = first.theme.clone();
+        }
+        if let Some(csld) = d.root.child("cSld") {
+            if let Some(n) = csld.attr("name").filter(|s| !s.is_empty()) {
+                m.name = n.to_string();
+            }
+            m.background = background(&mut imp, &part, csld);
+            if let Some(tree) = csld.child("spTree") {
+                m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+            }
+        }
+        if let Some(cm) = d.root.child("clrMap") {
+            m.color_map = color_map(cm);
+        }
+        p.handout_master = Some(Arc::new(m));
+    }
     // Document properties.
     if let Some(r) = root_rels.first_of("core-properties")
         && let Some(d) = pkg.xml(&r.target)
@@ -528,6 +641,8 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
     {
         p.props.company = d.root.child("Company").map(|c| c.text()).unwrap_or_default();
     }
+
+    p.kept_parts = kept_parts(&pkg, &pres_path);
 
     inherit_placeholder_geometry(&mut p);
     p.header_footer = header_footer(&p);
@@ -894,6 +1009,7 @@ fn read_slide(imp: &mut Imp, part: &Part, doc: &Doc, id: SlideId, layout: Layout
     let mut ctx = shapes::IdCtx::default();
     if let Some(csld) = root.child("cSld") {
         s.name = csld.attr("name").unwrap_or("").to_string();
+        s.tags = tags(imp, part, csld);
         s.background = background(imp, part, csld);
         if let Some(tree) = csld.child("spTree") {
             s.shapes = shapes::sp_tree(imp, part, &mut ctx, tree, 0);

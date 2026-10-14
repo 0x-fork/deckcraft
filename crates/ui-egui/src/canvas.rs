@@ -38,9 +38,10 @@ fn mods(ui: &Ui) -> Mods {
 /// The slide's rect on screen for the current zoom.
 pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let Some(d) = app.session.active() else { return (avail, 1.0) };
+    let page = deckcraft_engine::page_size(d);
     // Loaded sizes are repaired; a zero or non-finite side would still make the fit infinite.
     let side = |v: f64| if v.is_finite() { (v as f32).max(1.0) } else { 1.0 };
-    let (sw, sh) = (side(d.doc.slide_size.width), side(d.doc.slide_size.height));
+    let (sw, sh) = (side(page.width), side(page.height));
     let margin = 28.0;
     let fit = ((avail.width() - margin * 2.0) / sw).min((avail.height() - margin * 2.0) / sh).max(0.05);
     let scale = app.ui.zoom.unwrap_or(fit);
@@ -123,7 +124,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let px = ((slide_rect.width() * ppp).round().max(1.0) as u32, (slide_rect.height() * ppp).round().max(1.0) as u32);
     let now = ui.input(|i| i.time);
     let gifs = match app.session.active() {
-        Some(d) if d.selection.target == Target::Slides => app.media.gifs(&d.doc, d.selection.slide, now, &app.session.gif_paused),
+        Some(d) if d.selection.target == Target::Slides => app.media.gifs(d.uid, &d.doc, d.selection.slide, now, &app.session.gif_paused),
         _ => vec![],
     };
     crate::media::gif_repaint(ui.ctx(), &gifs);
@@ -140,6 +141,9 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
+        Some((t @ (Target::Handout | Target::NotesMaster), d)) => {
+            deckcraft_engine::master_page(&d.doc, t).and_then(|p| master_tex(ui.ctx(), &p, 0, None, px, visible))
+        }
         None => None,
     };
     if let Some((tex, region)) = tex {
@@ -152,6 +156,45 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     app.perf.render_ms = app.textures.last_render_ms;
     media_frames(app, &painter, xf);
+    // Notes Master view: the current slide inside the slide-image placeholder, as in PowerPoint.
+    let notes_preview = app.session.active().filter(|d| d.selection.target == Target::NotesMaster).and_then(|d| {
+        let frame = d.doc.notes_master.as_ref()?.shapes.iter().find(|s| s.ph_type() == Some(deckcraft_model::PhType::SlideImage))?.xfrm?;
+        Some((d.doc.clone(), d.selection.slide.min(d.doc.slides.len().saturating_sub(1)), frame))
+    });
+    if let Some((doc, idx, f)) = notes_preview
+        && f.w > 1.0
+        && f.h > 1.0
+    {
+        let aspect = doc.slide_size.width / doc.slide_size.height.max(1.0);
+        let (w, h) = if f.w / f.h > aspect { (f.h * aspect, f.h) } else { (f.w, f.w / aspect) };
+        let (x, y) = (f.x + (f.w - w) / 2.0, f.y + (f.h - h) / 2.0);
+        let r = Rect::from_min_size(
+            pos2(slide_rect.min.x + x as f32 * scale, slide_rect.min.y + y as f32 * scale),
+            vec2(w as f32 * scale, h as f32 * scale),
+        );
+        let mut budget = 2;
+        if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (r.width() * ppp).round().max(1.0) as u32, &mut budget) {
+            painter.image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        }
+    }
+    if let Some(d) = app.session.active().filter(|d| d.selection.target == Target::Handout) {
+        // Where the slides go on a printed handout, as in PowerPoint's preview.
+        let (n, s) = (d.doc.notes_size, d.doc.slide_size);
+        let aspect = s.width / s.height.max(1.0);
+        for b in deckcraft_engine::pdf::handout_boxes(app.ui.handout_per_page, (n.width, n.height), aspect) {
+            let r = Rect::from_min_max(
+                pos2(slide_rect.min.x + b.x0 as f32 * scale, slide_rect.min.y + b.y0 as f32 * scale),
+                pos2(slide_rect.min.x + b.x1 as f32 * scale, slide_rect.min.y + b.y1 as f32 * scale),
+            );
+            let dash = egui::Shape::dashed_line(
+                &[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()],
+                Stroke::new(1.0, Color32::from_gray(140)),
+                4.0,
+                3.0,
+            );
+            painter.extend(dash);
+        }
+    }
     if app.ui.gridlines {
         let step = 72.0 / 2.0 * scale;
         let mut x = slide_rect.min.x + step;
@@ -293,6 +336,7 @@ fn media_frames(app: &SlideApp, painter: &egui::Painter, xf: Xf) {
 /// selection or hover).
 fn media_bar(app: &mut SlideApp, ui: &mut Ui, xf: Xf) {
     let Some(d) = app.session.active() else { return };
+    let uid = d.uid;
     if d.selection.target != Target::Slides || d.selection.text.is_some() || app.session.tool.dragging() {
         return;
     }
@@ -311,11 +355,11 @@ fn media_bar(app: &mut SlideApp, ui: &mut Ui, xf: Xf) {
     let bar = Rect::from_min_size(pos2(r.center().x - w / 2.0, r.max.y + 6.0), vec2(w, 26.0));
     let status = app.media.status(id);
     match crate::media::control_bar(ui, bar, status.as_ref(), &clip) {
-        Some(crate::media::BarAction::Toggle) => app.media.toggle(&doc, id, &clip, crate::media::Owner::Editor),
-        Some(crate::media::BarAction::Seek(t)) => app.media.seek(&doc, id, &clip, t, crate::media::Owner::Editor),
+        Some(crate::media::BarAction::Toggle) => app.media.toggle(uid, &doc, id, &clip, crate::media::Owner::Editor),
+        Some(crate::media::BarAction::Seek(t)) => app.media.seek(uid, &doc, id, &clip, t, crate::media::Owner::Editor),
         Some(crate::media::BarAction::Nudge(dt)) => {
             let pos = status.map(|s| s.position).unwrap_or(0.0);
-            app.media.seek(&doc, id, &clip, (pos + dt).max(0.0), crate::media::Owner::Editor);
+            app.media.seek(uid, &doc, id, &clip, (pos + dt).max(0.0), crate::media::Owner::Editor);
         }
         None => {}
     }

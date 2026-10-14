@@ -27,11 +27,13 @@ const CT_SLIDE: &str = "application/vnd.openxmlformats-officedocument.presentati
 const CT_LAYOUT: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml";
 const CT_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml";
 const CT_NOTES_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml";
+const CT_HANDOUT_MASTER: &str = "application/vnd.openxmlformats-officedocument.presentationml.handoutMaster+xml";
 const CT_NOTES: &str = "application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml";
 const CT_THEME: &str = "application/vnd.openxmlformats-officedocument.theme+xml";
 const CT_PRES_PROPS: &str = "application/vnd.openxmlformats-officedocument.presentationml.presProps+xml";
 const CT_VIEW_PROPS: &str = "application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml";
 const CT_TABLE_STYLES: &str = "application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml";
+const CT_TAGS: &str = "application/vnd.openxmlformats-officedocument.presentationml.tags+xml";
 const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
 const CT_COMMENTS: &str = "application/vnd.openxmlformats-officedocument.presentationml.comments+xml";
 const CT_AUTHORS: &str = "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml";
@@ -53,6 +55,7 @@ pub struct Exp<'a> {
     n_media: u32,
     n_chart: u32,
     n_diagram: u32,
+    n_tags: u32,
     pub slide_parts: HashMap<SlideId, String>,
     pub table_styles: Vec<String>,
     placeholder: Option<String>,
@@ -174,12 +177,36 @@ impl Exp<'_> {
         self.n_diagram += 1;
         self.n_diagram
     }
+    /// A new `ppt/tags/tagN.xml` part holding `tags`, related from `o`.
+    pub fn tags_rel(&mut self, o: &mut Out, tags: &Tags) -> String {
+        self.n_tags += 1;
+        let name = format!("ppt/tags/tag{}.xml", self.n_tags);
+        let mut w = W::new();
+        root_open(&mut w, "p:tagLst", A::new());
+        for (n, v) in tags.iter().take(10_000) {
+            w.empty("p:tag", A::new().a("name", n).a("val", v));
+        }
+        w.close("p:tagLst");
+        self.pkg.xml_part(&name, CT_TAGS, w.finish());
+        o.rels.add_new("tags", &opc::relative(&o.name, &name), false)
+    }
     pub fn chart_rel(&mut self, o: &mut Out, c: &deckcraft_model::Chart) -> String {
         self.n_chart += 1;
         let name = format!("ppt/charts/chart{}.xml", self.n_chart);
         self.pkg.xml_part(&name, CT_CHART, chart::chart_xml(c));
         o.rels.add_new("chart", &opc::relative(&o.name, &name), false)
     }
+}
+
+/// `p:custDataLst` pointing at a tags part, when there are tags.
+pub fn cust_data(w: &mut W, x: &mut Exp, o: &mut Out, tags: &Tags) {
+    if tags.is_empty() {
+        return;
+    }
+    let id = x.tags_rel(o, tags);
+    w.open0("p:custDataLst");
+    w.empty("p:tags", A::new().a("r:id", id));
+    w.close("p:custDataLst");
 }
 
 fn root_open(w: &mut W, tag: &str, extra: A) {
@@ -210,7 +237,9 @@ fn background(w: &mut W, x: &mut Exp, o: &mut Out, bg: &Background) {
     w.close("p:bg");
 }
 
-fn csld(w: &mut W, x: &mut Exp, o: &mut Out, name: &str, bg: Option<&Background>, list: &[Shape]) -> shapes::IdMap {
+type Tags = [(String, String)];
+
+fn csld(w: &mut W, x: &mut Exp, o: &mut Out, name: &str, bg: Option<&Background>, list: &[Shape], tags: &Tags) -> shapes::IdMap {
     w.open("p:cSld", A::new().o("name", (!name.is_empty()).then_some(name)));
     if let Some(bg) = bg {
         background(w, x, o, bg);
@@ -223,6 +252,7 @@ fn csld(w: &mut W, x: &mut Exp, o: &mut Out, name: &str, bg: Option<&Background>
         shapes::shapes(w, x, o, &mut cx, list, 0);
     }
     w.close("p:spTree");
+    cust_data(w, x, o, tags);
     w.close("p:cSld");
     ids
 }
@@ -361,23 +391,27 @@ struct NotesMasterWrite {
 }
 
 fn notes_master_write(p: &Presentation) -> Option<NotesMasterWrite> {
-    let kept = p.notes_master.as_ref().filter(|m| !m.shapes.is_empty());
+    let nm = p.notes_master.as_deref();
+    let kept = nm.filter(|m| !m.shapes.is_empty());
     let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
-    if !has_notes && kept.is_none() {
+    if !has_notes && nm.is_none() {
         return None;
     }
+    let default_bg = || Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) };
     Some(match kept {
         Some(m) => NotesMasterWrite {
             shapes: m.shapes.clone(),
-            background: m.background.clone(),
+            background: Some(m.background.clone().unwrap_or_else(default_bg)),
             color_map: m.color_map.clone(),
             style: if m.body_style.is_empty() { notes_style() } else { m.body_style.clone() },
             theme: Some(m.theme.clone()),
         },
+        // A master without placeholders of its own gets PowerPoint's defaults, keeping its
+        // background and colour map.
         None => NotesMasterWrite {
             shapes: notes_master_shapes(p.notes_size),
-            background: Some(Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) }),
-            color_map: vec![],
+            background: Some(nm.and_then(|m| m.background.clone()).unwrap_or_else(default_bg)),
+            color_map: nm.map(|m| m.color_map.clone()).unwrap_or_default(),
             style: notes_style(),
             theme: None,
         },
@@ -474,6 +508,7 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         n_media: 0,
         n_chart: 0,
         n_diagram: 0,
+        n_tags: 0,
         slide_parts: HashMap::new(),
         table_styles: vec![],
         placeholder: None,
@@ -538,13 +573,36 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         x.pkg.rels(&tname, &to.rels);
         let mut w = W::new();
         root_open(&mut w, "p:notesMaster", A::new());
-        csld(&mut w, &mut x, &mut no, "", nm.background.as_ref(), &nm.shapes);
+        csld(&mut w, &mut x, &mut no, "", nm.background.as_ref(), &nm.shapes, &[]);
         clr_map(&mut w, &nm.color_map);
         dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &nm.style);
         w.close("p:notesMaster");
         x.pkg.xml_part(notes_master, CT_NOTES_MASTER, w.finish());
         x.pkg.rels(notes_master, &no.rels);
         notes_master_rid = Some(pres.rels.add("notesMaster", &opc::relative("ppt/presentation.xml", notes_master), false));
+    }
+
+    // Handout master. Its header, footer, date and slide-number text live on this part; a deck
+    // that has never had one does not gain an empty master on save.
+    let handout_path = "ppt/handoutMasters/handoutMaster1.xml";
+    let mut handout_rid = None;
+    if let Some(hm) = p.handout_master.as_ref() {
+        let tindex = p.masters.len() + 1 + usize::from(notes_master_rid.is_some());
+        let tname = format!("ppt/theme/theme{tindex}.xml");
+        let mut ho = Out::new(handout_path);
+        ho.rels.add("theme", &opc::relative(handout_path, &tname), false);
+        let mut to = Out::new(&tname);
+        let txml = theme::theme_xml(&mut x, &mut to, &hm.theme);
+        x.pkg.xml_part(&tname, CT_THEME, txml);
+        x.pkg.rels(&tname, &to.rels);
+        let mut w = W::new();
+        root_open(&mut w, "p:handoutMaster", A::new());
+        csld(&mut w, &mut x, &mut ho, &hm.name, hm.background.as_ref(), &hm.shapes, &[]);
+        clr_map(&mut w, &hm.color_map);
+        w.close("p:handoutMaster");
+        x.pkg.xml_part(handout_path, CT_HANDOUT_MASTER, w.finish());
+        x.pkg.rels(handout_path, &ho.rels);
+        handout_rid = Some(pres.rels.add("handoutMaster", &opc::relative("ppt/presentation.xml", handout_path), false));
     }
 
     // Comment authors.
@@ -619,9 +677,34 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
     x.pkg.xml_part("ppt/viewProps.xml", CT_VIEW_PROPS, view_props_xml());
     let ts = crate::tables::table_styles_xml(&x.table_styles, &p.table_styles);
     x.pkg.xml_part("ppt/tableStyles.xml", CT_TABLE_STYLES, ts);
-    let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), &slide_rids);
+    let pxml = presentation_xml(&mut x, &mut pres, &master_rids, notes_master_rid.as_deref(), handout_rid.as_deref(), &slide_rids);
     x.pkg.xml_part("ppt/presentation.xml", main_ct, pxml);
+    // Kept parts never replace a part the writer makes.
+    let kept: Vec<_> = p
+        .kept_parts
+        .iter()
+        .filter(|k| {
+            let n = k.name.to_ascii_lowercase();
+            !n.is_empty()
+                && !n.contains("..")
+                && !n.starts_with("ppt/")
+                && !n.starts_with("docprops/core")
+                && !n.starts_with("docprops/app")
+                && !n.starts_with("[content_types]")
+                && n != "_rels/.rels"
+        })
+        .collect();
+    for k in kept.iter().filter(|k| !k.rel_type.is_empty() && !k.from_root) {
+        pres.rels.add_new(&k.rel_type, &opc::relative("ppt/presentation.xml", &k.name), false);
+    }
     x.pkg.rels("ppt/presentation.xml", &pres.rels);
+    for k in &kept {
+        if k.content_type.is_empty() {
+            x.pkg.raw(&k.name, k.xml.clone().into_bytes());
+        } else {
+            x.pkg.xml_part(&k.name, &k.content_type, k.xml.clone().into_bytes());
+        }
+    }
 
     // Document properties and package relationships.
     x.pkg.xml_part("docProps/core.xml", CT_CORE, core_xml(p));
@@ -630,6 +713,9 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
     root.add("officeDocument", "ppt/presentation.xml", false);
     root.add(opc::RT_CORE, "docProps/core.xml", false);
     root.add("extended-properties", "docProps/app.xml", false);
+    for k in kept.iter().filter(|k| !k.rel_type.is_empty() && k.from_root) {
+        root.add_new(&k.rel_type, &k.name, false);
+    }
     x.pkg.rels("", &root);
     x.pkg.finish()
 }
@@ -641,7 +727,7 @@ fn layout_xml(x: &mut Exp, o: &mut Out, l: &Layout) -> Vec<u8> {
         "p:sldLayout",
         A::new().o("showMasterSp", (!l.show_master_shapes).then_some("0")).a("type", l.kind.xml()).t("preserve", l.preserve),
     );
-    csld(&mut w, x, o, &l.name, l.background.as_ref(), &l.shapes);
+    csld(&mut w, x, o, &l.name, l.background.as_ref(), &l.shapes, &[]);
     clr_map_ovr(&mut w, l.color_map.as_deref());
     ext_list(&mut w, ext_children(l.raw_ext.as_deref()).as_deref());
     w.close("p:sldLayout");
@@ -651,7 +737,7 @@ fn layout_xml(x: &mut Exp, o: &mut Out, l: &Layout) -> Vec<u8> {
 fn master_xml(x: &mut Exp, o: &mut Out, m: &Master, layouts: &[(u64, String)]) -> Vec<u8> {
     let mut w = W::new();
     root_open(&mut w, "p:sldMaster", A::new().t("preserve", m.preserve));
-    csld(&mut w, x, o, &m.name, m.background.as_ref(), &m.shapes);
+    csld(&mut w, x, o, &m.name, m.background.as_ref(), &m.shapes, &[]);
     clr_map(&mut w, &m.color_map);
     w.open0("p:sldLayoutIdLst");
     for (id, rid) in layouts {
@@ -673,7 +759,7 @@ fn master_xml(x: &mut Exp, o: &mut Out, m: &Master, layouts: &[(u64, String)]) -
 fn slide_xml(x: &mut Exp, o: &mut Out, s: &Slide, comment_rel: Option<&str>) -> Vec<u8> {
     let mut w = W::new();
     root_open(&mut w, "p:sld", A::new().o("showMasterSp", (!s.show_master_shapes).then_some("0")).o("show", s.hidden.then_some("0")));
-    let ids = csld(&mut w, x, o, &s.name, s.background.as_ref(), &s.shapes);
+    let ids = csld(&mut w, x, o, &s.name, s.background.as_ref(), &s.shapes, &s.tags);
     clr_map_ovr(&mut w, s.color_map.as_deref());
     if let Some(t) = &s.transition {
         timing::transition(&mut w, x, o, t);
@@ -704,7 +790,7 @@ fn notes_xml(x: &mut Exp, o: &mut Out, notes: &TextBody) -> Vec<u8> {
         text: Some(tb),
         ..Default::default()
     };
-    csld(&mut w, x, o, "", None, &[img, body]);
+    csld(&mut w, x, o, "", None, &[img, body], &[]);
     w.open0("p:clrMapOvr");
     w.empty0("a:masterClrMapping");
     w.close("p:clrMapOvr");
@@ -930,7 +1016,7 @@ fn write_embedded_fonts(x: &mut Exp, o: &mut Out) -> Vec<WrittenFont> {
     out
 }
 
-fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, slides: &[String]) -> Vec<u8> {
+fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, handout: Option<&str>, slides: &[String]) -> Vec<u8> {
     let fonts = write_embedded_fonts(x, o);
     let p = x.p;
     let mut w = W::new();
@@ -945,6 +1031,11 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
         w.open0("p:notesMasterIdLst");
         w.empty("p:notesMasterId", A::new().a("r:id", n));
         w.close("p:notesMasterIdLst");
+    }
+    if let Some(h) = handout {
+        w.open0("p:handoutMasterIdLst");
+        w.empty("p:handoutMasterId", A::new().a("r:id", h));
+        w.close("p:handoutMasterIdLst");
     }
     if !slides.is_empty() {
         w.open0("p:sldIdLst");
@@ -989,6 +1080,7 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
         }
         w.close("p:custShowLst");
     }
+    cust_data(&mut w, x, o, &p.tags);
     let dts = if p.default_text_style.is_empty() { defaults::default_text_style() } else { p.default_text_style.clone() };
     dml::list_style(&mut w, x, o, "p:defaultTextStyle", &dts);
     let sections = section_slides(p);

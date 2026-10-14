@@ -367,16 +367,32 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     let page = Rect::from_center_size(avail.center(), vec2(page_w, page_h));
     ui.painter().rect_filled(page.translate(vec2(2.0, 2.0)), CornerRadius::ZERO, t.shadow);
     ui.painter().rect_filled(page, CornerRadius::ZERO, Color32::WHITE);
-    let sw = page_w * 0.78;
-    let sh = sw * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32;
-    let srect = Rect::from_min_size(pos2(page.center().x - sw / 2.0, page.min.y + page_h * 0.08), vec2(sw, sh));
+    // The notes master places the slide, the notes and the header and footer text (in Letter
+    // points, as the PDF notes pages do).
+    let paper = (612.0, 792.0);
+    let k = page_w / paper.0 as f32;
+    let to_screen = |(x0, y0, x1, y1): (f64, f64, f64, f64)| {
+        Rect::from_min_max(page.min + vec2(x0 as f32 * k, y0 as f32 * k), page.min + vec2(x1 as f32 * k, y1 as f32 * k))
+    };
+    let (slide_box, notes_box) = deckcraft_engine::pdf::notes_frames(&doc, paper);
+    let srect = to_screen((slide_box.x0, slide_box.y0, slide_box.x1, slide_box.y1));
+    let sw = srect.width();
+    if let Some(m) = doc.notes_master.as_deref() {
+        // Laid out by the text engine as on the PDF page: wrapped, each run in its size and colour.
+        for piece in deckcraft_engine::pdf::master_text_pieces(&doc, m, paper, idx + 1) {
+            let size = (piece.size as f32 * k).max(4.0);
+            let at = page.min + vec2(piece.at.0 as f32 * k, piece.at.1 as f32 * k - size * 0.8);
+            let c = Color32::from_rgba_unmultiplied(piece.color.r, piece.color.g, piece.color.b, piece.color.a);
+            ui.painter().text(at, egui::Align2::LEFT_TOP, &piece.text, theme::font(size), c);
+        }
+    }
     let ppp = ui.ctx().pixels_per_point();
     let mut budget = 2;
     if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (sw * ppp) as u32, &mut budget) {
         ui.painter().image(tex.id(), srect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
     ui.painter().rect_stroke(srect, CornerRadius::ZERO, Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Outside);
-    let notes_rect = Rect::from_min_max(pos2(srect.min.x, srect.max.y + 24.0), pos2(srect.max.x, page.max.y - page_h * 0.06));
+    let notes_rect = to_screen((notes_box.x0, notes_box.y0, notes_box.x1, notes_box.y1));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
     let current = st.current_slide().map(|s| s.notes_text()).unwrap_or_default();
     let id = egui::Id::new(("notespage", st.uid, idx));

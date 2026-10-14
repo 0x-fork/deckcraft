@@ -18,6 +18,17 @@ pub const EXTENSION: &str = "deckcraft";
 pub const VERSION: u32 = 1;
 /// Largest entry we will inflate (guards against zip bombs).
 const MAX_ENTRY: u64 = 2 << 30;
+/// All embedded media together, inflated (#393).
+const MAX_TOTAL_MEDIA: u64 = 4 << 30;
+/// Media items one file may list.
+const MAX_MEDIA_ITEMS: usize = 100_000;
+
+/// What one load may inflate.
+#[derive(Clone, Copy)]
+struct Budget {
+    total: u64,
+    items: usize,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum FormatError {
@@ -87,12 +98,22 @@ pub fn sniff(bytes: &[u8]) -> bool {
 }
 
 fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<u8>> {
+    read_entry_max(z, name, MAX_ENTRY)
+}
+
+/// Read one member, refusing it before inflating if it declares more than `max` bytes, and
+/// stopping at `max` if it inflates further than it declared.
+fn read_entry_max(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str, max: u64) -> Result<Vec<u8>> {
     let f = z.by_name(name).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
-    if f.size() > MAX_ENTRY {
+    if f.size() > max {
         return Err(FormatError::Damaged(format!("{name} is too large")));
     }
     let mut out = Vec::with_capacity(f.size().min(64 << 20) as usize);
-    f.take(MAX_ENTRY).read_to_end(&mut out).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
+    let mut f = f.take(max.saturating_add(1));
+    f.read_to_end(&mut out).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
+    if out.len() as u64 > max {
+        return Err(FormatError::Damaged(format!("{name} is too large")));
+    }
     Ok(out)
 }
 
@@ -105,6 +126,10 @@ pub fn load(bytes: &[u8]) -> Result<Presentation> {
 /// Read a presentation and list the embedded media that couldn't be read (missing, too large
 /// or failing its CRC), one message each. Linked media saved without its bytes isn't damage.
 pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
+    load_within(bytes, Budget { total: MAX_TOTAL_MEDIA, items: MAX_MEDIA_ITEMS })
+}
+
+fn load_within(bytes: &[u8], budget: Budget) -> Result<(Presentation, Vec<String>)> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
     let m: Manifest = serde_json::from_slice(&json).map_err(|e| FormatError::Damaged(e.to_string()))?;
@@ -113,11 +138,25 @@ pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
     }
     let mut p = m.presentation;
     let mut damaged = vec![];
+    if p.media.len() > budget.items {
+        return Err(FormatError::Damaged(format!("{} media items (at most {})", p.media.len(), budget.items)));
+    }
+    // A repeated id names the same member: keep the first item, so the member is inflated once
+    // and the deck can be saved again (a zip can't hold two `media/<id>`).
+    let mut seen = std::collections::HashSet::new();
+    p.media.retain(|m| seen.insert(m.id));
+    let mut left = budget.total;
     for item in &mut p.media {
         let name = format!("media/{}", item.id.0);
         let linked_only = item.link.is_some() && z.index_for_name(&name).is_none();
-        match read_entry(&mut z, &name) {
-            Ok(data) => item.data = Arc::new(data),
+        if z.by_name(&name).is_ok_and(|f| f.size() > left) {
+            return Err(FormatError::Damaged("embedded media is larger than DeckCraft can open".into()));
+        }
+        match read_entry_max(&mut z, &name, left.min(MAX_ENTRY)) {
+            Ok(data) => {
+                left -= data.len() as u64;
+                item.data = Arc::new(data);
+            }
             Err(_) if linked_only => {}
             Err(e) => damaged.push(e.to_string()),
         }
@@ -340,6 +379,51 @@ mod tests {
             m.link = Some("file:///movies/v.mp4".into());
         }
         assert!(load_checked(&save(&l).unwrap()).unwrap().1.is_empty());
+    }
+
+    #[test]
+    fn media_budget_is_cumulative() {
+        let mut p = Presentation::default();
+        p.add_media("a.bin", "application/octet-stream", vec![1; 600]);
+        p.add_media("b.bin", "application/octet-stream", vec![2; 600]);
+        let bytes = save(&p).unwrap();
+        // Exactly at the limit opens; one byte under is refused, though each item fits.
+        assert!(load_within(&bytes, Budget { total: 1200, items: 2 }).is_ok());
+        assert!(load_within(&bytes, Budget { total: 1199, items: 2 }).is_err());
+        assert!(load_within(&bytes, Budget { total: 1200, items: 1 }).is_err());
+    }
+
+    #[test]
+    fn repeated_media_ids_are_read_once() {
+        use std::io::Write;
+        let mut p = Presentation::default();
+        p.add_media("a.bin", "application/octet-stream", vec![7; 1000]);
+        let good = save(&p).unwrap();
+        // The same file with its media item listed 51 times.
+        let mut z = zip::ZipArchive::new(Cursor::new(good.as_slice())).unwrap();
+        let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for i in 0..z.len() {
+            let mut f = z.by_index(i).unwrap();
+            if f.name() == "presentation.json" {
+                let mut json = vec![];
+                f.read_to_end(&mut json).unwrap();
+                let mut v: serde_json::Value = serde_json::from_slice(&json).unwrap();
+                let media = &mut v["presentation"]["media"];
+                let one = media[0].clone();
+                *media = serde_json::Value::Array(vec![one; 51]);
+                out.start_file("presentation.json", zip::write::SimpleFileOptions::default()).unwrap();
+                out.write_all(&serde_json::to_vec(&v).unwrap()).unwrap();
+            } else {
+                out.raw_copy_file(f).unwrap();
+            }
+        }
+        let bytes = out.finish().unwrap().into_inner();
+        // 51 references to one 1000-byte member fit a 1000-byte budget: it's inflated once.
+        let q = load_within(&bytes, Budget { total: 1000, items: 51 }).unwrap().0;
+        assert_eq!(q.media.len(), 1);
+        assert_eq!(q.media[0].data.len(), 1000);
+        // And the deck saves again.
+        assert!(save(&q).is_ok());
     }
 
     #[test]
