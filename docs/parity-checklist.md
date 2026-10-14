@@ -19,6 +19,8 @@ The summary between `<!-- SUMMARY -->
 | P2 | 54 | 14 | 14 | 26 | 39% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
 | P2 | 54 | 13 | 16 | 25 | 39% |
+| P1 | 65 | 38 | 21 | 6 | 75% |
+| P2 | 54 | 13 | 16 | 25 | 39% |
 
 | Area | Parity |
 |---|---|
@@ -49,6 +51,8 @@ The summary between `<!-- SUMMARY -->
 | Animations | 79% |
 | Slide show | 68% |
 | Review | 60% |
+| Slide show | 66% |
+| Review | 70% |
 | Draw | 33% |
 | Undo & clipboard | 100% |
 | Automation (✱) | 100% |
@@ -241,7 +245,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slide show | Multi-monitor presenting | P1 | M |
 | Review | Comments (add, reply, resolve, delete) | P1 | D |
 | Review | Accessibility checker | P2 | D |
-| Review | Compare presentations | P2 | M |
+| Review | Compare presentations | P2 | P |
 | Review | Track changes / version history | P2 | M |
 | Draw | Ink pens, highlighter, eraser | P1 | P |
 | Draw | Ink to shape / text | P2 | M |

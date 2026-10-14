@@ -332,6 +332,9 @@ sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; need
 matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
 encryption), ink to shape/text (6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
+show (8–12 h), compare presentations beyond slide-level accept (reject, per-object accept,
+markers on the slide: 3–5 h), password protection (4–6 h, ECMA-376 agile
+encryption), ink to shape/text (6–10 h), icons and 3-D models (8–14 h, needs an open icon set).
 
 ## UI/UX
 

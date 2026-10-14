@@ -213,6 +213,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
     ("app.browseThemeDialog", "Browse for Themes…", None, "{}"),
+    ("app.compareDialog", "Compare…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.pasteSpecial", "Paste Special…", Some("Cmd+Alt+V"), "{}"),
     ("app.qat", "Quick Access Toolbar", None, "{add: command id, params?, label?, icon?} | {remove: id, params?} | {reset: true} → [buttons]"),
@@ -739,6 +740,17 @@ impl SlideApp {
                 self.dialog = Some(d);
             }
             "app.find" | "app.replace" => self.palette = Some((String::new(), 0)),
+            "app.compareDialog" => {
+                if self.session.active().is_none() {
+                    return Err("open the presentation to compare first".into());
+                }
+                if self.services.pick_open.is_some() {
+                    self.pick_and_insert("open", "review.compare");
+                } else {
+                    // The browser's asynchronous picker would open the file as a new document.
+                    self.set_status("Compare needs the desktop app for now".to_string());
+                }
+            }
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
                 self.dialog = Some(dialogs::Dialog::new(d));
@@ -1392,6 +1404,8 @@ mod browsetheme_tests;
 mod eyedropper_tests;
 #[cfg(test)]
 mod huge_deck_tests;
+#[cfg(test)]
+mod compare_tests;
 #[cfg(test)]
 mod ime_tests;
 #[cfg(test)]
