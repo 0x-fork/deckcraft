@@ -1104,3 +1104,97 @@ fn float_down_is_preset_47_both_ways() {
     let got: Vec<(&str, &str)> = q.slides[1].animations.iter().map(|a| (a.effect.as_str(), a.option.as_str())).collect();
     assert_eq!(got, [("float", "d"), ("floatOut", "d"), ("floatOut", "u")]);
 }
+
+#[test]
+fn embedded_fonts_round_trip() {
+    let mut p = Presentation::default();
+    let regular = p.add_media("font1.fntdata", "application/x-fontdata", b"REGULAR-FONT-BYTES-0123456789".to_vec());
+    let bold = p.add_media("font2.fntdata", "application/x-fontdata", b"BOLD-FONT-BYTES-0123456789abcd".to_vec());
+    p.embedded_fonts.push(deckcraft_model::EmbeddedFont {
+        typeface: "Deck Test Face".into(),
+        panose: Some("020B0604020202020204".into()),
+        pitch_family: Some(34),
+        charset: Some(0),
+        regular: Some(regular),
+        bold: Some(bold),
+        italic: Some(regular),
+        bold_italic: None,
+    });
+    // The same typeface again is one entry: PowerPoint requires each typeface once.
+    p.embedded_fonts.push(deckcraft_model::EmbeddedFont { typeface: "Deck Test Face".into(), regular: Some(bold), ..Default::default() });
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes.clone())).expect("zip");
+    let mut xml = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("ppt/presentation.xml").expect("pres"), &mut xml).expect("read");
+    assert!(xml.contains("embedTrueTypeFonts=\"1\""));
+    let notes = xml.find("<p:notesSz").expect("notesSz");
+    let list = xml.find("<p:embeddedFontLst>").expect("list");
+    let dts = xml.find("<p:defaultTextStyle").expect("style");
+    assert!(notes < list && list < dts);
+    assert!(xml.contains(r#"<p:font typeface="Deck Test Face" panose="020B0604020202020204" pitchFamily="34" charset="0"/>"#));
+    assert_eq!(xml.matches("<p:embeddedFont>").count(), 1);
+    let mut rels = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("ppt/_rels/presentation.xml.rels").expect("rels"), &mut rels).expect("read");
+    assert_eq!(rels.matches("relationships/font").count(), 2, "regular and italic share one part");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    assert_eq!(q.embedded_fonts.len(), 1);
+    let f = &q.embedded_fonts[0];
+    assert_eq!(f.typeface, "Deck Test Face");
+    assert_eq!(f.panose.as_deref(), Some("020B0604020202020204"));
+    assert_eq!(f.pitch_family, Some(34));
+    assert_eq!(f.charset, Some(0));
+    assert_eq!(q.media(f.regular.expect("regular")).expect("media").data.as_slice(), b"REGULAR-FONT-BYTES-0123456789");
+    assert_eq!(q.media(f.bold.expect("bold")).expect("media").data.as_slice(), b"BOLD-FONT-BYTES-0123456789abcd");
+    assert_eq!(f.italic, f.regular);
+    assert!(f.bold_italic.is_none());
+}
+
+/// A package whose font list this writer did not produce: bold only, relationship id not `rIdN`.
+#[test]
+fn an_embedded_font_list_already_in_the_package_is_read() {
+    let bytes = deckcraft_pptx::export(&Presentation::default()).expect("export");
+    let font = b"FACE-BYTES-FROM-THE-PACKAGE";
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).expect("entry");
+        let name = f.name().to_string();
+        let mut data = vec![];
+        std::io::Read::read_to_end(&mut f, &mut data).expect("read");
+        if name == "ppt/presentation.xml" {
+            let xml = String::from_utf8(data).expect("utf8");
+            let xml = xml.replacen(
+                "<p:defaultTextStyle",
+                concat!(
+                    r#"<p:embeddedFontLst><p:embeddedFont><p:font typeface="Package Face" pitchFamily="2"/>"#,
+                    r#"<p:bold r:id="rIdFont"/></p:embeddedFont></p:embeddedFontLst><p:defaultTextStyle"#
+                ),
+                1,
+            );
+            data = xml.into_bytes();
+        } else if name == "ppt/_rels/presentation.xml.rels" {
+            let xml = String::from_utf8(data).expect("utf8");
+            let xml = xml.replacen(
+                "</Relationships>",
+                r#"<Relationship Id="rIdFont" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" Target="fonts/font1.fntdata"/></Relationships>"#,
+                1,
+            );
+            data = xml.into_bytes();
+        } else if name == "[Content_Types].xml" {
+            let xml = String::from_utf8(data).expect("utf8");
+            let xml = xml.replacen("</Types>", r#"<Default Extension="fntdata" ContentType="application/x-fontdata"/></Types>"#, 1);
+            data = xml.into_bytes();
+        }
+        out.start_file(name, zip::write::SimpleFileOptions::default()).expect("start");
+        std::io::Write::write_all(&mut out, &data).expect("write");
+    }
+    out.start_file("ppt/fonts/font1.fntdata", zip::write::SimpleFileOptions::default()).expect("font");
+    std::io::Write::write_all(&mut out, font).expect("font bytes");
+    let patched = out.finish().expect("finish").into_inner();
+    let p = deckcraft_pptx::import(&patched).expect("import");
+    let f = p.embedded_fonts.first().expect("font");
+    assert_eq!(f.typeface, "Package Face");
+    assert_eq!(f.pitch_family, Some(2));
+    assert!(f.panose.is_none() && f.regular.is_none() && f.italic.is_none() && f.bold_italic.is_none());
+    assert_eq!(p.media(f.bold.expect("bold")).expect("media").data.as_slice(), font);
+}

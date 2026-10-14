@@ -40,6 +40,43 @@ pub fn japanese_fonts() -> impl Iterator<Item = &'static CraftFont> {
     CRAFT_FONTS.iter().filter(|f| f.scripts.contains(&"Jpan"))
 }
 
+/// The TrueType or OpenType font inside a PresentationML embedded-font part
+/// (`application/x-fontdata`).
+///
+/// The part is the font itself, or an Embedded OpenType wrapper around it (the `0x504C` magic
+/// at byte 34, from the W3C Embedded OpenType submission). A MicroType Express subset is neither,
+/// so this returns none; the original part stays in the file for the round trip.
+pub fn embedded_sfnt(part: &[u8]) -> Option<&[u8]> {
+    eot_payload(part).or_else(|| sfnt_or_collection(part).then_some(part))
+}
+
+fn sfnt_or_collection(b: &[u8]) -> bool {
+    b.len() >= 12
+        && (b.starts_with(&[0x00, 0x01, 0x00, 0x00])
+            || b.starts_with(b"OTTO")
+            || b.starts_with(b"true")
+            || b.starts_with(b"typ1")
+            || b.starts_with(b"ttcf"))
+}
+
+/// Font data at the end of an Embedded OpenType blob, when the header is one.
+fn eot_payload(b: &[u8]) -> Option<&[u8]> {
+    if b.len() < 82 || u16::from_le_bytes([b[34], b[35]]) != 0x504C {
+        return None;
+    }
+    let version = u32::from_le_bytes(b.get(8..12)?.try_into().ok()?);
+    if !matches!(version, 0x0001_0000 | 0x0002_0001 | 0x0002_0002) {
+        return None;
+    }
+    let eot_size = u32::from_le_bytes(b.get(0..4)?.try_into().ok()?) as usize;
+    let font_size = u32::from_le_bytes(b.get(4..8)?.try_into().ok()?) as usize;
+    if font_size < 12 || eot_size < font_size.saturating_add(82) || eot_size > b.len() {
+        return None;
+    }
+    let font = b.get(eot_size - font_size..eot_size)?;
+    sfnt_or_collection(font).then_some(font)
+}
+
 /// Japanese faces in document-fallback order: Mincho (serif) families first, matching the
 /// serif default text font, then the others; Regular before other styles.
 pub fn japanese_document_fonts() -> Vec<&'static CraftFont> {
@@ -356,5 +393,30 @@ mod tests {
         if CRAFT_FONTS.iter().any(|f| f.family == "Carlito") {
             assert_eq!(db.face("Calibri", "Bold").family, "Carlito");
         }
+    }
+
+    /// An Embedded OpenType header of `version` around `font`, with the font at the end.
+    fn wrap_eot(font: &[u8], version: u32) -> Vec<u8> {
+        let mut h = vec![0u8; 82];
+        let total = 82 + font.len();
+        h[0..4].copy_from_slice(&(total as u32).to_le_bytes());
+        h[4..8].copy_from_slice(&(font.len() as u32).to_le_bytes());
+        h[8..12].copy_from_slice(&version.to_le_bytes());
+        h[34..36].copy_from_slice(&0x504Cu16.to_le_bytes());
+        h.extend_from_slice(font);
+        h
+    }
+
+    #[test]
+    fn embedded_open_type_yields_the_font() {
+        let font = epaint_default_fonts::UBUNTU_LIGHT;
+        assert_eq!(embedded_sfnt(font), Some(font));
+        assert_eq!(embedded_sfnt(&wrap_eot(font, 0x0002_0001)), Some(font));
+        assert_eq!(embedded_sfnt(&wrap_eot(font, 0x0001_0000)), Some(font));
+        assert!(embedded_sfnt(b"not a font file").is_none());
+        assert!(embedded_sfnt(&wrap_eot(b"hello world!!", 0x0002_0002)).is_none());
+        let mut truncated = wrap_eot(font, 0x0002_0001);
+        truncated.truncate(40);
+        assert!(embedded_sfnt(&truncated).is_none());
     }
 }
