@@ -209,8 +209,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
   chart's secondary value axis is read (`y2_*`, `Series.secondary_axis`) and is not written back
   when the chart is rebuilt.
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, Pareto,
-  box & whisker) are read for their data and written back unchanged, but they're drawn with the
-  bar renderer and an edited one is saved as a plain column chart; region maps aren't read.
+  box & whisker) are read for their data and written back unchanged. Waterfalls (floating bars,
+  totals, connectors), funnels, treemaps (squarified) and sunbursts (innermost ring) are drawn;
+  histograms and box & whisker still use the column renderer, an edited one is saved as a plain
+  column chart, and region maps aren't read.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 

@@ -10,6 +10,7 @@
 mod bevel;
 mod camera;
 mod chart;
+mod chartex;
 mod colr;
 mod extrude;
 mod light;

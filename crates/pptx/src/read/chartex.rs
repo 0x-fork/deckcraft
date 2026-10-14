@@ -110,6 +110,9 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
         if c.categories.is_empty() {
             c.categories = d.categories.clone();
         }
+        if let Some(st) = s.child("layoutPr").and_then(|l| l.child("subtotals")) {
+            c.subtotals = st.children_named("idx").filter_map(|i| i.u32("val")).map(|i| i as usize).take(MAX_POINTS).collect();
+        }
         let name = s.child("tx").and_then(|t| t.find("v")).map(|v| v.text()).unwrap_or_default();
         c.series.push(Series {
             name,
