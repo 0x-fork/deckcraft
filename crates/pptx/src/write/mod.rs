@@ -586,7 +586,7 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         x.pkg.rels(&tname, &to.rels);
         let mut w = W::new();
         root_open(&mut w, "p:handoutMaster", A::new());
-        csld(&mut w, &mut x, &mut ho, &hm.name, hm.background.as_ref(), &hm.shapes);
+        csld(&mut w, &mut x, &mut ho, &hm.name, hm.background.as_ref(), &hm.shapes, &[]);
         clr_map(&mut w, &hm.color_map);
         w.close("p:handoutMaster");
         x.pkg.xml_part(handout_path, CT_HANDOUT_MASTER, w.finish());
