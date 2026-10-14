@@ -1328,6 +1328,7 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
     });
     group(ui, |ui| {
         let r = big_button(ui, Icon::Colors, "Colors", true);
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Colors"));
         egui::Popup::menu(&r).width(240.0).show(|ui| {
             for cs in deckcraft_model::theme::builtin_color_schemes() {
                 ui.horizontal(|ui| {
@@ -1346,6 +1347,11 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
                         ui.close();
                     }
                 });
+            }
+            ui.separator();
+            if ui.button("Customize Colors…").clicked() {
+                run(app, "design.colors", json!({}));
+                ui.close();
             }
         });
         let r = big_button(ui, Icon::Fonts, "Fonts", true);

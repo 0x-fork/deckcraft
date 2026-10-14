@@ -16,6 +16,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (IME composition in a table cell is underlined; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Photo Album is one of 28 dialogs; Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Edit Photo Album reuses the Photo Album dialog, still 28; Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain; previous: trivial, Photo Album counted) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Colors; dialogs 27 → 28; previous: 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -301,6 +302,10 @@ Detail in [ui-parity.md](ui-parity.md).
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Photo Album is one of them). Still missing Font,
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Photo Album is one of them; Edit Photo Album reopens it). Still missing Font,
   Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object…. 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60. Create New Theme Colors (Design › Colors ›
+  Customize Colors…) edits the open master's twelve theme colours, not a saved library of named
+  schemes. Still missing: Font, Bullets and Numbering, Find/Replace dialog, Replace Fonts, Action
+  Settings, Print, Insert Object. 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
 ## Hardware
@@ -377,6 +382,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | An IME composition in a table cell is underlined in place, and the caret and candidate window sit in that cell |
 | 2026-10-14 | trivial | Photo Album dialog counted (28 vs ~60). Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain |
 | 2026-10-14 | trivial | Edit Photo Album reuses the Photo Album dialog (still 28 vs ~60). Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain |
+| 2026-10-14 | minor | Create New Theme Colors is in (dialogs 27 → 28). Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print and Insert Object stay open |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
