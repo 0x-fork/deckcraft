@@ -276,10 +276,15 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         crate::paint::fill_path(ctx, rctx, f, None, &plot.to_path(0.1), plot, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
     }
     let span = (max - min).max(1e-9);
-    let to_v = |v: f64| if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() };
+    // Values past the axis limits (fixed ones, or zero on an axis that starts above it) stop at
+    // the plot's edge.
+    let to_v = |v: f64| {
+        let v = v.max(min).min(max);
+        if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() }
+    };
     // A series' value as a position on its own axis.
     let to_axis = |sec: bool, v: f64| match (sec, second) {
-        (true, Some((min2, max2, _))) => plot.y1 - (v - min2) / (max2 - min2).max(1e-9) * plot.height(),
+        (true, Some((min2, max2, _))) => plot.y1 - (v.max(min2).min(max2) - min2) / (max2 - min2).max(1e-9) * plot.height(),
         _ => to_v(v),
     };
     // Gridlines and value labels.

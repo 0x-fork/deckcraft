@@ -271,41 +271,54 @@ impl Chart {
         if self.kind != ChartType::Combo {
             return (!secondary).then(|| self.value_range());
         }
+        let (lo, hi) = self.plotted_extent(secondary)?;
+        let (lo, hi) = (lo.min(0.0), hi.max(0.0));
+        Some(if secondary { (lo, hi) } else { (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi)) })
+    }
+
+    /// The smallest and largest value plotted against one value axis: plain values as they are,
+    /// stacked series as running sums from zero, 100 % series as 0–1. `(0, 0)` without finite
+    /// values; `None` when no series uses the axis.
+    fn plotted_extent(&self, secondary: bool) -> Option<(f64, f64)> {
         let ser: Vec<&Series> = self.series.iter().filter(|s| self.on_secondary(s) == secondary).collect();
         if ser.is_empty() {
-            return None;
+            return (!secondary && self.kind != ChartType::Combo).then_some((0.0, 0.0));
         }
-        let (mut lo, mut hi) = (0.0_f64, 0.0_f64);
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
         let n = ser.iter().map(|s| s.values.len()).max().unwrap_or(0);
         let mut percent = false;
         for i in 0..n {
-            let (mut p, mut m) = (0.0, 0.0);
+            let (mut p, mut m, mut stacked) = (0.0, 0.0, false);
             for s in &ser {
                 let k = self.series_kind(s);
                 let Some(v) = s.values.get(i).copied().flatten().filter(|v| v.is_finite()) else { continue };
                 if k.percent() {
                     percent = true;
                 } else if k.stacked() {
+                    stacked = true;
                     if v >= 0.0 { p += v } else { m += v }
                 } else {
                     hi = hi.max(v);
                     lo = lo.min(v);
                 }
             }
-            hi = hi.max(p);
-            lo = lo.min(m);
+            if stacked {
+                hi = hi.max(p);
+                lo = lo.min(m);
+            }
         }
         if percent {
+            lo = lo.min(0.0);
             hi = hi.max(1.0);
         }
-        Some(if secondary { (lo, hi) } else { (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi)) })
+        Some(if lo <= hi { (lo, hi) } else { (0.0, 0.0) })
     }
 
     /// A value axis' scale — (min, max, major unit) — with at most `max_intervals` intervals:
-    /// the bounds and unit the chart fixes, else PowerPoint's automatic ones (the data plus 5 %
-    /// headroom, rounded out to a 1-2-5 unit). `None` when no series uses the axis.
+    /// the bounds and unit the chart fixes, else Office's automatic ones ([`axis_scale`](fn@axis_scale)).
+    /// `None` when no series uses the axis.
     pub fn axis_scale(&self, secondary: bool, max_intervals: usize) -> Option<(f64, f64, f64)> {
-        let (lo, hi) = self.axis_range(secondary)?;
+        let (lo, hi) = self.plotted_extent(secondary)?;
         let (fmin, fmax, major) = if secondary { (self.y2_min, self.y2_max, self.y2_major) } else { (self.y_min, self.y_max, self.y_major) };
         let full_percent = !secondary && self.kind.percent();
         Some(axis_scale(lo, hi, fmin, fmax, major, max_intervals, !full_percent))
@@ -357,8 +370,15 @@ impl Chart {
 }
 
 /// The (min, max, major unit) of an axis over the data range [lo, hi]: `fmin`/`fmax`/`major`
-/// where the chart fixes them; otherwise the range takes in zero, gets 5 % headroom (`headroom`)
-/// and rounds out to the smallest 1-2-5 unit giving at most `max_intervals` intervals.
+/// where the chart fixes them; otherwise Office's automatic limits, rounded out to the smallest
+/// 1-2-5 unit giving at most `max_intervals` intervals:
+///
+/// - **Maximum:** `hi + (hi − lo)/20` (with `headroom`), rounded up to the unit.
+/// - **Minimum:** zero when every value is ≥ 0 and `lo` is below 5/6 of `hi`; otherwise
+///   `lo − (hi − lo)/20`, rounded down to the unit, so values bunched high get an axis that starts
+///   near them.
+/// - All-negative values mirror this: the axis ends at zero when `hi` is above 5/6 of `lo`.
+///   Mixed signs get headroom at both ends.
 pub fn axis_scale(
     lo: f64,
     hi: f64,
@@ -372,17 +392,28 @@ pub fn axis_scale(
     let fin = |v: Option<f64>| v.filter(|v| v.is_finite()).map(|v| v.clamp(-1e100, 1e100));
     let (fmin, fmax) = (fin(fmin), fin(fmax));
     let (lo, hi) = if lo.is_finite() && hi.is_finite() { (lo.min(hi).clamp(-1e100, 1e100), lo.max(hi).clamp(-1e100, 1e100)) } else { (0.0, 1.0) };
-    let mut lo = fmin.unwrap_or(lo.min(0.0));
-    let mut hi = fmax.unwrap_or(hi.max(lo));
+    // Office's automatic limits ("How chart axis limits are determined", as Jon Peltier
+    // summarises it): 5 % of the data range past the data, and zero when the values don't
+    // sit within the top sixth of their largest magnitude. A single value is measured from zero.
+    let flat = hi - lo < 1e-12;
+    let pad = if !headroom {
+        0.0
+    } else if flat {
+        hi.abs() / 20.0
+    } else {
+        (hi - lo) / 20.0
+    };
+    let auto_lo = if lo >= 0.0 && (flat || lo < hi * 5.0 / 6.0) { 0.0 } else { lo - pad };
+    let auto_hi = if hi <= 0.0 && (flat || hi > lo * 5.0 / 6.0) { 0.0 } else { hi + pad };
+    let mut lo = fmin.unwrap_or(auto_lo);
+    let mut hi = fmax.unwrap_or(auto_hi);
     if hi - lo < 1e-12 {
-        hi = lo + lo.abs().max(1.0);
-    }
-    let span = hi - lo;
-    if headroom && fmax.is_none() && hi > 0.0 {
-        hi += span * 0.05;
-    }
-    if headroom && fmin.is_none() && lo < 0.0 {
-        lo -= span * 0.05;
+        // A fixed limit on the far side of the data: the automatic end gives way.
+        match (fmin, fmax) {
+            (None, Some(_)) => lo = if hi > 0.0 { 0.0 } else { hi - hi.abs().max(1.0) },
+            (Some(_), None) if lo < 0.0 => hi = 0.0,
+            _ => hi = lo + lo.abs().max(1.0),
+        }
     }
     let n = max_intervals.clamp(1, 50) as f64;
     let step = match fin(major).filter(|m| *m > 0.0 && (hi - lo) / m <= 1000.0) {
@@ -459,6 +490,101 @@ mod tests {
         for (lo, hi) in [(f64::NAN, 1.0), (5.0, 5.0), (0.0, 0.0), (-1e300, 1e300)] {
             let (a, b, s) = axis_scale(lo, hi, None, None, Some(0.0), 0, true);
             assert!(a.is_finite() && b.is_finite() && s > 0.0 && b > a, "{lo} {hi}: {a} {b} {s}");
+        }
+    }
+
+    fn column(values: &[f64]) -> Chart {
+        let series = Series { name: "Sales".into(), values: values.iter().map(|v| Some(*v)).collect(), ..Default::default() };
+        Chart { categories: (0..values.len()).map(|i| format!("C{i}")).collect(), series: vec![series], ..Default::default() }
+    }
+
+    /// The primary axis of a chart with room for ten intervals.
+    fn scale(c: &Chart) -> (f64, f64, f64) {
+        c.axis_scale(false, 10).unwrap_or_default()
+    }
+
+    /// Office's documented automatic limits (#144), with room for ten intervals.
+    #[test]
+    fn automatic_axis_matches_office() {
+        // #144: 42.1 / 18.7 / 6.3 → 0–45 in steps of 5, not 0–50 in steps of 10.
+        assert_eq!(scale(&column(&[42.1, 18.7, 6.3])), (0.0, 45.0, 5.0));
+        // PowerPoint's default chart data (max 5): 0–6 in steps of 1.
+        let mut c = column(&[4.3, 2.5, 3.5, 4.5]);
+        c.series.push(Series { values: [2.4, 4.4, 1.8, 2.8].map(Some).to_vec(), ..Default::default() });
+        c.series.push(Series { values: [2.0, 2.0, 3.0, 5.0].map(Some).to_vec(), ..Default::default() });
+        assert_eq!(scale(&c), (0.0, 6.0, 1.0));
+        // A maximum of 100 (or 10) gets 5 % headroom, which rounds up to the next major unit.
+        assert_eq!(scale(&column(&[100.0, 40.0])), (0.0, 120.0, 20.0));
+        assert_eq!(scale(&column(&[10.0, 3.0])), (0.0, 12.0, 2.0));
+        // Peltier's example: 2.95 + 2.95/20 ≈ 3.1 rounds up to 3.5.
+        assert_eq!(scale(&column(&[2.95, 0.0])), (0.0, 3.5, 0.5));
+    }
+
+    #[test]
+    fn automatic_axis_minimum() {
+        // Below 5/6 of the maximum the axis starts at zero; at or above it, a unit below
+        // min − (max − min)/20.
+        assert_eq!(scale(&column(&[59.0, 49.0])).0, 0.0);
+        assert_eq!(scale(&column(&[59.0, 50.0])), (48.0, 60.0, 2.0));
+        assert_eq!(scale(&column(&[85.0, 92.0, 97.0])), (84.0, 98.0, 2.0));
+        // All-negative data mirrors it: the axis ends at zero, or near the data.
+        assert_eq!(scale(&column(&[-42.1, -18.7, -6.3])), (-45.0, 0.0, 5.0));
+        assert_eq!(scale(&column(&[-59.0, -49.0])).1, 0.0);
+        assert_eq!(scale(&column(&[-59.0, -50.0])), (-60.0, -48.0, 2.0));
+        // Mixed signs get headroom at both ends.
+        assert_eq!(scale(&column(&[42.1, -18.7])), (-30.0, 50.0, 10.0));
+        // Stacked bars build up from zero, so their axis keeps it.
+        let mut s = column(&[85.0, 92.0]);
+        s.kind = ChartType::StackedColumn;
+        assert_eq!(scale(&s).0, 0.0);
+        // A combo chart's secondary axis follows the same rule.
+        let mut c = Chart::sample(ChartType::Combo);
+        c.series.truncate(2);
+        c.series[0].values = vec![Some(200_000.0), Some(310_000.0)];
+        c.series[1].kind = Some(ChartType::Line);
+        c.series[1].values = vec![Some(7_000.0), Some(7_400.0)];
+        c.series[1].secondary_axis = true;
+        assert_eq!(c.axis_scale(false, 10), Some((0.0, 350_000.0, 50_000.0)));
+        assert_eq!(c.axis_scale(true, 10), Some((6_950.0, 7_450.0, 50.0)));
+    }
+
+    #[test]
+    fn fixed_axis_limits_are_kept() {
+        let mut c = column(&[42.1, 18.7, 6.3]);
+        c.y_max = Some(50.0);
+        assert_eq!(scale(&c), (0.0, 50.0, 5.0));
+        c.y_min = Some(10.0);
+        c.y_max = None;
+        assert_eq!(scale(&c), (10.0, 45.0, 5.0));
+        // A fixed limit beyond the data: the automatic end gives way to it.
+        let mut c = column(&[85.0, 92.0, 97.0]);
+        c.y_max = Some(50.0);
+        assert_eq!(scale(&c), (0.0, 50.0, 5.0));
+        let mut c = column(&[-50.0, -48.0]);
+        c.y_min = Some(-10.0);
+        assert_eq!(scale(&c), (-10.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn percent_axis_is_zero_to_one() {
+        let mut p = column(&[42.1, 18.7, 6.3]);
+        p.kind = ChartType::PercentColumn;
+        assert_eq!(scale(&p), (0.0, 1.0, 0.1));
+        assert_eq!(p.axis_scale(false, 5), Some((0.0, 1.0, 0.2)));
+    }
+
+    #[test]
+    fn degenerate_axes_are_finite() {
+        for (a, b) in [(0.0, 0.0), (7.0, 7.0), (-7.0, -7.0), (f64::NAN, 3.0), (f64::INFINITY, 1.0), (-f64::MAX, f64::MAX), (0.0, 1e-320)] {
+            let (min, max, step) = scale(&column(&[a, b]));
+            assert!(min.is_finite() && max > min && step > 0.0, "{a} {b}: {min} {max} {step}");
+        }
+        let (min, max, _) = scale(&column(&[7.0, 7.0]));
+        assert!(min == 0.0 && max > 7.0);
+        assert_eq!(scale(&column(&[])), (0.0, 1.0, 0.1));
+        for (fmin, fmax) in [(Some(5.0), Some(5.0)), (Some(5.0), Some(1.0)), (Some(f64::NAN), Some(f64::INFINITY)), (Some(-1e300), None)] {
+            let (a, b, s) = axis_scale(0.0, 1.0, fmin, fmax, None, 10, true);
+            assert!(a.is_finite() && b.is_finite() && b > a && s > 0.0, "{fmin:?} {fmax:?}: {a} {b} {s}");
         }
     }
 
