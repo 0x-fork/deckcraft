@@ -3372,3 +3372,85 @@ fn ink_pressures(s: &Session) -> Vec<Vec<f32>> {
     let deckcraft_model::ShapeKind::Ink { strokes } = &sh.kind else { return vec![] };
     strokes.iter().map(|stroke| stroke.points.iter().map(|p| p.2).collect()).collect()
 }
+
+#[test]
+fn shape_three_d_format_and_rotation_round_trip() {
+    use crate::cmd::three_d::Shape3d;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let fx = |s: &Session| s.doc().unwrap().selected_shapes()[0].effects.clone().unwrap_or_default();
+    // The old `bevel` key now writes real 3-D XML, so it is drawn and saved.
+    s.execute("shape.effects", &json!({"bevel": "angle"})).unwrap();
+    let e = fx(&s);
+    assert_eq!(e.bevel.as_deref(), Some("angle"));
+    assert!(e.raw3d.as_deref().is_some_and(|r| r.contains("bevelT") && r.contains("prst=\"angle\"")));
+    s.execute(
+        "shape.effects",
+        &json!({"threeD": {"bevelTopW": 9, "bevelBottom": "circle", "depth": 20, "contour": 2, "material": "metal",
+            "lighting": "harsh", "camera": "isometricTopUp", "rotX": 30, "rotY": -20, "z": 5, "bogus": 1}}),
+    )
+    .unwrap();
+    // Unknown names and non-finite numbers are ignored.
+    s.execute("shape.effects", &json!({"threeD": {"material": "gold", "depth": f64::NAN, "camera": 7}})).unwrap();
+    let want = fx(&s).raw3d.map(|r| Shape3d::parse(&r)).unwrap();
+    assert_eq!(want.top.as_ref().map(|b| (b.preset.as_str(), b.w, b.h)), Some(("angle", 9.0, 6.0)));
+    assert_eq!(want.bottom.as_ref().map(|b| b.preset.as_str()), Some("circle"));
+    assert_eq!((want.depth, want.contour, want.z), (20.0, 2.0, 5.0));
+    assert_eq!((want.material.as_str(), want.light.as_str(), want.camera.as_str()), ("metal", "harsh", "isometricTopUp"));
+    assert_eq!(want.rot, Some((30.0, 340.0, 0.0)));
+    // PPTX save and reopen keeps every setting.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": "d.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let back = s.doc().unwrap().doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| sh.effects.as_ref()?.raw3d.clone());
+    assert_eq!(Shape3d::parse(&back.unwrap()), want);
+}
+
+#[test]
+fn three_d_reset_and_flat_shapes_drop_the_xml() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let fx = |s: &Session| s.doc().unwrap().selected_shapes()[0].effects.clone().unwrap_or_default();
+    s.execute("shape.effects", &json!({"threeD": {"rotZ": 15, "depth": 4}})).unwrap();
+    assert!(fx(&s).raw3d.is_some());
+    s.execute("shape.effects", &json!({"threeD": {"reset": true}})).unwrap();
+    assert_eq!((fx(&s).raw3d, fx(&s).bevel), (None, None));
+    // Keeps colours it doesn't model.
+    let raw = "<a:scene3d><a:camera prst=\"orthographicFront\"/><a:lightRig rig=\"threePt\" dir=\"t\"/></a:scene3d><a:sp3d extrusionH=\"12700\"><a:extrusionClr><a:srgbClr val=\"FF0000\"/></a:extrusionClr></a:sp3d>";
+    let mut s3 = cmd::three_d::Shape3d::parse(raw);
+    s3.apply(&json!({"depth": 3}));
+    assert!(s3.to_xml().unwrap().contains("<a:extrusionClr><a:srgbClr val=\"FF0000\"/></a:extrusionClr>"));
+}
+
+/// A presentation read off the UI thread enters the session through `file.adopt`: journaled like
+/// `file.open`, and replayable from the journal without the staged copy.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn background_loads_are_adopted_through_a_command() {
+    let mut src = Session::with_new();
+    src.execute("slide.new", &json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("deckcraft-adopt-{}.deckcraft", std::process::id()));
+    let path = path.to_string_lossy().to_string();
+    src.execute("file.saveAs", &json!({"path": path})).unwrap();
+
+    let mut s = Session::new();
+    let loaded = cmd::file::read_presentation_file(&path).unwrap();
+    let token = s.stage_loaded(loaded);
+    let r = s.execute("file.adopt", &json!({"path": path, "token": token})).unwrap();
+    assert_eq!(r["slides"], 2, "{r}");
+    assert_eq!(s.documents().len(), 1);
+    assert_eq!(s.doc().unwrap().path.as_deref(), Some(path.as_str()));
+    let (id, params) = s.journal.last().cloned().unwrap();
+    assert_eq!(id, "file.adopt");
+    // The token was used up; replaying the entry reads the file again.
+    let mut replay = Session::new();
+    replay.execute(&id, &params).unwrap();
+    assert_eq!(replay.doc().unwrap().doc.slides.len(), 2);
+    // A token staged for another path is not taken for this one.
+    let other = s.stage_loaded(cmd::file::LoadedFile { path: "/elsewhere.pptx".into(), doc: Default::default(), native: true, damaged: vec![] });
+    s.execute("file.adopt", &json!({"path": path, "token": other})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides.len(), 2);
+    assert!(s.execute("file.adopt", &json!({})).is_err());
+    std::fs::remove_file(&path).ok();
+}

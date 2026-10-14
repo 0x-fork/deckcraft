@@ -12,6 +12,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for tables, charts, animations, media, sections and masters; handout-master text kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (a PNG or JPEG slide export records its resolution, so the default 2× picture is 144 dpi; previous: groups with a small legacy child coordinate space draw outlines at their own width, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previously minor: chart trendlines round-trip; groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (an unchanged chart keeps its embedded workbook on save, #335) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -94,8 +95,8 @@ the round trip even though DeckCraft doesn't model it.
 | Text warp (`prstTxWarp`) | yes | yes | All 40 presets rendered (`crates/geom/src/warp.rs`); adjust values (`avLst`) round-trip |
 | Pictures with crop, recolour, duotone, alpha, luminance | yes | yes | |
 | Tables with styles | yes | yes | Merges and both diagonal borders round-trip |
-| Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw`. Trendlines (type, order or period, forecast, intercept, equation and R²) are read, written and drawn. A combo chart's secondary value axis is read and is not written back when the chart is rebuilt |
-| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept; edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
+| Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw`. Trendlines (type, order or period, forecast, intercept, equation and R²) are read, written and drawn. A combo chart's secondary value axis is read and is not written back when the chart is rebuilt. An unchanged chart also keeps its embedded workbook and the other parts its relationships point at, under fresh `keptN` names so they never replace a part DeckCraft writes (#335); editing the chart drops that workbook instead of writing a stale one |
+| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept, with their embedded workbook (#335); edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
 | SmartArt (`dgm`) | drawing part only, as a group; text laid out on its `dsp:txXfrm` rectangle | as shapes | Diagram data model lost on save |
 | SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save. A diagram with no relationship parts keeps its XML; the drawing and data parts are still dropped (#203) |
 | SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save (DeckCraft keeps its own outline in `.deckcraft` only) |
@@ -144,6 +145,7 @@ the round trip even though DeckCraft doesn't model it.
 | 2026-10-13 | minor | Custom XML parts, the sensitivity label and custom properties kept on save |
 | 2026-10-13 | minor | Owned corpus round-trip for tables, charts, animations, media, sections and masters. Handout-master header, footer, date and slide-number text is written back |
 | 2026-10-14 | minor | PNG and JPEG slide export record their resolution (`scale` × 72 dpi; the default 2× picture is 144 dpi) |
+| 2026-10-13 | trivial | Unchanged charts keep the embedded workbook (`ppt/embeddings/`) and chart relationships (#335) |
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |

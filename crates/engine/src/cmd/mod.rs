@@ -4,6 +4,7 @@ pub mod animation;
 pub mod arrange;
 pub mod artistic;
 pub mod background;
+pub mod compress;
 pub mod design;
 pub mod edit;
 pub mod file;
@@ -17,6 +18,7 @@ pub mod merge;
 pub mod picture_style;
 pub mod points;
 pub mod recolor;
+pub mod reuse;
 pub mod review;
 mod richclip;
 pub mod selection;
@@ -25,6 +27,7 @@ pub mod slide;
 pub mod smartart;
 pub mod table;
 pub mod text;
+pub mod three_d;
 pub mod transition;
 pub mod zoom;
 
@@ -162,6 +165,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(file::specs());
         v.extend(edit::specs());
         v.extend(slide::specs());
+        v.extend(reuse::specs());
         v.extend(insert::specs());
         v.extend(smartart::specs());
         v.extend(shape::specs());
@@ -185,6 +189,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(media::specs());
         v.extend(artistic::specs());
         v.extend(zoom::specs());
+        v.extend(compress::specs());
         v
     })
 }

@@ -628,10 +628,8 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         if x.on_hover_text("Remove from Recent").clicked() {
             app.forget_recent(&path);
         }
-        if resp.clicked()
-            && let Err(e) = app.open_path(&path)
-        {
-            app.notify(e);
+        if resp.clicked() {
+            app.open_path_in_background(&path);
         }
     }
 }

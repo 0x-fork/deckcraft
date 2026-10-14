@@ -103,7 +103,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Shape Effects",
             ["Shape Format", "Shape Styles"],
             None,
-            "{shadow?: none|outer|inner|perspective|{color, blur, dist, dir}, glow?: none|{color, radius}, softEdges?: pt, reflection?: none|tight|half|full, bevel?: none|circle|…, shadowProps?: {color?, transparency?: 0..1, blur?: pt, dist?: pt, dir?: deg}, glowProps?: {color?, transparency?, radius?: pt}, reflectionProps?: {transparency?, size?: 0..1, dist?: pt, blur?: pt}, reset?, ids?} (the *Props keys adjust the current effect, adding a default one when there is none)",
+            "{shadow?: none|outer|inner|perspective|{color, blur, dist, dir}, glow?: none|{color, radius}, softEdges?: pt, reflection?: none|tight|half|full, bevel?: none|circle|…, threeD?: {camera?: preset, rotX?, rotY?, rotZ?: deg, z?: pt, bevelTop?, bevelBottom?: none|circle|…, bevelTopW?, bevelTopH?, bevelBottomW?, bevelBottomH?, depth?, contour?: pt, material?, lighting?, reset?: true}, shadowProps?: {color?, transparency?: 0..1, blur?: pt, dist?: pt, dir?: deg}, glowProps?: {color?, transparency?, radius?: pt}, reflectionProps?: {transparency?, size?: 0..1, dist?: pt, blur?: pt}, reset?, ids?} (the *Props keys adjust the current effect, adding a default one when there is none)",
             has_selection,
             effects
         ),
@@ -788,6 +788,7 @@ fn effects(s: &mut Session, p: &Value) -> Result<Value> {
         "full" => Some(Reflection { blur: 0.5, start_alpha: 0.5, end_alpha: 0.0, end_pos: 0.9, dist: 4.0 }),
         _ => Some(Reflection { blur: 0.5, start_alpha: 0.5, end_alpha: 0.0, end_pos: 0.35, dist: 0.0 }),
     });
+    let three_d = p.get("threeD").filter(|v| v.is_object());
     let bevel = str_param(p, "bevel").map(|b| if b == "none" { None } else { Some(b.to_string()) });
     let shadow_props = p.get("shadowProps").filter(|v| v.is_object()).cloned();
     let glow_props = p.get("glowProps").filter(|v| v.is_object()).cloned();
@@ -823,8 +824,18 @@ fn effects(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(r) = &refl {
             e.reflection.clone_from(r);
         }
-        if let Some(b) = &bevel {
-            e.bevel.clone_from(b);
+        if bevel.is_some() || three_d.is_some() {
+            let mut s3 = e.raw3d.as_deref().map(super::three_d::Shape3d::parse).unwrap_or_default();
+            if let Some(b) = &bevel {
+                s3.apply(&json!({"bevelTop": b.as_deref().unwrap_or("none")}));
+            }
+            if let Some(t) = three_d {
+                if t.get("reset").and_then(Value::as_bool) == Some(true) {
+                    s3 = super::three_d::Shape3d::default();
+                }
+                s3.apply(t);
+            }
+            super::three_d::store(e, &s3);
         }
         if let Some(v) = &shadow_props {
             let slot = if e.inner_shadow.is_some() { &mut e.inner_shadow } else { &mut e.outer_shadow };

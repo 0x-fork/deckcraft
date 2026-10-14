@@ -95,6 +95,8 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 
 | Pane / dialog | PowerPoint | DeckCraft |
 |---|---|---|
+| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill (solid transparency follows the selection), gradient editor, picture/texture fill (source, tile, offsets, scale, alignment, mirror, transparency, rotate with shape), line (dash, compound, cap, join, begin/end arrows and sizes), shadow/glow/reflection details (colour, transparency, blur, angle, distance, size), soft edges, 3-D format and rotation (bevels, depth, contour, material, lighting, camera presets, X/Y/Z rotation), size (lock aspect ratio) |
+| Format Background pane | yes | yes |
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line (dash, compound, cap, join, begin/end arrows and sizes), some effects, size (lock aspect ratio); no 3-D, thin picture/texture options |
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, shadow/glow/reflection details (colour, transparency, blur, angle, distance, size), soft edges, size; no 3-D, thin picture/texture options |
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill (solid transparency follows the selection), gradient editor, line, some effects, size; no 3-D, thin picture/texture options |

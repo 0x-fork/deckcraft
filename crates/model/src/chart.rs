@@ -392,6 +392,39 @@ pub struct Chart {
     /// Original chart XML part kept for round-trip of unmodelled options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
+    /// Package parts the original chart still points at (embedded workbook, styles, drawings).
+    /// The writer clears this before comparing modelled state. A native save does not store the bytes.
+    #[serde(skip)]
+    pub kept: ChartKept,
+}
+
+/// One relationship of a chart part, with the target string as it was written.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChartRel {
+    pub id: String,
+    pub rel_type: String,
+    pub target: String,
+    /// Absolute name of the part an internal relationship reaches (matches a `ChartPart::name`
+    /// up to case); empty for external ones. The writer renames kept parts and uses this to
+    /// point the relationship at the new name.
+    pub part: String,
+    pub external: bool,
+}
+
+/// A part reached from a chart (the workbook, a drawing, an image it uses).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChartPart {
+    /// Absolute part name (`ppt/embeddings/Workbook.xlsx`).
+    pub name: String,
+    pub content_type: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Sidecar for an unchanged chart: relationships and the parts they reach.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ChartKept {
+    pub rels: Vec<ChartRel>,
+    pub parts: Vec<ChartPart>,
 }
 
 impl Default for Chart {
@@ -438,6 +471,7 @@ impl Default for Chart {
             bin_count: None,
             bin_size: None,
             raw: None,
+            kept: ChartKept::default(),
         }
     }
 }

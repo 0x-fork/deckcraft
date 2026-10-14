@@ -19,6 +19,7 @@ pub mod icons;
 pub mod media;
 pub mod menus;
 pub mod notes;
+pub mod opening;
 pub mod panes;
 mod preview;
 pub mod qat;
@@ -399,6 +400,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
     ("app.changePictureDialog", "Change Picture…", None, "{}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
+    ("app.reuseSlidesDialog", "Reuse Slides…", None, "{keepFormatting?: bool}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
@@ -449,6 +451,8 @@ pub struct SlideApp {
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
+    /// A presentation being read in the background, with its progress window ([`opening`]).
+    pub opening: Option<opening::Opening>,
     /// A brief notice over the bottom of the window (missing fonts on opening a file).
     pub toast: Option<toast::Toast>,
     /// Documents (by uid) whose missing fonts have been mentioned.
@@ -540,6 +544,7 @@ impl SlideApp {
             anim_preview: None,
             media: media::MediaHost::new(audio_out),
             status: None,
+            opening: None,
             toast: None,
             fonts_noted: Default::default(),
             perf: Perf { frame_ms: 0.0, render_ms: 0.0, fps: 0.0 },
@@ -1005,6 +1010,7 @@ impl SlideApp {
             }
             "app.changePictureDialog" => self.pick_and_insert("picture", "picture.change"),
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
+            "app.reuseSlidesDialog" => self.pick_and_reuse(p.get("keepFormatting").and_then(Value::as_bool).unwrap_or(false)),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
@@ -1161,10 +1167,8 @@ impl SlideApp {
 
     fn pick_and_open(&mut self) {
         if let Some(pick) = self.services.pick_open.as_mut() {
-            if let Some(path) = pick("open")
-                && let Err(e) = self.open_path(&path)
-            {
-                self.notify(e);
+            if let Some(path) = pick("open") {
+                self.open_path_in_background(&path);
             }
         } else if self.services.open_async.is_some() {
             let id = self.begin_external_file("open");
@@ -1176,19 +1180,38 @@ impl SlideApp {
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
+        self.note_recent(path);
+        Ok(())
+    }
+
+    /// A presentation was opened from `path`: first in the recent list, shown in Normal view.
+    pub(crate) fn note_recent(&mut self, path: &str) {
         self.status = None; // an older error (a missing file just before this one) must not linger
         self.recent_checked.remove(path);
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
         self.ui.recent.truncate(RECENT_MAX);
         self.ui.view = ViewMode::Normal;
-        Ok(())
     }
 
     /// Transitions › Sound › Other Sound…: pick an audio file for the selected slides.
     pub(crate) fn pick_transition_sound(&mut self) {
         if self.services.pick_open.is_some() {
             self.pick_and_insert("audio", "transition.sound");
+        }
+    }
+
+    /// Home › New Slide › Reuse Slides…: pick a presentation and insert all its slides after the
+    /// current one (desktop only: the browser picker opens what it picks as a document).
+    fn pick_and_reuse(&mut self, keep: bool) {
+        let Some(pick) = self.services.pick_open.as_mut() else {
+            self.set_status("Reuse Slides needs the desktop app".to_string());
+            return;
+        };
+        let Some(path) = pick("open") else { return };
+        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep})) {
+            Ok(r) => self.set_status(format!("Inserted {} slides from {path}", r["slides"])),
+            Err(e) => self.set_status(e.to_string()),
         }
     }
 
@@ -1513,6 +1536,7 @@ impl SlideApp {
         }
         self.last_time = now;
         self.drain_control(ctx);
+        self.poll_opening();
         if self.fonts_ready {
             self.drain_inbox();
         }
@@ -1757,6 +1781,7 @@ impl SlideApp {
         let t = theme::Tokens::get(&ctx);
         self.tick_media(&ctx);
         eyedropper::tick(self, &ctx);
+        self.opening_ui(&ctx);
         if self.show.is_some() {
             self.anim_preview = None;
             show::ui(self, ui);

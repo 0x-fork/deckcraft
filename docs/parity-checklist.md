@@ -88,7 +88,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Export video (MP4) / animated GIF (GIF: one frame per slide, no transitions; no video) | P2 | P |
 | Files | Print (slides, handouts, notes, outline) | P1 | M |
 | Files | Password protection | P2 | M |
-| Files | Reuse slides from another file | P1 | M |
+| Files | Reuse slides from another file | P1 | P |
 | Files | Drag and drop files onto the window | P1 | D |
 | Files | OpenDocument .odp open/save | P2 | M |
 | Slides | New slide by layout | P0 | D |
@@ -210,7 +210,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Pictures | Remove background | P2 | M |
 | Pictures | Picture styles and borders | P1 | D |
 | Pictures | Change / reset picture | P1 | D |
-| Pictures | Compress pictures | P2 | M |
+| Pictures | Compress pictures | P2 | D |
 | Pictures | Paste image from clipboard (fails on Windows and Linux, #53) | P0 | P |
 | Pictures | Insert screenshot | P2 | M |
 | Media | Insert audio (any common format) | P0 | D |

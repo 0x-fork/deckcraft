@@ -49,5 +49,8 @@ sync_github_name = true
 [people.Momentum96]
 sync_github_name = true
 
+[people.NikitkaRa]
+real_name = "Nikita Rakitin"
+
 [people.RCShoemaker]
 real_name = "Ryan C. Shoemaker"

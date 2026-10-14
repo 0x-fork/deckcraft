@@ -1696,6 +1696,114 @@ fn radar_stock_and_combo_round_trip() {
     }
 }
 
+/// Home › New Slide › Reuse Slides: slides from another .pptx land after the current slide with
+/// their pictures (fresh media ids, same bytes) and animations on the renumbered shapes. By
+/// default they take a destination layout; Keep Source Formatting brings the source master.
+#[test]
+fn reuse_slides_from_another_presentation() {
+    use deckcraft_engine::Session;
+    use serde_json::json;
+    let b64 = deckcraft_engine::cmd::base64_encode;
+    // Source: three slides, a picture with an animation on the second.
+    let mut src = Session::with_new();
+    src.execute("slide.new", &json!({})).unwrap();
+    let pic = png(8, 8, [10, 200, 30]);
+    src.execute("insert.picture", &json!({"data": b64(&pic), "name": "green.png"})).unwrap();
+    src.execute("animation.add", &json!({"effect": "fade"})).unwrap();
+    src.execute("slide.new", &json!({})).unwrap();
+    let src_bytes = deckcraft_pptx::export(&src.doc().unwrap().doc).unwrap();
+
+    let mut s = Session::with_new();
+    // Media ids in the two decks overlap; the destination's own picture must stay its own.
+    let red = png(4, 4, [200, 0, 0]);
+    s.execute("insert.picture", &json!({"data": b64(&red), "name": "red.png"})).unwrap();
+    let r = s.execute("slide.reuse", &json!({"data": b64(&src_bytes), "name": "src.pptx", "slides": [1]})).unwrap();
+    assert_eq!(r["slides"], 1, "{r}");
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.slides.len(), 2);
+    assert_eq!(s.doc().unwrap().selection.slide, 1, "the reused slide is selected");
+    let pictures = |sl: &deckcraft_model::Slide| {
+        let mut v = vec![];
+        deckcraft_model::walk(&sl.shapes, &mut |sh, _| {
+            if let deckcraft_model::ShapeKind::Picture { fill } = &sh.kind {
+                v.push(fill.media);
+            }
+        });
+        v
+    };
+    let mine = pictures(&doc.slides[0]);
+    let reused = pictures(&doc.slides[1]);
+    assert_eq!(doc.media(mine[0]).map(|m| m.data.as_slice() == red.as_slice()), Some(true), "own picture untouched");
+    assert_eq!(doc.media(reused[0]).map(|m| m.data.as_slice() == pic.as_slice()), Some(true), "reused picture copied");
+    let anim = &doc.slides[1].animations[0];
+    assert!(doc.slides[1].shapes.iter().any(|sh| sh.id == anim.shape), "animation follows its shape");
+    assert!(doc.layout(doc.slides[1].layout).is_some(), "uses a destination layout");
+    assert_eq!(doc.masters.len(), 1);
+    // The result saves and reopens.
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&doc).unwrap()).unwrap();
+    assert_eq!(back.slides.len(), 2);
+
+    // Keep Source Formatting: every slide, and the source master comes along.
+    let r = s.execute("slide.reuse", &json!({"data": b64(&src_bytes), "name": "src.pptx", "keepFormatting": true, "at": 0})).unwrap();
+    assert_eq!(r["slides"], 3);
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.slides.len(), 5);
+    assert_eq!(doc.masters.len(), 2);
+    for sl in &doc.slides[..3] {
+        assert_eq!(doc.layout(sl.layout).map(|(m, _)| m.id), Some(doc.masters[1].id), "source master");
+    }
+    // One undo removes the whole reuse.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides.len(), 2);
+    assert!(s.execute("slide.reuse", &json!({"data": b64(&src_bytes), "name": "src.pptx", "slides": [7]})).is_err());
+    assert!(s.execute("slide.reuse", &json!({"data": b64(&[0u8, 159, 146, 150]), "name": "x.bin"})).is_err());
+}
+
+/// Picture Format › Compress Pictures: a big picture shown small is downsampled, its original
+/// goes when nothing else uses it, the saved file shrinks, a copy that wasn't compressed keeps
+/// the original, and undo brings everything back.
+#[test]
+fn compress_pictures_shrinks_the_file_and_keeps_shared_originals() {
+    use deckcraft_engine::Session;
+    use serde_json::json;
+    let b64 = deckcraft_engine::cmd::base64_encode;
+    // A noisy 1600 × 1600 picture (doesn't compress away on its own).
+    let big = {
+        let img = image::RgbImage::from_fn(1600, 1600, |x, y| image::Rgb([(x * 31 % 251) as u8, (y * 17 % 253) as u8, ((x * y) % 255) as u8]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(img).write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    };
+    let mut s = Session::with_new();
+    s.execute("insert.picture", &json!({"data": b64(&big), "name": "noise.png"})).unwrap();
+    s.execute("shape.resize", &json!({"w": 144, "h": 144})).unwrap();
+    let size_before = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap().len();
+    let r = s.execute("picture.compress", &json!({"ppi": 150})).unwrap();
+    assert_eq!(r["pictures"], 1, "{r}");
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.media.len(), 1, "the original is gone");
+    let img = image::load_from_memory(&doc.media[0].data).unwrap();
+    assert_eq!((img.width(), img.height()), (300, 300), "2 in at 150 ppi");
+    let size_after = deckcraft_pptx::export(&doc).unwrap().len();
+    assert!(size_after * 4 < size_before, "{size_before} → {size_after}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.media[0].data.len(), big.len(), "undo restores the original");
+
+    // A duplicate that isn't compressed still needs the original.
+    s.execute("edit.duplicate", &json!({})).unwrap();
+    let copy = s.doc().unwrap().selection.shapes.clone();
+    let first: Vec<_> = s.doc().unwrap().doc.slides[0].shapes.iter().map(|sh| sh.id).filter(|id| !copy.contains(id)).collect();
+    s.execute("picture.compress", &json!({"ppi": 150, "ids": [first.last().unwrap().0]})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.media.len(), 2);
+    assert!(doc.media.iter().any(|m| m.data.len() == big.len()), "the copy keeps the original");
+    // All pictures: the copy gets compressed too, and the original goes.
+    s.execute("picture.compress", &json!({"ppi": 150, "all": true})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert!(doc.media.iter().all(|m| m.data.len() < big.len() / 4));
+    assert!(s.execute("picture.compress", &json!({"ppi": 5, "all": true})).is_err());
+}
+
 /// #203: SmartArt we can't draw kept its XML but lost its diagram parts on save.
 #[test]
 fn smartart_without_a_drawing_keeps_its_parts() {
