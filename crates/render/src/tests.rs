@@ -156,6 +156,28 @@ fn combo_chart_draws_columns_and_a_line_on_its_own_axis() {
 }
 
 #[test]
+fn chart_axis_titles_are_drawn() {
+    let draw = |titles: (Option<String>, Option<String>)| {
+        let mut c = Chart::sample(ChartType::Column);
+        c.title = None;
+        c.legend = None;
+        c.axis_titles = titles;
+        let sh = Shape { id: ShapeId(624), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let ink = |img: &Image, r: (u32, u32, u32, u32)| {
+        (r.0..r.2).flat_map(|x| (r.1..r.3).map(move |y| (x, y))).filter(|(x, y)| img.pixel(*x, *y)[0] < 160).count()
+    };
+    let bare = draw((None, None));
+    let titled = draw((Some("Month".into()), Some("Revenue".into())));
+    // A turned "Revenue" down the left edge, "Month" along the bottom.
+    let left = (38, 150, 62, 390);
+    let bottom = (380, 490, 580, 520);
+    assert!(ink(&titled, left) > ink(&bare, left) + 30, "value axis title");
+    assert!(ink(&titled, bottom) > ink(&bare, bottom) + 30, "category axis title");
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
