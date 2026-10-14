@@ -124,10 +124,6 @@ pub fn small_button_ex(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, sele
     let main_rect = Rect::from_min_max(rect.min, pos2(rect.max.x - arrow_w, rect.max.y));
     let main_resp =
         if split { ui.interact(main_rect, resp.id.with("m"), if enabled { Sense::click() } else { Sense::hover() }) } else { resp.clone() };
-    // Screen readers (and UI tests) find the button by its text.
-    if !label.is_empty() {
-        main_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-    }
     let arrow_resp = split.then(|| {
         ui.interact(
             Rect::from_min_max(pos2(rect.max.x - arrow_w, rect.min.y), rect.max),
