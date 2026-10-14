@@ -4,6 +4,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (video seek frame-loss race fixed, upstream #416; previous: major, created; measured from `crates/ui-egui/src/show.rs` and `crates/anim/src/show.rs` against PowerPoint 16.113's Slide Show tab and menu) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (keyboard navigation from Presenter View) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (laser pointer in the show; the presenter window still does not move it; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Show Media Controls hides the show's playback bar and GIF button; breadth stays 66%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -30,6 +31,8 @@ ready** (estimated), **10–16 h** to parity.
 | Media playback with controls, play across slides, full-screen video | yes | yes | Seeks and loops preserve new-generation video frames and end-of-stream; queue regression and repeated seeks across H.264/HEVC/VP9/AV1 in `crates/media`. WMA/WMV not decodable |
 | Media playback with controls, play across slides, full-screen video, Play/Pause/Stop in the click sequence | yes | yes | WMA/WMV not decodable; click sequence since #116 |
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | |
+| Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable. Slide Show ▸ Show Media Controls (on by default) hides the playback bar |
+| Animated GIFs play; pause from their corner button | yes | yes (#39) | The corner button hides with Show Media Controls |
 | See All Slides grid during the show | yes | no | |
 | Zoom into part of a slide during the show | yes | no | |
 | Pen and highlighter ink | yes | pen only (Cmd+P pen, Cmd+A arrow, E erases all ink) | No highlighter, per-stroke eraser, ink colours, or keep/discard annotations prompt |
@@ -87,4 +90,5 @@ Reading View in a window with navigation: present (checklist row done).
 | 2026-10-14 | minor | Presenter View handles slideshow keys in its own viewport, including returning from the end screen and Escape; regression tests cover navigation and avoiding duplicate button activation |
 | 2026-10-11 | minor | Media effects (Play, Pause, Stop) in the click sequence play with their step (#116) |
 | 2026-10-13 | minor | The show has a laser pointer (Cmd/Ctrl+L, the show's laser colour, no ink). Presenter view still does not drive it |
+| 2026-10-14 | trivial | Show Media Controls hides the show's playback bar and GIF button |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |

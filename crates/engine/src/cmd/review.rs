@@ -45,7 +45,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Up Slide Show…",
             ["Slide Show", "Set Up"],
             None,
-            "{type?: speaker|browsed|kiosk, loop?: bool, noNarration?, noAnimation?, useTimings?, from?, to?}",
+            "{type?: speaker|browsed|kiosk, loop?: bool, noNarration?, noAnimation?, useTimings?, showMediaControls?, from?, to?}",
             has_doc,
             setup
         ),
@@ -312,6 +312,9 @@ fn setup(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(v) = bool_param(p, "useTimings") {
             sh.use_timings = v;
         }
+        if let Some(v) = bool_param(p, "showMediaControls") {
+            sh.show_media_controls = v;
+        }
         match (p.get("from").and_then(Value::as_u64), p.get("to").and_then(Value::as_u64)) {
             (Some(a), Some(b)) => sh.range = Some((a.min(u32::MAX as u64) as u32, b.min(u32::MAX as u64) as u32)),
             (None, None) if p.get("all").is_some() => sh.range = None,
@@ -397,5 +400,19 @@ mod tests {
     fn the_clock_is_not_empty() {
         // On wasm this used to return an empty string, so browser comments were saved undated.
         assert!(now().starts_with("20"), "{}", now());
+    }
+
+    #[test]
+    fn show_media_controls_follow_setup() {
+        let mut s = Session::with_new();
+        assert!(s.doc().expect("doc").doc.show.show_media_controls);
+        let off = s.execute("show.setup", &json!({"showMediaControls": false})).expect("off");
+        assert_eq!(off["showMediaControls"], false);
+        assert_eq!(off["useTimings"], true, "other setup flags stay");
+        let timings = s.execute("show.setup", &json!({"useTimings": false})).expect("timings");
+        assert_eq!(timings["showMediaControls"], false);
+        assert_eq!(timings["useTimings"], false);
+        s.execute("show.setup", &json!({"showMediaControls": true})).expect("on");
+        assert!(s.doc().expect("doc").doc.show.show_media_controls);
     }
 }
