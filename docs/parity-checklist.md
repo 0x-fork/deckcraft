@@ -1,6 +1,6 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-13 (summary by `cargo xtask parity`; Preview in editor re-scored; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
 **Weighted breadth parity: 80%** over 191 features.
@@ -41,6 +41,9 @@ The summary between `<!-- SUMMARY -->
 | Transitions | 100% |
 | Animations | 79% |
 | Slide show | 68% |
+| Transitions | 92% |
+| Animations | 85% |
+| Slide show | 66% |
 | Review | 60% |
 | Draw | 33% |
 | Undo & clipboard | 100% |
@@ -221,7 +224,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Animations | By-paragraph text builds | P1 | D |
 | Animations | Triggers | P2 | D |
 | Animations | Animation Painter | P2 | D |
-| Animations | Preview in editor | P1 | P |
+| Animations | Preview in editor | P1 | D |
 | Slide show | Full-screen show from start / current | P0 | D |
 | Slide show | Navigation (keys, click, go to slide, blank screen) | P0 | D |
 | Slide show | Presenter view (notes, next slide, timer) | P0 | P |

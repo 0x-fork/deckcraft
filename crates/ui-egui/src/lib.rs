@@ -20,6 +20,7 @@ pub mod media;
 pub mod menus;
 pub mod panes;
 pub mod qat;
+mod preview;
 pub mod ribbon;
 pub mod selpane;
 pub mod settings;
@@ -231,6 +232,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("show.start", "Slide Show", Some("F5"), "{from?: index, custom?: name}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
+    ("animation.preview", "Preview Animations", None, "{on?: bool}"),
     ("app.home", "Home", None, "{on?}"),
     ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
@@ -263,6 +265,18 @@ pub struct Perf {
     pub fps: f64,
 }
 
+/// Playhead for the in-canvas animation preview.
+struct AnimPreview {
+    uid: u64,
+    slide: usize,
+    /// `Arc` address of the slide when preview started. An edit replaces the slide and stops playback.
+    slide_ptr: usize,
+    /// egui time when the first frame latched the clock (`None` until then).
+    started: Option<f64>,
+    elapsed: f64,
+    timeline: deckcraft_anim::Timeline,
+}
+
 pub struct SlideApp {
     /// Table Design's border pen (`color`, `width`, `dash` for `table.borders`).
     pub table_pen: serde_json::Value,
@@ -273,6 +287,8 @@ pub struct SlideApp {
     pub control_rx: Option<Receiver<ControlRequest>>,
     pub dialog: Option<dialogs::Dialog>,
     pub show: Option<show::Show>,
+    /// Current slide's animations playing on the editor canvas (not the full-screen show).
+    anim_preview: Option<AnimPreview>,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
@@ -339,6 +355,7 @@ impl SlideApp {
             control_rx: None,
             dialog: None,
             show: None,
+            anim_preview: None,
             media: media::MediaHost::new(audio_out),
             status: None,
             toast: None,
@@ -630,6 +647,13 @@ impl SlideApp {
                 self.show = None;
                 self.media.stop_owned(media::Owner::Show);
             }
+            "animation.preview" => {
+                if p.get("on").and_then(Value::as_bool) == Some(false) {
+                    self.anim_preview = None;
+                    return Ok(json!({"playing": false}));
+                }
+                return self.start_anim_preview();
+            }
             "app.home" => {
                 let on = self.flag(p, self.backstage_open());
                 if on {
@@ -713,6 +737,7 @@ impl SlideApp {
     }
 
     pub fn start_show(&mut self, from: usize, reading: bool) {
+        self.anim_preview = None;
         self.media.stop_owned(media::Owner::Editor);
         if let Some(d) = self.session.active() {
             self.show = Some(show::Show::new(&d.doc, from, reading, self.ui.presenter_view && !reading));
@@ -728,6 +753,84 @@ impl SlideApp {
         if let Some(show) = self.show.as_mut() {
             show.state = state;
         }
+    }
+
+    /// The current slide's animations are playing on the editor canvas.
+    pub fn anim_preview_active(&self) -> bool {
+        self.anim_preview.is_some()
+    }
+
+    /// `(slide, seconds played, sequence length)` while a preview is running.
+    pub fn anim_preview_report(&self) -> Option<(usize, f64, f64)> {
+        self.anim_preview.as_ref().map(|p| (p.slide, p.elapsed, p.timeline.total_duration()))
+    }
+
+    pub fn stop_anim_preview(&mut self) {
+        self.anim_preview = None;
+    }
+
+    /// Timeline and playhead for this frame's canvas raster. `None` when the editor should draw the slide at rest.
+    pub fn anim_preview_draw(&self) -> Option<(deckcraft_anim::Timeline, f64)> {
+        self.anim_preview.as_ref().map(|p| (p.timeline.clone(), p.elapsed))
+    }
+
+    /// Advance the preview clock. Stops when the slide changes, the slide is edited, or the sequence
+    /// (plus a short hold) has finished.
+    pub fn tick_anim_preview(&mut self, now: f64) -> bool {
+        let Some(p) = self.anim_preview.as_ref() else { return false };
+        let (uid, slide, ptr) = (p.uid, p.slide, p.slide_ptr);
+        let alive = self.show.is_none()
+            && self.session.active().is_some_and(|d| {
+                d.uid == uid
+                    && d.selection.target == deckcraft_engine::Target::Slides
+                    && d.selection.slide == slide
+                    && d.doc.slides.get(slide).is_some_and(|s| std::sync::Arc::as_ptr(s) as usize == ptr)
+            });
+        if !alive {
+            self.anim_preview = None;
+            return false;
+        }
+        let Some(p) = self.anim_preview.as_mut() else { return false };
+        let now = if now.is_finite() { now } else { p.started.unwrap_or(0.0) };
+        let start = *p.started.get_or_insert(now);
+        let elapsed = (now - start).max(0.0);
+        if !elapsed.is_finite() || elapsed > p.timeline.total_duration() + preview::HOLD_SECS {
+            self.anim_preview = None;
+            return false;
+        }
+        p.elapsed = elapsed;
+        true
+    }
+
+    fn start_anim_preview(&mut self) -> Result<Value, String> {
+        let (uid, slide, ptr, timeline) = {
+            let Some(d) = self.session.active() else {
+                return Err("no presentation is open".into());
+            };
+            if d.selection.target != deckcraft_engine::Target::Slides {
+                return Err("animation preview plays the current slide".into());
+            }
+            let slide = d.selection.slide;
+            let Some(slide_arc) = d.doc.slides.get(slide) else {
+                return Err("no slide to preview".into());
+            };
+            let ptr = std::sync::Arc::as_ptr(slide_arc) as usize;
+            let timeline = deckcraft_anim::ShowState::timeline(&d.doc, slide);
+            (d.uid, slide, ptr, timeline)
+        };
+        if timeline.is_empty() {
+            self.anim_preview = None;
+            self.set_status("This slide has no animations");
+            return Ok(json!({"playing": false}));
+        }
+        if matches!(self.ui.view, ViewMode::Sorter | ViewMode::NotesPage) {
+            self.ui.view = ViewMode::Normal;
+        }
+        self.close_backstage();
+        let duration = timeline.total_duration();
+        self.anim_preview = Some(AnimPreview { uid, slide, slide_ptr: ptr, started: None, elapsed: 0.0, timeline });
+        self.set_status("Previewing animations");
+        Ok(json!({"playing": true, "slide": slide, "duration": duration}))
     }
 
     fn pick_and_open(&mut self) {
@@ -1102,6 +1205,10 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    if key == egui::Key::Escape && self.anim_preview.is_some() && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
+                        self.anim_preview = None;
+                        continue;
+                    }
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
                     if !self.session.tool.drawing_freeform() && menus::ui_shortcut(self, key, mods) {
                         continue;
@@ -1150,6 +1257,7 @@ impl SlideApp {
         self.tick_media(&ctx);
         eyedropper::tick(self, &ctx);
         if self.show.is_some() {
+            self.anim_preview = None;
             show::ui(self, ui);
             doc_window::show(self, &ctx);
             self.perf.frame_ms = now_ms() - t0;
@@ -1162,6 +1270,10 @@ impl SlideApp {
         if self.backstage.is_none() && self.session.active().is_some() {
             ribbon::show(self, ui);
             status::status_bar(self, ui);
+        }
+        let now = ui.input(|i| i.time);
+        if self.tick_anim_preview(now) {
+            ctx.request_repaint();
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
             if self.backstage.is_some() {
@@ -1918,5 +2030,115 @@ mod tests {
         h.run_steps(1);
         let cmds = &h.output().platform_output.commands;
         assert!(cmds.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyText(t) if t == OBJECTS_MARKER)), "{cmds:?}");
+    }
+
+    fn redder(px: [u8; 4]) -> i32 {
+        px[0] as i32 - px[1].max(px[2]) as i32
+    }
+
+    /// A fade entrance is hidden at the start of the preview clock and opaque once it has played.
+    #[test]
+    fn preview_hides_an_entrance_until_it_plays() {
+        let mut session = Session::with_new();
+        let text = session.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 220.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+        session.execute("text.set", &json!({"id": text, "text": "Alpha\nBeta"})).unwrap();
+        session.execute("animation.set", &json!({"effect": "fade", "duration": 1000})).unwrap();
+        session.execute("animation.options", &json!({"textBuild": "byParagraph"})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        let tl = deckcraft_anim::ShowState::timeline(&doc, 0);
+        let shape = deckcraft_model::ShapeId(text as u32);
+        let para = |time: f64, i: usize| preview::shape_state_at(&tl, shape, time).paras.into_iter().find(|(p, _)| *p == i).map(|(_, s)| s).unwrap();
+        assert!(!para(0.0, 0).visible && !para(0.0, 1).visible, "entrances have not started");
+        let mid = para(0.25, 0);
+        assert!(mid.visible && mid.opacity > 0.05 && mid.opacity < 0.95, "{mid:?}");
+        assert!(!para(0.25, 1).visible, "the next paragraph waits for its step");
+
+        session.execute("animation.clear", &json!({})).unwrap();
+        let id = session.execute("shape.insert", &json!({"preset": "rect", "rect": [400.0, 300.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+        session.execute("shape.fill", &json!({"id": id, "color": "#CC2200"})).unwrap();
+        session.execute("animation.set", &json!({"effect": "fade", "duration": 1000})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        let tl = deckcraft_anim::ShowState::timeline(&doc, 0);
+        let (w, h) = (doc.slide_size.width.round().max(1.0) as u32, doc.slide_size.height.round().max(1.0) as u32);
+        let paint = |time: Option<f64>| {
+            let f = |sid: deckcraft_model::ShapeId| preview::shape_state_at(&tl, sid, time.unwrap_or(0.0));
+            let state: Option<&dyn Fn(deckcraft_model::ShapeId) -> deckcraft_render::ShapeState> = if time.is_some() { Some(&f) } else { None };
+            let opts = deckcraft_render::RenderOpts { scale: 1.0, size: Some((w, h)), state, ..Default::default() };
+            deckcraft_render::render_slide(&doc, 0, &opts).pixel(460, 340)
+        };
+        let rest = paint(None);
+        let start = paint(Some(0.0));
+        let end = paint(Some(tl.total_duration() + 0.05));
+        assert!(redder(rest) > 40, "the shape is filled at rest {rest:?}");
+        assert!(redder(start) < redder(rest) / 2, "hidden at the first preview frame {start:?} vs {rest:?}");
+        assert!(redder(end) > 40, "visible again once the sequence has played {end:?}");
+    }
+
+    #[test]
+    fn animation_preview_plays_on_the_canvas_then_stops() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(0.05).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let none = harness.state_mut().run("animation.preview", json!({})).unwrap();
+        assert_eq!(none["playing"], false);
+        assert!(harness.state().status.as_ref().is_some_and(|s| s.0.contains("no animations")));
+        assert!(harness.state().show.is_none());
+
+        let id = harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [200.0, 280.0, 180.0, 80.0]})).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        harness.state_mut().session.execute("animation.set", &json!({"effect": "fade", "duration": 400})).unwrap();
+        let started = harness.state_mut().run("animation.preview", json!({})).unwrap();
+        assert_eq!(started["playing"], true);
+        assert!(harness.state().show.is_none(), "preview stays on the editor canvas");
+        harness.run_steps(1);
+        let elapsed = harness.state().anim_preview.as_ref().map(|p| p.elapsed).unwrap();
+        assert!(elapsed < 0.02, "the clock latches on the first frame, got {elapsed}");
+        let renders = harness.state().textures.canvas_renders;
+        harness.run_steps(6);
+        let elapsed = harness.state().anim_preview.as_ref().map(|p| p.elapsed).unwrap();
+        assert!((0.2..0.5).contains(&elapsed), "{elapsed}");
+        assert!(harness.state().textures.canvas_renders > renders, "each preview frame redraws the slide");
+        assert!(harness.state().show.is_none());
+
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_none(), "Escape stops the preview");
+
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_some());
+        harness.state_mut().run("animation.preview", json!({"on": false})).unwrap();
+        assert!(harness.state().anim_preview.is_none());
+
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        let centre = harness.state().slide_rect.unwrap().center();
+        harness.hover_at(centre);
+        harness.run_steps(1);
+        harness.drag_at(centre);
+        harness.run_steps(2);
+        assert!(harness.state().anim_preview.is_none(), "a click on the slide stops the preview");
+
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_none(), "leaving the slide stops the preview");
+
+        harness.state_mut().session.execute("slide.previous", &json!({})).unwrap();
+        harness.state_mut().session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_some());
+        // 400 ms effect plus the hold.
+        harness.run_steps(30);
+        assert!(harness.state().anim_preview.is_none(), "the preview ends after the sequence");
+        assert!(harness.state().show.is_none());
     }
 }

@@ -187,6 +187,14 @@ fn same(a: &Option<Arc<Master>>, b: &Option<Arc<Master>>) -> bool {
     }
 }
 
+/// Mix the preview playhead into the canvas cache key. Zero means "no preview", so a playhead of
+/// 0s still misses the at-rest texture (entrances start hidden).
+fn anim_key(anim: Option<(&deckcraft_anim::Timeline, f64)>) -> u64 {
+    let Some((_, t)) = anim else { return 0 };
+    let ms = if t.is_finite() { (t * 1000.0).clamp(0.0, 1.0e12) as u64 } else { 0 };
+    ms.wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+}
+
 fn threads() -> u16 {
     if cfg!(target_arch = "wasm32") { 0 } else { std::thread::available_parallelism().map(|n| n.get().min(8) as u16).unwrap_or(0) }
 }
@@ -208,6 +216,7 @@ impl Textures {
         extra: u64,
         grayscale: bool,
         gif_times: &[(ShapeId, f64)],
+        anim: Option<(&deckcraft_anim::Timeline, f64)>,
     ) -> Option<(TextureHandle, Region)> {
         let slide = p.slides.get(index)?.clone();
         let master = master_of(p, &slide);
@@ -232,7 +241,7 @@ impl Textures {
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
             size,
             edit,
-            extra: extra ^ grayscale as u64,
+            extra: extra ^ grayscale as u64 ^ anim_key(anim),
             want,
         };
         if let Some(e) = &self.canvas
@@ -242,8 +251,18 @@ impl Textures {
         }
         let t0 = crate::now_ms();
         let render = |region: Region| {
-            let opts =
-                RenderOpts { scale, edit, gif_times, threads: threads(), offset: region.offset(), size: Some(region.size()), ..Default::default() };
+            let state_of = |id: ShapeId| anim.map(|(tl, time)| crate::preview::shape_state_at(tl, id, time)).unwrap_or_default();
+            let state: Option<&dyn Fn(ShapeId) -> deckcraft_render::ShapeState> = if anim.is_some() { Some(&state_of) } else { None };
+            let opts = RenderOpts {
+                scale,
+                edit,
+                gif_times,
+                threads: threads(),
+                offset: region.offset(),
+                size: Some(region.size()),
+                state,
+                ..Default::default()
+            };
             deckcraft_render::render_slide_drawn(p, index, &opts)
         };
         let (mut img, drawn) = render(want);
