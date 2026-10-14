@@ -298,6 +298,10 @@ pub enum ShapeKind {
         xml: String,
         preview: Option<MediaId>,
         label: String,
+        /// The parts its XML points to (SmartArt data, an OLE embedding…), so a save writes them
+        /// back: (relationship id used in `xml`, relationship type, the part as a media item).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        parts: Vec<(String, String, MediaId)>,
     },
 }
 

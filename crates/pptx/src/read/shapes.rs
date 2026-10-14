@@ -449,7 +449,22 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
     } else {
         uri.rsplit('/').next().unwrap_or("Object").to_string()
     };
-    s.kind = ShapeKind::Opaque { xml: part.keep(e), preview, label };
+    // Keep the parts it points to so a save writes it back whole (#203). A part with relationships
+    // of its own, or an external link, can't be carried: the save then falls back to the preview.
+    let parts = super::rel_refs(e)
+        .into_iter()
+        .map(|id| {
+            let rel = part.rels.get(&id).filter(|r| !r.external)?;
+            if !imp.pkg.rels(&rel.target).items.is_empty() {
+                return None;
+            }
+            let (kind, target) = (rel.ty.clone(), rel.target.clone());
+            let media = if rel.kind == "diagramData" { diagram_data(imp, &target) } else { imp.media_for(&target) };
+            Some((id, kind, media?))
+        })
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default();
+    s.kind = ShapeKind::Opaque { xml: part.keep(e), preview, label, parts };
     s
 }
 
@@ -488,6 +503,34 @@ fn vml_index(pkg: &crate::opc::Package, vml: &str) -> std::collections::HashMap<
         }
     }
     out
+}
+
+/// A diagram's data part, without the link to its cached drawing: that link is a slide
+/// relationship id, which a save renumbers. Only diagrams whose drawing is missing or empty get
+/// here, and those are drawn from their data.
+fn diagram_data(imp: &mut Imp, target: &str) -> Option<deckcraft_model::MediaId> {
+    fn strip(e: &mut El, depth: usize) {
+        if depth > crate::xml::MAX_DEPTH {
+            return;
+        }
+        e.children.retain(|n| !matches!(n, crate::xml::Node::El(c) if c.is("ext") && c.find("dataModelExt").is_some()));
+        for c in e.elements_mut() {
+            strip(c, depth + 1);
+        }
+    }
+    let mut doc = imp.pkg.xml(target)?;
+    strip(&mut doc.root, 0);
+    let xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n{}", doc.root.to_xml());
+    let id = deckcraft_model::MediaId(imp.alloc());
+    let content_type = imp.pkg.content_type(target)?;
+    imp.media.push(deckcraft_model::MediaItem {
+        id,
+        name: crate::opc::file_of(target).to_string(),
+        content_type,
+        data: std::sync::Arc::new(xml.into_bytes()),
+        link: None,
+    });
+    Some(id)
 }
 
 /// SmartArt: read the pre-drawn shapes of its drawing part as a group.
