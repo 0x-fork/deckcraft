@@ -1224,6 +1224,8 @@ mod ime_tests;
 mod slide_size_tests;
 #[cfg(test)]
 mod ui_soak_tests;
+#[cfg(test)]
+mod replacefonts_tests;
 
 #[cfg(test)]
 mod tests {

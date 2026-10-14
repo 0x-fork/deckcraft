@@ -13,6 +13,16 @@ use crate::{DocState, Result, Selection, Session, Target, TextSel};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        cmd!(query "font.used", "Fonts in Presentation", [], None, "{} → [family] (theme fonts resolved)", has_doc, fonts_used),
+        cmd!(
+            "font.replace",
+            "Replace Fonts",
+            ["Home", "Editing", "Replace"],
+            None,
+            "{from, to} — every explicit use of family `from`, theme fonts included → {replaced}",
+            has_doc,
+            replace_font
+        ),
         cmd!(noundo "text.edit", "Edit Text", [], Some("Enter"), "{id?, at?: [paragraph, char], end?: bool, cell?: [row, col], notes?: bool}", has_slide, edit),
         cmd!(noundo "text.exit", "Stop Editing Text", [], None, "{}", has_doc, exit),
         cmd!("text.insert", "Type Text", [], None, "{text} (\\n = new paragraph, \\u000b = line break)", has_text, insert),
@@ -963,4 +973,72 @@ pub(crate) fn format_body(s: &mut Session, f: &(dyn Fn(&mut deckcraft_model::tex
         fit_text_box(s, id)?;
     }
     ok()
+}
+
+fn fonts_used(s: &mut Session, _: &Value) -> Result<Value> {
+    let mut v = crate::fonts::used_fonts(&s.doc()?.doc);
+    v.sort_by_key(|f| f.to_lowercase());
+    Ok(json!(v))
+}
+
+fn replace_font(s: &mut Session, p: &Value) -> Result<Value> {
+    let from = str_param(p, "from").map(str::trim).filter(|x| !x.is_empty()).ok_or_else(|| bad("font.replace", "missing `from`"))?.to_string();
+    let to = str_param(p, "to").map(str::trim).filter(|x| !x.is_empty()).ok_or_else(|| bad("font.replace", "missing `to`"))?.to_string();
+    if to.len() > 256 || to.chars().any(char::is_control) {
+        return Err(bad("font.replace", "`to` is not a font name"));
+    }
+    // Count on a copy first so a replace that finds nothing leaves no undo step.
+    let mut probe = (*s.doc()?.doc).clone();
+    if crate::fonts::replace_font(&mut probe, &from, &to) == 0 {
+        return Ok(json!({"replaced": 0}));
+    }
+    let n = s.edit(|doc, _| Ok(crate::fonts::replace_font(doc, &from, &to)))?;
+    let st = s.doc_mut()?;
+    st.missing_fonts = crate::fonts::missing_fonts(&st.doc);
+    Ok(json!({"replaced": n}))
+}
+
+#[cfg(test)]
+mod replace_font_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    fn fonts(s: &mut Session) -> Vec<String> {
+        serde_json::from_value(s.execute("font.used", &json!({})).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn replaces_runs_tables_notes_and_theme_and_undoes() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "B"})).unwrap();
+        let theme = s.doc().unwrap().doc.masters[0].theme.fonts.minor.latin.clone();
+        s.execute("insert.textBox", &json!({"rect": [10, 10, 200, 50], "text": "Hello"})).unwrap();
+        s.execute("text.exit", &json!({})).unwrap();
+        s.execute("format.font", &json!({"family": "Comic Neue"})).unwrap();
+        assert!(fonts(&mut s).iter().any(|f| f == "Comic Neue"), "{:?}", fonts(&mut s));
+        let r = s.execute("font.replace", &json!({"from": "comic neue", "to": "Lato"})).unwrap();
+        assert!(r["replaced"].as_u64().unwrap() >= 1, "{r}");
+        let used = fonts(&mut s);
+        assert!(!used.iter().any(|f| f == "Comic Neue") && used.iter().any(|f| f == "Lato"), "{used:?}");
+        // The theme's body font is replaced too, so placeholders follow.
+        s.execute("font.replace", &json!({"from": theme, "to": "Lato"})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.masters[0].theme.fonts.minor.latin, "Lato");
+        assert!(s.doc().unwrap().doc.validate().is_empty());
+        s.execute("edit.undo", &json!({})).unwrap();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(fonts(&mut s).iter().any(|f| f == "Comic Neue"));
+    }
+
+    #[test]
+    fn nothing_to_replace_is_no_undo_step_and_bad_names_fail() {
+        let mut s = Session::with_new();
+        let undo = s.doc().unwrap().history.undo.len();
+        assert_eq!(s.execute("font.replace", &json!({"from": "Nope Sans", "to": "Inter"})).unwrap()["replaced"], 0);
+        assert_eq!(s.execute("font.replace", &json!({"from": "+mn-lt", "to": "Inter"})).unwrap()["replaced"], 0);
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo);
+        assert!(s.execute("font.replace", &json!({"from": "", "to": "Inter"})).is_err());
+        assert!(s.execute("font.replace", &json!({"from": "Inter", "to": "a\nb"})).is_err());
+        assert!(s.execute("font.replace", &json!({"from": "Inter"})).is_err());
+    }
 }

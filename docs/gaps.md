@@ -312,6 +312,8 @@ Detail in [ui-parity.md](ui-parity.md).
   It is not a saved library of theme fonts, and it does not pick East Asian or complex-script
   faces. Still missing: Font, Bullets and Numbering, Find/Replace dialog, Replace Fonts, Action
   Settings, Print, Insert Object. 8–14 h.
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
+  Action Settings, Print, Insert Object…). 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
 ## Hardware

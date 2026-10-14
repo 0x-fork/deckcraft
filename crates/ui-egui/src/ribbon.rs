@@ -1046,6 +1046,11 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         // Also under Arrange, but that is disabled until something is selected (#132).
         big(app, ui, Icon::SelectionPane, "Selection\nPane", "view.pane", json!({"pane": "selection"}));
+        if small_button(ui, Icon::Fonts, "Replace Fonts…", enabled(app, "font.replace"), false).clicked() {
+            app.dialog = Some(crate::dialogs::Dialog::new("replaceFonts"));
+        }
+    });
+    group(ui, |ui| {
         big(app, ui, Icon::DesignIdeas, "Design\nIdeas", "view.pane", json!({"pane": "designer"}));
     });
 }
