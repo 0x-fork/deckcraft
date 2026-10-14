@@ -420,6 +420,22 @@ fn double_click_in_table_uses_grown_row_heights() {
 }
 
 #[test]
+fn double_click_edits_text_inside_group() {
+    // A text member of a group is still editable: double-click reaches it through the group
+    // (regression: it used to be a no-op, so grouped text boxes could not be edited).
+    let mut s = session();
+    let a =
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [100.0, 100.0, 120.0, 50.0], "text": "Hello"})).unwrap()["id"].as_u64().unwrap();
+    let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [300.0, 200.0, 50.0, 50.0]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [a, b]})).unwrap();
+    s.execute("arrange.group", &json!({})).unwrap();
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    // Double-click the grouped text box: it becomes editable and targets that member.
+    s.pointer(ev(PointerKind::DoubleClick, 160.0, 125.0)).unwrap();
+    assert_eq!(s.doc().unwrap().selection.text.as_ref().map(|t| t.shape.0 as u64), Some(a));
+}
+
+#[test]
 fn grown_table_frame_covers_its_drawn_rows() {
     // Rows stored 4 pt tall are drawn taller: the box, its handles and hit tests follow the drawn rows.
     let mut s = session();
