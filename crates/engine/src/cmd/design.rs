@@ -16,7 +16,15 @@ pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("design.theme", "Themes", ["Design", "Themes"], None, "{name} (see design.themes)", has_doc, theme),
         cmd!(query "design.themes", "Theme Gallery", [], None, "{} → themes, colour schemes and font schemes", always, themes),
-        cmd!("design.colors", "Colors", ["Design", "Variants"], None, "{name} | {colors: {accent1: #RRGGBB, …}}", has_doc, colors),
+        cmd!(
+            "design.colors",
+            "Colors",
+            ["Design", "Variants"],
+            None,
+            "{} opens Create New Theme Colors | {name} | {colors: {dk1|lt1|dk2|lt2|accent1..6|hlink|folHlink: #RRGGBB}}",
+            has_doc,
+            colors
+        ),
         cmd!("design.fonts", "Fonts", ["Design", "Variants"], None, "{name} | {major, minor}", has_doc, fonts),
         cmd!(
             "design.background",
@@ -95,34 +103,104 @@ fn themes(_s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn colors(s: &mut Session, p: &Value) -> Result<Value> {
-    let scheme = if let Some(name) = str_param(p, "name") {
-        Some(
-            builtin_color_schemes()
-                .into_iter()
-                .find(|c| c.name.eq_ignore_ascii_case(name))
-                .ok_or_else(|| bad("design.colors", format!("no colour scheme `{name}`")))?,
-        )
-    } else {
-        None
+    let name_v = p.get("name");
+    let colors_v = p.get("colors");
+    if name_v.is_none() && colors_v.is_none() {
+        let sc = current_colors(s)?;
+        s.ui_requests.push(crate::UiRequest::Dialog { id: "themeColors".into(), params: scheme_dialog_params(&sc) });
+        return ok();
+    }
+    let given = match name_v {
+        None => None,
+        Some(Value::String(n)) => {
+            let n = n.trim();
+            if n.is_empty() {
+                return Err(bad("design.colors", "name is empty"));
+            }
+            Some(n.to_string())
+        }
+        Some(_) => return Err(bad("design.colors", "`name` must be a string")),
     };
-    let custom = p.get("colors").and_then(Value::as_object).cloned();
+    let slots = parse_color_slots(colors_v)?;
+    let current = current_colors(s)?;
+    let next = next_scheme(&current, given.as_deref(), slots.as_deref())?;
+    if next == current {
+        return ok();
+    }
     s.edit(|doc, sel| {
         let mi = master_index(doc, sel);
         let m = Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("design.colors", "no master"))?);
-        if let Some(sc) = &scheme {
-            m.theme.colors = sc.clone();
-        }
-        if let Some(c) = &custom {
-            for (k, v) in c {
-                if let (Some(slot), Some(rgb)) = (deckcraft_color::SchemeSlot::from_xml(k), v.as_str().and_then(deckcraft_color::Rgba::from_hex)) {
-                    m.theme.colors.set(slot, rgb);
-                }
-            }
-            m.theme.colors.name = "Custom".into();
-        }
+        m.theme.colors = next;
         Ok(())
     })?;
     ok()
+}
+
+fn current_colors(s: &Session) -> Result<deckcraft_color::ColorScheme> {
+    let st = s.doc()?;
+    let mi = master_index(&st.doc, &st.selection);
+    st.doc.masters.get(mi).map(|m| m.theme.colors.clone()).ok_or_else(|| bad("design.colors", "no master"))
+}
+
+fn scheme_dialog_params(sc: &deckcraft_color::ColorScheme) -> Value {
+    let mut colors = serde_json::Map::new();
+    for slot in deckcraft_color::SchemeSlot::THEME {
+        colors.insert(slot.xml_name().to_string(), Value::String(format!("#{}", sc.get(slot).hex())));
+    }
+    json!({"name": sc.name, "colors": colors})
+}
+
+/// `None` when the key is absent. Present values must be the twelve stored slots; aliases such
+/// as `bg1` are rejected because `ColorScheme::set` ignores them.
+fn parse_color_slots(colors_v: Option<&Value>) -> Result<Option<Vec<(deckcraft_color::SchemeSlot, deckcraft_color::Rgba)>>> {
+    let Some(v) = colors_v else { return Ok(None) };
+    let Some(map) = v.as_object() else {
+        return Err(bad("design.colors", "`colors` must be an object"));
+    };
+    if map.is_empty() {
+        return Err(bad("design.colors", "`colors` is empty"));
+    }
+    let mut slots = Vec::with_capacity(map.len());
+    for (k, v) in map {
+        let Some(slot) = deckcraft_color::SchemeSlot::from_xml(k) else {
+            return Err(bad("design.colors", format!("unknown colour `{k}`")));
+        };
+        if !deckcraft_color::SchemeSlot::THEME.contains(&slot) {
+            return Err(bad("design.colors", format!("`{k}` is not a theme colour")));
+        }
+        let Some(rgb) = v.as_str().and_then(deckcraft_color::Rgba::from_hex) else {
+            return Err(bad("design.colors", format!("`{k}` needs a colour like #RRGGBB")));
+        };
+        slots.push((slot, rgb));
+    }
+    Ok(Some(slots))
+}
+
+/// A builtin `name` is applied first, then `colors` overlays those slots. The stored scheme name
+/// is the given name, or `Custom` when only colours are sent. An unknown name without colours is an error.
+fn next_scheme(
+    current: &deckcraft_color::ColorScheme,
+    given: Option<&str>,
+    slots: Option<&[(deckcraft_color::SchemeSlot, deckcraft_color::Rgba)]>,
+) -> Result<deckcraft_color::ColorScheme> {
+    let mut next = current.clone();
+    if let Some(name) = given {
+        if let Some(builtin) = builtin_color_schemes().into_iter().find(|c| c.name.eq_ignore_ascii_case(name)) {
+            next = builtin;
+        } else if slots.is_none() {
+            return Err(bad("design.colors", format!("no colour scheme `{name}`")));
+        }
+        next.name = name.to_string();
+    }
+    if let Some(changes) = slots {
+        for (slot, rgb) in changes {
+            next.set(*slot, *rgb);
+        }
+        if given.is_none() {
+            next.name = "Custom".into();
+        }
+    }
+    Ok(next)
 }
 
 fn fonts(s: &mut Session, p: &Value) -> Result<Value> {
@@ -558,9 +636,94 @@ fn insert_placeholder(s: &mut Session, p: &Value) -> Result<Value> {
 
 #[cfg(test)]
 mod tests {
+    use deckcraft_color::SchemeSlot;
+    use deckcraft_model::theme::builtin_color_schemes;
+    use serde_json::{Value, json};
+
+    use crate::{Session, UiRequest};
+
+    fn scheme(s: &Session) -> deckcraft_color::ColorScheme {
+        s.doc().unwrap().doc.masters[0].theme.colors.clone()
+    }
+
+    fn undo_len(s: &Session) -> usize {
+        s.doc().unwrap().history.undo.len()
+    }
+
     #[test]
     fn civil_dates() {
         assert_eq!(super::civil(0), (1970, 1, 1));
         assert_eq!(super::civil(20_734), (2026, 10, 8));
+    }
+
+    #[test]
+    fn colors_dialog_apply_and_reject() {
+        let mut s = Session::with_new();
+        let original = scheme(&s);
+        let n = undo_len(&s);
+        s.execute("design.colors", &json!({})).unwrap();
+        s.execute("design.colors", &Value::Null).unwrap();
+        assert_eq!(scheme(&s), original);
+        assert_eq!(undo_len(&s), n, "opening the dialog does not edit");
+        assert_eq!(s.ui_requests.len(), 2);
+        match &s.ui_requests[0] {
+            UiRequest::Dialog { id, params } => {
+                assert_eq!(id, "themeColors");
+                assert_eq!(params["name"], "DeckCraft");
+                let colors = params["colors"].as_object().unwrap();
+                assert_eq!(colors.len(), 12);
+                assert_eq!(colors["accent1"].as_str().unwrap(), format!("#{}", original.get(SchemeSlot::Accent1).hex()));
+                assert!(colors.contains_key("folHlink"));
+            }
+            other => panic!("expected a dialog, got {other:?}"),
+        }
+
+        s.execute("design.colors", &json!({"name": "Harbor"})).unwrap();
+        let harbor = builtin_color_schemes().into_iter().find(|c| c.name == "Harbor").unwrap();
+        assert_eq!(scheme(&s).name, "Harbor");
+        assert_eq!(scheme(&s).get(SchemeSlot::Accent1), harbor.get(SchemeSlot::Accent1));
+        assert_eq!(undo_len(&s), n + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Colors");
+        s.execute("design.colors", &json!({"name": "Harbor"})).unwrap();
+        assert_eq!(undo_len(&s), n + 1, "the same scheme is not an undo step");
+
+        let err = s.execute("design.colors", &json!({"name": "Nope"})).unwrap_err().to_string();
+        assert!(err.contains("no colour scheme `Nope`"), "{err}");
+        assert!(s.execute("design.colors", &json!({"name": "  "})).is_err());
+        assert!(s.execute("design.colors", &json!({"name": 1})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": {}})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": "red"})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": {"bg1": "#112233"}})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": {"tx1": "#112233"}})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": {"phClr": "#112233"}})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": {"nope": "#112233"}})).is_err());
+        assert!(s.execute("design.colors", &json!({"colors": {"accent1": "zz"}})).is_err());
+        assert!(s.execute("design.colors", &json!({"name": "Harbor", "colors": {}})).is_err());
+        assert_eq!(scheme(&s).name, "Harbor");
+        assert_eq!(scheme(&s).get(SchemeSlot::Accent1), harbor.get(SchemeSlot::Accent1));
+        assert_eq!(undo_len(&s), n + 1);
+
+        s.execute("design.colors", &json!({"colors": {"accent1": "112233"}})).unwrap();
+        assert_eq!(scheme(&s).name, "Custom");
+        assert_eq!(scheme(&s).get(SchemeSlot::Accent1).hex(), "112233");
+        assert_eq!(scheme(&s).get(SchemeSlot::Accent2), harbor.get(SchemeSlot::Accent2));
+        assert_eq!(undo_len(&s), n + 2);
+
+        let meadow = builtin_color_schemes().into_iter().find(|c| c.name == "Meadow").unwrap();
+        s.execute("design.colors", &json!({"name": "Meadow", "colors": {"lt1": "#010203"}})).unwrap();
+        assert_eq!(scheme(&s).name, "Meadow");
+        assert_eq!(scheme(&s).get(SchemeSlot::Lt1).hex(), "010203");
+        assert_eq!(scheme(&s).get(SchemeSlot::Accent1), meadow.get(SchemeSlot::Accent1));
+        assert_eq!(undo_len(&s), n + 3);
+
+        s.execute("design.colors", &json!({"name": "Talk", "colors": {"dk1": "#ABCDEF"}})).unwrap();
+        assert_eq!(scheme(&s).name, "Talk");
+        assert_eq!(scheme(&s).get(SchemeSlot::Dk1).hex(), "ABCDEF");
+        assert_eq!(scheme(&s).get(SchemeSlot::Lt1).hex(), "010203");
+        assert_eq!(scheme(&s).get(SchemeSlot::Accent1), meadow.get(SchemeSlot::Accent1));
+
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(scheme(&s).name, "Meadow");
+        assert_eq!(scheme(&s).get(SchemeSlot::Dk1), meadow.get(SchemeSlot::Dk1));
     }
 }
