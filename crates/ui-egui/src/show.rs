@@ -128,6 +128,7 @@ impl Show {
                 self.step_end = now;
             }
             ShowAction::Slide(i) => {
+                self.ended = false;
                 if self.rehearse {
                     self.timings.push((self.timeline.as_ref().map(|t| t.0).unwrap_or(i), now - self.slide_start));
                 }
@@ -248,6 +249,67 @@ fn part_textures(ctx: &egui::Context, doc: &Presentation, from: Option<usize>, t
     ]
 }
 
+/// Read the current viewport's show keys before its widgets can consume them. Both the
+/// audience window and Presenter View use this path, including animation steps and end-of-show.
+fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) -> bool {
+    let keys: Vec<(egui::Key, egui::Modifiers)> = ctx.input(|i| {
+        i.events
+            .iter()
+            .filter_map(|e| if let egui::Event::Key { key, pressed: true, modifiers, .. } = e { Some((*key, *modifiers)) } else { None })
+            .collect()
+    });
+    let mut keep = true;
+    let mut actions = vec![];
+    for (k, m) in keys {
+        use egui::Key::*;
+        match k {
+            Escape | Minus => keep = false,
+            ArrowRight | ArrowDown | Space | PageDown | N => {
+                if show.ended {
+                    keep = false;
+                } else {
+                    actions.push(show.state.next(doc));
+                }
+            }
+            Enter => {
+                if let Ok(n) = show.goto.parse::<usize>() {
+                    actions.push(show.state.goto(doc, n.saturating_sub(1)));
+                    show.goto.clear();
+                } else if show.ended {
+                    keep = false;
+                } else {
+                    actions.push(show.state.next(doc));
+                }
+            }
+            ArrowLeft | ArrowUp | Backspace | PageUp | P if !(k == P && m.command) => {
+                show.ended = false;
+                actions.push(show.state.prev(doc));
+            }
+            P if m.command => show.pen = !show.pen,
+            A if m.command => show.pen = false,
+            Home => actions.push(show.state.goto(doc, 0)),
+            End => actions.push(show.state.goto(doc, doc.slides.len().saturating_sub(1))),
+            B | Period => show.blank = if show.blank == Some(Color32::BLACK) { None } else { Some(Color32::BLACK) },
+            W | Comma => show.blank = if show.blank == Some(Color32::WHITE) { None } else { Some(Color32::WHITE) },
+            E => show.strokes.clear(),
+            Num0 | Num1 | Num2 | Num3 | Num4 | Num5 | Num6 | Num7 | Num8 | Num9 => {
+                show.goto.push_str(k.name());
+            }
+            _ => continue,
+        }
+        // The same key must not also activate a focused presenter button or be handled again
+        // by an embedded presenter viewport.
+        ctx.input_mut(|i| i.consume_key(m, k));
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    }
+    for action in actions {
+        if !show.apply(action, doc, now) {
+            keep = false;
+        }
+    }
+    keep
+}
+
 pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let Some(doc) = app.session.active().map(|d| d.doc.clone()) else {
@@ -267,58 +329,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         }
         show.after_enter(&doc, now);
     }
-    let mut keep = true;
-    // Input.
-    let (keys, clicked, secondary, moved) = ctx.input(|i| {
-        let keys: Vec<(egui::Key, egui::Modifiers)> = i
-            .events
-            .iter()
-            .filter_map(|e| if let egui::Event::Key { key, pressed: true, modifiers, .. } = e { Some((*key, *modifiers)) } else { None })
-            .collect();
-        (keys, i.pointer.primary_clicked(), i.pointer.secondary_clicked(), i.pointer.delta().length() > 0.0)
-    });
+    let mut keep = keyboard(&ctx, &mut show, &doc, now);
+    let (clicked, secondary, moved) = ctx.input(|i| (i.pointer.primary_clicked(), i.pointer.secondary_clicked(), i.pointer.delta().length() > 0.0));
     if moved {
         show.last_move = now;
     }
     let mut actions: Vec<ShowAction> = vec![];
-    for (k, m) in keys {
-        use egui::Key::*;
-        match k {
-            Escape | Minus => keep = false,
-            ArrowRight | ArrowDown | Space | PageDown | N => {
-                if show.ended {
-                    keep = false;
-                } else {
-                    actions.push(show.state.next(&doc));
-                }
-            }
-            Enter => {
-                if let Ok(n) = show.goto.parse::<usize>() {
-                    actions.push(show.state.goto(&doc, n.saturating_sub(1)));
-                    show.goto.clear();
-                } else if show.ended {
-                    keep = false;
-                } else {
-                    actions.push(show.state.next(&doc));
-                }
-            }
-            ArrowLeft | ArrowUp | Backspace | PageUp | P if !(k == P && m.command) => {
-                show.ended = false;
-                actions.push(show.state.prev(&doc));
-            }
-            P if m.command => show.pen = !show.pen,
-            A if m.command => show.pen = false,
-            Home => actions.push(show.state.goto(&doc, 0)),
-            End => actions.push(show.state.goto(&doc, doc.slides.len().saturating_sub(1))),
-            B | Period => show.blank = if show.blank == Some(Color32::BLACK) { None } else { Some(Color32::BLACK) },
-            W | Comma => show.blank = if show.blank == Some(Color32::WHITE) { None } else { Some(Color32::WHITE) },
-            E => show.strokes.clear(),
-            Num0 | Num1 | Num2 | Num3 | Num4 | Num5 | Num6 | Num7 | Num8 | Num9 => {
-                show.goto.push_str(k.name());
-            }
-            _ => {}
-        }
-    }
     // The clock of the triggered animations runs before anything reacts to the pointer.
     show.tick_triggers(&doc, now);
     let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
@@ -680,7 +696,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
     // Presenter view in a second window.
-    if show.presenter && !show.reading && !show.ended {
+    if keep && show.presenter && !show.reading {
         presenter_window(&ctx, &mut show, &doc, now, &mut keep);
     }
     if keep {
@@ -899,6 +915,9 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
         |ui, _| {
+            if !keyboard(ui.ctx(), show, doc, now) {
+                *keep = false;
+            }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_gray(24)).inner_margin(egui::Margin::same(16))).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(
@@ -971,6 +990,97 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    /// Send real egui key events to the presenter UI, without the audience window's handler.
+    #[test]
+    fn presenter_navigation_uses_its_own_keyboard_events() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut session = deckcraft_engine::Session::with_new();
+        session.execute("slide.new", &json!({})).unwrap();
+        session.execute("slide.new", &json!({})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        let show = Show::new(&doc, 0, false, true);
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1100.0, 700.0)).build_ui_state(
+            |ui, (doc, show, keep): &mut (std::sync::Arc<Presentation>, Show, bool)| {
+                let now = ui.input(|i| i.time);
+                presenter_window(ui.ctx(), show, doc, now, keep);
+            },
+            (doc, show, true),
+        );
+        harness.run_steps(2);
+        for (key, slide) in [
+            (egui::Key::ArrowRight, 1),
+            (egui::Key::ArrowLeft, 0),
+            (egui::Key::Space, 1),
+            (egui::Key::PageDown, 2),
+            (egui::Key::PageUp, 1),
+            (egui::Key::Home, 0),
+            (egui::Key::End, 2),
+        ] {
+            harness.key_press(key);
+            harness.run_steps(2);
+            assert_eq!(harness.state().1.state.slide, slide, "presenter key {key:?}");
+        }
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert!(harness.state().1.ended);
+        harness.key_press(egui::Key::ArrowLeft);
+        harness.run_steps(2);
+        assert!(!harness.state().1.ended);
+        assert_eq!(harness.state().1.state.slide, 2, "back from the end screen restores the last slide");
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert!(harness.state().1.ended);
+        harness.get_by_label("◀ Previous").click();
+        harness.run_steps(2);
+        assert!(!harness.state().1.ended, "the presenter Previous button also leaves the end screen");
+        harness.key_press(egui::Key::Home);
+        harness.run_steps(2);
+        harness.get_by_label("Next ▶").click();
+        harness.run_steps(2);
+        assert_eq!(harness.state().1.state.slide, 1);
+        harness.key_press(egui::Key::Space);
+        harness.run_steps(2);
+        assert_eq!(harness.state().1.state.slide, 2);
+        assert!(!harness.state().1.ended, "Space must not also activate the focused Next button");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert!(!harness.state().2, "Escape from Presenter View ends the show");
+    }
+
+    #[test]
+    fn slideshow_navigation_advances_once_with_presenter_view() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut session = deckcraft_engine::Session::with_new();
+        session.execute("slide.new", &json!({})).unwrap();
+        session.execute("slide.new", &json!({})).unwrap();
+        let mut app = SlideApp::new(session, crate::Services::default());
+        app.ui.presenter_view = true;
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        harness.run_steps(3);
+        harness.state_mut().start_show(0, false);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert_eq!(harness.state().show.as_ref().unwrap().state.slide, 1, "one key advances one slide");
+        harness.key_press(egui::Key::End);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::ArrowRight);
+        harness.run_steps(2);
+        assert!(harness.state().show.as_ref().unwrap().ended);
+        assert!(harness.query_by_label("End Show").is_some(), "the presenter remains available at the end screen");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert!(harness.state().show.is_none());
+    }
 
     #[test]
     fn a_transition_keeps_the_old_slide_in_its_own_texture() {
