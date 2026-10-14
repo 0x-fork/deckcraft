@@ -2773,7 +2773,9 @@ const TAB_KINDS: [(&str, &str); 4] = [("l", "Left"), ("ctr", "Center"), ("r", "R
 /// list (inches, as PowerPoint's dialog) and applied together with OK.
 fn tabs_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     if !d.fields.contains_key("stops") {
-        let r = app.session.execute("format.ruler", &json!({})).unwrap_or_default();
+        // Opened from Paragraph (or by `format.tabs` with no fields) the stops come with the
+        // dialog; otherwise they are read from the caret's paragraph.
+        let r = if d.params.get("tabs").is_some() { d.params.clone() } else { app.session.execute("format.ruler", &json!({})).unwrap_or_default() };
         let stops: Vec<String> = r["tabs"]
             .as_array()
             .map(|a| a.iter().filter_map(|t| Some(format!("{}:{}", t["pos"].as_f64()? / 72.0, t["align"].as_str().unwrap_or("l")))).collect())
@@ -2846,6 +2848,10 @@ fn tabs_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         let dt = num(d, "default", 1.0).clamp(0.02, 56.0) * 72.0;
         if let Err(e) = app.run("format.tabs", json!({"set": set, "defaultTab": dt})) {
             app.set_status(e);
+        } else if let Some(ret) = d.params.get_mut("returnParams").and_then(Value::as_object_mut) {
+            // Back in Paragraph, its Tabs… shows what was just applied.
+            ret.insert("tabs".into(), json!(set));
+            ret.insert("defaultTab".into(), json!(dt));
         }
     }
     ok || cancel

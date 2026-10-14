@@ -50,7 +50,9 @@ fn tabs_add_move_remove_clear_and_undo() {
     assert_eq!(tabs(&mut s).len(), 2);
     s.execute("format.tabs", &json!({"clear": true})).unwrap();
     assert!(tabs(&mut s).is_empty());
-    assert!(s.execute("format.tabs", &json!({})).is_err());
+    s.ui_requests.clear();
+    s.execute("format.tabs", &json!({})).unwrap();
+    assert!(matches!(s.ui_requests.last(), Some(crate::UiRequest::Dialog { id, .. }) if id == "tabs"), "no fields opens the Tabs dialog");
     assert!(s.execute("format.tabs", &json!({"add": {"pos": f64::MAX}})).is_ok(), "clamped, not a crash");
     for i in 0..100 {
         s.execute("format.tabs", &json!({"add": {"pos": i as f64 * 3.0}})).unwrap();

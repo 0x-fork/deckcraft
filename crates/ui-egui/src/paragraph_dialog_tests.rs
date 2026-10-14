@@ -71,8 +71,7 @@ fn tabs_from_paragraph_applies_a_stop_and_returns() {
     assert_eq!(h.state().dialog.as_ref().map(|d| d.id.as_str()), Some("tabs"), "status {:?}", h.state().status);
     {
         let d = h.state_mut().dialog.as_mut().unwrap();
-        d.params["editing"] = json!(true);
-        d.params["edit"] = json!([{"pos": 144.0, "align": "ctr"}]);
+        d.fields.insert("stops".into(), "2:ctr".into());
     }
     h.get_by_label("OK").click_accesskit();
     // The Tabs OK frame restores Paragraph; the next frame fills its fields.
