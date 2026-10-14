@@ -1330,6 +1330,9 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
         {
             run(app, "design.theme", json!({"name": n}));
         }
+        if small_button(ui, Icon::Themes, "Browse for Themes…", enabled(app, "design.browseTheme"), false).clicked() {
+            run(app, "app.browseThemeDialog", json!({}));
+        }
     });
     group(ui, |ui| {
         let r = big_button(ui, Icon::Colors, "Colors", true);
@@ -2883,6 +2886,10 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
                 if ui.button(&th.name).clicked() {
                     run(app, "design.theme", json!({"name": th.name}));
                 }
+            }
+            ui.separator();
+            if ui.button("Browse for Themes…").clicked() {
+                run(app, "app.browseThemeDialog", json!({}));
             }
         });
         big(app, ui, Icon::FormatBackground, "Background\nStyles", "view.pane", json!({"pane": "background"}));

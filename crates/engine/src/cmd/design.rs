@@ -15,6 +15,15 @@ use crate::{Result, Session, Target};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("design.theme", "Themes", ["Design", "Themes"], None, "{name} (see design.themes)", has_doc, theme),
+        cmd!(
+            "design.browseTheme",
+            "Browse for Themes…",
+            ["Design", "Themes"],
+            None,
+            "{path} | {name, data: base64} — apply the theme of a .thmx, .pptx or .potx file",
+            has_doc,
+            browse_theme
+        ),
         cmd!(query "design.themes", "Theme Gallery", [], None, "{} → themes, colour schemes and font schemes", always, themes),
         cmd!(
             "design.colors",
@@ -85,6 +94,68 @@ fn theme(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(json!({"theme": name}))
+}
+
+fn browse_theme(s: &mut Session, p: &Value) -> Result<Value> {
+    let bytes = if let Some(data) = str_param(p, "data") {
+        super::base64_decode(data).ok_or_else(|| bad("design.browseTheme", "invalid base64 `data`"))?
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let path = str_param(p, "path").ok_or_else(|| bad("design.browseTheme", "give `path` or `data`"))?;
+            std::fs::read(path).map_err(|e| crate::EngineError::Other(format!("{path}: {e}")))?
+        }
+        #[cfg(target_arch = "wasm32")]
+        return Err(bad("design.browseTheme", "give `data`"));
+    };
+    if !deckcraft_pptx::sniff(&bytes) {
+        return Err(bad("design.browseTheme", "not a theme or PowerPoint file"));
+    }
+    let (theme, media) = deckcraft_pptx::import_theme(&bytes).map_err(|e| bad("design.browseTheme", e.to_string()))?;
+    let name = theme.name.clone();
+    s.edit(|doc, sel| {
+        // The theme's pictures (format-scheme blip fills) get ids of this deck.
+        let mut map = std::collections::HashMap::new();
+        for m in &media {
+            let id = doc.add_media(&m.name, &m.content_type, m.data.as_ref().clone());
+            map.insert(m.id.0, id.0);
+        }
+        let theme = if map.is_empty() { theme.clone() } else { remap_media_ids(&theme, &map)? };
+        let mi = master_index(doc, sel);
+        let m = Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("design.browseTheme", "no master"))?);
+        m.theme = theme;
+        m.color_map = vec![];
+        Ok(())
+    })?;
+    Ok(json!({"theme": name}))
+}
+
+/// `theme` with every `media` id field rewritten through `map` (format-scheme picture fills).
+fn remap_media_ids(theme: &deckcraft_model::theme::Theme, map: &std::collections::HashMap<u32, u32>) -> Result<deckcraft_model::theme::Theme> {
+    fn rec(v: &mut Value, map: &std::collections::HashMap<u32, u32>, depth: usize) {
+        if depth > 64 {
+            return;
+        }
+        match v {
+            Value::Object(o) => {
+                for (k, x) in o.iter_mut() {
+                    if k == "media"
+                        && let Some(n) = x.as_u64().and_then(|n| u32::try_from(n).ok())
+                        && let Some(new) = map.get(&n)
+                    {
+                        *x = json!(new);
+                    } else {
+                        rec(x, map, depth + 1);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| rec(x, map, depth + 1)),
+            _ => {}
+        }
+    }
+    let mut v = serde_json::to_value(theme).map_err(|e| bad("design.browseTheme", e.to_string()))?;
+    rec(&mut v, map, 0);
+    serde_json::from_value(v).map_err(|e| bad("design.browseTheme", e.to_string()))
 }
 
 fn master_index(doc: &Presentation, sel: &crate::Selection) -> usize {
@@ -910,5 +981,33 @@ mod tests {
         assert_eq!(font_scheme(&s).name, "Classic");
         assert_eq!(font_scheme(&s).major.ea, "Kept");
         assert_eq!(font_scheme(&s).minor.latin, "Open Sans");
+    }
+}
+
+#[cfg(test)]
+mod browse_theme_tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn applies_the_theme_of_another_deck_and_undoes() {
+        let mut other = Session::with_new();
+        other.execute("design.fonts", &json!({"major": "Lato", "minor": "Source Sans 3"})).unwrap();
+        other.execute("design.colors", &json!({"colors": {"accent1": "#123456"}})).unwrap();
+        let data = other.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].as_str().unwrap().to_string();
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "B"})).unwrap();
+        let before = s.doc().unwrap().doc.masters[0].theme.clone();
+        s.execute("design.browseTheme", &json!({"name": "Brand.pptx", "data": data})).unwrap();
+        let t = &s.doc().unwrap().doc.masters[0].theme;
+        assert_eq!(t.fonts.major.latin, "Lato");
+        assert_eq!(t.fonts.minor.latin, "Source Sans 3");
+        assert_eq!(t.colors.get(deckcraft_color::SchemeSlot::Accent1).hex().to_lowercase(), "123456");
+        assert!(s.doc().unwrap().doc.validate().is_empty());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.masters[0].theme, before);
+        assert!(s.execute("design.browseTheme", &json!({"data": "AAAA"})).is_err());
+        assert!(s.execute("design.browseTheme", &json!({})).is_err());
     }
 }

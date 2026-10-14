@@ -250,6 +250,46 @@ fn max_cnvpr(el: &El, m: &mut u32) {
     }
 }
 
+/// The theme of a `.thmx` theme file (its `officeDocument` is a theme part), or of the first
+/// master of a `.pptx` / `.potx`, with the media its format scheme uses (ids from 1).
+pub fn import_theme(bytes: &[u8]) -> Result<(deckcraft_model::theme::Theme, Vec<MediaItem>), PptxError> {
+    let pkg = Package::open(bytes)?;
+    let target = pkg.rels("").first_of("officeDocument").map(|r| r.target.clone());
+    let theme_path = match &target {
+        Some(t) if pkg.xml(t).is_some_and(|d| d.root.is("theme")) => t.clone(),
+        _ => {
+            // A presentation: its first master's theme.
+            let pres = target.unwrap_or_else(|| "ppt/presentation.xml".into());
+            let pres_doc = load(&pkg, &pres).ok_or_else(|| PptxError::NotPptx("neither a theme nor a presentation".into()))?;
+            let pres_part = Part::new(&pkg, &pres, &pres_doc);
+            let master = pres_doc
+                .root
+                .child("sldMasterIdLst")
+                .and_then(|l| l.children_named("sldMasterId").next())
+                .and_then(|m| pres_part.rels.target(m.attr("r:id").unwrap_or("")).map(String::from))
+                .or_else(|| pres_part.rels.all_of("slideMaster").next().map(|r| r.target.clone()))
+                .ok_or_else(|| PptxError::NotPptx("the presentation has no slide master".into()))?;
+            pkg.rels(&master).first_of("theme").map(|r| r.target.clone()).ok_or_else(|| PptxError::NotPptx("the slide master has no theme".into()))?
+        }
+    };
+    let doc = load(&pkg, &theme_path).ok_or_else(|| PptxError::NotPptx(format!("missing or unreadable {theme_path}")))?;
+    if !doc.root.is("theme") {
+        return Err(PptxError::NotPptx(format!("{theme_path} is not a theme part")));
+    }
+    let mut imp = Imp {
+        pkg: &pkg,
+        media: vec![],
+        media_by_part: HashMap::new(),
+        next: 0,
+        slide_by_part: HashMap::new(),
+        custom_show_names: HashMap::new(),
+        table_style_ids: Vec::new(),
+    };
+    let part = Part::new(&pkg, &theme_path, &doc);
+    let theme = theme::read_theme(&mut imp, &part, &doc.root);
+    Ok((theme, imp.media))
+}
+
 pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
     let pkg = Package::open(bytes)?;
     let root_rels = pkg.rels("");

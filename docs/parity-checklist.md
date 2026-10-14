@@ -12,6 +12,8 @@ The summary between `<!-- SUMMARY -->
 | P2 | 54 | 13 | 15 | 26 | 38% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
 | P2 | 54 | 13 | 16 | 25 | 39% |
+| P1 | 65 | 38 | 21 | 6 | 75% |
+| P2 | 54 | 14 | 15 | 25 | 40% |
 
 | Area | Parity |
 |---|---|
@@ -20,6 +22,8 @@ The summary between `<!-- SUMMARY -->
 | Slides | 90% |
 | Views | 93% |
 | Masters & themes | 85% |
+| Views | 90% |
+| Masters & themes | 88% |
 | Shapes | 88% |
 | Format | 83% |
 | Arrange | 100% |
@@ -104,7 +108,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Masters & themes | Hide background graphics | P1 | D |
 | Masters & themes | Slide size (16:9, 4:3, presets, custom) | P0 | D |
 | Masters & themes | Header & footer (date, slide number, footer) | P1 | D |
-| Masters & themes | Browse themes from .pptx/.thmx | P2 | M |
+| Masters & themes | Browse themes from .pptx/.thmx | P2 | D |
 | Masters & themes | Designer layout suggestions (offline) | P2 | M |
 | Shapes | Preset shapes (lines, rectangles, basic, arrows, equation, flowchart, stars, callouts) | P0 | D |
 | Shapes | Action buttons | P2 | D |
