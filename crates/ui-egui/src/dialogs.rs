@@ -1520,6 +1520,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 ("JPEG image (current slide)", "jpeg"),
                 ("PowerPoint Presentation (.pptx)", "pptx"),
                 ("Outline (.txt)", "outline"),
+                ("Animated GIF (.gif)", "gif"),
             ] {
                 if ui.radio(fmt == f, l).clicked() {
                     d.fields.insert("fmt".into(), f.into());
@@ -1563,6 +1564,10 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                     d.fields.insert("pdfHidden".into(), hidden.to_string());
                 }
             }
+            let gif_params = if fmt == "gif" { gif_options(app, ui, d) } else { Ok(Value::Null) };
+            if let Err(e) = &gif_params {
+                ui.label(egui::RichText::new(e).color(Tokens::get(ui.ctx()).text_dim));
+            }
             let pdf_params = {
                 let (layout, per) = match pdf_layout.as_str() {
                     "notes" => ("notes", 0),
@@ -1573,7 +1578,19 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             };
             let (ok, cancel) = buttons(ui, "Export");
             if ok {
-                let extra = if fmt == "pdf" { pdf_params } else { json!({}) };
+                let gif_params = match gif_params {
+                    Ok(v) => v,
+                    // Keep the dialog open so the range or width can be corrected.
+                    Err(e) => {
+                        app.set_status(e);
+                        return false;
+                    }
+                };
+                let extra = match fmt.as_str() {
+                    "pdf" => pdf_params,
+                    "gif" => gif_params,
+                    _ => json!({}),
+                };
                 app.export_as(&fmt, extra);
             }
             ok || cancel
@@ -2377,6 +2394,64 @@ mod size_position_tests;
 #[path = "photo_album_tests.rs"]
 mod photo_album_tests;
 
+/// The export dialog's Animated GIF options (size, seconds per slide, loop, slide range, hidden
+/// slides) as `file.export` params; a slide range that doesn't fit the deck is an error message.
+fn gif_options(app: &SlideApp, ui: &mut Ui, d: &mut Dialog) -> Result<Value, String> {
+    use deckcraft_engine::gif_export::{MAX_SECONDS, MAX_WIDTH, MIN_SECONDS, MIN_WIDTH, SIZE_PRESETS};
+    let n = app.session.active().map_or(0, |s| s.doc.slides.len());
+    let size = d.get("gifSize", "medium");
+    let size_label = |k: &str| match k {
+        "small" => "Small (640 px wide)",
+        "large" => "Large (1280 px wide)",
+        "extraLarge" => "Extra Large (1920 px wide)",
+        "custom" => "Custom width",
+        _ => "Medium (960 px wide)",
+    };
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(120.0, 20.0), egui::Label::new("Size:"));
+        egui::ComboBox::from_id_salt("gif_size").selected_text(size_label(&size)).show_ui(ui, |ui| {
+            for k in SIZE_PRESETS.iter().map(|(k, _)| *k).chain(["custom"]) {
+                if ui.selectable_label(size == k, size_label(k)).clicked() {
+                    d.fields.insert("gifSize".into(), k.into());
+                }
+            }
+        });
+    });
+    if size == "custom" {
+        field(ui, d, "Width (pixels):", "gifWidth", "960");
+    }
+    field(ui, d, "Seconds per slide:", "gifSeconds", "5");
+    let n_text = n.max(1).to_string();
+    field(ui, d, "From slide:", "gifFrom", "1");
+    field(ui, d, "To slide:", "gifTo", &n_text);
+    let forever = check(ui, d, "Loop forever", "gifLoop", true);
+    let hidden = check(ui, d, "Include hidden slides", "gifHidden", false);
+
+    let width = if size == "custom" {
+        let w = num(d, "gifWidth", 960.0).round();
+        if !(f64::from(MIN_WIDTH)..=f64::from(MAX_WIDTH)).contains(&w) {
+            return Err(format!("Width: enter {MIN_WIDTH} to {MAX_WIDTH} pixels"));
+        }
+        json!(w as u32)
+    } else {
+        json!(size)
+    };
+    let seconds = num(d, "gifSeconds", f64::NAN);
+    if deckcraft_engine::gif_export::check_seconds(seconds).is_err() {
+        return Err(format!("Seconds per slide: enter {MIN_SECONDS} to {MAX_SECONDS}"));
+    }
+    let mut p = json!({"width": width, "secondsPerSlide": seconds, "loop": forever, "includeHidden": hidden});
+    let (from, to) = (num(d, "gifFrom", 1.0).round(), num(d, "gifTo", n as f64).round());
+    if !(from >= 1.0 && from <= to && to <= n as f64) {
+        return Err(format!("Slides: choose a range from 1 to {n}"));
+    }
+    if from > 1.0 || to < n as f64 {
+        p["slides"] = json!(((from as usize - 1)..(to as usize)).collect::<Vec<_>>());
+    }
+    Ok(p)
+}
+
 #[cfg(test)]
 #[path = "theme_colors_tests.rs"]
 mod theme_colors_tests;
@@ -2417,6 +2492,68 @@ mod tests {
         let mut h = link(Action::Url { url: address.into() }, tip);
         h.highlight_click = tip == "glow";
         h
+    }
+
+    /// The Export… dialog (Animated GIF) shows the GIF options and exports through `file.export` (#171).
+    #[test]
+    fn export_dialog_writes_an_animated_gif() {
+        use std::cell::RefCell;
+
+        use egui::vec2;
+        use egui_kittest::kittest::Queryable as _;
+        use serde_json::json;
+
+        use crate::SlideApp;
+        let dir = std::env::temp_dir().join(format!("deckcraft-ui-gif-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("deck.gif");
+        let picked = path.to_string_lossy().to_string();
+        let suggested = std::rc::Rc::new(RefCell::new(String::new()));
+        let seen = suggested.clone();
+        let services = crate::Services {
+            pick_save: Some(Box::new(move |s: &str| {
+                *seen.borrow_mut() = s.to_string();
+                Some(picked.clone())
+            })),
+            ..Default::default()
+        };
+        let mut session = deckcraft_engine::Session::with_new();
+        session.execute("slide.new", &json!({})).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, services),
+        );
+        harness.run_steps(2);
+        harness.state_mut().run("app.exportDialog", json!({})).unwrap();
+        harness.run_steps(2);
+        harness.get_by_label("Animated GIF (.gif)").click_accesskit();
+        harness.run_steps(2);
+        assert_eq!(harness.state().dialog.as_ref().and_then(|d| d.fields.get("fmt")).map(String::as_str), Some("gif"));
+        harness.get_by_label("Seconds per slide:");
+        harness.get_by_label("Loop forever").click_accesskit();
+        harness.run_steps(2);
+        // A range outside the deck keeps the dialog open with a message, and nothing is written.
+        harness.state_mut().dialog.as_mut().unwrap().fields.insert("gifTo".into(), "9".into());
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_some());
+        assert!(harness.state().status.as_ref().is_some_and(|(m, _)| m.contains("Slides")), "{:?}", harness.state().status);
+        assert!(!path.exists());
+        harness.state_mut().dialog.as_mut().unwrap().fields.insert("gifTo".into(), "2".into());
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none(), "the dialog closes after exporting");
+        assert!(suggested.borrow().ends_with(".gif"), "{}", suggested.borrow());
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"GIF89a"));
+        assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), 960, "medium by default");
+        assert!(!bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "Loop forever unticked: plays once");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

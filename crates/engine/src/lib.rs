@@ -10,6 +10,7 @@
 pub mod cmd;
 pub mod connect;
 pub mod fonts;
+pub mod gif_export;
 pub mod guard;
 pub mod icons;
 pub mod keys;
