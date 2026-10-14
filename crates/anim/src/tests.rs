@@ -726,10 +726,10 @@ fn playing_a_custom_show_stays_on_its_slides() {
 
     let mut s = ShowState::new(&p);
     p.slides[4] = Arc::new(Slide { id: SlideId(1004), ..Default::default() });
-    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Ends".into() }, None), LinkJump::Show(ShowAction::Slide(0)));
+    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Ends".into(), returns: true }, None), LinkJump::Show(ShowAction::Slide(0)));
     assert_eq!(s.custom_name(), Some("Ends"));
     assert_eq!(s.next(&p), ShowAction::Slide(4));
-    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Missing".into() }, None), LinkJump::None);
+    assert_eq!(s.follow(&p, &Action::CustomShow { name: "Missing".into(), returns: true }, None), LinkJump::None);
     assert_eq!(s.slide, 4, "an unknown custom show leaves the current slide");
 }
 

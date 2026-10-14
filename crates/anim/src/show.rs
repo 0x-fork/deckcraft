@@ -347,7 +347,7 @@ impl ShowState {
             Action::FirstSlide => self.visit(pres).first().copied(),
             Action::LastSlide => self.visit(pres).last().copied(),
             Action::LastViewed => last_viewed,
-            Action::CustomShow { name } => {
+            Action::CustomShow { name, .. } => {
                 let Some(order) = custom_indices(pres, name) else { return LinkJump::None };
                 let Some(&i) = order.first() else { return LinkJump::None };
                 self.order = Some(order);

@@ -693,7 +693,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         // While this slide rests, render the next one's first frame (not one with GIFs, whose
         // frame depends on when it is entered).
         if !animating && show.trans.is_none() && !show.preview_only {
-            let next = deckcraft_anim::show_order(&doc).into_iter().find(|i| *i > idx);
+            let next = show.state.peek_next(&doc);
             let wanted = next.filter(|n| app.media.gifs(doc_uid, &doc, *n, now, &app.session.gif_paused).is_empty());
             if let Some(n) = wanted
                 && show.prefetch.as_ref().is_none_or(|p| p.key.slide != n || p.key.size != size || p.key.doc != std::sync::Arc::as_ptr(&doc) as usize)
