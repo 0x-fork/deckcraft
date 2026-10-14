@@ -1,5 +1,6 @@
 //! Slide Show: full-screen playback with transitions and animations (`deckcraft-anim`),
-//! keyboard/mouse navigation, pen, black/white screens, presenter view and rehearsed timings.
+//! keyboard/mouse navigation, pen, black/white screens, See All Slides, zoom, presenter view
+//! and rehearsed timings.
 
 use deckcraft_anim::{Layer, LinkJump, ShowAction, ShowState, Source, Timeline};
 use deckcraft_model::text::Hyperlink;
@@ -28,6 +29,12 @@ pub struct Show {
     tex: Option<(Key, TextureHandle)>,
     next_tex: Option<(usize, TextureHandle)>,
     blank: Option<Color32>,
+    /// See All Slides covers the show until a slide is chosen.
+    pub grid: bool,
+    /// The next click on the slide zooms in there.
+    pub zoom_arm: bool,
+    zoom: Option<Zoom>,
+    thumbs: Vec<(usize, TextureHandle)>,
     pen: bool,
     strokes: Vec<Vec<Pos2>>,
     goto: String,
@@ -88,6 +95,10 @@ impl Show {
             tex: None,
             next_tex: None,
             blank: None,
+            grid: false,
+            zoom_arm: false,
+            zoom: None,
+            thumbs: vec![],
             pen: false,
             strokes: vec![],
             goto: String::new(),
@@ -125,6 +136,8 @@ impl Show {
                 self.step_end = now;
             }
             ShowAction::Slide(i) => {
+                self.zoom = None;
+                self.zoom_arm = false;
                 if self.rehearse {
                     self.timings.push((self.timeline.as_ref().map(|t| t.0).unwrap_or(i), now - self.slide_start));
                 }
@@ -276,10 +289,25 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.last_move = now;
     }
     let mut actions: Vec<ShowAction> = vec![];
+    let full = ui.max_rect();
+    let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
+    let srect = fit(avail, &doc);
+    let pointer = ctx.input(|i| i.pointer.interact_pos());
     for (k, m) in keys {
         use egui::Key::*;
+        if matches!(k, Escape | Minus) {
+            if !show.back_out() {
+                keep = false;
+            }
+            continue;
+        }
+        if show.grid {
+            if k == G && plain(m) {
+                show.grid = false;
+            }
+            continue;
+        }
         match k {
-            Escape | Minus => keep = false,
             ArrowRight | ArrowDown | Space | PageDown | N => {
                 if show.ended {
                     keep = false;
@@ -305,16 +333,19 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             A if m.command => show.pen = false,
             Home => actions.push(show.state.goto(&doc, 0)),
             End => actions.push(show.state.goto(&doc, doc.slides.len().saturating_sub(1))),
-            B | Period => show.blank = if show.blank == Some(Color32::BLACK) { None } else { Some(Color32::BLACK) },
-            W | Comma => show.blank = if show.blank == Some(Color32::WHITE) { None } else { Some(Color32::WHITE) },
+            B | Period => toggle_blank(&mut show, Color32::BLACK),
+            W | Comma => toggle_blank(&mut show, Color32::WHITE),
             E => show.strokes.clear(),
+            G if plain(m) => show.grid = true,
+            Z if plain(m) => show.zoom_key(),
             Num0 | Num1 | Num2 | Num3 | Num4 | Num5 | Num6 | Num7 | Num8 | Num9 => {
                 show.goto.push_str(k.name());
             }
             _ => {}
         }
     }
-    let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
+    let on_slide =
+        !show.grid && !show.pen && !show.ended && show.blank.is_none() && show.zoom.is_none() && !show.zoom_arm && !show.reading_bar_hit(&ctx);
     let gif_click = if clicked && on_slide { gif_hit(&ctx, ui, &show, &doc, app) } else { None };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
     let link = if on_slide && gif_click.is_none() && media_click.is_none() { link_hit(&ctx, ui, &mut show, &doc) } else { None };
@@ -330,6 +361,27 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             LinkJump::Exit => keep = false,
             LinkJump::None => {}
         }
+    } else if show.grid && clicked {
+        let aspect = slide_aspect(&doc);
+        if let Some(p) = pointer
+            && let Some(n) = see_all_hit(full, grid_indices(doc.slides.len()).len(), aspect, p)
+            && let Some(&i) = grid_indices(doc.slides.len()).get(n)
+        {
+            show.grid = false;
+            show.blank = None;
+            show.zoom = None;
+            show.zoom_arm = false;
+            actions.push(show.state.goto(&doc, i));
+        }
+    } else if clicked && show.zoom_arm && !show.reading_bar_hit(&ctx) {
+        if let Some(p) = pointer
+            && let Some((nx, ny)) = norm_on_slide(srect, unit_uv(), p)
+        {
+            show.zoom = Some(Zoom::at(nx, ny));
+            show.zoom_arm = false;
+        }
+    } else if clicked && show.zoom.is_some() && !show.pen && !show.reading_bar_hit(&ctx) {
+        show.dismiss_zoom();
     } else if clicked && !show.pen && !show.reading_bar_hit(&ctx) {
         if show.ended {
             keep = false;
@@ -339,7 +391,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             actions.push(show.state.next(&doc));
         }
     }
-    if secondary && !show.ended {
+    if secondary && !show.ended && !show.grid && show.zoom.is_none() && !show.zoom_arm {
         actions.push(show.state.prev(&doc));
     }
     // Apply input first: a step started by this click must restart the clock before it is read.
@@ -364,7 +416,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let next_auto = show.timeline(&doc).step_is_auto(cur_step);
         let n_steps = show.timeline(&doc).steps();
         let step_due = cur_step < n_steps && ((show.autoplay && idle > 0.3) || next_auto);
-        if step_due || (!show.rehearse && show.state.auto_advance_due(&doc, idle) && !show.ended) {
+        let holding = show.grid || show.zoom.is_some() || show.zoom_arm;
+        if !holding && (step_due || (!show.rehearse && show.state.auto_advance_due(&doc, idle) && !show.ended)) {
             actions.push(show.state.next(&doc));
         } else if show.preview_only && cur_step >= n_steps && idle > 0.8 {
             keep = false;
@@ -377,11 +430,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     show_media(app, &mut show, &doc);
     // Draw.
-    let full = ui.max_rect();
     let painter = ui.painter_at(full);
     painter.rect_filled(full, CornerRadius::ZERO, Color32::BLACK);
-    let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
-    let srect = fit(avail, &doc);
     let ppp = ctx.pixels_per_point();
     let size = ((srect.width() * ppp).round().max(1.0) as u32, (srect.height() * ppp).round().max(1.0) as u32);
     if show.ended {
@@ -534,10 +584,11 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         if !drew {
             show.trans = None;
             if let Some(tex) = &tex {
-                painter.image(tex.id(), srect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                painter.image(tex.id(), srect, show.zoom_uv(), Color32::WHITE);
             }
             // Playing video: the current frame in its box, or full screen.
-            let k = srect.width() / doc.slide_size.width.max(1.0) as f32;
+            let (sw, sh) = (doc.slide_size.width as f32, doc.slide_size.height as f32);
+            let uv = show.zoom_uv();
             for (id, x, clip) in &media {
                 if !clip.video || hidden.contains(id) {
                     continue;
@@ -545,12 +596,15 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 let r = if clip.full_screen && app.media.is_playing(*id) {
                     full
                 } else {
-                    Rect::from_min_size(pos2(srect.min.x + x.x as f32 * k, srect.min.y + x.y as f32 * k), vec2(x.w as f32 * k, x.h as f32 * k))
+                    slide_box(srect, uv, sw, sh, x.x as f32, x.y as f32, x.w as f32, x.h as f32)
                 };
                 crate::media::paint_frame(&painter, &app.media, *id, r);
             }
             // Play/pause on the animated GIF under the pointer.
-            if let Some(p) = ctx.input(|i| i.pointer.hover_pos()).filter(|_| !show.pen && now - show.last_move < 2.5) {
+            if let Some(p) =
+                ctx.input(|i| i.pointer.hover_pos()).filter(|_| !show.pen && !show.zoom_arm && show.zoom.is_none() && now - show.last_move < 2.5)
+            {
+                let k = srect.width() / sw.max(1.0);
                 for g in &gifs {
                     let r = on_screen(srect, k, &g.rect);
                     if r.contains(p) {
@@ -573,11 +627,16 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         if resp.drag_started() {
             show.strokes.push(vec![]);
         }
+        let uv = show.zoom_uv();
         if resp.dragged()
-            && let (Some(p), Some(s)) = (resp.interact_pointer_pos(), show.strokes.last_mut())
+            && let Some(p) = resp.interact_pointer_pos()
+            && let Some((nx, ny)) = norm_on_slide(srect, uv, p)
+            && let Some(s) = show.strokes.last_mut()
         {
-            s.push(pos2((p.x - srect.min.x) / srect.width(), (p.y - srect.min.y) / srect.height()));
+            s.push(pos2(nx, ny));
         }
+        ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+    } else if show.zoom_arm || show.grid {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
     } else if link.is_some() {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -586,9 +645,19 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
     let pen_col = theme::to_color32(doc.show.pen_color);
+    let uv = show.zoom_uv();
     for s in &show.strokes {
-        let pts: Vec<Pos2> = s.iter().map(|q| pos2(srect.min.x + q.x * srect.width(), srect.min.y + q.y * srect.height())).collect();
+        let pts: Vec<Pos2> = s.iter().map(|q| slide_to_screen(srect, uv, q.x, q.y)).collect();
         painter.add(egui::Shape::line(pts, Stroke::new(3.0, pen_col)));
+    }
+    if show.zoom_arm && !show.grid {
+        painter.text(
+            pos2(full.center().x, full.min.y + 36.0),
+            Align2::CENTER_CENTER,
+            "Click the slide to zoom in. Esc cancels.",
+            theme::font(16.0),
+            Color32::WHITE,
+        );
     }
     // Reading view bar / on-screen controls.
     if show.reading {
@@ -619,8 +688,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             let a = show.state.prev(&doc);
             show.apply(a, &doc, now);
         }
-    } else if now - show.last_move < 2.5 {
-        let bar = Rect::from_min_size(pos2(full.min.x + 20.0, full.max.y - 50.0), vec2(250.0, 34.0));
+    } else if !show.grid && (now - show.last_move < 2.5 || show.zoom_arm) {
+        let bar = tool_bar_rect(full);
         painter.rect_filled(bar, CornerRadius::same(17), Color32::from_black_alpha(140));
         let mut child =
             ui.new_child(egui::UiBuilder::new().max_rect(bar.shrink2(vec2(10.0, 4.0))).layout(egui::Layout::left_to_right(egui::Align::Center)));
@@ -638,13 +707,25 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         if b(&mut child, if show.pen { "✏ on" } else { "✏" }).clicked() {
             show.pen = !show.pen;
         }
-        if b(&mut child, "⬛").clicked() {
-            show.blank = Some(Color32::BLACK);
+        if b(&mut child, "Black").clicked() {
+            toggle_blank(&mut show, Color32::BLACK);
+        }
+        if b(&mut child, "White").clicked() {
+            toggle_blank(&mut show, Color32::WHITE);
+        }
+        if b(&mut child, "All").clicked() {
+            show.grid = !show.grid;
+        }
+        if b(&mut child, show.zoom_label()).clicked() {
+            show.zoom_key();
         }
         if b(&mut child, "End").clicked() {
             keep = false;
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
+    }
+    if show.grid && !show.ended {
+        paint_grid(&painter, &ctx, &mut show, &doc, full);
     }
     if show.rehearse {
         let t = now - show.slide_start;
@@ -759,13 +840,306 @@ fn gif_hit(ctx: &egui::Context, ui: &Ui, show: &Show, doc: &Presentation, app: &
 }
 
 impl Show {
+    fn zoom_uv(&self) -> Rect {
+        self.zoom.map(Zoom::uv).unwrap_or_else(unit_uv)
+    }
+
+    fn zoom_label(&self) -> &'static str {
+        if self.zoom.is_some() {
+            "Zoom on"
+        } else if self.zoom_arm {
+            "Zoom…"
+        } else {
+            "Zoom"
+        }
+    }
+
+    /// Z, or the Zoom button: arm a click-to-zoom, or leave a zoom that is already on.
+    fn zoom_key(&mut self) {
+        if self.zoom.is_some() || self.zoom_arm {
+            self.dismiss_zoom();
+        } else {
+            self.zoom_arm = true;
+            self.pen = false;
+        }
+    }
+
+    /// Esc closes See All Slides, then a zoom, and only then leaves the show.
+    fn back_out(&mut self) -> bool {
+        if self.grid {
+            self.grid = false;
+            true
+        } else {
+            self.dismiss_zoom()
+        }
+    }
+
+    /// Esc backs out of a zoom before it leaves the show. True when it did.
+    fn dismiss_zoom(&mut self) -> bool {
+        if self.zoom.is_some() || self.zoom_arm {
+            self.zoom = None;
+            self.zoom_arm = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn blank_name(&self) -> Option<&'static str> {
+        match self.blank {
+            Some(c) if c == Color32::BLACK => Some("black"),
+            Some(c) if c == Color32::WHITE => Some("white"),
+            Some(_) => Some("blank"),
+            None => None,
+        }
+    }
+
+    pub fn zoom_view(&self) -> Option<(f32, f32, f32)> {
+        self.zoom.map(|z| (z.nx, z.ny, z.scale))
+    }
+
+    pub fn showing_value(&self, n_slides: usize, aspect: f32, full: Rect) -> serde_json::Value {
+        let mut v = json!({
+            "slide": self.state.slide,
+            "step": self.state.step,
+            "ended": self.ended,
+            "grid": self.grid,
+            "zoomArm": self.zoom_arm,
+            "blank": self.blank_name(),
+            "zoom": self.zoom_view().map(|(x, y, scale)| json!({"x": x, "y": y, "scale": scale})),
+        });
+        if self.grid {
+            let slides = grid_indices(n_slides);
+            let cells = see_all_cells(full, slides.len(), aspect);
+            v["cells"] =
+                serde_json::Value::Array(slides.iter().zip(cells).map(|(i, r)| json!({"slide": i, "x": r.center().x, "y": r.center().y})).collect());
+        }
+        v
+    }
+
     fn reading_bar_hit(&self, ctx: &egui::Context) -> bool {
         // Clicks on the on-screen controls must not also advance.
         ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
             let r = ctx.content_rect();
-            (self.reading && p.y > r.max.y - 34.0) || (!self.reading && p.y > r.max.y - 56.0 && p.x < r.min.x + 280.0)
+            (self.reading && p.y > r.max.y - 34.0) || (!self.reading && tool_bar_rect(r).expand(8.0).contains(p))
         })
     }
+}
+
+const ZOOM_SCALE: f32 = 2.0;
+const GRID_CAP: usize = 48;
+const TOOL_BAR_W: f32 = 520.0;
+
+#[derive(Clone, Copy)]
+struct Zoom {
+    nx: f32,
+    ny: f32,
+    scale: f32,
+}
+
+impl Zoom {
+    fn at(nx: f32, ny: f32) -> Self {
+        Zoom { nx: finite_unit(nx), ny: finite_unit(ny), scale: ZOOM_SCALE }
+    }
+
+    fn uv(self) -> Rect {
+        zoom_uv(self.nx, self.ny, self.scale)
+    }
+}
+
+fn finite_unit(n: f32) -> f32 {
+    if n.is_finite() { n.clamp(0.0, 1.0) } else { 0.5 }
+}
+
+fn plain(m: egui::Modifiers) -> bool {
+    !m.command && !m.ctrl && !m.alt && !m.shift
+}
+
+fn unit_uv() -> Rect {
+    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
+}
+
+fn slide_aspect(doc: &Presentation) -> f32 {
+    let a = doc.slide_size.width as f32 / doc.slide_size.height.max(1.0) as f32;
+    if a.is_finite() && a > 0.05 { a } else { 16.0 / 9.0 }
+}
+
+/// The part of the slide a zoom shows, in 0–1 texture space. The window stays on the slide.
+fn zoom_uv(nx: f32, ny: f32, scale: f32) -> Rect {
+    let scale = if scale.is_finite() && scale > 1.0 { scale } else { ZOOM_SCALE };
+    let w = 1.0 / scale;
+    if w >= 1.0 {
+        return unit_uv();
+    }
+    let x = (nx - w * 0.5).clamp(0.0, 1.0 - w);
+    let y = (ny - w * 0.5).clamp(0.0, 1.0 - w);
+    Rect::from_min_size(pos2(x, y), vec2(w, w))
+}
+
+fn zoom_frame(slide: Rect, uv: Rect) -> Rect {
+    Rect::from_min_size(
+        pos2(slide.min.x + uv.min.x * slide.width(), slide.min.y + uv.min.y * slide.height()),
+        vec2(uv.width() * slide.width(), uv.height() * slide.height()),
+    )
+}
+
+fn toggle_blank(show: &mut Show, color: Color32) {
+    show.blank = if show.blank == Some(color) { None } else { Some(color) };
+}
+
+fn tool_bar_rect(full: Rect) -> Rect {
+    let w = TOOL_BAR_W.min((full.width() - 32.0).max(32.0));
+    Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 50.0), vec2(w, 34.0))
+}
+
+fn grid_indices(n: usize) -> Vec<usize> {
+    (0..n.min(GRID_CAP)).collect()
+}
+
+/// Thumbnail rectangles for `n` slides inside `full`, largest 16:9-style thumbs that fit.
+fn see_all_cells(full: Rect, n: usize, aspect: f32) -> Vec<Rect> {
+    if n == 0 || full.width() < 16.0 || full.height() < 16.0 {
+        return vec![];
+    }
+    let aspect = if aspect.is_finite() && aspect > 0.05 { aspect } else { 16.0 / 9.0 };
+    let margin = 28.0;
+    let gap = 16.0;
+    let label_h = 22.0;
+    let inner = full.shrink(margin);
+    let inner = Rect::from_min_max(pos2(inner.min.x, inner.min.y + 36.0), inner.max);
+    if inner.width() < 8.0 || inner.height() < 8.0 {
+        return vec![];
+    }
+    let mut best: Vec<Rect> = vec![];
+    let mut best_area = 0.0_f32;
+    for cols in 1..=n.min(8) {
+        let rows = n.div_ceil(cols);
+        let cell_w = (inner.width() - gap * (cols.saturating_sub(1) as f32)) / cols as f32;
+        let cell_h = (inner.height() - gap * (rows.saturating_sub(1) as f32)) / rows as f32;
+        if cell_w < 8.0 || cell_h < label_h + 8.0 {
+            continue;
+        }
+        let thumb_max_h = cell_h - label_h;
+        let mut tw = cell_w;
+        let mut th = tw / aspect;
+        if th > thumb_max_h {
+            th = thumb_max_h;
+            tw = th * aspect;
+        }
+        if tw < 8.0 || th < 8.0 {
+            continue;
+        }
+        let area = tw * th;
+        if area <= best_area {
+            continue;
+        }
+        best_area = area;
+        best = (0..n)
+            .map(|i| {
+                let c = i % cols;
+                let r = i / cols;
+                let ox = inner.min.x + c as f32 * (cell_w + gap) + (cell_w - tw) * 0.5;
+                let oy = inner.min.y + r as f32 * (cell_h + gap);
+                Rect::from_min_size(pos2(ox, oy), vec2(tw, th))
+            })
+            .collect();
+    }
+    best
+}
+
+fn see_all_hit(full: Rect, n: usize, aspect: f32, p: Pos2) -> Option<usize> {
+    see_all_cells(full, n, aspect).into_iter().position(|r| r.expand2(vec2(4.0, 18.0)).contains(p))
+}
+
+fn norm_on_slide(srect: Rect, uv: Rect, p: Pos2) -> Option<(f32, f32)> {
+    if srect.width() <= 1.0 || srect.height() <= 1.0 || !srect.contains(p) {
+        return None;
+    }
+    let u = (p.x - srect.min.x) / srect.width();
+    let v = (p.y - srect.min.y) / srect.height();
+    let nx = uv.min.x + u * uv.width();
+    let ny = uv.min.y + v * uv.height();
+    (nx.is_finite() && ny.is_finite()).then_some((nx.clamp(0.0, 1.0), ny.clamp(0.0, 1.0)))
+}
+
+fn slide_to_screen(srect: Rect, uv: Rect, nx: f32, ny: f32) -> Pos2 {
+    let u = (nx - uv.min.x) / uv.width().max(1e-4);
+    let v = (ny - uv.min.y) / uv.height().max(1e-4);
+    pos2(srect.min.x + u * srect.width(), srect.min.y + v * srect.height())
+}
+
+fn slide_box(srect: Rect, uv: Rect, slide_w: f32, slide_h: f32, x: f32, y: f32, w: f32, h: f32) -> Rect {
+    let a = slide_to_screen(srect, uv, x / slide_w.max(1.0), y / slide_h.max(1.0));
+    let b = slide_to_screen(srect, uv, (x + w) / slide_w.max(1.0), (y + h) / slide_h.max(1.0));
+    Rect::from_min_max(a, b)
+}
+
+fn paint_grid(painter: &egui::Painter, ctx: &egui::Context, show: &mut Show, doc: &Presentation, full: Rect) {
+    let slides = grid_indices(doc.slides.len());
+    let aspect = slide_aspect(doc);
+    let cells = see_all_cells(full, slides.len(), aspect);
+    painter.rect_filled(full, CornerRadius::ZERO, Color32::from_gray(16));
+    painter.text(pos2(full.center().x, full.min.y + 28.0), Align2::CENTER_CENTER, "All slides", theme::font(20.0), Color32::WHITE);
+    if doc.slides.len() > GRID_CAP {
+        painter.text(
+            pos2(full.center().x, full.min.y + 50.0),
+            Align2::CENTER_CENTER,
+            format!("First {GRID_CAP} slides"),
+            theme::font(13.0),
+            Color32::from_gray(180),
+        );
+    }
+    let budget = if slides.len() <= 12 { 12 } else { 4 };
+    let mut made = 0;
+    for (i, rect) in slides.iter().copied().zip(cells) {
+        painter.rect_filled(rect, CornerRadius::same(4), Color32::from_gray(32));
+        let tex = match show.thumbs.iter().find(|(k, _)| *k == i).map(|(_, t)| t.clone()) {
+            Some(t) => Some(t),
+            None if made < budget => {
+                made += 1;
+                render_thumb(ctx, show, doc, i)
+            }
+            None => {
+                ctx.request_repaint();
+                None
+            }
+        };
+        if let Some(t) = tex {
+            painter.image(t.id(), rect, unit_uv(), Color32::WHITE);
+        }
+        let current = i == show.state.slide;
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(4),
+            Stroke::new(if current { 3.0 } else { 1.0 }, if current { Color32::WHITE } else { Color32::from_gray(70) }),
+            egui::StrokeKind::Inside,
+        );
+        let hidden = doc.slides.get(i).is_some_and(|s| s.hidden);
+        let label = if hidden { format!("{}  Hidden", i + 1) } else { format!("{}", i + 1) };
+        painter.text(
+            pos2(rect.center().x, rect.max.y + 12.0),
+            Align2::CENTER_CENTER,
+            label,
+            theme::font(13.0),
+            if current { Color32::WHITE } else { Color32::from_gray(180) },
+        );
+    }
+}
+
+fn render_thumb(ctx: &egui::Context, show: &mut Show, doc: &Presentation, i: usize) -> Option<TextureHandle> {
+    if show.thumbs.len() >= GRID_CAP {
+        return None;
+    }
+    let w = 320.0_f64;
+    let h = (w * doc.slide_size.height / doc.slide_size.width.max(1.0)).round().max(1.0);
+    let img = deckcraft_render::render_slide(
+        doc,
+        i,
+        &RenderOpts { scale: w / doc.slide_size.width.max(1.0), size: Some((w as u32, h as u32)), ..Default::default() },
+    );
+    let tex = ctx.load_texture(format!("show-grid-{i}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+    show.thumbs.push((i, tex.clone()));
+    Some(tex)
 }
 
 fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, keep: &mut bool) {
@@ -820,7 +1194,21 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                         }
                     });
                 });
-                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button(if show.blank == Some(Color32::BLACK) { "Black on" } else { "Black" }).clicked() {
+                        toggle_blank(show, Color32::BLACK);
+                    }
+                    if ui.button(if show.blank == Some(Color32::WHITE) { "White on" } else { "White" }).clicked() {
+                        toggle_blank(show, Color32::WHITE);
+                    }
+                    if ui.button(if show.grid { "All slides on" } else { "All slides" }).clicked() {
+                        show.grid = !show.grid;
+                    }
+                    if ui.button(show.zoom_label()).clicked() {
+                        show.zoom_key();
+                    }
+                });
+                ui.add_space(8.0);
                 let avail = ui.available_rect_before_wrap();
                 let left = Rect::from_min_max(avail.min, pos2(avail.min.x + avail.width() * 0.62, avail.max.y));
                 let right = Rect::from_min_max(pos2(left.max.x + 16.0, avail.min.y), avail.max);
@@ -828,6 +1216,24 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                 let cr = Rect::from_min_size(left.min, cr.size());
                 if let Some(t) = &cur_tex {
                     ui.painter().image(t.id(), cr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                }
+                if let Some(z) = show.zoom {
+                    let mark = zoom_frame(cr, z.uv());
+                    ui.painter().rect_stroke(mark, CornerRadius::ZERO, Stroke::new(2.0, Color32::WHITE), egui::StrokeKind::Inside);
+                }
+                if show.zoom_arm {
+                    let hit = ui.interact(cr, ui.id().with("presenter_zoom"), Sense::click());
+                    if hit.clicked()
+                        && let Some(p) = hit.interact_pointer_pos()
+                        && cr.width() > 1.0
+                        && cr.height() > 1.0
+                    {
+                        show.zoom = Some(Zoom::at((p.x - cr.min.x) / cr.width(), (p.y - cr.min.y) / cr.height()));
+                        show.zoom_arm = false;
+                    }
+                }
+                if let Some(c) = show.blank {
+                    ui.painter().rect_filled(cr, CornerRadius::ZERO, c);
                 }
                 let nr = Rect::from_min_size(
                     right.min + vec2(0.0, 22.0),
@@ -884,5 +1290,62 @@ mod tests {
         assert_eq!(tr.old.as_ref().map(TextureHandle::id), Some(red.id()));
         assert_eq!(tr.from, Some(0));
         assert!(show.tex.is_none(), "the new slide gets a texture of its own instead of overwriting the old one");
+    }
+
+    #[test]
+    fn zoom_stays_on_the_slide_and_the_grid_hits_a_thumbnail() {
+        let uv = zoom_uv(0.5, 0.5, 2.0);
+        assert!((uv.min.x - 0.25).abs() < 1e-4 && (uv.min.y - 0.25).abs() < 1e-4);
+        assert!((uv.width() - 0.5).abs() < 1e-4);
+        let corner = zoom_uv(0.0, 0.0, 2.0);
+        assert_eq!(corner.min, pos2(0.0, 0.0));
+        assert!(corner.max.x <= 1.0 && corner.max.y <= 1.0);
+        let full = Rect::from_min_size(Pos2::ZERO, vec2(1728.0, 1084.0));
+        let cells = see_all_cells(full, 7, 16.0 / 9.0);
+        assert_eq!(cells.len(), 7);
+        for (i, a) in cells.iter().enumerate() {
+            assert!(full.contains_rect(*a), "cell {i} leaves the window");
+            for b in cells.iter().skip(i + 1) {
+                let overlap = a.intersect(*b);
+                assert!(overlap.width() < 1.0 || overlap.height() < 1.0, "thumbnails overlap {a:?} {b:?}");
+            }
+        }
+        let hit = see_all_hit(full, 7, 16.0 / 9.0, cells[3].center());
+        assert_eq!(hit, Some(3));
+        assert_eq!(see_all_hit(full, 7, 16.0 / 9.0, pos2(2.0, 2.0)), None);
+        let srect = Rect::from_min_size(pos2(10.0, 20.0), vec2(200.0, 100.0));
+        assert_eq!(norm_on_slide(srect, unit_uv(), pos2(110.0, 70.0)), Some((0.5, 0.5)));
+        let zoomed = zoom_uv(0.5, 0.5, 2.0);
+        let back = norm_on_slide(srect, zoomed, pos2(110.0, 70.0)).expect("on the slide");
+        assert!((back.0 - 0.5).abs() < 1e-3 && (back.1 - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn escape_leaves_the_grid_then_the_zoom_and_blank_toggles() {
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let mut show = Show::new(&doc, 0, false, true);
+        show.grid = true;
+        show.zoom = Some(Zoom::at(0.2, 0.3));
+        assert!(show.back_out());
+        assert!(!show.grid);
+        assert!(show.zoom.is_some(), "closing the grid leaves the zoom");
+        assert!(show.back_out());
+        assert!(show.zoom.is_none());
+        assert!(!show.back_out());
+        show.zoom_key();
+        assert!(show.zoom_arm);
+        show.zoom_key();
+        assert!(!show.zoom_arm);
+        toggle_blank(&mut show, Color32::BLACK);
+        assert_eq!(show.blank_name(), Some("black"));
+        toggle_blank(&mut show, Color32::WHITE);
+        assert_eq!(show.blank_name(), Some("white"));
+        toggle_blank(&mut show, Color32::WHITE);
+        assert_eq!(show.blank_name(), None);
+        show.zoom = Some(Zoom::at(0.4, 0.6));
+        assert!(show.apply(ShowAction::Slide(1), &doc, 1.0));
+        assert!(show.zoom.is_none(), "a new slide is shown whole");
     }
 }
