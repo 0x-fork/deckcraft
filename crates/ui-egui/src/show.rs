@@ -442,7 +442,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.cue_media(&doc, step, now - show.step_start);
     }
     show_media(app, &mut show, doc_uid, &doc);
-    run_media_cues(app, &mut show, &doc);
+    run_media_cues(app, &mut show, doc_uid, &doc);
     // Draw.
     let full = ui.max_rect();
     let painter = ui.painter_at(full);
@@ -792,7 +792,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
     if let Some(media) = sound {
         // Loop Until Next Sound: it repeats until another slide's sound or Stop Previous Sound.
         let clip = deckcraft_model::MediaClip { media, volume: 1.0, loop_play: sound_loop, ..Default::default() };
-        app.media.play(doc, TRANSITION_SOUND, &clip, None, crate::media::Owner::Show);
+        app.media.play(doc_uid, doc, TRANSITION_SOUND, &clip, None, crate::media::Owner::Show);
     }
     if let Some(i) = cur {
         for (id, _, clip) in crate::media::slide_media(doc, i) {
@@ -805,15 +805,15 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
 
 /// Carry out the media effects the show's steps set off: Play starts from the beginning unless
 /// the clip is already playing, Pause toggles, Stop stops.
-fn run_media_cues(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
+fn run_media_cues(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentation) {
     for (id, effect) in std::mem::take(&mut show.media_cues) {
         let Some(clip) = crate::media::find_clip(doc, id) else { continue };
         match effect.as_str() {
-            "pause" => app.media.toggle(doc, id, &clip, crate::media::Owner::Show),
+            "pause" => app.media.toggle(doc_uid, doc, id, &clip, crate::media::Owner::Show),
             "stop" => app.media.stop(id),
             // Already playing (it also starts automatically): leave it running.
             _ if app.media.is_playing(id) => {}
-            _ => app.media.play(doc, id, &clip, Some(0.0), crate::media::Owner::Show),
+            _ => app.media.play(doc_uid, doc, id, &clip, Some(0.0), crate::media::Owner::Show),
         }
     }
 }
