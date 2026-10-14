@@ -142,6 +142,62 @@ fn clipboard_copy_paste_shapes_and_slides() {
 }
 
 #[test]
+fn bold_copy_is_html_and_pages_html_pastes_bold() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hello"})).unwrap();
+    s.execute("text.selectAll", &json!({})).unwrap();
+    s.execute("format.bold", &json!({"on": true})).unwrap();
+    let v = s.execute("edit.copy", &json!({})).unwrap();
+    let html = v["html"].as_str().unwrap();
+    assert!(html.contains("<b>"), "{html}");
+    assert_eq!(v["text"], "Hello");
+    // The same plain words are our own clipboard, so a plainer HTML fragment is not reparsed.
+    s.execute("text.select", &json!({"anchor": [0, 5], "caret": [0, 5]})).unwrap();
+    s.execute("edit.paste", &json!({"text": "Hello", "html": "<p>Hello</p>"})).unwrap();
+    let body = s.doc().unwrap().shape(deckcraft_model::ShapeId(title)).unwrap().text.clone().unwrap();
+    assert_eq!(body.text(), "HelloHello");
+    assert!(body.paragraphs.iter().flat_map(|p| p.runs.iter()).all(|r| r.props.bold == Some(true)), "{body:?}");
+    s.execute("text.select", &json!({"anchor": [0, 10], "caret": [0, 10]})).unwrap();
+    let caret = s.execute("edit.copy", &json!({})).unwrap();
+    assert_eq!(caret["text"], "");
+    assert_eq!(caret["html"], "");
+
+    let mut ext = session();
+    ext.execute("edit.paste", &json!({"text": "Hello", "html": "<p style=\"font-weight: bold\">Hello</p>"})).unwrap();
+    let pasted = ext
+        .doc()
+        .unwrap()
+        .current_slide()
+        .unwrap()
+        .shapes
+        .iter()
+        .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hello"))
+        .unwrap()
+        .text
+        .clone()
+        .unwrap();
+    assert_eq!(pasted.paragraphs[0].runs[0].props.bold, Some(true), "{pasted:?}");
+
+    let mut mismatched = session();
+    mismatched.execute("edit.paste", &json!({"text": "Hi", "html": "<b>Nope</b>"})).unwrap();
+    let plain = mismatched
+        .doc()
+        .unwrap()
+        .current_slide()
+        .unwrap()
+        .shapes
+        .iter()
+        .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hi"))
+        .unwrap()
+        .text
+        .clone()
+        .unwrap();
+    assert_ne!(plain.paragraphs[0].runs[0].props.bold, Some(true));
+}
+
+#[test]
 fn group_ungroup_roundtrip_positions() {
     let mut s = session();
     let a = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 50, 50]})).unwrap()["id"].as_u64().unwrap();

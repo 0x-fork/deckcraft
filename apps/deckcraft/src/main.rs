@@ -19,6 +19,8 @@ mod display;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
+#[cfg(not(target_arch = "wasm32"))]
+mod pasteboard;
 
 use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Services, SlideApp};
@@ -110,14 +112,9 @@ fn services() -> Services {
         pick_save: Some(Box::new(|name: &str| rfd::FileDialog::new().set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string()))),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
-        clipboard_image: Some(Box::new(|| {
-            let mut cb = arboard::Clipboard::new().ok()?;
-            let img = cb.get_image().ok()?;
-            let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
-            let mut out = Vec::new();
-            rgba.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).ok()?;
-            Some(out)
-        })),
+        clipboard_image: Some(Box::new(pasteboard::image_png)),
+        clipboard_html: Some(Box::new(pasteboard::html)),
+        clipboard_set_html: Some(Box::new(pasteboard::set_html)),
         // Media is mixed and clocked by the output device; `DECKCRAFT_NO_AUDIO` plays silently.
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")
             .is_none()
