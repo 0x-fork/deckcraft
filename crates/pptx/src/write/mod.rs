@@ -434,8 +434,8 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
         master_rids.push((master_id, pres.rels.add("slideMaster", &opc::relative("ppt/presentation.xml", &mname), false)));
     }
 
-    // Notes master when any slide has notes.
-    let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
+    // Notes master when the deck has one or any slide has notes.
+    let has_notes = p.notes_master.is_some() || p.slides.iter().any(|s| !s.notes.is_empty());
     let notes_master = "ppt/notesMasters/notesMaster1.xml";
     let mut notes_master_rid = None;
     if has_notes {
@@ -449,9 +449,22 @@ pub fn export(p: &Presentation) -> Result<Vec<u8>, PptxError> {
         x.pkg.rels(&tname, &to.rels);
         let mut w = W::new();
         root_open(&mut w, "p:notesMaster", A::new());
-        let bg = Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) };
-        csld(&mut w, &mut x, &mut no, "", Some(&bg), &notes_master_shapes(p.notes_size));
-        clr_map(&mut w, &[]);
+        let nm = p.notes_master.as_deref();
+        let bg = nm
+            .and_then(|m| m.background.clone())
+            .unwrap_or(Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) });
+        // The file's own placeholders are kept; PowerPoint's defaults only when it has none.
+        let own = nm.map(|m| m.shapes.as_slice()).filter(|s| !s.is_empty());
+        let defaults;
+        let list = match own {
+            Some(s) => s,
+            None => {
+                defaults = notes_master_shapes(p.notes_size);
+                defaults.as_slice()
+            }
+        };
+        csld(&mut w, &mut x, &mut no, "", Some(&bg), list);
+        clr_map(&mut w, nm.map(|m| m.color_map.as_slice()).unwrap_or(&[]));
         dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &notes_style());
         w.close("p:notesMaster");
         x.pkg.xml_part(notes_master, CT_NOTES_MASTER, w.finish());
