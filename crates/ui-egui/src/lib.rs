@@ -93,6 +93,8 @@ pub struct UiState {
     pub pane_width: f32,
     pub ruler: bool,
     pub gridlines: bool,
+    /// Slides per page previewed in Handout Master view (1, 2, 3, 4, 6 or 9).
+    pub handout_per_page: u8,
     pub guides: bool,
     pub smart_guides: bool,
     /// None = fit to window.
@@ -123,6 +125,7 @@ impl Default for UiState {
             pane_width: 300.0,
             ruler: false,
             gridlines: false,
+            handout_per_page: 6,
             guides: false,
             smart_guides: true,
             zoom: None,

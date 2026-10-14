@@ -109,7 +109,9 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
 fn contextual(app: &SlideApp) -> Vec<&'static str> {
     let mut v = vec![];
     let Some(st) = app.session.active() else { return v };
-    if st.selection.target != Target::Slides {
+    if st.selection.target == Target::Handout {
+        v.push("Handout Master");
+    } else if st.selection.target != Target::Slides {
         v.push("Slide Master");
     }
     let shapes = st.selected_shapes();
@@ -225,6 +227,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             "Chart Design" => chart_design(app, ui),
             "Playback" => playback(app, ui),
             "Slide Master" => slide_master(app, ui),
+            "Handout Master" => handout_master(app, ui),
             _ => {}
         }
     });
@@ -1955,8 +1958,10 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
         if big_button_ex(ui, Icon::SlideMaster, "Slide\nMaster", true, false, in_master).0.clicked() {
             let _ = app.run(if in_master { "view.closeMaster" } else { "view.slideMaster" }, json!({}));
         }
-        let r = big_button(ui, Icon::HandoutMaster, "Handout\nMaster", false);
-        let _ = r.on_hover_text("Handout Master (coming soon)");
+        let in_handout = app.session.active().is_some_and(|d| d.selection.target == Target::Handout);
+        if big_button_ex(ui, Icon::HandoutMaster, "Handout\nMaster", true, false, in_handout).0.clicked() {
+            let _ = app.run(if in_handout { "view.closeMaster" } else { "view.handoutMaster" }, json!({}));
+        }
         let r = big_button(ui, Icon::NotesMaster, "Notes\nMaster", false);
         let _ = r.on_hover_text("Notes Master (coming soon)");
     });
@@ -2671,6 +2676,46 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
                 }
             }
         });
+        big(app, ui, Icon::FormatBackground, "Background\nStyles", "view.pane", json!({"pane": "background"}));
+    });
+    group(ui, |ui| {
+        if big_button(ui, Icon::Close, "Close\nMaster View", true).clicked() {
+            run(app, "view.closeMaster", json!({}));
+        }
+    });
+}
+
+fn handout_master(app: &mut SlideApp, ui: &mut Ui) {
+    group(ui, |ui| {
+        let r = big_button(ui, Icon::Layout, &format!("Slides Per\nPage: {}", app.ui.handout_per_page), true);
+        egui::Popup::menu(&r).show(|ui| {
+            for n in [1u8, 2, 3, 4, 6, 9] {
+                if ui.selectable_label(app.ui.handout_per_page == n, format!("{n} Slide{}", if n == 1 { "" } else { "s" })).clicked() {
+                    app.ui.handout_per_page = n;
+                }
+            }
+        });
+    });
+    group(ui, |ui| {
+        let shown = |app: &SlideApp, k: deckcraft_model::PhType| {
+            app.session.active().and_then(|d| d.doc.handout_master.as_ref()).is_some_and(|m| m.shapes.iter().any(|s| s.ph_type() == Some(k)))
+        };
+        rows(ui, |ui| {
+            use deckcraft_model::PhType;
+            for (label, key, k) in [
+                ("Header", "header", PhType::Header),
+                ("Date", "date", PhType::Date),
+                ("Footer", "footer", PhType::Footer),
+                ("Page Number", "pageNumber", PhType::SlideNum),
+            ] {
+                let mut on = shown(app, k);
+                if ui.checkbox(&mut on, label).changed() {
+                    run(app, "handout.placeholders", json!({ key: on }));
+                }
+            }
+        });
+    });
+    group(ui, |ui| {
         big(app, ui, Icon::FormatBackground, "Background\nStyles", "view.pane", json!({"pane": "background"}));
     });
     group(ui, |ui| {

@@ -245,9 +245,10 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 - **Estimate:** 4–8 h.
 
 ### Notes and Handout masters
-- **Evidence:** checklist row missing the editing view. PPTX writes a notes master, and a handout
-  master's header, footer, date and slide number are kept. There is no view to edit either master.
-- **Estimate:** 4–6 h.
+- **Evidence:** View ▸ Handout Master edits the handout master (header, date, footer and page
+  number placeholders, background, slides-per-page preview) and PPTX keeps it. There's no Notes
+  Master view yet, and PDF handouts don't use the handout master's text.
+- **Estimate:** 2–3 h (Notes Master view), 1 h (handout text in PDF).
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -382,6 +383,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Size and Position dialog landed (position, size, rotation, scale, lock aspect, one undo). The dialog gap remains Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object and the rest of the ~60 |
 | 2026-10-14 | minor | File › New has six original starter decks; a large template gallery is still open |
 | 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
+| 2026-10-14 | minor | Handout Master view: the masters gap is now the Notes Master view and handout text in PDF |
 | 2026-10-13 | minor | Owned PPTX corpus for tables, charts, animations, media, sections and masters. Handout-master text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |

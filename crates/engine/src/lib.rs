@@ -30,6 +30,7 @@ pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
 pub use deckcraft_geom as geom;
 pub use deckcraft_media as media;
 pub use deckcraft_model as model;
+pub use deckcraft_pdf as pdf;
 pub use deckcraft_render as render;
 pub use tools::{Mods, PointerEvent, PointerKind, ToolKind};
 
@@ -103,6 +104,8 @@ pub enum Target {
         master: usize,
         layout: usize,
     },
+    /// The handout master (View ▸ Handout Master), a page at the notes size.
+    Handout,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -228,6 +231,7 @@ impl DocState {
         match self.selection.target {
             Target::Slides => self.current_slide().map(|s| s.shapes.as_slice()).unwrap_or(&[]),
             Target::Master { master } => self.doc.masters.get(master).map(|m| m.shapes.as_slice()).unwrap_or(&[]),
+            Target::Handout => self.doc.handout_master.as_ref().map(|m| m.shapes.as_slice()).unwrap_or(&[]),
             Target::Layout { master, layout } => {
                 self.doc.masters.get(master).and_then(|m| m.layouts.get(layout)).map(|l| l.shapes.as_slice()).unwrap_or(&[])
             }
@@ -241,11 +245,28 @@ impl DocState {
     }
 }
 
+/// The page being edited: the slide size, or the notes size in Handout Master view.
+pub fn page_size(st: &DocState) -> deckcraft_geom::Size {
+    if st.selection.target == Target::Handout { st.doc.notes_size } else { st.doc.slide_size }
+}
+
+/// The handout master as a one-master presentation at the handout page size, for drawing it with
+/// the layout renderer.
+pub fn handout_page(doc: &Presentation) -> Option<Presentation> {
+    let m = doc.handout_master.clone()?;
+    let mut p = doc.clone();
+    p.slide_size = doc.notes_size;
+    p.masters = vec![m];
+    p.slides.clear();
+    Some(p)
+}
+
 /// Mutable access to the edited shape tree of a presentation.
 pub fn shapes_mut<'a>(doc: &'a mut Presentation, sel: &Selection) -> Option<&'a mut Vec<Shape>> {
     match sel.target {
         Target::Slides => doc.slides.get_mut(sel.slide).map(|s| &mut Arc::make_mut(s).shapes),
         Target::Master { master } => doc.masters.get_mut(master).map(|m| &mut Arc::make_mut(m).shapes),
+        Target::Handout => doc.handout_master.as_mut().map(|m| &mut Arc::make_mut(m).shapes),
         Target::Layout { master, layout } => {
             doc.masters.get_mut(master).and_then(|m| Arc::make_mut(m).layouts.get_mut(layout)).map(|l| &mut l.shapes)
         }
@@ -580,6 +601,7 @@ fn clamp_selection(st: &mut DocState) {
     st.selection.slides = slides;
     match st.selection.target {
         Target::Master { master } if master >= st.doc.masters.len() => st.selection.target = Target::Slides,
+        Target::Handout if st.doc.handout_master.is_none() => st.selection.target = Target::Slides,
         Target::Layout { master, layout } if st.doc.masters.get(master).is_none_or(|m| layout >= m.layouts.len()) => {
             st.selection.target = Target::Slides
         }

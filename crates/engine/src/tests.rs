@@ -1733,3 +1733,41 @@ fn artistic_effects_apply_change_remove_and_round_trip() {
     s.execute("picture.reset", &json!({})).unwrap();
     assert_eq!((fill(&s).media, fill(&s).artistic), (original, None));
 }
+
+#[test]
+fn handout_master_view_edits_and_round_trips() {
+    use deckcraft_model::PhType;
+    let mut s = Session::with_new();
+    assert!(s.doc().unwrap().doc.handout_master.is_none());
+    assert!(s.execute("handout.placeholders", &json!({"footer": false})).is_err(), "only in the view");
+    let r = s.execute("view.handoutMaster", &json!({})).unwrap();
+    assert_eq!(r["created"], true);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.target, Target::Handout);
+    assert_eq!(crate::page_size(st), st.doc.notes_size);
+    let kinds: Vec<_> = st.shapes().iter().filter_map(|x| x.ph_type()).collect();
+    assert_eq!(kinds, [PhType::Header, PhType::Date, PhType::Footer, PhType::SlideNum]);
+    // Hide the footer, then show it again; undo restores the hidden state.
+    let r = s.execute("handout.placeholders", &json!({"footer": false})).unwrap();
+    assert_eq!(r["footer"], false);
+    assert_eq!(s.doc().unwrap().shapes().len(), 3);
+    s.execute("handout.placeholders", &json!({"footer": true})).unwrap();
+    assert_eq!(s.doc().unwrap().shapes().len(), 4);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().shapes().len(), 3);
+    // Shapes drawn in the view land on the handout master, not the slide.
+    let slide_shapes = s.doc().unwrap().doc.slides[0].shapes.len();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [20, 300, 100, 40]})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.handout_master.as_ref().unwrap().shapes.len(), 4);
+    assert_eq!(s.doc().unwrap().doc.slides[0].shapes.len(), slide_shapes);
+    assert!(crate::handout_page(&s.doc().unwrap().doc).is_some_and(|p| p.masters.len() == 1 && p.slide_size == p.notes_size));
+    s.execute("view.closeMaster", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.target, Target::Slides);
+    // Reopening doesn't make a second master, and it survives PPTX.
+    assert_eq!(s.execute("view.handoutMaster", &json!({})).unwrap()["created"], false);
+    let bytes = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let hm = back.handout_master.expect("handout master kept");
+    assert_eq!(hm.shapes.len(), 4);
+    assert!(hm.shapes.iter().any(|x| x.ph_type() == Some(PhType::SlideNum)));
+}

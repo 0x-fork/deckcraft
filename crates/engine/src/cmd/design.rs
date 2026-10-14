@@ -47,6 +47,24 @@ pub fn specs() -> Vec<CommandSpec> {
             header_footer
         ),
         cmd!(noundo "view.slideMaster", "Slide Master", ["View", "Master Views"], None, "{master?: index, layout?: index}", has_doc, master_view),
+        cmd!(
+            "view.handoutMaster",
+            "Handout Master",
+            ["View", "Master Views"],
+            None,
+            "{} (creates the handout master with header, date, footer and page number if the deck has none)",
+            has_doc,
+            handout_view
+        ),
+        cmd!(
+            "handout.placeholders",
+            "Handout Placeholders",
+            ["Handout Master", "Placeholders"],
+            None,
+            "{header?: bool, date?: bool, footer?: bool, pageNumber?: bool} (show or hide each)",
+            in_handout,
+            handout_placeholders
+        ),
         cmd!(noundo "view.closeMaster", "Close Master View", ["Slide Master", "Close"], None, "{}", has_doc, close_master),
         cmd!("master.insertLayout", "Insert Layout", ["Slide Master", "Edit Master"], None, "{name?}", has_doc, insert_layout),
         cmd!("master.renameLayout", "Rename Layout", ["Slide Master", "Edit Master"], None, "{name, master?, layout?}", has_doc, rename_layout),
@@ -82,7 +100,9 @@ fn theme(s: &mut Session, p: &Value) -> Result<Value> {
 fn master_index(doc: &Presentation, sel: &crate::Selection) -> usize {
     match sel.target {
         Target::Master { master } | Target::Layout { master, .. } => master,
-        Target::Slides => doc.slides.get(sel.slide).and_then(|s| doc.masters.iter().position(|m| m.layout(s.layout).is_some())).unwrap_or(0),
+        Target::Slides | Target::Handout => {
+            doc.slides.get(sel.slide).and_then(|s| doc.masters.iter().position(|m| m.layout(s.layout).is_some())).unwrap_or(0)
+        }
     }
 }
 
@@ -194,6 +214,11 @@ fn background(s: &mut Session, p: &Value) -> Result<Value> {
             Target::Layout { master, layout } => {
                 if let Some(l) = doc.masters.get_mut(master).and_then(|m| Arc::make_mut(m).layouts.get_mut(layout)) {
                     l.background = bg.clone();
+                }
+            }
+            Target::Handout => {
+                if let Some(m) = doc.handout_master.as_mut() {
+                    Arc::make_mut(m).background = bg.clone();
                 }
             }
             Target::Slides => {
@@ -450,6 +475,89 @@ fn master_view(s: &mut Session, p: &Value) -> Result<Value> {
         sel.text = None;
     })?;
     Ok(serde_json::to_value(target).unwrap_or_default())
+}
+
+fn in_handout(s: &Session) -> std::result::Result<(), String> {
+    if s.active().is_some_and(|d| d.selection.target == Target::Handout) { Ok(()) } else { Err("open View ▸ Handout Master first".into()) }
+}
+
+/// The four handout-master placeholders PowerPoint offers, in a page of `size`.
+pub fn handout_placeholder(kind: PhType, size: Size, id: ShapeId) -> Shape {
+    let (w, h) = (size.width, size.height);
+    let (name, idx, x, y) = match kind {
+        PhType::Header => ("Header Placeholder", 0, 0.0, 0.0),
+        PhType::Date => ("Date Placeholder", 1, w * 0.57, 0.0),
+        PhType::Footer => ("Footer Placeholder", 2, 0.0, h * 0.95),
+        _ => ("Slide Number Placeholder", 3, w * 0.57, h * 0.95),
+    };
+    let mut text = TextBody::default();
+    if let Some(p) = text.paragraphs.first_mut()
+        && matches!(kind, PhType::Date | PhType::SlideNum)
+    {
+        p.props.align = Some(deckcraft_model::text::Align::Right);
+    }
+    Shape {
+        id,
+        name: format!("{name} {}", idx + 1),
+        xfrm: Some(deckcraft_geom::Xfrm::new(x, y, w * 0.43, h * 0.05)),
+        ph: Some(deckcraft_model::Placeholder { kind, idx, size: Some("quarter".into()), ..Default::default() }),
+        text: Some(text),
+        ..Default::default()
+    }
+}
+
+const HANDOUT_KINDS: [(&str, PhType); 4] =
+    [("header", PhType::Header), ("date", PhType::Date), ("footer", PhType::Footer), ("pageNumber", PhType::SlideNum)];
+
+fn handout_view(s: &mut Session, _p: &Value) -> Result<Value> {
+    let created = s.doc()?.doc.handout_master.is_none();
+    if created {
+        s.edit(|doc, _| {
+            let mut m = deckcraft_model::Master {
+                name: "Handout Master".into(),
+                theme: doc.masters.first().map(|m| m.theme.clone()).unwrap_or_default(),
+                color_map: doc.masters.first().map(|m| m.color_map.clone()).unwrap_or_default(),
+                ..Default::default()
+            };
+            let size = doc.notes_size;
+            for (_, k) in HANDOUT_KINDS {
+                let id = ShapeId(doc.alloc_id());
+                m.shapes.push(handout_placeholder(k, size, id));
+            }
+            doc.handout_master = Some(Arc::new(m));
+            Ok(())
+        })?;
+    }
+    s.select(|_, sel| {
+        sel.target = Target::Handout;
+        sel.shapes.clear();
+        sel.text = None;
+    })?;
+    Ok(json!({"created": created}))
+}
+
+fn handout_placeholders(s: &mut Session, p: &Value) -> Result<Value> {
+    s.edit(|doc, _| {
+        let size = doc.notes_size;
+        let mut ids = vec![];
+        for (key, _) in HANDOUT_KINDS {
+            ids.push(p.get(key).and_then(Value::as_bool).map(|_| ShapeId(doc.alloc_id())));
+        }
+        let m = Arc::make_mut(doc.handout_master.as_mut().ok_or_else(|| bad("handout.placeholders", "no handout master"))?);
+        for ((key, kind), id) in HANDOUT_KINDS.into_iter().zip(ids) {
+            let (Some(on), Some(id)) = (p.get(key).and_then(Value::as_bool), id) else { continue };
+            let has = m.shapes.iter().any(|x| x.ph_type() == Some(kind));
+            if on && !has {
+                m.shapes.push(handout_placeholder(kind, size, id));
+            } else if !on {
+                m.shapes.retain(|x| x.ph_type() != Some(kind));
+            }
+        }
+        Ok(())
+    })?;
+    let m = s.doc()?.doc.handout_master.clone();
+    let shown = |k: PhType| m.as_ref().is_some_and(|m| m.shapes.iter().any(|x| x.ph_type() == Some(k)));
+    Ok(json!({"header": shown(PhType::Header), "date": shown(PhType::Date), "footer": shown(PhType::Footer), "pageNumber": shown(PhType::SlideNum)}))
 }
 
 fn close_master(s: &mut Session, _p: &Value) -> Result<Value> {
