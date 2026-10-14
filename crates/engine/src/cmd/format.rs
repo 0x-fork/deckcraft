@@ -135,7 +135,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Numbering",
             ["Home", "Paragraph"],
             None,
-            "{on?: bool, scheme?: arabicPeriod|arabicParenR|romanUcPeriod|romanLcPeriod|alphaUcPeriod|alphaLcParenR|alphaLcPeriod, start?: n}",
+            "{on?: bool, scheme?: arabicPeriod|arabicParenR|romanUcPeriod|romanLcPeriod|alphaUcPeriod|alphaLcParenR|alphaLcPeriod, start?: n, color?, size?: % of text}",
             has_text_or_shapes,
             numbering
         ),
@@ -527,7 +527,7 @@ fn bullets(s: &mut Session, p: &Value) -> Result<Value> {
     let on = on_param(p, Some(cur));
     let ch = str_param(p, "char").unwrap_or("•").to_string();
     let col = color_param(p, "color");
-    let size = f64_param(p, "size").map(|v| v / 100.0);
+    let size = f64_param(p, "size").map(|v| (v / 100.0).clamp(0.25, 4.0));
     let explicit_char = p.get("char").is_some();
     format_para(s, &move |para| {
         if on {
@@ -556,9 +556,17 @@ fn numbering(s: &mut Session, p: &Value) -> Result<Value> {
     let on = on_param(p, Some(cur));
     let scheme = str_param(p, "scheme").unwrap_or("arabicPeriod").to_string();
     let start = p.get("start").and_then(Value::as_u64).map(|v| v.clamp(1, 32767) as u32).unwrap_or(1);
+    let col = color_param(p, "color");
+    let size = f64_param(p, "size").map(|v| (v / 100.0).clamp(0.25, 4.0));
     format_para(s, &move |para| {
         if on {
             para.props.bullet = Some(Bullet::AutoNum { scheme: scheme.clone(), start_at: start });
+            if col.is_some() {
+                para.props.bullet_color = col.clone();
+            }
+            if size.is_some() {
+                para.props.bullet_size = size;
+            }
             para.props.margin_left = Some(27.0 + 36.0 * para.level as f64);
             para.props.indent = Some(-27.0);
         } else {

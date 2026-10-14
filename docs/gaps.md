@@ -244,7 +244,7 @@ Detail in [ui-parity.md](ui-parity.md).
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
-- **Dialogs**: 27 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Find/Replace dialog,
   Replace Fonts, Action Settings, Print, Insert Object…). 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 

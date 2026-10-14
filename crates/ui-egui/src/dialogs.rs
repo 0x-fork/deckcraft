@@ -55,6 +55,7 @@ fn title(id: &str) -> &'static str {
         "chartData" => "Chart Data",
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
+        "bullets" => "Bullets and Numbering",
         "quit" => "DeckCraft",
         _ => "DeckCraft",
     }
@@ -354,6 +355,107 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 app.ui.pane = Some("comments".into());
             }
             ok || cancel
+        }
+        "bullets" => {
+            // The current paragraph's list, as the dialog's starting point.
+            let cur = app.session.execute("format.state", &json!({})).ok().unwrap_or(Value::Null);
+            let numbered = cur.get("numbering").and_then(Value::as_bool).unwrap_or(false);
+            let tab = d.get("tab", if numbered { "numbered" } else { "bulleted" });
+            ui.horizontal(|ui| {
+                for (k, l) in [("bulleted", "Bulleted"), ("numbered", "Numbered")] {
+                    if ui.selectable_label(tab == k, l).clicked() {
+                        d.fields.insert("tab".into(), k.into());
+                    }
+                }
+            });
+            ui.separator();
+            let style_key = if tab == "numbered" { "scheme" } else { "char" };
+            let current = d.get(style_key, if tab == "numbered" { "arabicPeriod" } else { "•" });
+            let styles: &[(&str, &str)] = if tab == "numbered" {
+                &[
+                    ("arabicPeriod", "1. 2. 3."),
+                    ("arabicParenR", "1) 2) 3)"),
+                    ("romanUcPeriod", "I. II. III."),
+                    ("romanLcPeriod", "i. ii. iii."),
+                    ("alphaUcPeriod", "A. B. C."),
+                    ("alphaLcParenR", "a) b) c)"),
+                    ("alphaLcPeriod", "a. b. c."),
+                ]
+            } else {
+                &[("•", "•"), ("○", "○"), ("■", "■"), ("□", "□"), ("◆", "◆"), ("➢", "➢"), ("✓", "✓"), ("–", "–"), ("★", "★")]
+            };
+            egui::Grid::new("bullet-styles").show(ui, |ui| {
+                for (i, (k, l)) in styles.iter().enumerate() {
+                    let r = ui.add_sized(
+                        vec2(if tab == "numbered" { 88.0 } else { 44.0 }, 40.0),
+                        egui::Button::selectable(current == *k, egui::RichText::new(*l).size(16.0)),
+                    );
+                    if r.clicked() {
+                        d.fields.insert(style_key.into(), (*k).into());
+                    }
+                    if (i + 1) % if tab == "numbered" { 4 } else { 5 } == 0 {
+                        ui.end_row();
+                    }
+                }
+            });
+            if tab == "bulleted" {
+                field(ui, d, "Custom character:", "custom", "");
+            } else {
+                field(ui, d, "Start at:", "start", "1");
+            }
+            field(ui, d, "Size (% of text):", "size", "100");
+            let colors = [
+                ("", "Automatic"),
+                ("tx1", "Text"),
+                ("accent1", "Accent 1"),
+                ("accent2", "Accent 2"),
+                ("accent3", "Accent 3"),
+                ("accent4", "Accent 4"),
+                ("accent5", "Accent 5"),
+                ("accent6", "Accent 6"),
+            ];
+            let color = d.get("color", "");
+            ui.horizontal(|ui| {
+                ui.add_sized(vec2(120.0, 20.0), egui::Label::new("Color:"));
+                egui::ComboBox::from_id_salt("bullet-color")
+                    .selected_text(colors.iter().find(|c| c.0 == color).map_or("Automatic", |c| c.1))
+                    .show_ui(ui, |ui| {
+                        for (k, l) in colors {
+                            if ui.selectable_label(color == k, l).clicked() {
+                                d.fields.insert("color".into(), k.into());
+                            }
+                        }
+                    });
+            });
+            ui.horizontal(|ui| {
+                if ui.button("None").on_hover_text("Remove bullets and numbering").clicked() {
+                    d.fields.insert("none".into(), "1".into());
+                }
+            });
+            let (ok, cancel) = buttons(ui, "OK");
+            let none = d.fields.contains_key("none");
+            if none {
+                run(app, if tab == "numbered" { "format.numbering" } else { "format.bullets" }, json!({"on": false}));
+            } else if ok {
+                let mut p = json!({"on": true});
+                if let Some(size) = d.get("size", "100").trim().trim_end_matches('%').parse::<f64>().ok().filter(|v| v.is_finite()) {
+                    p["size"] = json!(size.clamp(25.0, 400.0));
+                }
+                if !color.is_empty() {
+                    p["color"] = json!(color);
+                }
+                if tab == "numbered" {
+                    p["scheme"] = json!(d.get("scheme", "arabicPeriod"));
+                    p["start"] = json!(d.get("start", "1").trim().parse::<u64>().unwrap_or(1).clamp(1, 32767));
+                    run(app, "format.numbering", p);
+                } else {
+                    let custom = d.get("custom", "");
+                    let ch = custom.chars().find(|c| !c.is_whitespace()).map(String::from).unwrap_or_else(|| d.get("char", "•"));
+                    p["char"] = json!(ch);
+                    run(app, "format.bullets", p);
+                }
+            }
+            ok || cancel || none
         }
         "altText" => {
             let cur = app.session.active().and_then(|s| s.selected_shapes().first().map(|x| x.descr.clone())).unwrap_or_default();
