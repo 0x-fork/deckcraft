@@ -1,18 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (SmartArt text follows `dsp:txXfrm`; previous: trivial, Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width comments: modern threaded parts written, #70; groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); previously major: created; formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (EMF/WMF rectangle clip regions; previous: trivial, groups with a small legacy child space, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (embedded fonts read, written and drawn; MicroType Express subsets kept but not drawn; previously trivial: groups with a small legacy child coordinate space, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus round-trip; notes-master header and footer text kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders; paragraph `defRPr` and action sounds kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for text effects, body layout, theme effects, fills, bevels and connectors; a run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, survive a save; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (3-D model parts and animation bounce end round-trip; `corpus_media.rs` covers SmartArt and OLE XML, media bookmarks and trims, sections, fields, ink and timing) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines round-trip; previously trivial: groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for tables, charts, animations, media, sections and masters; handout-master text kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (a PNG or JPEG slide export records its resolution, so the default 2× picture is 144 dpi; previous: groups with a small legacy child coordinate space draw outlines at their own width, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previously minor: chart trendlines round-trip; groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233); formats taken from PowerPoint 16.113.4's Info.plist, PPTX coverage measured from `crates/pptx`) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (an unchanged chart keeps its embedded workbook on save, #335) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** major (community PR wave 2026-10-14: seven owned PPTX corpus files, embedded fonts, EMF/WMF clip regions, threaded comments (#70), chart trendlines and workbooks (#335), SmartArt written as a diagram, tags and custom XML kept, picture export DPI; duplicated rows and headers folded; previous: trivial, lines in scaled groups, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -28,11 +16,7 @@ PowerPoint opens and saves; Viewer = opens only).
 
 | Format | PowerPoint | DeckCraft read | DeckCraft write | Fidelity / notes | Tested by |
 |---|---|---|---|---|---|
-| `.pptx` presentation | Editor | yes | yes | Broad (see below); corpus is decks we author, not measured against PowerPoint renders | `crates/pptx/tests/corpus.rs`, `roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
-| `.pptx` presentation | Editor | yes | yes | Broad (see below); an owned corpus covers comments, links and actions, custom shows, rotated groups and placeholders that inherit from the layout. Embedded fonts and a corpus of decks from outside this repo are still open | `crates/pptx/tests/roundtrip.rs`, `corpus_elements.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
-| `.pptx` presentation | Editor | yes | yes | Broad (see below); an owned corpus covers text effects, autofit, columns, vertical and RTL text, tabs, line spacing, theme effects, gradient and pattern fills, bevels and connectors. A corpus of decks from outside this repo is still open | `crates/pptx/tests/roundtrip.rs`, `corpus_style.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
-| `.pptx` presentation | Editor | yes | yes | Broad (see below); never measured on real decks | `crates/pptx/tests/roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs` (30 tests), `corpus_media.rs`; opened in PowerPoint by hand 2026-10-06 |
-| `.pptx` presentation | Editor | yes | yes | Broad (see below); corpus is decks we author, not measured against PowerPoint renders | `crates/pptx/tests/corpus_kinds.rs`, `roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
+| `.pptx` presentation | Editor | yes | yes | Broad (see below); an owned corpus of decks we author round-trips tables, charts, animations, media, sections, masters and layouts, comments, links and actions, custom shows, rotated groups, inherited placeholders, text effects and body layout, theme effects, fills, bevels, connectors, 3-D models and animation bounce end. Not measured against PowerPoint renders or decks from outside this repo | `crates/pptx/tests/corpus.rs`, `corpus_kinds.rs`, `corpus_elements.rs`, `corpus_style.rs`, `corpus_themes.rs`, `corpus_charts.rs`, `corpus_media.rs`, `roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
 | `.potx` template | Editor | yes (as a presentation) | no: written with the `.pptx` content type | `file.saveTemplate` is Save As under another name | none |
 | `.ppsx` slide show | Editor | yes (as a presentation) | no: written as `.pptx` content | Doesn't start in show mode | none |
 | `.pptm` / `.potm` / `.ppsm` macro-enabled | Editor | no | no | Should open and keep `vbaProject.bin` without running it | none |
@@ -42,8 +26,6 @@ PowerPoint opens and saves; Viewer = opens only).
 | `.deckcraft` native (zip + JSON) | n/a | yes (also `.slidecraft`) | yes | Lossless for the DeckCraft model, forward compatible | `crates/format` tests |
 | PDF | export | no | yes | Slides, notes pages, handouts (1–9); real-text layer with embedded subsets, links, bookmarks. Slide artwork is a raster image at print resolution, not vector | `crates/pdf` tests |
 | Outline `.rtf` / `.txt` | export (RTF), import (outline) | `.txt` outline; `.md` as Markdown (headings are slides, list items bullets) (`slide.fromOutline`) | `.txt` outline | No RTF | engine tests |
-| PNG / JPEG slide images | export | n/a | yes (`file.export`, `deckcraft-cli render`) | Matches the editor's renderer | render tests |
-| Outline `.rtf` / `.txt` | export (RTF), import (outline) | `.txt`/`.md` outline (`slide.fromOutline`) | `.txt` outline | No RTF | engine tests |
 | PNG / JPEG slide images | export | n/a | yes (`file.export`, `deckcraft-cli render`) | Matches the editor's renderer. PNG `pHYs` and JPEG JFIF density are `scale` × 72 dpi (default scale 2 is 144 dpi), so Preview shows the slide's real size | render and engine tests |
 | TIFF / BMP / GIF slide images | export | n/a | no | Easy (the `image` crate writes them) | none |
 | Animated GIF of the deck | export | n/a | yes (`file.export` format `gif`, Export…, `deckcraft-cli`, MCP `export`) | One frame per slide from the slide renderer; size small/medium/large/extra large or 16–3840 px wide, 0.1–600 s per slide, loop forever or play once, slide range, hidden slides skipped; a 256-colour palette per frame (exact, or NeuQuant above 256 colours). Transitions and build animations are not animated | `crates/engine/src/gif_export.rs` tests (decoded frames, size, delay, loop, hidden slides, hostile params), MCP, CLI and export dialog tests |
@@ -65,10 +47,8 @@ PowerPoint opens and saves; Viewer = opens only).
 | WMV | yes (Windows) | embedded, not playable | |
 | Online video (YouTube embeds) | yes | no | Cloud feature |
 | Embedded OLE objects | yes | kept on round trip (opaque), not insertable or editable | `ShapeKind::Opaque` |
-| 3-D models (`.glb`) | yes | no | |
 | Embedded fonts | yes | yes | `p:embeddedFontLst` read and written. TrueType, OpenType and Embedded OpenType faces are used to draw; MicroType Express subsets are kept and written back, not drawn |
 | 3-D models (`.glb`) | yes | kept | The model part round-trips (`p:contentPart`, including an `mc:AlternateContent` choice and its fallback picture). Not drawn as a mesh and not inserted from the ribbon |
-| Embedded fonts | yes | no | `p:embeddedFontLst` ignored |
 
 ## PPTX coverage (PresentationML / DrawingML)
 
@@ -86,21 +66,15 @@ the round trip even though DeckCraft doesn't model it.
 | Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group, and text, keep their size in points whatever the group's child-coordinate scale (#233). |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
 | Lines: dash, compound, caps, joins, arrowheads | yes | yes | |
-| Effects: shadow, glow, soft edges, reflection | yes | yes | |
-| 3-D: `scene3d`, `sp3d` | kept | kept | Not rendered |
-| Text: runs, paragraphs, bullets, numbering, levels, autofit, columns, vertical, RTL, script fonts, fields, hyperlinks | yes | yes | Round-trip tests incl. `justLow`, date fields and paragraph `defRPr` (the defaults a placeholder's runs inherit, including a link). A click or hover action keeps its sound, `endSnd`, and a custom show's "Show and return" |
+| Text: runs, paragraphs, bullets, numbering, levels, autofit, columns, vertical, RTL, script fonts, fields, hyperlinks | yes | yes | Round-trip tests incl. `justLow`, date fields and paragraph `defRPr` (the defaults a placeholder's runs inherit, including a link). A click or hover action keeps its sound, `endSnd`, and a custom show's "Show and return". Gradient and outline on a run, autofit, columns, vertical and RTL text, tab stops and line spacing round-trip (`corpus_style.rs`) |
 | Effects: shadow, glow, soft edges, reflection | yes | yes | On a run, inner shadow, reflection and soft edges are kept along with the outer shadow and glow |
-| 3-D: `scene3d`, `sp3d` | kept | kept | A bevel preset with no `sp3d` of its own is written back on shapes and theme effect styles. Bevels, cameras and face lighting draw approximately; extrusion does not |
-| Text: runs, paragraphs, bullets, numbering, levels, autofit, columns, vertical, RTL, script fonts, fields, hyperlinks | yes | yes | Round-trip tests incl. `justLow`, date fields, gradient and outline on a run, autofit, columns, vertical and RTL text, tab stops and line spacing (`corpus_style.rs`) |
+| 3-D: `scene3d`, `sp3d` | kept | kept | A bevel preset with no `sp3d` of its own is written back on shapes and theme effect styles. Bevels, cameras, face lighting and extrusion sides draw approximately |
 | Text warp (`prstTxWarp`) | yes | yes | All 40 presets rendered (`crates/geom/src/warp.rs`); adjust values (`avLst`) round-trip |
 | Pictures with crop, recolour, duotone, alpha, luminance | yes | yes | |
 | Tables with styles | yes | yes | Merges and both diagonal borders round-trip |
 | Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw`. Trendlines (type, order or period, forecast, intercept, equation and R²) are read, written and drawn. A combo chart's secondary value axis is read and is not written back when the chart is rebuilt. An unchanged chart also keeps its embedded workbook and the other parts its relationships point at, under fresh `keptN` names so they never replace a part DeckCraft writes (#335); editing the chart drops that workbook instead of writing a stale one |
 | Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept, with their embedded workbook (#335); edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
-| SmartArt (`dgm`) | drawing part only, as a group; text laid out on its `dsp:txXfrm` rectangle | as shapes | Diagram data model lost on save |
-| SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save. A diagram with no relationship parts keeps its XML; the drawing and data parts are still dropped (#203) |
-| SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save (DeckCraft keeps its own outline in `.deckcraft` only) |
-| SmartArt (`dgm`) | the drawing part as a group, and the outline from the data model (Text Pane) | as a diagram: data model from the outline; layout, quick style and colour parts (the file's own kept until the layout is switched); the group as the cached drawing | DeckCraft's layout definitions are simple; a diagram without a cached drawing isn't drawn |
+| SmartArt (`dgm`) | the drawing part as a group (text laid out on its `dsp:txXfrm` rectangle), and the outline from the data model (Text Pane) | as a diagram: data model from the outline; layout, quick style and colour parts (the file's own kept until the layout is switched); the group as the cached drawing | DeckCraft's layout definitions are simple; a diagram without a cached drawing isn't drawn. SmartArt kept only as XML, without its relationship parts, still loses the drawing and data parts (#203) |
 | Equations (OMML, `a14:m`) | no | no | PR #55 open |
 | Audio / video (`p14:media`, trim, fades, bookmarks) | yes | partly | Playback options lost on save (#74) |
 | Ink (`contentPart`) | yes | as a group of freeform lines | PowerPoint sees shapes, not ink |
@@ -109,13 +83,10 @@ the round trip even though DeckCraft doesn't model it.
 | Comments: legacy | yes | yes | |
 | Comments: modern threaded (`p188`) | yes | yes | Written next to the flattened legacy part; replies and resolved state round-trip (`threads_and_resolved_round_trip`) |
 | Unknown slide-level elements (`graphicFrame` OLE, extensions, `mc:AlternateContent`) | kept | kept | Rendered as a labelled placeholder with the preview picture when present |
-| Tags, custom XML, VBA | no / no / no | | |
 | Embedded fonts | yes | yes | MicroType Express subsets kept, not drawn |
 | Tags (`p:custDataLst`) on the presentation, slides and shapes | yes | yes | Add-ins such as think-cell keep their identity; `tags_survive_round_trip` |
-| Custom XML, VBA | no / no | no / no | |
 | Custom XML data, sensitivity label (`docMetadata/LabelInfo.xml`), custom document properties | kept verbatim | yes | SharePoint metadata and the label survive a save; `custom_xml_label_and_custom_properties_survive_save` |
-| Tags, VBA | no / no | | |
-| Embedded fonts | no | no | |
+| VBA | no | no | |
 | Encryption (password to open) | no | no | |
 
 ### What would move the PPTX number
@@ -132,6 +103,7 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Community PR wave folded: one row each for `.pptx` (seven owned corpus files), outline, 3-D models, embedded fonts, text, effects, 3-D (extrusion sides draw now), SmartArt (written as a diagram) and VBA (tags and custom XML are kept) |
 | 2026-10-12 | minor | SmartArt import lays each shape's text out on its `dsp:txXfrm` text rectangle instead of the shape box |
 | 2026-10-13 | minor | EMF/WMF rectangle clip regions limit later drawing; EMF+ records remain |
 | 2026-10-13 | minor | Embedded fonts read and written; TrueType, OpenType and Embedded OpenType faces drawn |
