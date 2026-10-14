@@ -3454,3 +3454,10 @@ fn background_loads_are_adopted_through_a_command() {
     assert!(s.execute("file.adopt", &json!({})).is_err());
     std::fs::remove_file(&path).ok();
 }
+
+#[test]
+fn every_command_id_is_registered_once() {
+    let mut seen = std::collections::HashSet::new();
+    let dups: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| !seen.insert(*id)).collect();
+    assert!(dups.is_empty(), "registered more than once: {dups:?}");
+}

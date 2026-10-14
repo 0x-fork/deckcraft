@@ -36,7 +36,6 @@ pub fn specs() -> Vec<CommandSpec> {
             autocorrect_options
         ),
         cmd!("text.insert", "Type Text", [], None, "{text} (\\n = new paragraph, \\u000b = line break)", has_text, insert),
-        cmd!("text.delete", "Delete Text", [], Some("Backspace"), "{dir?: backward|forward|wordBackward|wordForward}", has_text, delete),
         // The input method's composition: shown in place, an undo step only once committed.
         CommandSpec {
             id: "text.compose",
@@ -58,7 +57,6 @@ pub fn specs() -> Vec<CommandSpec> {
             has_text,
             commit
         ),
-        cmd!(noundo "text.move", "Move Insertion Point", [], None, "{to: left|right|up|down|wordLeft|wordRight|lineStart|lineEnd|paraStart|paraEnd|start|end, extend?: bool}", has_text, move_caret),
         cmd!(
             "text.delete",
             "Delete Text",
