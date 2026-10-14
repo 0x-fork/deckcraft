@@ -440,6 +440,15 @@ pub fn fmt_num(v: f64, suffix: &str) -> String {
     format!("{s}{suffix}")
 }
 
+/// The text a kept-open text box shows: the typed draft while the stored value is still what the
+/// draft started from, otherwise the stored value (another document, a reorder or an undo changed it).
+pub fn text_draft(stored: Option<(String, String)>, current: &str) -> String {
+    match stored {
+        Some((base, buf)) if base == current => buf,
+        _ => current.to_string(),
+    }
+}
+
 /// Section header inside panes.
 pub fn section(ui: &mut Ui, title: &str, open: bool) -> bool {
     let t = Tokens::get(ui.ctx());
@@ -533,5 +542,20 @@ mod tests {
         assert!(harness.query_by_label("Eyedropper").is_none(), "the menu closes again");
         harness.run();
         assert_eq!(picked.borrow().iter().count(), 1, "the colour is handed back once");
+    }
+
+    /// #413: a draft is kept while the stored text is unchanged ...
+    #[test]
+    fn text_draft_keeps_typing_while_the_stored_text_is_unchanged() {
+        let stored = Some(("old".to_string(), "old plus typing".to_string()));
+        assert_eq!(text_draft(stored, "old"), "old plus typing");
+    }
+
+    /// ... and dropped when the stored text changes underneath it.
+    #[test]
+    fn text_draft_drops_a_stale_draft_when_the_stored_text_changes() {
+        let stored = Some(("old".to_string(), "old plus typing".to_string()));
+        assert_eq!(text_draft(stored, "undone"), "undone");
+        assert_eq!(text_draft(None, "fresh"), "fresh");
     }
 }
