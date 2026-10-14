@@ -171,6 +171,10 @@ enum Drag {
 /// Shape-gallery names that draw a freeform path instead of a preset.
 pub const FREEFORM_TOOLS: [(&str, &str); 3] = [("curve", "Curve"), ("freeform", "Freeform: Shape"), ("scribble", "Freeform: Scribble")];
 
+/// Draw Table's pencil and eraser, as `ToolKind::Shape` presets (Insert › Table › Draw Table).
+pub const DRAW_TABLE: &str = "drawTable";
+pub const TABLE_ERASER: &str = "tableEraser";
+
 pub fn is_freeform_tool(name: &str) -> bool {
     FREEFORM_TOOLS.iter().any(|f| f.0 == name)
 }
@@ -401,6 +405,10 @@ impl Session {
                 self.tool.path_smooth = preset == "curve";
                 self.tool.path_closing = false;
                 return Ok(Value::Null);
+            }
+            ToolKind::Shape { preset } if preset == TABLE_ERASER => {
+                // Click a border to merge the cells on either side; elsewhere does nothing.
+                return Ok(self.execute("table.eraseLine", &json!({"at": [p.x, p.y], "tol": tol.max(4.0)})).unwrap_or(Value::Null));
             }
             ToolKind::Shape { .. } | ToolKind::TextBox => {
                 self.tool.drag = Some(Drag::Create { start: p });
@@ -713,6 +721,13 @@ impl Session {
                     }
                     let s0 = self.glue_at(start, tol).map(|g| g.2).unwrap_or(start);
                     line_xfrm(s0, q, 0.0)
+                } else if matches!(&self.tool.kind, ToolKind::Shape { preset } if preset == DRAW_TABLE)
+                    && crate::cmd::table::table_at(self, &Value::Null, (start.x, start.y)).is_some()
+                {
+                    // The pencil inside a table draws a straight border, across or down.
+                    let q = if (p.x - start.x).abs() >= (p.y - start.y).abs() { Point::new(p.x, start.y) } else { Point::new(start.x, p.y) };
+                    let r = Rect::from_points(start, q);
+                    Xfrm::new(r.x0, r.y0, r.width(), r.height())
                 } else {
                     let mut r = Rect::from_points(start, p);
                     if mods.shift {
@@ -822,6 +837,16 @@ impl Session {
                 let preview = self.tool.preview.take();
                 let dragged = (p - start).hypot() > 2.0;
                 let res = match &kind {
+                    ToolKind::Shape { preset } if preset == DRAW_TABLE => {
+                        // Inside a table: split cells along the line. Elsewhere: a one-cell table.
+                        if crate::cmd::table::table_at(self, &Value::Null, (start.x, start.y)).is_some() {
+                            self.execute("table.drawLine", &json!({"from": [start.x, start.y], "to": [p.x, p.y]})).unwrap_or(Value::Null)
+                        } else if let Some(x) = preview.filter(|x| dragged && x.w >= 8.0 && x.h >= 8.0) {
+                            self.execute("insert.table", &json!({"rows": 1, "cols": 1, "rect": [x.x, x.y, x.w, x.h]}))?
+                        } else {
+                            Value::Null
+                        }
+                    }
                     ToolKind::Shape { preset } => {
                         let line = deckcraft_geom::preset::is_line_like(preset);
                         let rect = match preview.filter(|_| dragged) {
@@ -855,7 +880,8 @@ impl Session {
                     }
                     _ => Value::Null,
                 };
-                if !self.tool.sticky {
+                // The table pencil stays on until you pick another tool, as in PowerPoint.
+                if !self.tool.sticky && !matches!(&kind, ToolKind::Shape { preset } if preset == DRAW_TABLE) {
                     self.tool.kind = ToolKind::Select;
                 }
                 out = res;

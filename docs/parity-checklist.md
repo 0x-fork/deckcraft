@@ -16,6 +16,8 @@ The summary between `<!-- SUMMARY -->
 | P2 | 54 | 14 | 15 | 25 | 40% |
 | P1 | 65 | 39 | 21 | 5 | 76% |
 | P2 | 54 | 14 | 17 | 23 | 42% |
+| P1 | 65 | 38 | 21 | 6 | 75% |
+| P2 | 54 | 13 | 16 | 25 | 39% |
 
 | Area | Parity |
 |---|---|
@@ -34,6 +36,7 @@ The summary between `<!-- SUMMARY -->
 | Arrange | 100% |
 | Text | 80% |
 | Tables | 95% |
+| Tables | 92% |
 | Charts | 65% |
 | SmartArt | 33% |
 | Pictures | 52% |
@@ -177,7 +180,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Right-to-left and complex scripts | P1 | P |
 | Text | East Asian text (CJK fonts, line breaking) | P1 | P |
 | Tables | Insert table (grid picker, dialog) | P0 | D |
-| Tables | Draw table | P2 | M |
+| Tables | Draw table | P2 | P |
 | Tables | Table styles and style options | P0 | D |
 | Tables | Insert/delete rows and columns | P0 | D |
 | Tables | Merge and split cells | P1 | D |
