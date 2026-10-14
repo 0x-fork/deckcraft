@@ -33,11 +33,11 @@ pub fn transition(imp: &mut Imp, part: &Part, t: &El) -> Option<Transition> {
         },
     }
     let default_dur = deckcraft_model::anim::TRANSITIONS.iter().find(|x| x.0 == tr.kind).map(|x| x.3).unwrap_or(1000);
+    // `spd` defaults to "fast" in the schema; PowerPoint omits both attributes for 0.5 s.
     tr.duration_ms = ms_attr(t, "dur").unwrap_or(match t.attr("spd") {
-        Some("fast") => 500,
         Some("med") => 750,
         Some("slow") => default_dur.max(1000),
-        _ => default_dur,
+        _ => 500,
     });
     if let Some(snd) = t.path(&["sndAc", "stSnd", "snd"]) {
         tr.sound = dml::media_ref(imp, part, snd);
