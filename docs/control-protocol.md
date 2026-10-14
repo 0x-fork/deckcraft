@@ -3,6 +3,12 @@
 Start the app with `--control <port>`. The server listens on `127.0.0.1` only and speaks JSON
 lines: one request object per line, one reply per line.
 
+The connected MCP client requires the reply's numeric `id` to match its request, `ok` to be a
+boolean, and exactly one of `result` (success) or a string `error` (failure). It caps each reply at
+16 MiB including its terminating newline, accepts CRLF, and rejects EOF inside a frame. Invalid
+replies invalidate the connection and leave the command's outcome unknown; the client does not
+replay it. Unsolicited bytes already buffered between calls force a reconnect before sending.
+
 The server bounds what a client can hold: 16 connections at once (more get `{"ok":false,"error":"busy: …"}`
 and are closed), 16 MiB per request line (longer closes the connection), 64 queued requests (more are
 answered `busy`), 10 minutes idle and 30 seconds per blocked reply write before the socket is closed, and
