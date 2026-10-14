@@ -254,9 +254,11 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   only the three-point rig, and no command or pane to apply 3-D).
 - **Estimate:** 1 h (edit points: segment types, open/close path), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
   render as approximations and `scene3d`/`sp3d` round-trip as raw XML; extrusions draw their
-  sides, in one shaded colour, under turned cameras; only the three-point rig, and no command or pane to apply 3-D).
-- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 6–10 h (3-D extrusion,
-  rigs and materials, Format Shape page).
+  sides under turned cameras, each lit for its own normal; the preset light rigs, rig directions and
+  materials shade bevels and sides approximately (fitted to PowerPoint for three-point/matte only); no contours,
+  and no command or pane to apply 3-D).
+- **Estimate:** 4–6 h (edit points), 2–4 h (warp gallery, command and handles), 2–4 h (3-D contours and
+  rig/material fidelity), plus the Format Shape page.
 
 ### Proofing: spelling, thesaurus, AutoCorrect
 - **Evidence:** `review.spelling` checks a small built-in list of frequent misspellings
@@ -353,6 +355,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
 | 2026-10-14 | trivial | Corpus slice: themes, masters, effects and links; text Mouse Over actions round-trip |
 | 2026-10-14 | minor | Chart trendlines round-trip. The real-deck corpus gap stays open; secondary-axis export and drawing trendlines stay in the charts gap |
+| 2026-10-14 | trivial | 3-D light rigs and materials; extrusion sides lit per side |
 | 2026-10-14 | trivial | 3-D extrusions draw their sides under turned cameras |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |

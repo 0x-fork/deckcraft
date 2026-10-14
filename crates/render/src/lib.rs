@@ -12,6 +12,7 @@ mod camera;
 mod chart;
 mod colr;
 mod extrude;
+mod light;
 
 mod compound;
 mod extent;
@@ -967,7 +968,8 @@ impl Renderer {
                 _ => None,
             };
             let pre = m * turn.inverse();
-            extrude::draw(ctx, &outline, pre, turn, extrude::back_offset(&cam, ex.depth, w, h), extrude::side_color(rctx, &ex, face));
+            let lit = light::Lighting::from_raw(raw);
+            extrude::draw(ctx, &outline, w, h, &cam, ex.depth, pre, turn, extrude::side_color(rctx, &ex, face), &lit);
         }
         // Fill.
         match &s.kind {
