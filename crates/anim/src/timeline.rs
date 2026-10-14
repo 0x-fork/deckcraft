@@ -267,7 +267,9 @@ impl Timeline {
                     max_end = max_end.max(end);
                     let step = steps.len().saturating_sub(1);
                     if let Some(s) = steps.last_mut() {
-                        s.duration = s.duration.max(end);
+                        // Media plays on by itself once started: it holds back an After Previous
+                        // effect (`max_end`), but not the next click (#116).
+                        s.duration = s.duration.max(if a.class == AnimClass::Media { start } else { end });
                     }
                     tl.effects.push(Effect {
                         timing: EffectTiming {
@@ -324,6 +326,20 @@ impl Timeline {
     /// Duration of main step `i` in seconds (0 when out of range).
     pub fn step_duration(&self, i: usize) -> f64 {
         self.main.get(i).map(|s| s.duration).unwrap_or(0.0)
+    }
+
+    /// Media effects (Play, Pause, Stop) of main step `step` that start after `from` and by `to`
+    /// seconds into it, in order: what a show running the step from `from` to `to` sets off.
+    pub fn media_cues(&self, step: usize, from: f64, to: f64) -> Vec<EffectTiming> {
+        let mut v: Vec<EffectTiming> = self
+            .effects
+            .iter()
+            .map(|e| &e.timing)
+            .filter(|e| e.class == AnimClass::Media && e.sequence == Sequence::Main && e.step == step && e.start > from && e.start <= to)
+            .cloned()
+            .collect();
+        v.sort_by(|a, b| a.start.total_cmp(&b.start));
+        v
     }
 
     /// Total duration of the main sequence played without pauses.

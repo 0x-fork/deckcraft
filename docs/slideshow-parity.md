@@ -27,6 +27,7 @@ ready** (estimated), **10–16 h** to parity.
 | "Advance on click" off: a click never leaves the slide (animation steps still play, keys still move on) | yes | yes | |
 | Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable |
 | Media playback with controls, play across slides, full-screen video | yes | yes | Seeks and loops preserve new-generation video frames and end-of-stream; queue regression and repeated seeks across H.264/HEVC/VP9/AV1 in `crates/media`. WMA/WMV not decodable |
+| Media playback with controls, play across slides, full-screen video, Play/Pause/Stop in the click sequence | yes | yes | WMA/WMV not decodable; click sequence since #116 |
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | |
 | See All Slides grid during the show | yes | no | |
 | Zoom into part of a slide during the show | yes | no | |
@@ -83,4 +84,5 @@ Reading View in a window with navigation: present (checklist row done).
 | 2026-10-13 | minor | Click handling for interactive decks: triggers, per-slide state kept across visits, visible-shape hit testing with hand cursor, advance on click |
 | 2026-10-13 | minor | Video seek handoff no longer discards freshly decoded frames or end-of-stream (upstream #416); deterministic queue and four-codec seek regression tests |
 | 2026-10-14 | minor | Presenter View handles slideshow keys in its own viewport, including returning from the end screen and Escape; regression tests cover navigation and avoiding duplicate button activation |
+| 2026-10-11 | minor | Media effects (Play, Pause, Stop) in the click sequence play with their step (#116) |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |

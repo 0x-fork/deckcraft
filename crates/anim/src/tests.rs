@@ -893,3 +893,20 @@ fn same_text_morphs_even_by_objects() {
     b.shapes = vec![titled(2, 40.0, 44.0, "Other")];
     assert!(morph_frame(&p, &a, &b, 0.5, &|_| false).text.is_empty());
 }
+
+#[test]
+fn media_in_the_click_sequence_cues_and_does_not_hold_the_click() {
+    // #116: a video set to play in the click sequence starts with its step, and the step doesn't
+    // last as long as the video (the next click goes on while it plays).
+    let play = Animation { duration_ms: 5000, ..anim(1, AnimClass::Media, "play", AnimStart::OnClick) };
+    let tl = Timeline::new(&slide_with(vec![play.clone(), anim(2, AnimClass::Exit, "fadeOut", AnimStart::OnClick)]), W, H);
+    assert_eq!(tl.steps(), 2);
+    assert_eq!(tl.step_duration(0), 0.0);
+    let cues = tl.media_cues(0, f64::NEG_INFINITY, 0.0);
+    assert_eq!(cues.iter().map(|e| (e.shape, e.anim)).collect::<Vec<_>>(), [(ShapeId(1), 0)]);
+    assert!(tl.media_cues(0, 0.0, f64::INFINITY).is_empty(), "set off once");
+    assert!(tl.media_cues(1, f64::NEG_INFINITY, f64::INFINITY).is_empty(), "only media effects");
+    // An After Previous effect still waits for the video.
+    let tl = Timeline::new(&slide_with(vec![play, anim(2, AnimClass::Entrance, "fade", AnimStart::AfterPrevious)]), W, H);
+    assert!((tl.step_duration(0) - 6.0).abs() < 1e-9, "{}", tl.step_duration(0));
+}
