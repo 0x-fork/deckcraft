@@ -2267,6 +2267,9 @@ fn size_group(app: &mut SlideApp, ui: &mut Ui) {
                 }
             });
         });
+        if ui.add_enabled(bx.is_some(), egui::Button::new("Size and Position…")).clicked() {
+            run(app, "shape.sizePosition", json!({}));
+        }
     });
 }
 

@@ -773,6 +773,10 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 let _ = app.run("shape.setDefault", json!({}));
                 ui.close();
             }
+            if ui.button("Size and Position…").clicked() {
+                let _ = app.run("shape.sizePosition", json!({}));
+                ui.close();
+            }
             if ui.button("Format Shape…").clicked() {
                 let _ = app.run("view.pane", json!({"pane": "format"}));
                 ui.close();
