@@ -1069,7 +1069,9 @@ fn an_embedded_face_is_used_when_the_machine_lacks_it() {
     let mut body = deckcraft_model::text::TextBody::from_text("Hello");
     body.paragraphs[0].runs[0].props.font = Some("DeckCraft Colr Squares".into());
     slide.shapes[0].text = Some(body);
-    let id = p.add_media("font1.fntdata", "application/x-fontdata", include_bytes!("../../render/tests/fixtures/colr-squares.ttf").to_vec());
+    let id = p
+        .add_media("font1.fntdata", "application/x-fontdata", include_bytes!("../../render/tests/fixtures/colr-squares.ttf").to_vec())
+        .expect("media");
     p.embedded_fonts.push(deckcraft_model::EmbeddedFont { typeface: "DeckCraft Colr Squares".into(), regular: Some(id), ..Default::default() });
     let data = crate::cmd::base64_encode(&crate::cmd::file::save_bytes(&p, "pptx").unwrap());
     let mut s = Session::with_new();
@@ -1583,8 +1585,8 @@ mod copy_remap {
     fn populate(s: &mut Session, bytes: &[u8]) -> (ShapeId, ShapeId, ShapeId) {
         let st = s.doc_mut().unwrap();
         let doc = Arc::make_mut(&mut st.doc);
-        let media = doc.add_media("p.png", "image/png", bytes.to_vec());
-        let (p, b, c) = (ShapeId(doc.alloc_id()), ShapeId(doc.alloc_id()), ShapeId(doc.alloc_id()));
+        let media = doc.add_media("p.png", "image/png", bytes.to_vec()).expect("media");
+        let (p, b, c) = (ShapeId(doc.alloc_id().expect("id")), ShapeId(doc.alloc_id().expect("id")), ShapeId(doc.alloc_id().expect("id")));
         let x = Some(Xfrm::new(10.0, 10.0, 50.0, 50.0));
         let slide = Arc::make_mut(&mut doc.slides[0]);
         slide.shapes.push(Shape {
@@ -3460,4 +3462,31 @@ fn every_command_id_is_registered_once() {
     let mut seen = std::collections::HashSet::new();
     let dups: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| !seen.insert(*id)).collect();
     assert!(dups.is_empty(), "registered more than once: {dups:?}");
+}
+
+/// A deck whose ids are used up (a hostile file can arrive with next_id at the top of the
+/// range) refuses to grow instead of handing out duplicate ids (#407).
+#[test]
+fn an_exhausted_id_space_refuses_growth() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc).next_id = u32::MAX;
+    let before = s.doc().unwrap().doc.clone();
+    assert!(s.execute("slide.new", &json!({})).is_err(), "a new slide is refused");
+    assert!(s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 100, 50]})).is_err());
+    assert!(s.execute("slide.duplicate", &json!({})).is_err());
+    assert!(s.execute("edit.duplicate", &json!({})).is_err());
+    assert!(s.execute("insert.smartArt", &json!({"kind": "blockList", "items": ["Plan", "Build"]})).is_err());
+    assert!(s.execute("insert.textBox", &json!({"text": "Hi"})).is_err());
+    // What the deck holds is untouched: same slides, same ids, no duplicates.
+    let after = s.doc().unwrap().doc.clone();
+    assert_eq!(after.slides.len(), before.slides.len());
+    let mut ids = vec![];
+    deckcraft_model::walk(&after.slides[0].shapes, &mut |sh, _| ids.push(sh.id.0));
+    ids.push(after.slides[0].id.0);
+    ids.push(after.next_id);
+    let mut sorted = ids.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), ids.len(), "no id repeats");
 }

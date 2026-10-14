@@ -169,14 +169,19 @@ fn compress(s: &mut Session, p: &Value) -> Result<Value> {
                             let old = m.data.len();
                             pack(&m.data, crop, w, h, ppi, delete_cropped).map(|pk| (pk, old, m.name.clone()))
                         });
-                        let v = packed.map(|(pk, old, name)| {
-                            before += old;
-                            after += pk.bytes.len();
-                            let stem = std::path::Path::new(&name).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or(name);
-                            let ext = if pk.content_type == "image/jpeg" { "jpg" } else { "png" };
-                            let id = doc.add_media(&format!("{stem}.{ext}"), pk.content_type, pk.bytes);
-                            (id, pk.crop, old)
-                        });
+                        let v = match packed {
+                            Some((pk, old, name)) => {
+                                before += old;
+                                after += pk.bytes.len();
+                                let stem = std::path::Path::new(&name).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or(name);
+                                let ext = if pk.content_type == "image/jpeg" { "jpg" } else { "png" };
+                                let id = doc
+                                    .add_media(&format!("{stem}.{ext}"), pk.content_type, pk.bytes)
+                                    .ok_or_else(|| bad("picture.compress", NO_ID_SPACE))?;
+                                Some((id, pk.crop, old))
+                            }
+                            None => None,
+                        };
                         cache.insert(key, v);
                         v
                     }
@@ -291,8 +296,8 @@ mod tests {
         let big = png(1200, 600);
         let processed = png(1100, 600);
         s.edit(|doc, _| {
-            let original = doc.add_media("original.png", "image/png", big.clone());
-            let shown = doc.add_media("processed.png", "image/png", processed.clone());
+            let original = doc.add_media("original.png", "image/png", big.clone()).expect("media");
+            let shown = doc.add_media("processed.png", "image/png", processed.clone()).expect("media");
             let slide = Arc::make_mut(doc.slides.first_mut().ok_or_else(|| bad("test", "no slide"))?);
             let xfrm = Some(deckcraft_geom::Xfrm::new(0.0, 0.0, 72.0, 36.0));
             let with_effect =

@@ -18,7 +18,7 @@ fn link(action: Action) -> Hyperlink {
 }
 
 fn box_at(p: &mut Presentation, name: &str, x: f64, y: f64) -> Shape {
-    Shape { id: ShapeId(p.alloc_id()), name: name.into(), xfrm: Some(Xfrm::new(x, y, 80.0, 28.0)), ..Default::default() }
+    Shape { id: ShapeId(p.alloc_id().expect("id")), name: name.into(), xfrm: Some(Xfrm::new(x, y, 80.0, 28.0)), ..Default::default() }
 }
 
 fn round(p: &Presentation) -> Presentation {
@@ -51,8 +51,8 @@ fn deck() -> Presentation {
         body.list_style = ls;
     }
 
-    let chime = p.add_media("chime.wav", "audio/wav", CHIME.to_vec());
-    let mut a = defaults::new_slide(&mut p, layout);
+    let chime = p.add_media("chime.wav", "audio/wav", CHIME.to_vec()).expect("media");
+    let mut a = defaults::new_slide(&mut p, layout).expect("slide");
     a.name = "Review".into();
     if let Some(title) = a.shapes.iter_mut().find(|s| s.ph_type() == Some(PhType::Title)) {
         title.text = Some(TextBody::from_text("Review"));
@@ -165,7 +165,7 @@ fn deck() -> Presentation {
         ..Default::default()
     }];
 
-    let mut b = defaults::new_slide(&mut p, layout);
+    let mut b = defaults::new_slide(&mut p, layout).expect("slide");
     if let Some(title) = b.shapes.iter_mut().find(|s| s.ph_type() == Some(PhType::Title)) {
         title.text = Some(TextBody::from_text("Second"));
     }

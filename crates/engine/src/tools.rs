@@ -1407,7 +1407,7 @@ impl Session {
             let list = cmd::current_shapes(doc, sel).cloned().unwrap_or_default();
             let mut copies: Vec<Shape> = list.iter().filter(|x| ids.contains(&x.id)).cloned().collect();
             let boxes: Vec<Xfrm> = copies.iter().map(|c| xfrm_of(doc, sel, c)).collect();
-            cmd::edit::reid(doc, &mut copies);
+            cmd::edit::reid("edit.duplicate", doc, &mut copies)?;
             for (c, b) in copies.iter_mut().zip(boxes) {
                 c.xfrm = Some(b);
                 c.ph = None;
@@ -1561,7 +1561,7 @@ impl Session {
             let id = match existing {
                 Some(id) => id,
                 None => {
-                    let id = ShapeId(doc.alloc_id());
+                    let id = ShapeId(doc.alloc_id().ok_or_else(|| cmd::bad("ink.draw", cmd::NO_ID_SPACE))?);
                     let size = doc.slide_size;
                     let list = crate::shapes_mut(doc, sel).ok_or_else(|| cmd::bad("ink", "no slide"))?;
                     list.push(Shape {

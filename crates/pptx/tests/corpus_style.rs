@@ -10,7 +10,7 @@ use deckcraft_model::text::{Align, AutoFit, BodyProps, ParaProps, Paragraph, Run
 use deckcraft_model::{Geom, Presentation, Shape, ShapeId, ShapeKind, defaults};
 
 fn shape(p: &mut Presentation, name: &str, x: f64, y: f64, w: f64, h: f64) -> Shape {
-    Shape { id: ShapeId(p.alloc_id()), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
+    Shape { id: ShapeId(p.alloc_id().expect("id")), name: name.into(), xfrm: Some(Xfrm::new(x, y, w, h)), ..Default::default() }
 }
 
 fn shadow(inner: bool, dir: f64) -> Shadow {
@@ -74,7 +74,7 @@ fn style_deck() -> Presentation {
     };
 
     let layout = defaults::layout_of_kind(&p, deckcraft_model::LayoutType::Blank).unwrap_or_default();
-    let mut s = defaults::new_slide(&mut p, layout);
+    let mut s = defaults::new_slide(&mut p, layout).expect("slide");
 
     let mut word = shape(&mut p, "Styled text", 40.0, 40.0, 400.0, 180.0);
     word.text = Some(TextBody {
