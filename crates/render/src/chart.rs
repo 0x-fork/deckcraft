@@ -246,6 +246,23 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     // Bars are drawn first and lines over them; a combo chart has both.
     let bar_kind = c.series.iter().map(|s| c.series_kind(s)).find(|k| k.is_bar_like());
     let horiz = if combo { bar_kind.is_some_and(ChartType::horizontal) } else { c.kind.horizontal() };
+    // Axis titles: the left one turned to read upwards, the bottom one centred under the axis.
+    // On a horizontal bar chart the category axis is the left one.
+    let (left_title, bottom_title) =
+        if horiz { (c.axis_titles.0.as_deref(), c.axis_titles.1.as_deref()) } else { (c.axis_titles.1.as_deref(), c.axis_titles.0.as_deref()) };
+    let band_h = base * 1.6;
+    if let Some(t) = bottom_title.filter(|t| !t.is_empty()) {
+        let r = Rect::new(area.x0, area.y1 - band_h, area.x1, area.y1);
+        label(ctx, rctx, m, t, r, base, Align::Center, Anchor::Bottom, text_col, true);
+        area.y1 -= band_h + base * 0.3;
+    }
+    if let Some(t) = left_title.filter(|t| !t.is_empty()) {
+        let (cx, cy) = (area.x0 + band_h / 2.0, (area.y0 + area.y1) / 2.0);
+        let turned = m * Affine::translate((cx, cy)) * Affine::rotate(-std::f64::consts::FRAC_PI_2);
+        let half = area.height() / 2.0;
+        label(ctx, rctx, turned, t, Rect::new(-half, -band_h / 2.0, half, band_h / 2.0), base, Align::Center, Anchor::Middle, text_col, true);
+        area.x0 += band_h + base * 0.3;
+    }
     // As many major units as the value axis has room for labels (PowerPoint's automatic unit).
     let axis_len = if horiz { area.width() - base * 4.5 } else { area.height() - base * 1.8 };
     let max_intervals = (axis_len / if horiz { base * 6.0 } else { base * 1.9 }).floor().clamp(2.0, 12.0) as usize;
