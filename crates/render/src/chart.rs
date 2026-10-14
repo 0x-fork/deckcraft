@@ -36,6 +36,43 @@ fn series_fill(ctx: &Ctx, c: &Chart, i: usize, s: Option<&deckcraft_model::chart
     }
 }
 
+/// The fill of point `k` of a series: its own (`c:dPt`) where the file gives one, else the series'.
+fn point_fill(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series, k: usize) -> Rgba {
+    match s.point_fills.iter().find(|(p, _)| *p == k).map(|(_, f)| f) {
+        Some(Fill::Solid { color: cc }) => ctx.color(cc, None),
+        _ => series_fill(ctx, c, i, Some(s)),
+    }
+}
+
+fn polyline(pts: &[Point]) -> BezPath {
+    let mut p = BezPath::new();
+    for (k, q) in pts.iter().enumerate() {
+        if k == 0 {
+            p.move_to(*q);
+        } else {
+            p.line_to(*q);
+        }
+    }
+    p
+}
+
+/// A smoothed line (`c:smooth`) through `pts`: a Catmull-Rom spline as cubic Béziers, the curve
+/// PowerPoint draws, passing through every point.
+pub(crate) fn smooth_path(pts: &[Point]) -> BezPath {
+    let mut p = BezPath::new();
+    let Some(first) = pts.first() else { return p };
+    p.move_to(*first);
+    for k in 0..pts.len() - 1 {
+        let p0 = pts[k.saturating_sub(1)];
+        let (p1, p2) = (pts[k], pts[k + 1]);
+        let p3 = pts[(k + 2).min(pts.len() - 1)];
+        let c1 = p1 + (p2 - p0) / 6.0;
+        let c2 = p2 - (p3 - p1) / 6.0;
+        p.curve_to(c1, c2, p2);
+    }
+    p
+}
+
 /// A line series' colour: its line's own (where PowerPoint keeps it), else its fill's, else the
 /// palette's.
 fn series_line(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series) -> Rgba {
@@ -418,7 +455,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                     Rect::new(plot.x0 + start, to_axis(sec, b), plot.x0 + start + bar, to_axis(sec, a))
                 };
                 ctx.set_transform(m);
-                ctx.set_paint(color(series_fill(rctx, c, *si, Some(s)), 1.0));
+                ctx.set_paint(color(point_fill(rctx, c, *si, s, i), 1.0));
                 ctx.fill_rect(&r.abs());
                 if c.data_labels {
                     let t = c.data_label(s, s.values.get(i).copied().flatten().unwrap_or(0.0));
@@ -480,14 +517,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         if pts.is_empty() {
             continue;
         }
-        let mut p = BezPath::new();
-        for (k, q) in pts.iter().enumerate() {
-            if k == 0 {
-                p.move_to(*q);
-            } else {
-                p.line_to(*q);
-            }
-        }
+        let p = if s.smooth && !area_kind && pts.len() > 2 { smooth_path(&pts) } else { polyline(&pts) };
         ctx.set_transform(m);
         if area_kind {
             let mut a = p.clone();

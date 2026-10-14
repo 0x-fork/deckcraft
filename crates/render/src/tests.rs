@@ -156,6 +156,30 @@ fn combo_chart_draws_columns_and_a_line_on_its_own_axis() {
 }
 
 #[test]
+fn column_points_take_their_own_fill_and_smooth_lines_curve() {
+    // One column series where only the middle point is given a red c:dPt fill.
+    let mut c = Chart::sample(ChartType::Column);
+    c.title = None;
+    c.legend = None;
+    c.series.truncate(1);
+    c.categories = vec!["A".into(), "B".into(), "C".into()];
+    c.series[0].values = vec![Some(10.0), Some(10.0), Some(10.0)];
+    c.series[0].point_fills = vec![(1, deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))))];
+    let sh = Shape { id: ShapeId(621), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let red = |x: u32| (300..500).any(|y| img.pixel(x, y)[..3] == [255, 0, 0]);
+    assert!(red(480), "the middle column takes its point's fill");
+    assert!(!red(200) && !red(760), "the others keep the series colour");
+
+    // A smoothed line through a peak overshoots no point but leaves the straight chord.
+    let pts = [kurbo::Point::new(0.0, 0.0), kurbo::Point::new(10.0, 10.0), kurbo::Point::new(20.0, 0.0)];
+    let p = crate::chart::smooth_path(&pts);
+    assert_eq!(p.elements().len(), 3, "a cubic per segment");
+    let mid = kurbo::ParamCurve::eval(&p.segments().next().unwrap(), 0.5);
+    assert!(mid.y > mid.x, "the first half bows towards the peak instead of following the chord: {mid:?}");
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
