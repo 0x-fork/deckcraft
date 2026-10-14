@@ -3093,7 +3093,7 @@ fn master_checks(app: &SlideApp) -> (bool, bool, bool) {
     let preserve = match st.selection.target {
         Target::Master { master } => st.doc.masters.get(master).is_some_and(|m| m.preserve),
         Target::Layout { master, layout } => st.doc.masters.get(master).and_then(|m| m.layouts.get(layout)).is_some_and(|l| l.preserve),
-        Target::Slides => false,
+        Target::Slides | Target::Handout | Target::NotesMaster => false,
     };
     let title = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(|k| k.is_title()));
     let footers = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(|k| k.is_footer_kind()));
