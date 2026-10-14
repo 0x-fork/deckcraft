@@ -20,6 +20,7 @@ mod canvas;
 mod clip;
 mod dib;
 mod emf;
+mod emfplus;
 mod geom;
 mod place;
 mod text;

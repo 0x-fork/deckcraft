@@ -45,6 +45,7 @@ pub(crate) fn parse(input: Bytes) -> Result<(Canvas, Option<Frame>), Error> {
     if let Some(px_mm) = device_px_per_mm(input) {
         cv.set_device_mm(px_mm);
     }
+    let mut plus = crate::emfplus::Plus::new();
     let mut parsed = 0usize;
     let mut pos = hsize.max(88);
     while !cv.full() {
@@ -57,7 +58,13 @@ pub(crate) fn parse(input: Bytes) -> Result<(Canvas, Option<Frame>), Error> {
         if typ == 14 {
             break;
         }
-        record(&mut cv, typ, Bytes(rec));
+        if typ == 70 && Bytes(rec).u32(12) == Some(crate::emfplus::EMF_PLUS) {
+            if let Some(data) = Bytes(rec).tail(16) {
+                plus.comment(&mut cv, data);
+            }
+        } else {
+            record(&mut cv, typ, Bytes(rec));
+        }
         parsed += 1;
         let Some(next) = pos.checked_add(size) else { break };
         pos = next;

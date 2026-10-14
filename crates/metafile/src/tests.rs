@@ -1602,3 +1602,109 @@ fn wmf_intersect_clip_rect_limits_later_records() {
     let p = parse(&wmf(&[wrec(0x0416, &clip), wrec(0x041B, &rect)], None)).unwrap();
     assert_eq!(item_region(&p.items[0]), Some(&[[10.0, 5.0, 40.0, 30.0]][..]));
 }
+
+// ---- EMF+ ----
+
+fn f32s(v: &[f32]) -> Vec<u8> {
+    v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// One EMF+ record: type, flags, size, data size, data (padded to 4).
+fn prec(typ: u16, flags: u16, data: &[u8]) -> Vec<u8> {
+    let mut d = data.to_vec();
+    while !d.len().is_multiple_of(4) {
+        d.push(0);
+    }
+    let mut v = typ.to_le_bytes().to_vec();
+    v.extend(flags.to_le_bytes());
+    v.extend(((12 + d.len()) as u32).to_le_bytes());
+    v.extend((d.len() as u32).to_le_bytes());
+    v.extend(d);
+    v
+}
+
+/// An EMR_COMMENT carrying EMF+ records.
+fn plus_comment(recs: &[Vec<u8>]) -> Vec<u8> {
+    let body = recs.concat();
+    let mut p = ((body.len() + 4) as u32).to_le_bytes().to_vec();
+    p.extend(0x2B46_4D45u32.to_le_bytes());
+    p.extend(body);
+    erec(70, &p)
+}
+
+/// EMF+ header: dual (bit 0) or EMF+ only, 96 dpi.
+fn plus_header(dual: bool) -> Vec<u8> {
+    prec(0x4001, u16::from(dual), &cat(vec![h32(0xDBC0_1002), h32(0), h32(96), h32(96)]))
+}
+
+fn solid_pen(argb: u32, width: f32) -> Vec<u8> {
+    cat(vec![h32(0xDBC0_1002), h32(0), h32(0), h32(0), f32s(&[width]), h32(0xDBC0_1002), h32(0), h32(argb)])
+}
+
+#[test]
+fn emfplus_only_fill_rects_with_argb_colour() {
+    let fill = prec(0x400A, 0x8000, &cat(vec![h32(0xFF00_80FF), h32(1), f32s(&[10.0, 20.0, 30.0, 40.0])]));
+    let p = parse(&emf(&[plus_comment(&[plus_header(false), fill])], [0; 4], [0; 4])).unwrap();
+    assert_eq!(p.items.len(), 1);
+    let (segs, fill, stroke, _) = path_segs(&p.items[0]);
+    assert_eq!(fill, Some([0x00, 0x80, 0xFF, 0xFF]));
+    assert_eq!(stroke, None);
+    // Geometry is placed relative to the drawing's bounding box (no frame given).
+    assert_eq!((p.width, p.height), (30.0, 40.0));
+    assert_eq!(segs[0], Seg::Move(0.0, 0.0));
+    assert!(segs.contains(&Seg::Line(30.0, 40.0)));
+}
+
+#[test]
+fn emfplus_dual_files_draw_only_the_emf_records() {
+    let fill = prec(0x400A, 0x8000, &cat(vec![h32(0xFFFF_0000), h32(1), f32s(&[0.0, 0.0, 5.0, 5.0])]));
+    let gdi = erec(43, &cat(vec![e32(0), e32(0), e32(9), e32(9)]));
+    let p = parse(&emf(&[plus_comment(&[plus_header(true), fill]), gdi], [0; 4], [0; 4])).unwrap();
+    assert_eq!(p.items.len(), 1);
+    assert_eq!(path_segs(&p.items[0]).1, Some([255, 255, 255, 255]));
+}
+
+#[test]
+fn emfplus_pen_object_draws_lines_under_a_scale_transform() {
+    let pen = prec(0x4008, 0x0200 | 3, &solid_pen(0xFF00_FF00, 2.0));
+    let scale = prec(0x402E, 0, &f32s(&[2.0, 3.0]));
+    let lines = prec(0x400D, 3, &cat(vec![h32(2), f32s(&[1.0, 1.0, 4.0, 2.0])]));
+    let p = parse(&emf(&[plus_comment(&[plus_header(false), pen, scale, lines])], [0; 4], [0; 4])).unwrap();
+    let (segs, fill, stroke, _) = path_segs(&p.items[0]);
+    // (1,1)-(4,2) scaled by (2,3) is (2,3)-(8,6), placed relative to its bounding box.
+    assert_eq!(segs, &vec![Seg::Move(0.0, 0.0), Seg::Line(6.0, 3.0)]);
+    assert_eq!(fill, None);
+    let (c, w) = stroke.unwrap();
+    assert_eq!(c, [0, 255, 0, 255]);
+    assert!(w > 0.0);
+}
+
+#[test]
+fn emfplus_path_object_fills_with_brush_object_and_restore_undoes_transform() {
+    let brush = prec(0x4008, 0x0100 | 1, &cat(vec![h32(0xDBC0_1002), h32(0), h32(0x8012_3456)]));
+    // Triangle: start, line, line|close.
+    let path = prec(0x4008, 0x0300 | 2, &cat(vec![h32(0xDBC0_1002), h32(3), h32(0), f32s(&[0.0, 0.0, 10.0, 0.0, 0.0, 10.0]), vec![0, 1, 0x81]]));
+    let save = prec(0x4025, 0, &h32(7));
+    let mv = prec(0x402D, 0, &f32s(&[100.0, 0.0]));
+    let restore = prec(0x4026, 0, &h32(7));
+    let fill = prec(0x4014, 2, &h32(1));
+    let p = parse(&emf(&[plus_comment(&[plus_header(false), brush, path, save, mv, restore, fill])], [0; 4], [0; 4])).unwrap();
+    let (segs, fill, _, _) = path_segs(&p.items[0]);
+    assert_eq!(fill, Some([0x12, 0x34, 0x56, 0x80]));
+    assert_eq!(segs, &vec![Seg::Move(0.0, 0.0), Seg::Line(10.0, 0.0), Seg::Line(0.0, 10.0), Seg::Close]);
+}
+
+#[test]
+fn emfplus_garbage_records_never_panic() {
+    let mut s = 0x1234_5678u32;
+    for _ in 0..300 {
+        let mut recs = vec![plus_header(false)];
+        for _ in 0..6 {
+            s = s.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            let typ = 0x4000 + (s >> 16) as u16 % 0x40;
+            let data: Vec<u8> = (0..(s % 64)).map(|i| (s.rotate_left(i)) as u8).collect();
+            recs.push(prec(typ, (s >> 8) as u16, &data));
+        }
+        let _ = parse(&emf(&[plus_comment(&recs)], [0; 4], [0; 4]));
+    }
+}
