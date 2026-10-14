@@ -104,6 +104,8 @@ From the local execution plan (`plan/execution-plan.md`, gitignored). Status as 
 | M8 | Tables and charts | partly | chart data grid, elements, chartex types, draw table |
 | M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), warp adjust handles |
 | M10 | Views | done | grid options, New Window |
+| M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), text warps |
+| M10 | Views | done | grid options, Arrange All |
 | M11 | Output | partly | vector PDF, SVG, GIF, MP4, print |
 | M12 | Review | partly | dictionaries, AutoCorrect, find/replace dialog, compare |
 | M13 | Automation and CLI parity | done | |

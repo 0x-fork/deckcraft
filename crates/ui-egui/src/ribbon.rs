@@ -1994,6 +1994,14 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
         }
     });
     group(ui, |ui| {
+        let has = app.session.active().is_some();
+        let on = app.doc_window.is_some();
+        let resp = big_button_ex(ui, Icon::NewWindow, "New\nWindow", has, false, on).0;
+        if resp.on_hover_text("Open another window on this presentation").clicked() {
+            let _ = app.run("view.newWindow", json!({}));
+        }
+    });
+    group(ui, |ui| {
         let gs = app.ui.grayscale;
         if big_button_ex(ui, Icon::Grayscale, "Grayscale", true, false, gs).0.clicked() {
             app.ui.grayscale = !gs;
