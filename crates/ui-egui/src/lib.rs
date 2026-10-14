@@ -1879,6 +1879,10 @@ impl SlideApp {
     fn drain_control(&mut self, ctx: &egui::Context) {
         let Some(rx) = self.control_rx.take() else { return };
         while let Ok(req) = rx.try_recv() {
+            // A request whose sender gave up waiting (reply timeout) must not run late (#719).
+            if !req.take() {
+                continue;
+            }
             let reply = req.reply.clone();
             match control::handle(self, ctx, &req) {
                 control::Outcome::Done(v) => {
