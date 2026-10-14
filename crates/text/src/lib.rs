@@ -1538,16 +1538,30 @@ fn tab_advance(x: f64, stops: &[Tab], default_tab: f64, seg: (f64, f64)) -> f64 
 pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLayout {
     let bp = resolve::body(ctx, shape);
     let autofit = bp.autofit.unwrap_or(AutoFit::None);
-    let mut l = layout_scaled(ctx, shape, body, &bp, opts, 1.0, 0.0);
+    // Shrink on overflow starts from the scale the file was saved with (`fontScale`,
+    // `lnSpcReduction`), which is what PowerPoint draws; editing the text resets it.
+    let (scale0, reduce0) = match (autofit, opts.no_shrink) {
+        (AutoFit::Shrink { font_scale, line_reduction }, false) => (
+            if font_scale.is_finite() { font_scale.clamp(0.1, 1.0) } else { 1.0 },
+            if line_reduction.is_finite() { line_reduction.clamp(0.0, 0.2) } else { 0.0 },
+        ),
+        _ => (1.0, 0.0),
+    };
+    let mut l = layout_scaled(ctx, shape, body, &bp, opts, scale0, reduce0);
+    // A scale PowerPoint saved is drawn as it is: PowerPoint fits the text again only when it
+    // changes (and editing resets the saved scale), not when a file opens, even where our
+    // metrics would call it overflowing (trailing empty paragraphs, substituted fonts).
+    let saved = scale0 < 1.0 || reduce0 > 0.0;
     if let (AutoFit::Shrink { .. }, false) = (autofit, opts.no_shrink)
         && l.overflow
+        && !saved
     {
         // Binary search the largest scale that fits (steps like 90%, 80%… with line reduction).
-        let (mut lo, mut hi) = (0.1_f64, 1.0_f64);
+        let (mut lo, mut hi) = (0.1_f64, scale0);
         let mut best = None;
         for _ in 0..12 {
             let mid = (lo + hi) / 2.0;
-            let red: f64 = ((1.0 - mid) * 0.8_f64).min(0.2);
+            let red: f64 = ((1.0 - mid) * 0.8_f64).min(0.2).max(reduce0);
             let t = layout_scaled(ctx, shape, body, &bp, opts, mid, red);
             if t.overflow {
                 hi = mid;
