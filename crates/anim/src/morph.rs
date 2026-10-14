@@ -237,7 +237,11 @@ pub fn morph_frame(pres: &Presentation, a: &Slide, b: &Slide, t: f64, hidden_b: 
         } else {
             let new = push(Shape { xfrm: x, ..sb.clone() }, false, s);
             let old = push(Shape { xfrm: x, ..sa.clone() }, true, 1.0 - s);
-            if by_text
+            // The same text in shapes that differ otherwise (a title slide's centred title and a
+            // content slide's title: other placeholder, size, alignment) moves and resizes word
+            // by word even with the Objects option, as PowerPoint does, instead of cross-fading.
+            let same_text = text_of(sa).trim() == text_of(sb).trim();
+            if (by_text || same_text)
                 && has_text(sa)
                 && has_text(sb)
                 && let (Some(from), Some(to)) = (box_of(ca.as_ref(), sa), box_of(cb.as_ref(), sb))

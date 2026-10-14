@@ -866,3 +866,30 @@ fn many_distinct_triggers_past_the_effect_cap_build_in_order() {
     assert_eq!(shapes.len(), 100_000);
     assert!(shapes.iter().enumerate().all(|(i, s)| *s == ShapeId(1000 + i as u32)));
 }
+
+/// #316: the same text in two shapes that differ otherwise (a title slide's big centred title,
+/// a content slide's title) morphs word by word with the default Objects option, instead of
+/// the old box cross-fading into the new one.
+#[test]
+fn same_text_morphs_even_by_objects() {
+    let p = deckcraft_model::defaults::new_presentation(None);
+    let titled = |id, x, size: f64, text: &str| {
+        let mut body = TextBody::from_text(text);
+        for para in &mut body.paragraphs {
+            for r in &mut para.runs {
+                r.props.size = Some(size);
+            }
+        }
+        Shape { xfrm: Some(Xfrm::new(x, 100.0, 600.0, 120.0)), text: Some(body), ..shape(id, "Title 1") }
+    };
+    let mut a = Slide::default();
+    let mut b = Slide::default();
+    a.shapes = vec![titled(1, 100.0, 60.0, "TEST")];
+    b.shapes = vec![titled(2, 40.0, 44.0, "TEST")];
+    let f = morph_frame(&p, &a, &b, 0.5, &|_| false);
+    assert_eq!(f.text.len(), 1, "the shared text morphs");
+    assert!(!f.text[0].chars);
+    // Different texts still cross-fade with the Objects option.
+    b.shapes = vec![titled(2, 40.0, 44.0, "Other")];
+    assert!(morph_frame(&p, &a, &b, 0.5, &|_| false).text.is_empty());
+}
