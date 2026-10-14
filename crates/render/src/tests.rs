@@ -1762,3 +1762,33 @@ fn a_text_hyperlink_belongs_to_the_shape_that_holds_the_text() {
     assert!(placed.links.iter().any(|l| l.text && l.shape == ShapeId(7)));
     assert!(placed.shapes.iter().all(|s| s.link.is_none()), "a text link is not the shape's own action");
 }
+
+#[test]
+fn metafile_intersect_clip_rect_hides_the_rest_of_the_picture() {
+    let rec = |typ: u32, payload: &[u8]| {
+        let mut v = typ.to_le_bytes().to_vec();
+        v.extend(((8 + payload.len()) as u32).to_le_bytes());
+        v.extend(payload);
+        v
+    };
+    let rect = |l: i32, t: i32, r: i32, b: i32| [l, t, r, b].into_iter().flat_map(|v| v.to_le_bytes()).collect::<Vec<_>>();
+    let mut body = rec(30, &rect(0, 0, 50, 50));
+    body.extend(rec(43, &rect(0, 0, 100, 50)));
+    let eof = rec(14, &[0; 12]);
+    let total = 88 + body.len() + eof.len();
+    let mut file = vec![0u8; 88];
+    file[0..4].copy_from_slice(&1u32.to_le_bytes());
+    file[4..8].copy_from_slice(&88u32.to_le_bytes());
+    file[8..24].copy_from_slice(&rect(0, 0, 100, 50));
+    file[40..44].copy_from_slice(&0x464D_4520u32.to_le_bytes());
+    file[44..48].copy_from_slice(&0x0001_0000u32.to_le_bytes());
+    file[48..52].copy_from_slice(&(total as u32).to_le_bytes());
+    file[52..56].copy_from_slice(&2u32.to_le_bytes());
+    file[56..58].copy_from_slice(&1u16.to_le_bytes());
+    file.extend(body);
+    file.extend(eof);
+    let img = crate::metafile::rasterize(&file, 100).expect("raster");
+    let opaque = |x: u32, y: u32| img.get_pixel(x, y)[3] > 200;
+    assert!(opaque(20, 25), "the clipped half is drawn");
+    assert!(!opaque(80, 25), "past the clip the picture stays clear, pixel {:?}", img.get_pixel(80, 25));
+}

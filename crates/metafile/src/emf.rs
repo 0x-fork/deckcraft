@@ -39,6 +39,9 @@ pub(crate) fn parse(input: Bytes) -> Result<(Canvas, Option<Frame>), Error> {
     let [l, t, r, b] = bounds;
     let frame = frame_from_header(input).or_else(|| (r > l && b > t).then_some(Frame { rect: [l, t, r - l, b - t], size: None }));
     let mut cv = Canvas::new();
+    if r > l && b > t {
+        cv.set_clip_surface([l, t, r, b]);
+    }
     if let Some(px_mm) = device_px_per_mm(input) {
         cv.set_device_mm(px_mm);
     }
@@ -117,6 +120,9 @@ fn record(cv: &mut Canvas, typ: u32, r: Bytes) {
         83 | 84 => ext_text_out(cv, r, typ == 84),
         108 => small_text_out(cv, r),
         40 => r.u32(8).map(|i| cv.delete_object(i)),
+        29 => rect32(r, 8).map(|rect| cv.exclude_clip_rect(rect)),
+        30 => rect32(r, 8).map(|rect| cv.intersect_clip_rect(rect)),
+        75 => ext_select_clip(cv, r),
         27 => xy32(r, 8).map(|p| cv.move_to(p)),
         54 => xy32(r, 8).map(|p| cv.line_to(p)),
         42 => rect32(r, 8).map(|[l, t, rr, b]| cv.shape(&geom::ellipse(l, t, rr, b), true, true)),
@@ -180,6 +186,37 @@ fn record(cv: &mut Canvas, typ: u32, r: Bytes) {
         114 => alphablend(cv, r),
         _ => Some(()),
     };
+}
+
+/// EMR_EXTSELECTCLIPRGN: `cbRgnData` bytes of `RGNDATA` (rectangles in logical units) and a region
+/// mode. No region data selects the default clip.
+fn ext_select_clip(cv: &mut Canvas, r: Bytes) -> Option<()> {
+    let cb = r.u32(8)? as usize;
+    let mode = r.u32(12)?;
+    if cb == 0 {
+        cv.reset_clip();
+        return Some(());
+    }
+    let header = 16;
+    if cb < 32 {
+        return Some(());
+    }
+    // RDH_RECTANGLES is the only region type GDI writes.
+    if r.u32(header + 4)? != 1 {
+        return Some(());
+    }
+    let n = (r.u32(header + 8)? as usize).min(crate::clip::MAX_CLIP_RECTS);
+    let end = header.checked_add(cb)?;
+    let mut rects = Vec::new();
+    for i in 0..n {
+        let o = header + 32 + i * 16;
+        if o + 16 > end {
+            break;
+        }
+        rects.push(rect32(r, o)?);
+    }
+    cv.select_clip_rects(&rects, mode);
+    Some(())
 }
 
 /// Two little-endian i32 values at `off`, as a point.

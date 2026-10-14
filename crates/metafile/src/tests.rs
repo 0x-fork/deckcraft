@@ -119,7 +119,7 @@ const DIB24_RGBA: [u8; 16] = [255, 0, 0, 255, 255, 255, 255, 255, 0, 0, 255, 255
 
 fn path_segs(item: &Item) -> (&Vec<Seg>, Option<[u8; 4]>, Option<([u8; 4], f32)>, bool) {
     match item {
-        Item::Path { segs, fill, stroke, even_odd } => (segs, *fill, *stroke, *even_odd),
+        Item::Path { segs, fill, stroke, even_odd, .. } => (segs, *fill, *stroke, *even_odd),
         other => panic!("expected a path: {other:?}"),
     }
 }
@@ -179,7 +179,7 @@ fn wmf_stretchdib_flips_bottom_up_rows() {
     let params = cat(vec![h32(0x00CC_0020), h16(0), h16(2), h16(2), h16(0), h16(0), h16(10), h16(20), h16(0), h16(0), dib24_bottom_up()]);
     let p = parse(&wmf(&[wrec(0x0F43, &params)], None)).unwrap();
     assert_eq!((p.width, p.height), (20.0, 10.0));
-    let Item::Bitmap { rect, width, height, rgba } = &p.items[0] else { panic!("expected a bitmap") };
+    let Item::Bitmap { rect, width, height, rgba, .. } = &p.items[0] else { panic!("expected a bitmap") };
     assert_eq!(rect, &[0.0, 0.0, 20.0, 10.0]);
     assert_eq!((*width, *height), (2, 2));
     assert_eq!(rgba.as_slice(), DIB24_RGBA);
@@ -236,7 +236,7 @@ fn emf_stretchdibits_flips_and_fits_frame() {
     let p = parse(&file).unwrap();
     let (w, h) = (2500.0 * 72.0 / 2540.0, 1250.0 * 72.0 / 2540.0);
     assert!(close(p.width, w as f32) && close(p.height, h as f32));
-    let Item::Bitmap { rect, width, height, rgba } = &p.items[0] else { panic!("expected a bitmap") };
+    let Item::Bitmap { rect, width, height, rgba, .. } = &p.items[0] else { panic!("expected a bitmap") };
     assert!(rect.iter().zip([0.0, 0.0, w, h]).all(|(a, b)| close(*a, b as f32)));
     assert_eq!((*width, *height), (2, 2));
     assert_eq!(rgba.as_slice(), DIB24_RGBA);
@@ -428,7 +428,7 @@ fn wmf_stretchdib_clipped_source_keeps_its_place() {
     // destination and the picture keeps the original 20-unit width scale.
     let params = cat(vec![h32(0x00CC_0020), h16(0), h16(2), h16(2), h16(0), h16(-1), h16(10), h16(20), h16(0), h16(0), dib24_bottom_up()]);
     let p = parse(&wmf(&[wrec(0x0F43, &params)], Some([0, 0, 20, 10]))).unwrap();
-    let Item::Bitmap { rect, width, height, rgba } = &p.items[0] else { panic!("expected a bitmap") };
+    let Item::Bitmap { rect, width, height, rgba, .. } = &p.items[0] else { panic!("expected a bitmap") };
     // Placeable units are points: 20 units at 1440 per inch are 1 point, so the right column is 0.5 pt wide.
     assert_eq!(rect, &[0.5, 0.0, 0.5, 0.5]);
     assert_eq!((*width, *height), (1, 2));
@@ -723,7 +723,7 @@ fn wmf_dibbitblt_copies_the_dib_at_its_destination() {
     params.extend(dib24_bottom_up());
     let recs = [wrec(0x041B, &cat(vec![h16(10), h16(10), h16(0), h16(0)])), wrec(0x0940, &params)];
     let p = parse(&wmf(&recs, None)).unwrap();
-    let Item::Bitmap { rect, width, height, rgba } = &p.items[1] else { panic!("expected a bitmap") };
+    let Item::Bitmap { rect, width, height, rgba, .. } = &p.items[1] else { panic!("expected a bitmap") };
     assert_eq!(rect, &[5.0, 6.0, 2.0, 2.0]);
     assert_eq!((*width, *height), (2, 2));
     assert_eq!(rgba.as_slice(), DIB24_RGBA);
@@ -881,8 +881,14 @@ fn place_fits_the_frame_scales_strokes_and_drops_far_paths() {
         width: 100.0,
         height: 50.0,
         items: vec![
-            Item::Path { segs: vec![Seg::Move(0.0, 0.0), Seg::Line(10.0, 10.0)], fill: None, stroke: Some(([0, 0, 0, 255], 4.0)), even_odd: true },
-            Item::Path { segs: vec![Seg::Move(0.0, 0.0), Seg::Line(2e6, 0.0)], fill: None, stroke: None, even_odd: true },
+            Item::Path {
+                segs: vec![Seg::Move(0.0, 0.0), Seg::Line(10.0, 10.0)],
+                fill: None,
+                stroke: Some(([0, 0, 0, 255], 4.0)),
+                even_odd: true,
+                region: None,
+            },
+            Item::Path { segs: vec![Seg::Move(0.0, 0.0), Seg::Line(2e6, 0.0)], fill: None, stroke: None, even_odd: true, region: None },
         ],
     };
     let placed = pic.place(kurbo::Rect::new(0.0, 0.0, 200.0, 100.0), [0.0; 4]);
@@ -893,7 +899,7 @@ fn place_fits_the_frame_scales_strokes_and_drops_far_paths() {
 
 #[test]
 fn place_keeps_only_finite_bounded_bitmaps_with_area() {
-    let bitmap = |rect: [f32; 4]| Item::Bitmap { rect, width: 1, height: 1, rgba: vec![0; 4] };
+    let bitmap = |rect: [f32; 4]| Item::Bitmap { rect, width: 1, height: 1, rgba: vec![0; 4], region: None };
     let pic = crate::Picture {
         width: 100.0,
         height: 50.0,
@@ -907,21 +913,21 @@ fn place_keeps_only_finite_bounded_bitmaps_with_area() {
     };
     let placed = pic.place(kurbo::Rect::new(0.0, 0.0, 200.0, 100.0), [0.0; 4]);
     assert_eq!(placed.len(), 1);
-    let crate::PlacedItem::Bitmap { index, rect } = &placed[0] else { panic!("expected a bitmap") };
+    let crate::PlacedItem::Bitmap { index, rect, .. } = &placed[0] else { panic!("expected a bitmap") };
     assert_eq!((*index, *rect), (4, kurbo::Rect::new(20.0, 10.0, 40.0, 30.0)));
 }
 
 #[test]
 fn take_pixels_returns_only_drawable_bitmaps() {
-    let mut ok = Item::Bitmap { rect: [0.0; 4], width: 2, height: 1, rgba: vec![7; 8] };
+    let mut ok = Item::Bitmap { rect: [0.0; 4], width: 2, height: 1, rgba: vec![7; 8], region: None };
     assert_eq!(ok.take_pixels(), Some((2, 1, vec![7; 8])));
     assert!(matches!(&ok, Item::Bitmap { rgba, .. } if rgba.is_empty()), "the pixels move out");
-    let mut short = Item::Bitmap { rect: [0.0; 4], width: 2, height: 2, rgba: vec![0; 8] };
+    let mut short = Item::Bitmap { rect: [0.0; 4], width: 2, height: 2, rgba: vec![0; 8], region: None };
     assert_eq!(short.take_pixels(), None);
     let side = crate::MAX_BITMAP_SIDE + 1;
-    let mut wide = Item::Bitmap { rect: [0.0; 4], width: side, height: 1, rgba: vec![0; side as usize * 4] };
+    let mut wide = Item::Bitmap { rect: [0.0; 4], width: side, height: 1, rgba: vec![0; side as usize * 4], region: None };
     assert_eq!(wide.take_pixels(), None);
-    let mut path = Item::Path { segs: Vec::new(), fill: None, stroke: None, even_odd: false };
+    let mut path = Item::Path { segs: Vec::new(), fill: None, stroke: None, even_odd: false, region: None };
     assert_eq!(path.take_pixels(), None);
     let pic = |width: f32, height: f32| crate::Picture { width, height, items: Vec::new() };
     assert!(pic(1.0, 2.0).has_size());
@@ -1517,4 +1523,82 @@ fn pattern_brush_pixels_count_against_the_byte_budget() {
     recs.push(wrec(0x041B, &cat(vec![h16(9), h16(9), h16(0), h16(0)])));
     let p = wmf200(&recs);
     assert!(p.items.is_empty(), "the parse stopped at the budget: {:?}", p.items.len());
+}
+
+fn item_region(item: &Item) -> Option<&[[f32; 4]]> {
+    match item {
+        Item::Path { region, .. } | Item::Bitmap { region, .. } | Item::Pattern { region, .. } => region.as_deref(),
+        Item::Text(t) => t.region.as_deref(),
+    }
+}
+
+#[test]
+fn emf_intersect_clip_rect_limits_later_records_only() {
+    let full = cat(vec![e32(0), e32(0), e32(80), e32(40)]);
+    let clip = cat(vec![e32(10), e32(5), e32(40), e32(30)]);
+    let p = parse(&emf(&[erec(43, &full), erec(30, &clip), erec(43, &full)], [0, 0, 80, 40], [0; 4])).unwrap();
+    assert_eq!(p.items.len(), 2);
+    assert_eq!(item_region(&p.items[0]), None);
+    assert_eq!(item_region(&p.items[1]), Some(&[[10.0, 5.0, 40.0, 30.0]][..]));
+}
+
+#[test]
+fn emf_clip_follows_the_world_transform_and_save_restores_it() {
+    let xf = cat([2.0f32, 0.0, 0.0, 2.0, 0.0, 0.0].iter().map(|v| v.to_le_bytes().to_vec()).collect());
+    let rect = cat(vec![e32(0), e32(0), e32(10), e32(10)]);
+    let clip = cat(vec![e32(0), e32(0), e32(5), e32(5)]);
+    let p = parse(&emf(&[erec(35, &xf), erec(30, &clip), erec(43, &rect)], [0, 0, 20, 20], [0; 4])).unwrap();
+    assert_eq!(item_region(&p.items[0]), Some(&[[0.0, 0.0, 10.0, 10.0]][..]));
+
+    let full = cat(vec![e32(0), e32(0), e32(40), e32(20)]);
+    let p =
+        parse(&emf(&[erec(43, &full), erec(33, &[]), erec(30, &clip), erec(43, &full), erec(34, &e32(-1)), erec(43, &full)], [0, 0, 40, 20], [0; 4]))
+            .unwrap();
+    assert_eq!(p.items.len(), 3);
+    assert_eq!(item_region(&p.items[0]), None);
+    assert_eq!(item_region(&p.items[1]), Some(&[[0.0, 0.0, 5.0, 5.0]][..]));
+    assert_eq!(item_region(&p.items[2]), None);
+}
+
+#[test]
+fn emf_ext_select_clip_rgn_copies_and_intersects_rectangles() {
+    let mut data = cat(vec![h32(32), h32(1), h32(2), h32(32), e32(0), e32(0), e32(50), e32(20)]);
+    data.extend(cat(vec![e32(0), e32(0), e32(10), e32(20), e32(30), e32(0), e32(50), e32(20)]));
+    let payload = cat(vec![h32(data.len() as u32), h32(5), data]);
+    let rect = cat(vec![e32(0), e32(0), e32(50), e32(20)]);
+    let p = parse(&emf(&[erec(75, &payload), erec(43, &rect)], [0, 0, 50, 20], [0; 4])).unwrap();
+    assert_eq!(item_region(&p.items[0]), Some(&[[0.0, 0.0, 10.0, 20.0], [30.0, 0.0, 50.0, 20.0]][..]));
+
+    let and = cat(vec![h32(0), h32(1)]);
+    // A zero-length region selects the default clip, so the next rectangle is not clipped.
+    let p = parse(&emf(&[erec(75, &payload), erec(75, &and), erec(43, &rect)], [0, 0, 50, 20], [0; 4])).unwrap();
+    assert_eq!(item_region(&p.items[0]), None);
+
+    let overlap = cat(vec![e32(40), e32(0), e32(80), e32(20)]);
+    let p = parse(&emf(&[erec(75, &payload), erec(30, &overlap), erec(43, &rect)], [0, 0, 80, 20], [0; 4])).unwrap();
+    assert_eq!(item_region(&p.items[0]), Some(&[[40.0, 0.0, 50.0, 20.0]][..]));
+}
+
+#[test]
+fn emf_exclude_clip_rect_cuts_the_surface() {
+    let hole = cat(vec![e32(20), e32(0), e32(40), e32(40)]);
+    let rect = cat(vec![e32(0), e32(0), e32(80), e32(40)]);
+    let p = parse(&emf(&[erec(29, &hole), erec(43, &rect)], [0, 0, 80, 40], [0; 4])).unwrap();
+    assert_eq!(item_region(&p.items[0]), Some(&[[0.0, 0.0, 20.0, 40.0], [40.0, 0.0, 80.0, 40.0]][..]));
+}
+
+#[test]
+fn an_empty_clip_drops_later_drawing() {
+    let empty = cat(vec![e32(5), e32(5), e32(5), e32(8)]);
+    let rect = cat(vec![e32(0), e32(0), e32(20), e32(10)]);
+    let p = parse(&emf(&[erec(43, &rect), erec(30, &empty), erec(43, &rect)], [0, 0, 20, 10], [0; 4])).unwrap();
+    assert_eq!(p.items.len(), 1);
+}
+
+#[test]
+fn wmf_intersect_clip_rect_limits_later_records() {
+    let clip = cat(vec![h16(30), h16(40), h16(5), h16(10)]);
+    let rect = cat(vec![h16(40), h16(80), h16(0), h16(0)]);
+    let p = parse(&wmf(&[wrec(0x0416, &clip), wrec(0x041B, &rect)], None)).unwrap();
+    assert_eq!(item_region(&p.items[0]), Some(&[[10.0, 5.0, 40.0, 30.0]][..]));
 }
