@@ -162,17 +162,42 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
     s.add_document(st)
 }
 
+/// A presentation read from disk, not yet added to a session: [`read_presentation_file`] needs no
+/// session, so a host can run it on a background thread and add the result with
+/// [`add_presentation_file`].
+#[derive(Debug)]
+pub struct LoadedFile {
+    pub path: String,
+    pub doc: Presentation,
+    /// A native or PPTX file (saving goes back to it); an outline import has no file to save to.
+    pub native: bool,
+    /// Pictures and media a `.deckcraft` file had lost or damaged.
+    pub damaged: Vec<String>,
+}
+
+/// Read and parse the presentation at `path`.
 #[cfg(not(target_arch = "wasm32"))]
-fn open(s: &mut Session, p: &Value) -> Result<Value> {
-    let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
+pub fn read_presentation_file(path: &str) -> Result<LoadedFile> {
     let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let (doc, damaged) = open_checked(path, &bytes)?;
     let native = deckcraft_format::sniff(&bytes) || deckcraft_pptx::sniff(&bytes);
-    // A damaged file opens as an untitled repaired copy, so Save can't overwrite the original
-    // with the empty media.
+    Ok(LoadedFile { path: path.to_string(), doc, native, damaged })
+}
+
+/// Add a presentation read by [`read_presentation_file`] as the active document. A damaged file
+/// opens as an untitled repaired copy, so Save can't overwrite the original with the empty media.
+pub fn add_presentation_file(s: &mut Session, f: LoadedFile) -> Result<(usize, Vec<String>)> {
+    let LoadedFile { path, doc, native, damaged } = f;
     let keep_path = native && damaged.is_empty();
-    let i = add_opened(s, path, keep_path.then(|| path.to_string()), doc);
+    let i = add_opened(s, &path, keep_path.then(|| path.clone()), doc);
     report_damage(s, &damaged)?;
+    Ok((i, damaged))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
+    let (i, damaged) = add_presentation_file(s, read_presentation_file(path)?)?;
     let st = s.doc()?;
     Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts, "damagedMedia": damaged}))
 }

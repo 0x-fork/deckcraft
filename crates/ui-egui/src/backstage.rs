@@ -593,10 +593,8 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         icons::paint(p, Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(22.0, 22.0)), Icon::Slide, t.text, false);
         p.text(pos2(rect.left() + 44.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &name, theme::font(13.0), t.text);
         p.text(pos2(rect.left() + 44.0, rect.center().y + 9.0), Align2::LEFT_CENTER, &folder, theme::font(11.0), t.text_dim);
-        if resp.on_hover_text(&path).clicked()
-            && let Err(e) = app.open_path(&path)
-        {
-            app.notify(e);
+        if resp.on_hover_text(&path).clicked() {
+            app.open_path_in_background(&path);
         }
     }
 }
