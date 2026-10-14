@@ -390,6 +390,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
     ("app.smartArtPictureDialog", "Insert Picture in SmartArt…", None, "{id?, index}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
+    ("app.reuseSlidesDialog", "Reuse Slides…", None, "{keepFormatting?: bool}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
@@ -933,6 +934,7 @@ impl SlideApp {
                 self.pick_and_run("picture", "smartArt.picture", p);
             }
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
+            "app.reuseSlidesDialog" => self.pick_and_reuse(p.get("keepFormatting").and_then(Value::as_bool).unwrap_or(false)),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
@@ -1115,6 +1117,20 @@ impl SlideApp {
     pub(crate) fn pick_transition_sound(&mut self) {
         if self.services.pick_open.is_some() {
             self.pick_and_insert("audio", "transition.sound");
+        }
+    }
+
+    /// Home › New Slide › Reuse Slides…: pick a presentation and insert all its slides after the
+    /// current one (desktop only: the browser picker opens what it picks as a document).
+    fn pick_and_reuse(&mut self, keep: bool) {
+        let Some(pick) = self.services.pick_open.as_mut() else {
+            self.set_status("Reuse Slides needs the desktop app".to_string());
+            return;
+        };
+        let Some(path) = pick("open") else { return };
+        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep})) {
+            Ok(r) => self.set_status(format!("Inserted {} slides from {path}", r["slides"])),
+            Err(e) => self.set_status(e.to_string()),
         }
     }
 

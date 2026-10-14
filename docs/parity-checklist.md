@@ -88,7 +88,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Export video (MP4) / animated GIF | P2 | M |
 | Files | Print (slides, handouts, notes, outline) | P1 | M |
 | Files | Password protection | P2 | M |
-| Files | Reuse slides from another file | P1 | M |
+| Files | Reuse slides from another file | P1 | P |
 | Files | Drag and drop files onto the window | P1 | D |
 | Files | OpenDocument .odp open/save | P2 | M |
 | Slides | New slide by layout | P0 | D |
