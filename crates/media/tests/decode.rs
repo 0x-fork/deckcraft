@@ -342,3 +342,33 @@ fn player_plays_decoded_audio_through_the_mixer() {
     assert!((rms - 0.0884 * 0.5).abs() < 0.005, "{rms}");
     assert!((p.status(1).map(|s| s.position).unwrap_or(0.0) - 0.1).abs() < 1e-6);
 }
+
+/// Damaged files found by mutation fuzzing the fixtures above (so CC0 like them): each must come
+/// back as an error or as audio — not panic (symphonia's Matroska reader panics on the first two)
+/// and not hang (the MP4 demuxer reported the same error forever on the last two).
+#[test]
+fn damaged_media_neither_panics_nor_hangs() {
+    for name in ["damaged/ebml-header.mkv", "damaged/ebml-position.webm", "damaged/demux-loop.mp4", "damaged/demux-loop.m4a"] {
+        let b = fixture(name);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ok = std::panic::catch_unwind(|| {
+                let _ = probe::probe(&b);
+                let _ = audio::decode(&b);
+                if let Ok(mut d) = video::VideoDecoder::open(b.clone()) {
+                    for _ in 0..12 {
+                        if !matches!(d.next_frame(), Ok(Some(_))) {
+                            break;
+                        }
+                    }
+                }
+            })
+            .is_ok();
+            let _ = tx.send(ok);
+        });
+        match rx.recv_timeout(Duration::from_secs(20)) {
+            Ok(ok) => assert!(ok, "{name} panicked"),
+            Err(_) => panic!("{name} still decoding after 20 s"),
+        }
+    }
+}
