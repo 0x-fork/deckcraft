@@ -505,7 +505,8 @@ fn build_spec(a: &Animation, xf: Xfrm, sw: f64, sh: f64, resolve: &dyn Fn(&deckc
     EffectSpec {
         class: a.class,
         effect,
-        option: a.option.clone(),
+        // Sink Down is Rise Up played backwards, leaving downward.
+        option: if a.effect == "sinkDown" { "d".into() } else { a.option.clone() },
         accel: a.smooth_start,
         decel: a.smooth_end,
         bounce: a.bounce_end,
