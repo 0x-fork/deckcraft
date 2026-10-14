@@ -116,6 +116,12 @@ pub fn layout_id(kind: &str) -> &'static str {
         "timeline" => "urn:microsoft.com/office/officeart/2005/8/layout/hProcess11",
         "venn" => "urn:microsoft.com/office/officeart/2005/8/layout/venn1",
         "target" => "urn:microsoft.com/office/officeart/2005/8/layout/target1",
+        "textCycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle1",
+        "continuousCycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle3",
+        "horizontalHierarchy" => "urn:microsoft.com/office/officeart/2005/8/layout/hierarchy2",
+        "gridMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix2",
+        "gear" => "urn:microsoft.com/office/officeart/2005/8/layout/gear1",
+        "funnel" => "urn:microsoft.com/office/officeart/2005/8/layout/funnel1",
         _ => "urn:microsoft.com/office/officeart/2005/8/layout/vList2",
     }
 }
@@ -123,6 +129,11 @@ pub fn layout_id(kind: &str) -> &'static str {
 /// The DeckCraft layout closest to a PowerPoint layout (by its id and category).
 pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
     let last = layout_id.rsplit('/').next().unwrap_or("").to_ascii_lowercase();
+    // DeckCraft before Picture Accent Process got its own id wrote it as pList2 (Horizontal
+    // Picture List) with its own layout part in the process category; PowerPoint's pList2 is a list.
+    if last == "plist2" && category.eq_ignore_ascii_case("process") {
+        return "pictureProcess";
+    }
     // Exact ids first: the layouts DeckCraft writes, and their closest siblings.
     for k in [
         "blockList",
@@ -146,6 +157,12 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "timeline",
         "venn",
         "target",
+        "textCycle",
+        "continuousCycle",
+        "horizontalHierarchy",
+        "gridMatrix",
+        "gear",
+        "funnel",
         "list",
     ] {
         if layout_id == layout_id_of(k) {
@@ -153,7 +170,11 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         }
     }
     let s = format!("{last} {}", category.to_ascii_lowercase());
-    if s.contains("venn") {
+    if s.contains("gear") {
+        "gear"
+    } else if s.contains("funnel") {
+        "funnel"
+    } else if s.contains("venn") {
         "venn"
     } else if s.contains("target") {
         "target"
@@ -188,12 +209,12 @@ fn layout_id_of(kind: &str) -> &'static str {
 
 fn category(kind: &str) -> &'static str {
     match kind {
-        "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" | "timeline" => "process",
+        "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" | "timeline" | "gear" | "funnel" => "process",
         "venn" | "target" => "relationship",
-        "cycle" | "blockCycle" | "radial" => "cycle",
-        "hierarchy" => "hierarchy",
+        "cycle" | "blockCycle" | "radial" | "textCycle" | "continuousCycle" => "cycle",
+        "hierarchy" | "horizontalHierarchy" => "hierarchy",
         "pyramid" | "invertedPyramid" => "pyramid",
-        "matrix" | "titledMatrix" => "matrix",
+        "matrix" | "titledMatrix" | "gridMatrix" => "matrix",
         _ => "list",
     }
 }
@@ -411,12 +432,14 @@ fn alg(kind: &str) -> (&'static str, Vec<(&'static str, &'static str)>, &'static
         }
         "chevron" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "chevron"),
         "verticalProcess" => ("lin", vec![("linDir", "fromT"), ("nodeHorzAlign", "ctr")], "roundRect"),
-        "cycle" | "radial" | "venn" | "target" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
+        "cycle" | "radial" | "venn" | "target" | "textCycle" | "continuousCycle" | "gear" => {
+            ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse")
+        }
         "blockCycle" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "roundRect"),
         "pyramid" | "invertedPyramid" => {
             ("pyra", vec![("linDir", if kind == "pyramid" { "fromT" } else { "fromB" }), ("txDir", "fromT"), ("pyraAcctPos", "bef")], "trapezoid")
         }
-        "matrix" | "titledMatrix" | "blockList" => (
+        "matrix" | "titledMatrix" | "gridMatrix" | "blockList" => (
             "snake",
             vec![("grDir", "tL"), ("flowDir", "row"), ("contDir", "sameDir"), ("off", "ctr")],
             if kind == "blockList" { "rect" } else { "roundRect" },
@@ -479,7 +502,7 @@ pub fn layout_xml(kind: &str) -> Vec<u8> {
     w.empty0("dgm:dir");
     w.empty("dgm:resizeHandles", A::new().a("val", "exact"));
     w.close("dgm:varLst");
-    if kind == "hierarchy" {
+    if matches!(kind, "hierarchy" | "horizontalHierarchy") {
         // Each node over the row of its children, recursively.
         w.empty("dgm:alg", A::new().a("type", "hierChild"));
         w.open("dgm:shape", A::new().a("r:blip", ""));
@@ -694,7 +717,24 @@ mod tests {
         assert!(String::from_utf8(style_xml("cartoon")).unwrap().contains("bevelT"));
         assert!(layout_id("pictureProcess").ends_with("/hProcess10"), "Picture Accent Process");
         assert!(layout_id("pictureHList").ends_with("/pList2"), "Horizontal Picture List");
-        for k in ["pictureList", "pictureCaption", "pictureProcess", "pictureHList", "timeline", "venn", "target"] {
+        // Picture Accent Process as an earlier DeckCraft wrote it (pList2, process category).
+        assert_eq!(kind_for("urn:microsoft.com/office/officeart/2005/8/layout/pList2", "process"), "pictureProcess");
+        assert_eq!(kind_for("urn:microsoft.com/office/officeart/2005/8/layout/pList2", "list"), "pictureHList");
+        for k in [
+            "pictureList",
+            "pictureCaption",
+            "pictureProcess",
+            "pictureHList",
+            "timeline",
+            "venn",
+            "target",
+            "textCycle",
+            "continuousCycle",
+            "horizontalHierarchy",
+            "gridMatrix",
+            "gear",
+            "funnel",
+        ] {
             assert_eq!(kind_for(layout_id(k), ""), k);
         }
     }
