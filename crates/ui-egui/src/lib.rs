@@ -1345,19 +1345,19 @@ mod tests {
         assert!(app.run("app.qat", json!({"add": "no.such"})).is_err());
         app.run("app.qat", json!({"remove": "edit.redo"})).unwrap();
         assert_eq!(ids(app), ["app.home", "file.save", "app.exportDialog", "edit.undo", "show.fromStart", "insert.table", "view.pane"]);
-        assert_eq!(app.ui.qat[4].label, "Table");
+        assert_eq!(app.ui.qat[5].label, "Table");
         // Saved with the rest of the UI state and read back.
         let back: UiState = serde_json::from_value(serde_json::to_value(&app.ui).unwrap()).unwrap();
         assert_eq!(back.qat, app.ui.qat);
         harness.run_steps(2);
         let app = harness.state_mut();
         app.run("app.qat", json!({"remove": "view.pane", "params": {"pane": "selection"}})).unwrap();
-        assert_eq!(app.ui.qat.len(), 5);
+        assert_eq!(app.ui.qat.len(), 6);
         app.run("app.qat", json!({"reset": true})).unwrap();
         assert_eq!(ids(app), ["app.home", "file.save", "app.exportDialog", "edit.undo", "edit.redo", "show.fromStart"]);
         // An older settings file without the toolbar gets the defaults.
         let old: UiState = serde_json::from_value(json!({"tab": "Home"})).unwrap();
-        assert_eq!(old.qat.len(), 5);
+        assert_eq!(old.qat.len(), 6);
     }
 
     #[test]
