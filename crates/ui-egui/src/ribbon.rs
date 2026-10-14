@@ -1452,6 +1452,29 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
             run(app, "app.browseThemeDialog", json!({}));
         }
     });
+    // Variants: the current theme in its four colour variations.
+    if let Some(th) = app.session.active().and_then(|d| d.doc.masters.first().map(|m| m.theme.clone())) {
+        let variants = deckcraft_model::theme::theme_variants(&th);
+        let tiles: Vec<deckcraft_model::Theme> = variants.iter().map(|c| deckcraft_model::Theme { colors: c.clone(), ..th.clone() }).collect();
+        let names: Vec<String> = variants.iter().map(|c| c.name.clone()).collect();
+        let sel = variants.iter().position(|c| c.colors == th.colors.colors);
+        group(ui, |ui| {
+            if let Some(i) = widgets::gallery(
+                ui,
+                tiles.len(),
+                vec2(84.0, 56.0),
+                sel,
+                |p, r, i| {
+                    if let Some(t) = tiles.get(i) {
+                        paint_theme_tile(p, r, t);
+                    }
+                },
+                |i| names.get(i).cloned().unwrap_or_default(),
+            ) {
+                run(app, "design.variant", json!({"index": i}));
+            }
+        });
+    }
     group(ui, |ui| {
         let r = big_button(ui, Icon::Colors, "Colors", true);
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Colors"));

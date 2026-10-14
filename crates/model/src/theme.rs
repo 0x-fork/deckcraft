@@ -149,6 +149,31 @@ pub fn default_format() -> FormatScheme {
     }
 }
 
+/// Design ▸ Variants: four colour variations of `t`, built from its built-in colours when it is
+/// a built-in theme (so picking one variant after another doesn't drift), else from its own.
+/// 1: as designed; 2 and 3: the accents rotated; 4: dark (light and dark colours swapped).
+pub fn theme_variants(t: &Theme) -> Vec<ColorScheme> {
+    let base = builtin_themes().into_iter().find(|b| b.name == t.name).map_or_else(|| t.colors.clone(), |b| b.colors);
+    let rotate = |by: usize| {
+        let mut c = base.clone();
+        let accents: Vec<_> = base.colors.get(4..10).map(<[_]>::to_vec).unwrap_or_default();
+        for (i, slot) in c.colors.iter_mut().skip(4).take(6).enumerate() {
+            if let Some(a) = accents.get((i + by) % accents.len().max(1)) {
+                *slot = *a;
+            }
+        }
+        c
+    };
+    let mut dark = base.clone();
+    dark.colors.swap(0, 1);
+    dark.colors.swap(2, 3);
+    let mut out = vec![base.clone(), rotate(1), rotate(3), dark];
+    for (i, c) in out.iter_mut().enumerate().skip(1) {
+        c.name = format!("{} {}", base.name, i + 1);
+    }
+    out
+}
+
 /// Our original built-in themes (shown in Design ▸ Themes). Colours and names are our own.
 pub fn builtin_themes() -> Vec<Theme> {
     let t = |name: &str, colors: ColorScheme, major: &str, minor: &str| Theme {

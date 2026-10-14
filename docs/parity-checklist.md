@@ -26,6 +26,8 @@ The summary between `<!-- SUMMARY -->
 | Masters & themes | 85% |
 | Views | 90% |
 | Masters & themes | 88% |
+| Views | 90% |
+| Masters & themes | 88% |
 | Shapes | 88% |
 | Shapes | 91% |
 | Format | 83% |
@@ -105,7 +107,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Masters & themes | Insert/rename/delete layouts, insert placeholders | P1 | D |
 | Masters & themes | Handout and Notes masters | P2 | M |
 | Masters & themes | Built-in themes (original designs) | P0 | D |
-| Masters & themes | Theme variants | P1 | P |
+| Masters & themes | Theme variants | P1 | D |
 | Masters & themes | Colour schemes (built-in and custom) | P0 | D |
 | Masters & themes | Font schemes (built-in and custom) | P0 | D |
 | Masters & themes | Effect schemes / background styles | P2 | P |

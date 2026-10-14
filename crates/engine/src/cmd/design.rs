@@ -34,6 +34,8 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             colors
         ),
+        cmd!("design.variant", "Variants", ["Design", "Variants"], None, "{index: 0..3} (see design.variants)", has_doc, variant),
+        cmd!(query "design.variants", "Variant Gallery", [], None, "{} → the current theme's four colour variants and which is applied", has_doc, variants),
         cmd!("design.fonts", "Fonts", ["Design", "Variants"], None, "{} opens Create New Theme Fonts | {name} | {major, minor}", has_doc, fonts),
         cmd!("design.effects", "Effects", ["Design", "Variants"], None, "{name} (see design.themes)", has_doc, effects),
         cmd!(
@@ -255,6 +257,32 @@ fn colors(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     ok()
+}
+
+fn variant(s: &mut Session, p: &Value) -> Result<Value> {
+    let index = p.get("index").and_then(Value::as_u64).ok_or_else(|| bad("design.variant", "missing `index` (0..3)"))? as usize;
+    s.edit(|doc, sel| {
+        let mi = master_index(doc, sel);
+        let m = Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("design.variant", "no master"))?);
+        let v = deckcraft_model::theme::theme_variants(&m.theme);
+        m.theme.colors =
+            v.get(index).cloned().ok_or_else(|| bad("design.variant", format!("no variant {index}; 0..{}", v.len().saturating_sub(1))))?;
+        Ok(())
+    })?;
+    Ok(json!({"variant": index}))
+}
+
+fn variants(s: &mut Session, _p: &Value) -> Result<Value> {
+    let st = s.doc()?;
+    let mi = master_index(&st.doc, &st.selection);
+    let th = st.doc.masters.get(mi).map(|m| m.theme.clone()).unwrap_or_default();
+    let v = deckcraft_model::theme::theme_variants(&th);
+    let current = v.iter().position(|c| c.colors == th.colors.colors);
+    Ok(json!({
+        "theme": th.name,
+        "current": current,
+        "variants": v.iter().map(|c| json!({"name": c.name, "colors": c.colors.iter().map(|x| format!("#{}", x.hex())).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+    }))
 }
 
 fn current_colors(s: &Session) -> Result<deckcraft_color::ColorScheme> {

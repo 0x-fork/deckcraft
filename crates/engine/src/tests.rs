@@ -2314,3 +2314,31 @@ fn autocorrect_options_as_you_type() {
     s.execute("text.insert", &json!({"text": "monday notes "})).unwrap();
     assert_eq!(s.execute("text.get", &json!({"id": title})).unwrap()["text"], "monday notes ");
 }
+
+#[test]
+fn theme_variants_apply_and_report_the_current_one() {
+    let mut s = session();
+    let name = deckcraft_model::theme::builtin_themes()[1].name.clone();
+    s.execute("design.theme", &json!({"name": name})).unwrap();
+    let v = s.execute("design.variants", &json!({})).unwrap();
+    assert_eq!(v["variants"].as_array().unwrap().len(), 4);
+    assert_eq!(v["current"], json!(0));
+    let base = s.doc().unwrap().doc.masters[0].theme.colors.clone();
+    s.execute("design.variant", &json!({"index": 1})).unwrap();
+    let c = s.doc().unwrap().doc.masters[0].theme.colors.clone();
+    assert_eq!(c.colors[4], base.colors[5], "accents rotate");
+    assert_eq!(c.colors[0], base.colors[0]);
+    assert_eq!(s.execute("design.variants", &json!({})).unwrap()["current"], json!(1));
+    // From a variant, another variant is built from the theme's own colours, not the variant's.
+    s.execute("design.variant", &json!({"index": 3})).unwrap();
+    let d = s.doc().unwrap().doc.masters[0].theme.colors.clone();
+    assert_eq!((d.colors[0], d.colors[1], d.colors[4]), (base.colors[1], base.colors[0], base.colors[4]));
+    s.execute("design.variant", &json!({"index": 0})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.masters[0].theme.colors.colors, base.colors);
+    assert!(s.execute("design.variant", &json!({"index": 9})).is_err());
+    // It survives PPTX.
+    s.execute("design.variant", &json!({"index": 2})).unwrap();
+    let p = s.doc().unwrap().doc.as_ref().clone();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&p).unwrap()).unwrap();
+    assert_eq!(back.masters[0].theme.colors.colors, p.masters[0].theme.colors.colors);
+}
