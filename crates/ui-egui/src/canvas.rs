@@ -480,7 +480,7 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
                 egui::CursorIcon::Move
             }
         }
-        (_, Some(Hit::Shape { .. })) => egui::CursorIcon::Move,
+        (_, Some(Hit::Shape { .. } | Hit::Frame { .. })) => egui::CursorIcon::Move,
         _ => egui::CursorIcon::Default,
     };
     if resp.hovered() {

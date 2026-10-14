@@ -101,6 +101,11 @@ pub enum Hit {
         id: ShapeId,
         text: bool,
     },
+    /// The frame of the box whose text is being edited (a band on either side of its edge):
+    /// pressing there leaves text editing and drags the box, like PowerPoint.
+    Frame {
+        id: ShapeId,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -305,6 +310,13 @@ impl Session {
                 }
             }
         }
+        // The frame of the text being edited: grabbing it moves the box.
+        if let Some(e) = edited_box(st)
+            && e.movable
+            && edit_zone(&e.xfrm, p, tol) == EditZone::Frame
+        {
+            return Some(Hit::Frame { id: e.id });
+        }
         // Shapes, topmost first.
         // Locked objects are still picked (to format them or type in them); they just don't move.
         for sh in st.shapes().iter().rev() {
@@ -418,29 +430,25 @@ impl Session {
             ToolKind::Select => {}
         }
         let st = self.doc()?;
-        // Clicking inside the text being edited moves the caret / starts a text selection.
-        if let Some(t) = st.selection.text.clone()
-            && !t.notes
-            && t.cell.is_none()
-            && let Some(sh) = st.shape(t.shape)
+        // Clicking inside the text being edited moves the caret / starts a text selection. Its
+        // handles and its frame (see `Hit::Frame`) win: they size, rotate or move the box.
+        if let Some(e) = edited_box(st)
+            && edit_zone(&e.xfrm, p, tol) != EditZone::Outside
+            && !matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::Frame { .. }))
+            && let Some(sh) = st.shape(e.id)
         {
-            let x = xfrm_of(&st.doc, &st.selection, sh);
-            if x.bounds().inflate(tol, tol).contains(p)
-                && !matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. }))
-            {
-                let pos = text_pos(st, sh, p);
-                let shift = mods.shift;
-                self.select(|_, sel| {
-                    if let Some(tt) = sel.text.as_mut() {
-                        tt.caret = pos;
-                        if !shift {
-                            tt.anchor = pos;
-                        }
+            let pos = text_pos(st, sh, p);
+            let shift = mods.shift;
+            self.select(|_, sel| {
+                if let Some(tt) = sel.text.as_mut() {
+                    tt.caret = pos;
+                    if !shift {
+                        tt.anchor = pos;
                     }
-                })?;
-                self.tool.drag = Some(Drag::TextSelect { shape: t.shape });
-                return Ok(json!({"caret": [pos.0, pos.1]}));
-            }
+                }
+            })?;
+            self.tool.drag = Some(Drag::TextSelect { shape: e.id });
+            return Ok(json!({"caret": [pos.0, pos.1]}));
         }
         let hit = self.hit_test(p, tol);
         // Edit Points: drag a vertex, Ctrl-click one to delete it or the outline to add one;
@@ -498,6 +506,17 @@ impl Session {
                 let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
                 self.begin("Adjust Shape");
                 self.tool.drag = Some(Drag::Adjust { id, index, orig });
+            }
+            Some(Hit::Frame { id }) => {
+                // Like PowerPoint: the box leaves text editing and is selected whole (a click
+                // without a drag stops there), and dragging moves it as one undo step.
+                let origs: Vec<(ShapeId, Xfrm)> = st.shape(id).map(|s| (id, xfrm_of(&st.doc, &st.selection, s))).into_iter().collect();
+                self.select(|_, sel| {
+                    sel.shapes = vec![id];
+                    sel.text = None;
+                    sel.cells = None;
+                })?;
+                self.tool.drag = Some(Drag::Move { ids: vec![id], start: p, origs, moved: false, duplicate: mods.alt, enter_text: None });
             }
             Some(Hit::Shape { id, text }) => {
                 let selected = st.selection.shapes.contains(&id);
@@ -1300,6 +1319,46 @@ fn member_at(children: &[Shape], to_abs: Affine, p: Point, tol: f64) -> Option<S
         }
     }
     None
+}
+
+/// The box whose text is being edited on the slide (not speaker notes, not a table cell).
+struct EditedBox {
+    id: ShapeId,
+    xfrm: Xfrm,
+    /// Its frame can be grabbed to move it: not a line (no frame to grab) and not locked.
+    movable: bool,
+}
+
+fn edited_box(st: &crate::DocState) -> Option<EditedBox> {
+    let t = st.selection.text.as_ref()?;
+    if t.notes || t.cell.is_some() {
+        return None;
+    }
+    let sh = st.shape(t.shape)?;
+    Some(EditedBox { id: t.shape, xfrm: xfrm_of(&st.doc, &st.selection, sh), movable: !sh.is_line() && !sh.locked })
+}
+
+/// Where a point falls against the box of the text being edited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EditZone {
+    /// Well inside: the caret goes there.
+    Inside,
+    /// On the frame: a band `tol` wide on either side of the box edge.
+    Frame,
+    Outside,
+}
+
+/// Classify slide point `p` against box `x`, in the box's own (rotated, flipped) frame. Inside
+/// small boxes the band narrows to a quarter of the box so their text stays reachable.
+fn edit_zone(x: &Xfrm, p: Point, tol: f64) -> EditZone {
+    let l = x.affine().inverse() * p;
+    let (w, h) = (x.w.max(0.0), x.h.max(0.0));
+    let tol = if tol.is_finite() { tol.max(0.0) } else { 0.0 };
+    if !(l.x.is_finite() && l.y.is_finite()) || l.x < -tol || l.y < -tol || l.x > w + tol || l.y > h + tol {
+        return EditZone::Outside;
+    }
+    let inner = tol.min(w / 4.0).min(h / 4.0);
+    if l.x > inner && l.y > inner && l.x < w - inner && l.y < h - inner { EditZone::Inside } else { EditZone::Frame }
 }
 
 fn contains_rect(outer: Rect, inner: Rect) -> bool {
