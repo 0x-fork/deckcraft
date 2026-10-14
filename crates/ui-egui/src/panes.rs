@@ -555,45 +555,97 @@ fn comments(app: &mut SlideApp, ui: &mut Ui) {
         app.dialog = Some(crate::dialogs::Dialog::new("comment"));
     }
     ui.separator();
-    let Some(st) = app.session.active() else { return };
-    let list = st.current_slide().map(|s| s.comments.clone()).unwrap_or_default();
-    if list.is_empty() {
-        ui.label(egui::RichText::new("No comments on this slide.").color(t.text_dim));
+    let threads: Vec<(usize, Vec<deckcraft_model::Comment>)> = app
+        .session
+        .active()
+        .map(|st| st.doc.slides.iter().enumerate().filter(|(_, sl)| !sl.comments.is_empty()).map(|(i, sl)| (i, sl.comments.clone())).collect())
+        .unwrap_or_default();
+    if threads.is_empty() {
+        ui.label(egui::RichText::new("No comments.").color(t.text_dim));
+        return;
     }
-    for (i, c) in list.iter().enumerate() {
-        egui::Frame::NONE.fill(t.chrome).corner_radius(CornerRadius::same(8)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+    let focus = app.ui.comment_focus;
+    for (si, list) in threads {
+        ui.label(egui::RichText::new(format!("Slide {}", si + 1)).font(theme::bold(12.0)).color(t.text_dim));
+        ui.add_space(2.0);
+        for (i, c) in list.iter().enumerate() {
+            comment_card(app, ui, si, i, c, focus == Some((si, i)));
+            ui.add_space(6.0);
+        }
+    }
+}
+
+fn focus_comment(app: &mut SlideApp, slide: usize, index: usize) {
+    let _ = app.run("slide.go", json!({"index": slide}));
+    app.ui.comment_focus = Some((slide, index));
+}
+
+fn comment_card(app: &mut SlideApp, ui: &mut Ui, slide: usize, index: usize, c: &deckcraft_model::Comment, focused: bool) {
+    let t = Tokens::get(ui.ctx());
+    let stroke = if focused { Stroke::new(2.0, t.accent) } else { Stroke::NONE };
+    let shown = egui::Frame::NONE
+        .fill(if focused { t.selected } else { t.chrome })
+        .stroke(stroke)
+        .corner_radius(CornerRadius::same(8))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
+            let head = ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
                 ui.painter().circle_filled(r.center(), 12.0, t.accent);
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, &c.initials, theme::bold(11.0), Color32::WHITE);
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(&c.author).font(theme::bold(12.5)));
-                    ui.label(egui::RichText::new(c.date.replace('T', " ").trim_end_matches('Z')).size(10.5).color(t.text_faint));
+                    let name = ui.add(egui::Label::new(egui::RichText::new(&c.author).font(theme::bold(12.5))).sense(Sense::click()));
+                    if name.clicked() {
+                        focus_comment(app, slide, index);
+                    }
+                    let when = c.date.replace('T', " ").trim_end_matches('Z').to_string();
+                    let when = if c.resolved { format!("{when} · Resolved") } else { when };
+                    ui.label(egui::RichText::new(when).size(10.5).color(t.text_faint));
                 });
             });
-            ui.label(&c.text);
+            if head.response.clicked() {
+                focus_comment(app, slide, index);
+            }
+            let body = ui.add(egui::Label::new(&c.text).sense(Sense::click()));
+            if body.clicked() {
+                focus_comment(app, slide, index);
+            }
             for r in &c.replies {
                 ui.label(egui::RichText::new(format!("↳ {}: {}", r.author, r.text)).color(t.text_dim));
             }
             ui.horizontal(|ui| {
-                let id = ui.id().with(("reply", i));
+                let id = ui.id().with(("reply", slide, index));
                 let mut txt: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
                 let r = ui.add(egui::TextEdit::singleline(&mut txt).hint_text("Reply…").desired_width(ui.available_width() - 70.0));
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !txt.trim().is_empty() {
-                    run(app, "comment.reply", json!({"index": i, "text": txt}));
+                    focus_comment(app, slide, index);
+                    run(app, "comment.reply", json!({"index": index, "text": txt}));
                     txt.clear();
                 }
                 ui.data_mut(|d| d.insert_temp(id, txt));
                 if ui.small_button(if c.resolved { "Reopen" } else { "Resolve" }).clicked() {
-                    run(app, "comment.resolve", json!({"index": i, "resolved": !c.resolved}));
+                    focus_comment(app, slide, index);
+                    run(app, "comment.resolve", json!({"index": index, "resolved": !c.resolved}));
                 }
                 if ui.small_button("🗑").clicked() {
-                    run(app, "comment.delete", json!({"index": i}));
+                    let _ = app.run("slide.go", json!({"index": slide}));
+                    let _ = app.run("comment.delete", json!({"index": index}));
+                    match app.ui.comment_focus {
+                        Some((fs, fi)) if fs == slide && fi == index => app.ui.comment_focus = None,
+                        Some((fs, fi)) if fs == slide && fi > index => app.ui.comment_focus = Some((fs, fi - 1)),
+                        _ => {}
+                    }
                 }
             });
         });
-        ui.add_space(6.0);
+    if focused {
+        let key = egui::Id::new("comment-focus-scrolled");
+        let seen = ui.data(|d| d.get_temp::<(usize, usize)>(key));
+        if seen != Some((slide, index)) {
+            ui.scroll_to_rect(shown.response.rect, Some(egui::Align::Center));
+            ui.data_mut(|d| d.insert_temp(key, (slide, index)));
+        }
     }
 }
 

@@ -102,6 +102,9 @@ pub struct UiState {
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
     pub grayscale: bool,
+    /// Comment the Review Previous/Next buttons last landed on: `(slide, index)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment_focus: Option<(usize, usize)>,
 }
 
 impl Default for UiState {
@@ -127,6 +130,7 @@ impl Default for UiState {
             ui_scale: 1.0,
             format_tab: "fill".into(),
             grayscale: false,
+            comment_focus: None,
         }
     }
 }

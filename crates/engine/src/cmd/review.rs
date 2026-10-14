@@ -6,7 +6,7 @@ use deckcraft_model::Comment;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{Result, Session, UiRequest};
+use crate::{Result, Session, Target, UiRequest};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -15,6 +15,24 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("comment.delete", "Delete Comment", ["Review", "Comments"], None, "{index? | all?: bool}", has_slide, delete),
         cmd!("comment.resolve", "Resolve Thread", ["Comments"], None, "{index, resolved?: bool}", has_slide, resolve),
         cmd!(query "comment.list", "Comments", [], None, "{slide?} → comments", has_slide, list),
+        cmd!(
+            noundo "comment.next",
+            "Next Comment",
+            ["Review", "Comments"],
+            None,
+            "{slide?, index?} → {slide, index, text}",
+            has_slide,
+            |s, p| neighbour(s, p, true)
+        ),
+        cmd!(
+            noundo "comment.prev",
+            "Previous Comment",
+            ["Review", "Comments"],
+            None,
+            "{slide?, index?} → {slide, index, text}",
+            has_slide,
+            |s, p| neighbour(s, p, false)
+        ),
         cmd!(query "review.accessibility", "Check Accessibility", ["Review", "Accessibility"], None, "{} → [{slide, shape, issue}]", has_doc, accessibility),
         cmd!(query "review.spelling", "Spelling", ["Review", "Proofing"], Some("F7"), "{} → [{slide, shape, word}] (words not in the built-in list)", has_doc, spelling),
         cmd!(noundo "show.fromStart", "Play from Start", ["Slide Show", "Start Slide Show"], Some("Cmd+Shift+Enter"), "{}", has_slide, |s, _| start(s, 0)),
@@ -121,6 +139,51 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc()?;
     let i = usize_param(p, "slide").unwrap_or(st.selection.slide);
     Ok(serde_json::to_value(st.doc.slides.get(i).map(|x| x.comments.clone()).unwrap_or_default()).unwrap_or_default())
+}
+
+/// Flat `(slide, comment index)` list in deck order.
+fn comment_threads(doc: &deckcraft_model::Presentation) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    for (si, sl) in doc.slides.iter().enumerate() {
+        for ci in 0..sl.comments.len() {
+            out.push((si, ci));
+        }
+    }
+    out
+}
+
+/// Step to the next or previous comment. With `{slide, index}` matching a thread, move one step
+/// and stop at the ends. Without `index`, next is the first thread on or after `slide` (the
+/// current slide when omitted) and previous is the last thread strictly before it.
+fn neighbour(s: &mut Session, p: &Value, forward: bool) -> Result<Value> {
+    let cmd = if forward { "comment.next" } else { "comment.prev" };
+    let (threads, slide, index) = {
+        let st = s.doc()?;
+        (comment_threads(&st.doc), usize_param(p, "slide").unwrap_or(st.selection.slide), usize_param(p, "index"))
+    };
+    if threads.is_empty() {
+        return Err(bad(cmd, "no comments"));
+    }
+    let pos = index.and_then(|i| threads.iter().position(|&(sl, c)| sl == slide && c == i));
+    let target = match (pos, forward) {
+        (Some(i), true) => threads.get(i + 1).copied(),
+        (Some(i), false) => i.checked_sub(1).and_then(|j| threads.get(j).copied()),
+        (None, true) => threads.iter().copied().find(|(sl, _)| *sl >= slide),
+        (None, false) => threads.iter().copied().rev().find(|(sl, _)| *sl < slide),
+    };
+    let Some((slide, index)) = target else {
+        return Err(bad(cmd, "no more comments"));
+    };
+    s.select(|doc, sel| {
+        sel.slide = slide;
+        sel.slides = doc.slides.get(slide).map(|x| vec![x.id]).unwrap_or_default();
+        sel.shapes.clear();
+        sel.text = None;
+        sel.cells = None;
+        sel.target = Target::Slides;
+    })?;
+    let text = s.doc()?.doc.slides.get(slide).and_then(|sl| sl.comments.get(index)).map(|c| c.text.clone()).unwrap_or_default();
+    Ok(json!({"slide": slide, "index": index, "text": text}))
 }
 
 fn accessibility(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -263,4 +326,54 @@ fn custom_show(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use crate::Session;
+
+    #[test]
+    fn previous_and_next_comment_walk_the_deck() {
+        let mut s = Session::with_new();
+        let err = s.execute("comment.next", &json!({})).unwrap_err();
+        assert!(err.to_string().contains("no comments"), "{err}");
+
+        s.execute("comment.add", &json!({"text": "on first"})).unwrap();
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [10.0, 10.0, 40.0, 40.0]})).unwrap();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("comment.add", &json!({"text": "on second a"})).unwrap();
+        s.execute("comment.add", &json!({"text": "on second b"})).unwrap();
+        s.execute("slide.new", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.slide, 2);
+
+        let err = s.execute("comment.next", &json!({})).unwrap_err();
+        assert!(err.to_string().contains("no more comments"), "{err}");
+
+        let undo_before = s.doc().unwrap().history.undo.len();
+        let back = s.execute("comment.prev", &json!({})).unwrap();
+        assert_eq!(back["slide"], 1);
+        assert_eq!(back["index"], 1);
+        assert_eq!(back["text"], "on second b");
+        assert_eq!(s.doc().unwrap().selection.slide, 1);
+        assert!(s.doc().unwrap().selection.shapes.is_empty());
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo_before);
+
+        let prev = s.execute("comment.prev", &json!({"slide": 1, "index": 1})).unwrap();
+        assert_eq!(prev["index"], 0);
+        assert_eq!(prev["text"], "on second a");
+        let first = s.execute("comment.prev", &json!({"slide": prev["slide"], "index": prev["index"]})).unwrap();
+        assert_eq!(first["slide"], 0);
+        assert_eq!(first["text"], "on first");
+        let err = s.execute("comment.prev", &json!({"slide": 0, "index": 0})).unwrap_err();
+        assert!(err.to_string().contains("no more comments"), "{err}");
+
+        let next = s.execute("comment.next", &json!({"slide": 0, "index": 0})).unwrap();
+        assert_eq!(next["slide"], 1);
+        assert_eq!(next["text"], "on second a");
+        s.execute("slide.go", &json!({"index": 0})).unwrap();
+        let here = s.execute("comment.next", &json!({})).unwrap();
+        assert_eq!(here["text"], "on first");
+    }
 }
