@@ -690,7 +690,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     }
     // A category position (0-based, fractional) as a slot, the way `slot` places the bars.
     let slot_at = |x: f64| if backwards { ncat as f64 - 1.0 - x + fwd } else { x + back };
-    draw_trendlines(ctx, rctx, c, m, plot, band, &slot_at, ncat, horiz, base, text_col, &to_axis);
+    draw_trendlines(ctx, rctx, c, m, plot, band, &slot_at, xscale, ncat, horiz, base, text_col, &to_axis);
     // Axis line.
     let mut ax = BezPath::new();
     if horiz {
@@ -852,6 +852,7 @@ fn draw_trendlines(
     plot: Rect,
     band: f64,
     slot: &impl Fn(f64) -> f64,
+    xscale: Option<(f64, f64, f64)>,
     ncat: usize,
     horiz: bool,
     base: f64,
@@ -879,8 +880,11 @@ fn draw_trendlines(
             xs.push(x);
             ys.push(y);
         }
-        // The same x extent the scatter marks use, so the fit sits on the points.
-        let (sx0, sx1) = if scatter {
+        // The same x extent the scatter marks use, so the fit sits on the points: the chart's
+        // value x axis where it has one, else the series' own x values.
+        let (sx0, sx1) = if let (true, Some((lo, hi, _))) = (scatter, xscale) {
+            (lo, hi)
+        } else if scatter {
             let mut lo = f64::MAX;
             let mut hi = f64::MIN;
             for v in s.x_values.iter().copied().flatten().filter(|v| v.is_finite()) {
