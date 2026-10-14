@@ -64,6 +64,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("shape.adjust", "Adjust Shape", [], None, "{index, value (file units), ids?}", has_selection, adjust),
         cmd!("shape.change", "Change Shape", ["Shape Format", "Insert Shapes", "Edit Shape"], None, "{preset, ids?}", has_selection, change),
         cmd!(
+            "shape.smoothCorners",
+            "Smooth Corners",
+            ["Shape Format", "Insert Shapes", "Edit Shape"],
+            None,
+            "{smoothing: 0..100 (%), radius?: pt (default: the rounded rectangle's own), ids?} → rectangle outline with smoothed (squircle) corners",
+            has_selection,
+            smooth_corners
+        ),
+        cmd!(
             "shape.fill",
             "Shape Fill",
             ["Shape Format", "Shape Styles"],
@@ -400,6 +409,47 @@ fn adjust(s: &mut Session, p: &Value) -> Result<Value> {
                 *slot = v;
             }
         }
+        Ok(())
+    })
+}
+
+/// Rectangles and rounded rectangles become custom geometry whose corners are smoothed
+/// ([`deckcraft_geom::squircle`]); the radius is the rounded rectangle's own unless `radius` says.
+fn smooth_corners(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "shape.smoothCorners";
+    let smoothing =
+        f64_param(p, "smoothing").filter(|v| v.is_finite()).ok_or_else(|| bad(CMD, "missing `smoothing` (0–100)"))?.clamp(0.0, 100.0) / 100.0;
+    let radius = f64_param(p, "radius").filter(|v| v.is_finite()).map(|v| v.max(0.0));
+    edit_geometry(s, p, CMD, |sh| {
+        let Some(x) = sh.xfrm else { return Err(bad(CMD, "the shape has no size of its own")) };
+        let ss = x.w.min(x.h).max(0.0);
+        let own = match &sh.geom {
+            Geom::Preset { name, adj } if name == "roundRect" => Some(ss * adj.first().copied().unwrap_or(16667.0).clamp(0.0, 50000.0) / 100000.0),
+            Geom::Preset { name, .. } if name == "rect" => Some(ss * 16667.0 / 100000.0),
+            _ => None,
+        };
+        // A custom outline qualifies only when it is a squircle this command drew with `radius`
+        // (re-smoothing as the slider moves), never an arbitrary freeform.
+        let custom = match (&sh.geom, radius) {
+            (Geom::Custom { paths }, Some(r)) => match paths.as_slice() {
+                [only] => (0..=100).any(|k| deckcraft_geom::squircle::path_d(only.w, only.h, r, f64::from(k) / 100.0) == only.d),
+                _ => false,
+            },
+            _ => false,
+        };
+        let r = match (radius, own) {
+            (Some(r), _) if own.is_some() || custom => r,
+            (None, Some(r)) => r,
+            _ => return Err(bad(CMD, "only rectangles, rounded rectangles and shapes already smoothed with this `radius` can be smoothed")),
+        };
+        sh.geom = Geom::Custom {
+            paths: vec![deckcraft_model::CustomPath {
+                w: x.w,
+                h: x.h,
+                d: deckcraft_geom::squircle::path_d(x.w, x.h, r, smoothing),
+                ..Default::default()
+            }],
+        };
         Ok(())
     })
 }

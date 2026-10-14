@@ -2521,3 +2521,40 @@ fn language_marks_text_and_no_proof_and_repeats_are_reported() {
     assert!(s.execute("review.spelling", &json!({})).unwrap().as_array().unwrap().is_empty());
     assert!(s.execute("format.language", &json!({"lang": "en US!"})).is_err());
 }
+
+/// Smooth Corners (#286): a rounded rectangle becomes a squircle outline that survives PPTX.
+#[test]
+fn smooth_corners_makes_a_squircle_outline() {
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "roundRect", "rect": [100, 100, 200, 100]})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    s.execute("shape.smoothCorners", &json!({"smoothing": 60})).unwrap();
+    let d = |s: &Session| match &s.doc().unwrap().shape(id).unwrap().geom {
+        deckcraft_model::Geom::Custom { paths } => paths[0].d.clone(),
+        g => panic!("{g:?}"),
+    };
+    // The default roundRect radius is 16.667% of the short side: 16.667 pt, smoothed 60%.
+    assert_eq!(d(&s), deckcraft_geom::squircle::path_d(200.0, 100.0, 16.667, 0.6));
+    // The smoothed outline takes a new smoothing with the radius it was drawn with; without a
+    // radius, or with another one (it could be any freeform), it is refused.
+    s.execute("shape.smoothCorners", &json!({"smoothing": 100, "radius": 16.667})).unwrap();
+    assert_eq!(d(&s), deckcraft_geom::squircle::path_d(200.0, 100.0, 16.667, 1.0));
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50})).is_err());
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50, "radius": 30})).is_err());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(d(&s), deckcraft_geom::squircle::path_d(200.0, 100.0, 16.667, 0.6));
+    // Other shapes are refused.
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [0, 0, 50, 50]})).unwrap();
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50})).is_err());
+    // So is a freeform, whatever radius is given.
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [0, 0, 50, 50]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": false})).unwrap();
+    assert!(matches!(s.doc().unwrap().shapes().last().unwrap().geom, deckcraft_model::Geom::Custom { .. }), "Edit Points made a freeform");
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50, "radius": 8})).is_err());
+    // The outline round-trips through PPTX as custom geometry.
+    let bytes = crate::cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    let back = crate::cmd::file::open_presentation("x.pptx", &bytes).unwrap();
+    let sh = back.slides.iter().flat_map(|sl| sl.shapes.iter()).find(|sh| matches!(sh.geom, deckcraft_model::Geom::Custom { .. }));
+    assert!(sh.is_some(), "a custom outline in the saved file");
+}
