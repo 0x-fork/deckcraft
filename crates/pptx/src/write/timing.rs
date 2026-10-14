@@ -364,6 +364,25 @@ fn behaviors(w: &mut W, x: &mut Exp, ids: &mut Ids, e: &Eff) {
                 w.close("p:to");
                 w.close("p:set");
             }
+            "colorPulse" => {
+                // As PowerPoint writes it: text and fill go to the colour and back (autoRev). The behaviour
+                // duration is the one import reads as the effect duration.
+                let c = a.color.clone().unwrap_or(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0xC0, 0x00, 0x00)));
+                for (attr, child) in [("style.color", true), ("fillcolor", false)] {
+                    w.open("p:animClr", A::new().a("clrSpc", "rgb").a("dir", "cw"));
+                    w.open("p:cBhvr", A::new().o("override", child.then_some("childStyle")));
+                    w.empty("p:cTn", A::new().a("id", ids.next()).a("dur", dur.max(1)).a("autoRev", "1").a("fill", "remove"));
+                    tgt(w, e.spid, e.paragraph);
+                    w.open0("p:attrNameLst");
+                    w.elt("p:attrName", attr);
+                    w.close("p:attrNameLst");
+                    w.close("p:cBhvr");
+                    w.open0("p:to");
+                    super::dml::color(w, &c);
+                    w.close("p:to");
+                    w.close("p:animClr");
+                }
+            }
             "fillColor" | "objectColor" | "fontColor" | "lineColor" | "complementaryColor" | "darken" | "lighten" => {
                 let attr = match a.effect.as_str() {
                     "fontColor" => "style.color",

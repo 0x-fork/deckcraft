@@ -1350,3 +1350,28 @@ fn literal_line_ends_in_run_text_read_as_breaks_and_survive_save() {
     assert_eq!(runs_of(&a, "one"), want);
     assert_eq!(runs_of(&round(&a), "one"), want, "save and reopen keep the runs");
 }
+
+#[test]
+fn color_pulse_keeps_its_effect_colour_and_duration() {
+    let mut p = defaults::new_presentation(None);
+    let s = shape(&mut p, "Pulsed", 10.0, 10.0, 200.0, 100.0);
+    let id = s.id;
+    let first = p.slides[0].id;
+    let sl = p.slide_mut(first).expect("slide");
+    sl.shapes.push(s);
+    let white = ColorRef::rgb(Rgba::rgb(255, 255, 255));
+    sl.animations.push(Animation {
+        shape: id,
+        class: AnimClass::Emphasis,
+        effect: "colorPulse".into(),
+        duration_ms: 1000,
+        color: Some(white.clone()),
+        ..Default::default()
+    });
+    let q = round(&p);
+    let a = &q.slides[0].animations[0];
+    assert_eq!((a.class, a.effect.as_str()), (AnimClass::Emphasis, "colorPulse"));
+    assert_eq!(a.color, Some(white));
+    assert_eq!(a.amount, None, "no grow/shrink scale is invented");
+    assert_eq!(a.duration_ms, 1000);
+}
