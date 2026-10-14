@@ -281,6 +281,21 @@ fn shrink_gives_up_at_once_when_even_the_smallest_scale_overflows() {
 }
 
 #[test]
+fn space_before_the_first_paragraph_with_spc_first_last_para() {
+    // 10 pt before every paragraph: skipped on the first one, unless the body asks for it.
+    let (p, mut sh) = setup("One\nTwo", 600.0, 300.0);
+    for para in &mut sh.text.as_mut().unwrap().paragraphs {
+        para.props.space_before = Some(Spacing::Pts(10.0));
+        para.props.space_after = Some(Spacing::Pts(6.0));
+    }
+    let plain = lay(&p, &sh, 600.0, 300.0);
+    sh.text.as_mut().unwrap().body.space_first_last = Some(true);
+    let both = lay(&p, &sh, 600.0, 300.0);
+    assert!((both.lines[0].top - plain.lines[0].top - 10.0).abs() < 1e-6);
+    assert!((both.content_height - plain.content_height - 16.0).abs() < 1e-6);
+}
+
+#[test]
 fn caret_and_hit_roundtrip() {
     let (p, sh) = setup("Hello world", 600.0, 100.0);
     let l = lay(&p, &sh, 600.0, 100.0);

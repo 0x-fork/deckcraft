@@ -241,6 +241,7 @@ pub fn body(ctx: &Ctx, shape: &Shape) -> BodyProps {
         warp_adj: Vec::new(),
         rtl_col: Some(false),
         upright: Some(false),
+        space_first_last: Some(false),
     });
     b
 }

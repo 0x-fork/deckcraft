@@ -1640,6 +1640,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
     let mut prev_after = 0.0;
     // How far the last line's full pitch reaches past the text (exact spacing; see below).
     let mut tail = 0.0;
+    let first_last = bp.space_first_last.unwrap_or(false);
     let mut shaped_paras: Vec<ParaShaped> = Vec::with_capacity(body.paragraphs.len());
     for (pi, para) in body.paragraphs.iter().enumerate() {
         let lvl = para.level.min(8) as usize;
@@ -1683,7 +1684,8 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         let first_w = (col_w - first_x - mr).max(1.0);
         let rest_w = (col_w - rest_x - mr).max(1.0);
         let raw = break_lines(p, first_w, rest_w, wrap, &tabs, props.default_tab.unwrap_or(72.0), first_x, rest_x);
-        let before = if pi == 0 { 0.0 } else { spacing_pts(props.space_before, p.lead_size) };
+        // The first paragraph's space before counts only when the body says so.
+        let before = if pi == 0 && !first_last { 0.0 } else { spacing_pts(props.space_before, p.lead_size) };
         y += before.max(0.0) + prev_after;
         let first_line_idx = all_lines.len();
         for (li, rl) in raw.iter().enumerate() {
@@ -1867,8 +1869,9 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         out.para_lines.push((first_line_idx, raw.len()));
         prev_after = spacing_pts(props.space_after, p.lead_size).max(0.0);
     }
-    // The text ends at the last line's descent under exact spacing.
-    let total = (y - tail).max(0.0);
+    // The text ends at the last line's descent under exact spacing; the last paragraph's space
+    // after counts only when the body says so.
+    let total = (y - tail).max(0.0) + if first_last { prev_after } else { 0.0 };
     out.content_height = total;
     // Where column `c` starts: from the left, or from the right with `rtlCol` (PowerPoint puts the
     // first column on the right).

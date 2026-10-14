@@ -440,7 +440,8 @@ pub fn body_pr(w: &mut W, b: &BodyProps) {
         .b("rtlCol", b.rtl_col)
         .o("anchor", b.anchor.map(|a| a.xml()))
         .b("anchorCtr", b.anchor_ctr)
-        .b("upright", b.upright);
+        .b("upright", b.upright)
+        .b("spcFirstLastPara", b.space_first_last);
     let warp = b.warp.as_deref().filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()));
     if warp.is_none() && b.autofit.is_none() {
         w.empty("a:bodyPr", a);
