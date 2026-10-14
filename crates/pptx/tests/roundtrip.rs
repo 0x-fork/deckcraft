@@ -991,3 +991,31 @@ fn transition_defaults_read_like_powerpoint() {
         assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
     }
 }
+
+#[test]
+fn linked_pictures_are_written_with_r_link() {
+    // A picture whose bytes live outside the package must be referenced with `r:link`; `r:embed`
+    // may only name a part inside the package (PowerPoint won't load the linked image otherwise).
+    let mut p = defaults::new_presentation(None);
+    let media = deckcraft_model::MediaId(5000);
+    p.media.push(deckcraft_model::MediaItem {
+        id: media,
+        name: "linked.png".into(),
+        content_type: "image/png".into(),
+        data: Arc::new(Vec::new()),
+        link: Some("file:///tmp/linked.png".into()),
+    });
+    let mut pic = shape(&mut p, "Linked", 100.0, 100.0, 200.0, 150.0);
+    pic.kind = ShapeKind::Picture { fill: PictureFill { media, ..Default::default() } };
+    Arc::make_mut(&mut p.slides[0]).shapes.push(pic);
+
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+    let mut xml = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("ppt/slides/slide1.xml").expect("slide"), &mut xml).expect("read");
+    assert!(xml.contains(r#"r:link="rId"#), "{xml}");
+    assert!(!xml.contains(r#"r:embed="rId"#), "{xml}");
+    let mut rels = String::new();
+    std::io::Read::read_to_string(&mut zip.by_name("ppt/slides/_rels/slide1.xml.rels").expect("rels"), &mut rels).expect("read");
+    assert!(rels.contains(r#"Target="file:///tmp/linked.png" TargetMode="External""#), "{rels}");
+}
