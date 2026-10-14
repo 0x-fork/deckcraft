@@ -395,8 +395,9 @@ fn layout_menu(app: &mut SlideApp, ui: &mut Ui, cmd: &str) {
                             ..Default::default()
                         },
                     );
-                    let tex = crate::textures::upload(ui.ctx(), format!("layout-{li}"), crate::textures::to_color_image(&img, false));
-                    ui.painter().image(tex.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+                    let tex = crate::textures::upload_editor(ui.ctx(), format!("layout-{li}"), crate::textures::to_color_image(&img, false));
+                    let at = crate::textures::device_pixel_rect(rect, ui.ctx().pixels_per_point());
+                    ui.painter().image(tex.id(), at, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 }
                 let t = Tokens::get(ui.ctx());
                 ui.painter().rect_stroke(
@@ -2638,7 +2639,7 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
         rows(ui, |ui| {
-            small(app, ui, Icon::ChangePicture, "Change Picture", "app.insertPictureDialog", json!({}));
+            small(app, ui, Icon::ChangePicture, "Change Picture", "app.changePictureDialog", json!({}));
             small(app, ui, Icon::ResetPicture, "Reset Picture", "picture.reset", json!({}));
         });
     });

@@ -45,7 +45,7 @@ PowerPoint opens and saves; Viewer = opens only).
 | Outline `.rtf` / `.txt` | export (RTF), import (outline) | `.txt`/`.md` outline (`slide.fromOutline`) | `.txt` outline | No RTF | engine tests |
 | PNG / JPEG slide images | export | n/a | yes (`file.export`, `deckcraft-cli render`) | Matches the editor's renderer. PNG `pHYs` and JPEG JFIF density are `scale` × 72 dpi (default scale 2 is 144 dpi), so Preview shows the slide's real size | render and engine tests |
 | TIFF / BMP / GIF slide images | export | n/a | no | Easy (the `image` crate writes them) | none |
-| Animated GIF of the deck | export | n/a | no | | none |
+| Animated GIF of the deck | export | n/a | yes (`file.export` format `gif`, Export…, `deckcraft-cli`, MCP `export`) | One frame per slide from the slide renderer; size small/medium/large/extra large or 16–3840 px wide, 0.1–600 s per slide, loop forever or play once, slide range, hidden slides skipped; a 256-colour palette per frame (exact, or NeuQuant above 256 colours). Transitions and build animations are not animated | `crates/engine/src/gif_export.rs` tests (decoded frames, size, delay, loop, hidden slides, hostile params), MCP, CLI and export dialog tests |
 | MP4 / MOV video of the deck | export | n/a | no | Needs timeline render + H.264 encode | none |
 | Print | yes | n/a | no | PR #66 (browser) open | none |
 
@@ -80,7 +80,7 @@ the round trip even though DeckCraft doesn't model it.
 | Presentation, slide size, sections (p14), custom shows | yes | yes | |
 | Slide masters, layouts, placeholders and inheritance | yes | yes | |
 | Themes: colour, font (Latin/EA/CS), effect schemes, background styles | yes | yes | Unknown theme parts kept |
-| Notes slides and notes master | yes | yes | Header, footer, date and slide-number text on the notes master is kept. Edited in View ▸ Notes Master |
+| Notes slides and notes master | yes | yes | Header, footer, date and slide-number text on the notes master is kept. Edited in View ▸ Notes Master. Notes keep their run and paragraph formatting (bold, italic, underline, size, levels, indents, bullets), shown and kept when edited in the notes pane and Notes Page (`crates/pptx/tests/notes.rs`). PDF notes pages print them as plain text; levels and bullets inherited from a custom notes master aren't shown |
 | Handout master | yes | yes | Header, footer, date and slide-number text is kept. Edited in View ▸ Handout Master |
 | Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group, and text, keep their size in points whatever the group's child-coordinate scale (#233). |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
@@ -147,5 +147,7 @@ the round trip even though DeckCraft doesn't model it.
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |
+| 2026-10-11 | minor | Speaker notes: formatting shown in the notes pane and Notes Page and kept when they are edited |
+| 2026-10-11 | minor | Animated GIF of the deck: export yes (#171) |
 | 2026-10-10 | major | Created from PowerPoint 16.113.4's `CFBundleDocumentTypes`, `crates/pptx` reader/writer and tests, and the open round-trip issues |
 | 2026-10-13 | minor | Comments: the writer emits the modern threaded part (`p188`) next to the flattened legacy one; the reader prefers the modern part and scales its EMU positions (#70) |

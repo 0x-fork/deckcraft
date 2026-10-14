@@ -6,9 +6,9 @@ use deckcraft_model::{Presentation, SlideId};
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::json;
 
+use crate::SlideApp;
 use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens};
-use crate::{SlideApp, widgets};
 
 /// Sorter-only state. Nothing here is part of the document.
 #[derive(Debug, Default)]
@@ -200,10 +200,10 @@ fn place_slides(app: &mut SlideApp, ui: &mut Ui, g: &Grid<'_>, budget: &mut u32,
                 let (cell, resp) = ui.allocate_exact_size(vec2(g.tw + 36.0, g.th + 36.0), Sense::click_and_drag());
                 let label = format!("Slide {}", i + 1);
                 resp.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
-                let img = Rect::from_min_size(cell.min + vec2(18.0, 8.0), vec2(g.tw, g.th));
+                let img = crate::textures::device_pixel_rect(Rect::from_min_size(cell.min + vec2(18.0, 8.0), vec2(g.tw, g.th)), ppp);
                 rects.push((i, cell));
                 let p = ui.painter();
-                match app.textures.thumb(ui.ctx(), g.doc, i, (g.tw * ppp) as u32, budget) {
+                match app.textures.thumb(ui.ctx(), g.doc, i, (img.width() * ppp).round() as u32, budget) {
                     Some(tex) => {
                         p.image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                     }
@@ -375,8 +375,8 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
         Rect::from_min_max(page.min + vec2(x0 as f32 * k, y0 as f32 * k), page.min + vec2(x1 as f32 * k, y1 as f32 * k))
     };
     let (slide_box, notes_box) = deckcraft_engine::pdf::notes_frames(&doc, paper);
-    let srect = to_screen((slide_box.x0, slide_box.y0, slide_box.x1, slide_box.y1));
-    let sw = srect.width();
+    // On the physical pixel grid, so the thumbnail is one texel per device pixel (#184).
+    let srect = crate::textures::device_pixel_rect(to_screen((slide_box.x0, slide_box.y0, slide_box.x1, slide_box.y1)), ui.ctx().pixels_per_point());
     if let Some(m) = doc.notes_master.as_deref() {
         // Laid out by the text engine as on the PDF page: wrapped, each run in its size and colour.
         for piece in deckcraft_engine::pdf::master_text_pieces(&doc, m, paper, idx + 1) {
@@ -388,29 +388,41 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     }
     let ppp = ui.ctx().pixels_per_point();
     let mut budget = 2;
-    if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (sw * ppp) as u32, &mut budget) {
+    if let Some(tex) = app.textures.thumb(ui.ctx(), &doc, idx, (srect.width() * ppp).round() as u32, &mut budget) {
         ui.painter().image(tex.id(), srect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
     }
     ui.painter().rect_stroke(srect, CornerRadius::ZERO, Stroke::new(1.0, Color32::GRAY), egui::StrokeKind::Outside);
     let notes_rect = to_screen((notes_box.x0, notes_box.y0, notes_box.x1, notes_box.y1));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
-    let current = st.current_slide().map(|s| s.notes_text()).unwrap_or_default();
+    // A draft belongs to this document and to the notes it started from (#413): another document,
+    // a reorder or an undo that changes them drops it.
     let id = egui::Id::new(("notespage", st.uid, idx));
-    let stored: Option<(String, String)> = child.data_mut(|d| d.get_temp(id));
-    let mut buf = widgets::text_draft(stored, &current);
-    let r = child.add(
-        egui::TextEdit::multiline(&mut buf)
-            .hint_text("Click to add text")
-            .desired_width(notes_rect.width())
-            .desired_rows(12)
-            .frame(egui::Frame::NONE)
-            .text_color(Color32::from_gray(30))
-            .font(theme::font(14.0)),
-    );
-    if r.lost_focus() && buf != current {
-        let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));
+    let edit_id = egui::Id::new(("notespage-edit", idx));
+    let focused = child.ctx().memory(|m| m.has_focus(edit_id));
+    let notes_of = |app: &SlideApp| app.session.active().and_then(|st| st.doc.slides.get(idx)).map(|s| s.notes.clone()).unwrap_or_default();
+    let notes = notes_of(app);
+    let stored: Option<(deckcraft_model::text::TextBody, crate::notes::Draft)> = child.data_mut(|d| d.get_temp(id));
+    let mut draft = stored.filter(|(base, _)| *base == notes).map(|(_, d)| d);
+    // Save an edited draft once the field has lost focus, before anything reloads it.
+    if !focused && let Some(d) = draft.as_mut().filter(|d| d.edited) {
+        d.edited = false;
+        let _ = app.run("slide.notes", json!({"body": d.body, "index": idx}));
     }
-    child.data_mut(|d| d.insert_temp(id, (current, buf)));
+    let notes = notes_of(app);
+    let mut draft = draft.filter(|d| focused || d.body == notes).unwrap_or_else(|| crate::notes::Draft::new(&notes));
+    let look = crate::notes::Look { size: 14.0, color: Some(Color32::from_gray(30)) };
+    let width = notes_rect.width();
+    let r = crate::notes::editor(&mut child, &mut draft, &look, |e| {
+        e.id(edit_id).hint_text("Click to add text").desired_width(width).desired_rows(12).frame(egui::Frame::NONE)
+    })
+    .response
+    .response;
+    if r.lost_focus() && draft.edited {
+        draft.edited = false;
+        let _ = app.run("slide.notes", json!({"body": draft.body, "index": idx}));
+    }
+    let base = notes_of(app);
+    child.data_mut(|d| d.insert_temp(id, (base, draft)));
     let nav = ui.input(|i| (i.key_pressed(egui::Key::PageDown), i.key_pressed(egui::Key::PageUp)));
     if nav.0 {
         let _ = app.run("slide.next", json!({}));

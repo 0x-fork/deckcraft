@@ -16,8 +16,8 @@ because it mostly follows from hardware use.
 | Window compositing on the GPU | Metal / DirectX | wgpu (Metal) | wgpu, DX12 only by default (#16) | wgpu (Vulkan, GL) | WebGPU, WebGL2 fallback |
 | Slide rasterization | GPU | **CPU** (`vello_cpu`) | CPU | CPU | CPU (wasm) |
 | Transitions and Morph frames | GPU | CPU-rendered slide images composited as textured quads on the GPU | same | same | same |
-| High-DPI / Retina | yes | yes | yes | yes | yes |
 | Picture export resolution | 2 px per point, tagged so the file is the slide's size | PNG `pHYs` and JPEG density, 144 dpi at the default 2 px per point | same | same | same |
+| High-DPI / Retina | yes | yes; editor slide rasters sit on the physical pixel grid (#184) | yes | yes | yes |
 | Wide gamut / HDR display | partly (P3 images) | no (sRGB) | no | no | no |
 | Startup on all GPUs | yes | yes | **no**: crashes in some Intel/AMD drivers (#40, #59) | not reported | n/a |
 | Software fallback when no GPU | yes (WARP on Windows) | no | no | no | no |
@@ -80,6 +80,7 @@ outlines every frame (#67, fix open), and the decoders run in software.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-14 | minor | PNG and JPEG slide export record 144 dpi at the default 2 pixels per point, so a Retina picture opens at the slide's size |
+| 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
 | 2026-10-14 | minor | A two-finger twist on the trackpad rotates the selected shapes, as one undo step. Pinch-zoom is unchanged |
 | 2026-10-14 | minor | A sideways trackpad swipe turns the page in Normal view (when the slide fits) and in the show. Pinch-zoom is unchanged |
 | 2026-10-14 | minor | Pen pressure scales ink width; tilt, pinch zoom and trackpad gestures remain (estimate 3–6 h → 2–5 h) |

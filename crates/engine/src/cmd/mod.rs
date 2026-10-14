@@ -43,6 +43,9 @@ pub struct CommandSpec {
     /// Where it lives: `["Home", "Font"]` (ribbon tab and group) or `["Arrange"]` (menu).
     pub menu: &'static [&'static str],
     pub shortcut: Option<&'static str>,
+    /// The parameters as `describe` and `commands` show them, read by [`parse_params`]: `?` marks
+    /// an optional key, a spaced ` | ` separates alternative sets of keys (so alternative values
+    /// are written unspaced, `ms|null`), `(…)` is a remark and `→` starts the answer.
     pub params: &'static str,
     pub enabled: Enabled,
     pub run: Run,
@@ -63,6 +66,28 @@ pub struct CommandInfo {
 }
 
 impl CommandSpec {
+    /// Holds because `Session::execute` skips the selection check when `id` or `ids` is given.
+    pub fn acts_on(&self) -> Option<String> {
+        let keys = param_keys(self.params).unwrap_or_default();
+        let named = if keys.contains(&"ids") {
+            Some("the shapes in `ids`")
+        } else if keys.contains(&"id") {
+            Some("the shape in `id`")
+        } else {
+            None
+        };
+        let reason = (self.enabled)(&Session::with_new()).err()?;
+        Some(match (reason.as_str(), named) {
+            (SELECT_TEXT_OR_SHAPE, _) => "Acts on the selected text or shapes.".into(),
+            (NOTHING_SELECTED, Some(n)) => format!("Acts on {n}, else on the selected shapes."),
+            (NOTHING_SELECTED, None) => "Acts on the selected shapes.".into(),
+            (SELECT_TWO, Some(n)) => format!("Acts on two or more shapes: {n}, else the selected ones."),
+            (SELECT_TWO, None) => "Acts on two or more selected shapes.".into(),
+            (NO_TEXT_POINT, _) => "Acts on the text being edited; text.edit starts editing a shape's text.".into(),
+            _ => return None,
+        })
+    }
+
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
         CommandInfo {
@@ -89,6 +114,8 @@ pub fn has_slide(s: &Session) -> std::result::Result<(), String> {
 }
 pub const NOTHING_SELECTED: &str = "nothing selected";
 pub const SELECT_TWO: &str = "select two or more objects";
+pub const NO_TEXT_POINT: &str = "no text insertion point";
+pub const SELECT_TEXT_OR_SHAPE: &str = "select text or a shape";
 pub fn has_selection(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
     if s.active().is_some_and(|d| !d.selection.shapes.is_empty()) { Ok(()) } else { Err(NOTHING_SELECTED.into()) }
@@ -99,17 +126,14 @@ pub fn has_two(s: &Session) -> std::result::Result<(), String> {
 }
 pub fn has_text(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
-    if s.active().is_some_and(|d| d.selection.text.is_some()) { Ok(()) } else { Err("no text insertion point".into()) }
+    if s.active().is_some_and(|d| d.selection.text.is_some()) { Ok(()) } else { Err(NO_TEXT_POINT.into()) }
 }
-/// Text editing or shapes with text selected (formatting commands apply to either).
+/// Text editing or selected shapes (formatting commands apply to either).
 pub fn has_text_or_shapes(s: &Session) -> std::result::Result<(), String> {
     has_doc(s)?;
-    if s.active().is_some_and(|d| d.selection.text.is_some() || !d.selection.shapes.is_empty()) {
-        Ok(())
-    } else {
-        Err("select text or a shape".into())
-    }
+    if s.active().is_some_and(|d| d.selection.text.is_some() || !d.selection.shapes.is_empty()) { Ok(()) } else { Err(SELECT_TEXT_OR_SHAPE.into()) }
 }
+
 pub fn can_undo(s: &Session) -> std::result::Result<(), String> {
     if s.active().is_some_and(|d| !d.history.undo.is_empty()) { Ok(()) } else { Err("nothing to undo".into()) }
 }
@@ -165,6 +189,99 @@ pub fn command_specs() -> &'static [CommandSpec] {
 
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
     command_specs().iter().find(|c| c.id == id)
+}
+
+pub(crate) fn param_keys(doc: &str) -> std::result::Result<Vec<&str>, String> {
+    let mut keys = vec![];
+    for p in parse_params(doc)? {
+        if !keys.contains(&p.name) {
+            keys.push(p.name);
+        }
+    }
+    Ok(keys)
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Param<'a> {
+    pub name: &'a str,
+    pub optional: bool,
+    /// What the doc says of it: its values, unit or remark (`rect|roundRect|…`, `[x,y,w,h] pt`).
+    pub about: &'a str,
+    /// An alternative to the parameter before it in the same object (`color? | none?`).
+    pub or: bool,
+    /// Which of the doc's alternative objects it belongs to: `{index} | {id}` puts id in object 1.
+    pub object: usize,
+}
+
+/// The top-level parameters of a params doc: `{preset, rect?: [x,y,w,h] pt} | {id}` gives preset,
+/// rect (optional, `[x,y,w,h] pt`) and id (in the second object). Text after `→` is the result
+/// and is skipped. Errs where the doc strays from that grammar.
+pub fn parse_params(doc: &str) -> std::result::Result<Vec<Param<'_>>, String> {
+    let doc = doc.split('→').next().unwrap_or_default();
+    let mut params: Vec<Param> = vec![];
+    let mut open: Vec<char> = vec![];
+    let mut expect_key = false;
+    let mut or = false;
+    let mut objects: usize = 0;
+    let mut about_from: Option<usize> = None;
+    let mut chars = doc.char_indices().peekable();
+    let mut prev = ' ';
+    fn end_about<'a>(doc: &'a str, params: &mut [Param<'a>], from: &mut Option<usize>, to: usize) {
+        if let (Some(f), Some(p)) = (from.take(), params.last_mut()) {
+            p.about = doc.get(f..to).unwrap_or_default().trim();
+        }
+    }
+    while let Some((i, c)) = chars.next() {
+        let in_object = open == ['{'];
+        match c {
+            '{' | '[' | '(' => {
+                open.push(c);
+                if open == ['{'] {
+                    expect_key = true;
+                    objects += 1;
+                    or = false;
+                }
+            }
+            '}' | ']' | ')' => {
+                if in_object {
+                    end_about(doc, &mut params, &mut about_from, i);
+                }
+                open.pop();
+            }
+            ',' if in_object => {
+                end_about(doc, &mut params, &mut about_from, i);
+                expect_key = true;
+            }
+            '|' if in_object && prev == ' ' && chars.peek().is_some_and(|(_, n)| *n == ' ') => {
+                end_about(doc, &mut params, &mut about_from, i);
+                expect_key = true;
+                or = true;
+            }
+            c if in_object && expect_key && (c.is_ascii_alphabetic() || c == '_') => {
+                let mut end = i + c.len_utf8();
+                while let Some((j, n)) = chars.peek().copied().filter(|(_, n)| n.is_ascii_alphanumeric() || *n == '_') {
+                    end = j + n.len_utf8();
+                    chars.next();
+                }
+                let after = doc.get(end..).unwrap_or_default();
+                let rest = after.trim_start_matches('?').trim_start();
+                let at = doc.len() - rest.len();
+                about_from = match rest.chars().next() {
+                    Some(':') => Some(at + 1),
+                    Some('(') => Some(at),
+                    Some(',' | '}' | '|') => None,
+                    _ => return Err(format!("`{}` is followed by `{}`", &doc[i..end], rest.chars().take(12).collect::<String>())),
+                };
+                params.push(Param { name: &doc[i..end], optional: after.starts_with('?'), about: "", or, object: objects.saturating_sub(1) });
+                or = false;
+                expect_key = false;
+            }
+            c if in_object && expect_key && !c.is_whitespace() => return Err(format!("expected a key at `{}`", &doc[i..])),
+            _ => {}
+        }
+        prev = c;
+    }
+    Ok(params)
 }
 
 // ---------- param helpers ----------

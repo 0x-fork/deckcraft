@@ -24,7 +24,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path, format?}", has_doc, save_as),
         cmd!(noundo "file.saveTemplate", "Save as Template…", ["File"], None, "{path}", has_doc, save_as),
         cmd!(query "file.saveBytes", "Save to Data", [], None, "{format?: deckcraft|pptx} → {data: base64}", has_doc, save_bytes_cmd),
-        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, paper?: letter|a4|legal|a3, orientation?: portrait|landscape, dpi?, slides?: [index] | \"1-3,5\", includeHidden?, textLayer?, frame?}", has_doc, export),
+        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format?: png|jpeg|pptx|deckcraft|outline|pdf|gif (else by path), slide?: index, all?: bool, scale?: px per pt, layout?: slides|notes|handouts (pdf), perPage?: 1|2|3|4|6|9, paper?: letter|a4|legal|a3 (pdf), orientation?: portrait|landscape (pdf), dpi?, slides?: [index]|range (\"1-3,5\"), includeHidden?, textLayer?, frame?, width?: px 16-3840|small|medium|large|extraLarge (gif), secondsPerSlide?: 0.1-600 (gif; 5), loop?: bool (gif; true: forever)} → {path, bytes} or {files} (png, jpeg); gif adds frames, width, height, secondsPerSlide", has_doc, export),
         cmd!(
             query "file.info",
             "Info",
@@ -57,7 +57,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.recovery.save", "Save AutoRecover Information", [], None, "{} → {written}", has_doc, recovery_save),
         cmd!(query "file.recovery.list", "Recovered Presentations", [], None, "{} → [{uid, path, title, saved}]", always, recovery_list),
         cmd!(noundo "file.recovery.open", "Open Recovered Presentations", [], None, "{} → {opened: [document index]}", always, recovery_open),
-        cmd!(noundo "file.recovery.discard", "Discard Recovered Presentations", [], None, "{uid?: one entry, else all}", always, recovery_discard),
+        cmd!(noundo "file.recovery.discard", "Discard Recovered Presentations", [], None, "{uid?: one entry (else all)}", always, recovery_discard),
         cmd!(noundo "file.revert", "Revert", [], None, "{}", has_doc, revert),
         cmd!(noundo "window.next", "Next Window", ["Window"], Some("Cmd+`"), "{index?}", has_doc, next_window),
     ]
@@ -208,12 +208,13 @@ fn report_damage(s: &mut Session, damaged: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Encode the presentation in `format` (`deckcraft`, `pptx`, `potx`, `ppsx`, `outline`, `pdf`).
+/// Encode the presentation in `format` (`deckcraft`, `pptx`, `potx`, `ppsx`, `outline`, `pdf`, `gif`).
 pub fn save_bytes(doc: &Presentation, format: &str) -> Result<Vec<u8>> {
     match format {
         f @ ("pptx" | "potx" | "ppsx") => deckcraft_pptx::export_as(doc, f).map_err(|e| EngineError::Other(e.to_string())),
         "outline" | "txt" => Ok(deckcraft_format::slides_to_outline(doc).into_bytes()),
         "pdf" => deckcraft_pdf::export(doc, &Default::default()).map_err(|e| EngineError::Other(e.to_string())),
+        "gif" => gif_bytes(doc, &Value::Null),
         _ => deckcraft_format::save(doc).map_err(|e| EngineError::Other(e.to_string())),
     }
 }
@@ -287,14 +288,19 @@ pub fn pdf_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
 }
 
 /// The output extensions [`format_for_path`] maps to a writer of that format.
-pub const WRITABLE_EXTENSIONS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "pdf", "png", "jpg", "jpeg", "txt", "md"];
+pub const WRITABLE_EXTENSIONS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "pdf", "png", "jpg", "jpeg", "gif", "txt", "md"];
 
 /// The format a file named `path` is written in, or `None` when its extension names no format
-/// DeckCraft writes (`.odp`, `.gif`, `.svg`, no extension …): [`format_for_path`] would save
+/// DeckCraft writes (`.odp`, `.svg`, no extension …): [`format_for_path`] would save
 /// those as native `.deckcraft` bytes under the wrong name.
 pub fn writable_format_for_path(path: &str) -> Option<&'static str> {
     let ext = std::path::Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
     WRITABLE_EXTENSIONS.contains(&ext.as_str()).then(|| format_for_path(path))
+}
+
+/// Animated GIF bytes for `doc` with the options in `p` (see [`crate::gif_export::GifOptions::from_params`]).
+pub fn gif_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
+    Ok(crate::gif_export::encode(doc, &crate::gif_export::GifOptions::from_params(p)?)?.bytes)
 }
 
 pub fn format_for_path(path: &str) -> &'static str {
@@ -311,6 +317,8 @@ pub fn format_for_path(path: &str) -> &'static str {
         "jpeg"
     } else if l.ends_with(".pdf") {
         "pdf"
+    } else if l.ends_with(".gif") {
+        "gif"
     } else if l.ends_with(".txt") || l.ends_with(".md") {
         "outline"
     } else {
@@ -334,10 +342,30 @@ fn mark_saved(s: &mut Session, path: Option<String>) -> Result<()> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
-    // Write to a temporary sibling then rename, so a failed save never truncates the old file.
-    let tmp = format!("{path}.saving");
-    std::fs::write(&tmp, bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    std::fs::rename(&tmp, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let err = |e: std::io::Error| EngineError::Other(format!("{path}: {e}"));
+    // Write to a uniquely named temporary sibling, created exclusively (never following or reusing an
+    // existing file or symlink), then rename it over the destination so a failed save never truncates
+    // the old file and concurrent saves never share temporary bytes.
+    let mut attempts = 0;
+    let (tmp, mut file) = loop {
+        let tmp = format!("{path}.{}.{}.saving", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempts < 16 => attempts += 1,
+            Err(e) => return Err(err(e)),
+        }
+    };
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let result = written.and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err(e));
+    }
+    Ok(())
 }
 #[cfg(target_arch = "wasm32")]
 fn write_file(_path: &str, _bytes: &[u8]) -> Result<()> {
@@ -470,6 +498,23 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
             write_file(&path, &bytes)?;
             Ok(json!({"path": path, "bytes": bytes.len()}))
         }
+        "gif" => {
+            // `slides` may be a range, as for PDF ("1-3,5").
+            let mut gp = p.clone();
+            if let Some(text) = p.get("slides").and_then(Value::as_str) {
+                gp["slides"] = json!(parse_slide_range(text, st.doc.slides.len())?);
+            }
+            let out = crate::gif_export::encode(&st.doc, &crate::gif_export::GifOptions::from_params(&gp)?)?;
+            write_file(&path, &out.bytes)?;
+            Ok(json!({
+                "path": path,
+                "bytes": out.bytes.len(),
+                "frames": out.frames,
+                "width": out.width,
+                "height": out.height,
+                "secondsPerSlide": f64::from(out.delay_cs) / 100.0,
+            }))
+        }
         "pptx" | "potx" | "ppsx" | "deckcraft" | "outline" | "txt" => {
             let bytes = save_bytes(&st.doc, &format)?;
             write_file(&path, &bytes)?;
@@ -595,3 +640,43 @@ fn recovery_discard(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "color_at_tests.rs"]
 mod color_at_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::write_file;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("deckcraft-write-file-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn write_file_does_not_touch_a_predictable_saving_sibling() {
+        let dir = scratch("sibling");
+        let dest = dir.join("deck.deckcraft");
+        let dest_str = dest.to_str().unwrap();
+        std::fs::write(&dest, b"old").unwrap();
+        std::fs::write(dir.join("deck.deckcraft.saving"), b"precious").unwrap();
+        write_file(dest_str, b"new").unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert_eq!(std::fs::read(dir.join("deck.deckcraft.saving")).unwrap(), b"precious");
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 2, "no temporary file may be left behind: {names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_file_failed_rename_keeps_destination_and_cleans_up() {
+        let dir = scratch("failed");
+        let dest = dir.join("target");
+        std::fs::create_dir(&dest).unwrap();
+        assert!(write_file(dest.to_str().unwrap(), b"new").is_err());
+        assert!(dest.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

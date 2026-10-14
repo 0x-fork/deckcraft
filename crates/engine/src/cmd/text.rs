@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
+use deckcraft_geom::{Affine, Point, Rect};
 use deckcraft_model::edit::{self as ed, Pos};
 use deckcraft_model::resolve::{self, Ctx};
 use deckcraft_model::text::{AutoFit, Hyperlink, Run, RunKind, RunProps, TextBody};
-use deckcraft_model::{Presentation, ShapeId, ShapeKind};
+use deckcraft_model::{Presentation, Shape, ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
 use super::*;
@@ -114,7 +115,7 @@ fn body_mut<'a>(doc: &'a mut Presentation, sel: &Selection, t: &TextSel) -> Opti
 
 /// Edit the active text body and selection; refits auto-sizing text boxes afterwards.
 pub(crate) fn edit_text<T>(s: &mut Session, f: impl FnOnce(&mut TextBody, &mut TextSel) -> T) -> Result<T> {
-    let t0 = s.doc()?.selection.text.clone().ok_or_else(|| bad("text", "no text insertion point"))?;
+    let t0 = s.doc()?.selection.text.clone().ok_or_else(|| bad("text", NO_TEXT_POINT))?;
     // Materialise an inherited placeholder box before editing (so autofit can change it).
     let r = s.edit(|doc, sel| {
         let mut t = t0.clone();
@@ -183,20 +184,44 @@ pub(crate) fn ctx_for<'a>(doc: &'a Presentation, sel: &Selection) -> Option<Ctx<
 
 /// Lay out the text being edited (for vertical caret movement and hit testing).
 pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayout> {
-    if t.notes || t.cell.is_some() {
+    text_frame(st, t).map(|f| f.0)
+}
+
+/// The text being edited as it is drawn: its layout, and the transform from layout space to the
+/// slide (flips don't mirror text, vertical text is turned). Shapes and table cells alike; the
+/// caret, the text selection, hit testing and caret movement all use it. `None` for notes.
+pub fn text_frame(st: &DocState, t: &TextSel) -> Option<(deckcraft_text::TextLayout, Affine)> {
+    if t.notes {
         return None;
     }
     let sh = st.shape(t.shape)?;
-    let body = sh.text.as_ref()?;
     let ctx = ctx_for(&st.doc, &st.selection)?;
+    let lay = |s: &Shape, body: &TextBody, rect: Rect| {
+        deckcraft_text::layout(&ctx, s, body, &deckcraft_text::Opts { rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false })
+    };
+    if let Some((r, c)) = t.cell {
+        // A cell's text is laid out in the cell's rect with the cell's margins, anchor and the
+        // table style's text look, exactly as the table draws it.
+        let placed = cell_on_slide(st, t.shape, r, c)?;
+        return Some((placed.layout, placed.to_slide));
+    }
+    let body = sh.text.as_ref()?;
     let x = xfrm_of(&st.doc, &st.selection, sh);
-    let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
-    Some(deckcraft_text::layout(
-        &ctx,
-        sh,
-        body,
-        &deckcraft_text::Opts { rect: geo.text_rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
-    ))
+    let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
+    let l = lay(sh, body, tr);
+    let m = deckcraft_render::text_transform(x.affine(), tr, l.rotation);
+    Some((l, m))
+}
+
+/// The text position under slide point `p` in the text being edited (its shape or cell).
+pub fn text_pos_at(st: &DocState, t: &TextSel, p: Point) -> Pos {
+    match text_frame(st, t) {
+        Some((l, m)) => {
+            let h = l.hit(m.inverse() * p);
+            (h.para, h.ch)
+        }
+        None => (0, 0),
+    }
 }
 
 /// The insertion point on the slide: its line from top to bottom, in slide coordinates (flips and
@@ -1104,7 +1129,7 @@ pub(crate) fn format_run(s: &mut Session, f: &(dyn Fn(&mut RunProps) + Send + Sy
     }
     let ids = st.selection.shapes.clone();
     if ids.is_empty() {
-        return Err(bad("format", "select text or a shape"));
+        return Err(bad("format", SELECT_TEXT_OR_SHAPE));
     }
     edit_shapes(s, &json!({"ids": ids}), "format", |sh| {
         match &mut sh.kind {
@@ -1194,7 +1219,7 @@ pub(crate) fn format_para(s: &mut Session, f: &(dyn Fn(&mut deckcraft_model::tex
     }
     let ids = st.selection.shapes.clone();
     if ids.is_empty() {
-        return Err(bad("format", "select text or a shape"));
+        return Err(bad("format", SELECT_TEXT_OR_SHAPE));
     }
     edit_shapes(s, &json!({"ids": ids}), "format", |sh| {
         match &mut sh.kind {

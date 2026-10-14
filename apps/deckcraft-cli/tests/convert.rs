@@ -21,7 +21,7 @@ fn convert_rejects_output_formats_it_cannot_write() {
     let out = Command::new(env!("CARGO_BIN_EXE_deckcraft-cli")).args(["run", "--sample", "--export"]).arg(&input).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 
-    for name in ["out.odp", "out.gif", "out.svg", "out.outline", "out"] {
+    for name in ["out.odp", "out.bmp", "out.svg", "out.outline", "out"] {
         let target = dir.join(name);
         let out = cli(&[Path::new("convert"), &input, &target]);
         assert!(!out.status.success(), "{name}: convert should fail");

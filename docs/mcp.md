@@ -20,7 +20,7 @@ deck.
 | `list_commands` | Every command (id, label, menu, shortcut, params doc), optionally filtered |
 | `run_command` | Run one command: `{command, params}` — every menu item, ribbon button and gesture is a command |
 | `batch` | Run several commands in order and stop at the first error |
-| `new_presentation`, `open_presentation`, `save_presentation`, `export` | Files: native `.deckcraft`, PowerPoint `.pptx`, PDF (slides, notes pages, handouts), PNG/JPEG, outline |
+| `new_presentation`, `open_presentation`, `save_presentation`, `export` | Files: native `.deckcraft`, PowerPoint `.pptx`, PDF (slides, notes pages, handouts), PNG/JPEG, outline, animated GIF (size, seconds per slide, loop, slides) |
 | `inspect_document`, `inspect_slide` | Structure of the deck / one slide (shapes, text, placeholders, animations) |
 | `render_slide` | A slide as an image the model can look at |
 | `add_slide`, `go_to_slide` | Slides by layout |
@@ -35,5 +35,6 @@ A tool refuses an argument that is not in its schema (`insert_chart: unknown arg
 Useful commands for building decks: `slide.new {layout, title, body}`, `shape.insert {preset,
 rect, text}`, `shape.connect {from, to, preset}`, `shape.freeform {points, closed, smooth}`,
 `shape.merge {op, ids}`, `format.*`, `design.theme`, `transition.set`, `animation.set`,
-`chart.*`, `table.*`, `file.export {path, layout}`. `deckcraft-cli describe ID` prints any
+`chart.*`, `table.*`, `file.export {path, layout}` (PDF) or `{path, width, secondsPerSlide, loop}`
+(GIF). `deckcraft-cli describe COMMAND` prints any
 command's parameters.

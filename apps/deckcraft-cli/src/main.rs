@@ -1,21 +1,8 @@
-//! Headless DeckCraft.
-//!
-//! ```text
-//! deckcraft-cli info FILE                       # slides, titles, layouts (JSON)
-//! deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] OUT.png|OUT_DIR
-//! N starts at 0. --all writes slide-01.png, slide-02.png, …
-//! deckcraft-cli render-transition FILE --slide N --t T[,T…] [--width PX] OUT.png   # transition frame(s)
-//! deckcraft-cli convert IN OUT                  # .deckcraft ⇄ .pptx, outline .txt, .png (first slide)
-//! deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
-//! deckcraft-cli commands [FILTER]               # list commands (JSON)
-//! deckcraft-cli describe ID                     # one command
-//! deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]   # drive the running app
-//! deckcraft-cli mcp [--connect PORT] [--sample] # MCP server over stdio
-//! deckcraft-cli bench [FILE | --sample] [--runs N] [--json]   # time open, render, save, export
-//! deckcraft-cli links | --version
-//! ```
+//! Headless DeckCraft. `deckcraft-cli help` explains each subcommand (`help.rs`).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
+
+mod help;
 
 use std::process::ExitCode;
 
@@ -35,23 +22,28 @@ macro_rules! outln {
     }};
 }
 
-const USAGE: &str = "usage: deckcraft-cli info FILE
-       deckcraft-cli render (FILE | --sample) [--slide N | --all] [--scale S] [--edit] OUT
-       N starts at 0 (the first slide). --all writes slide-01.png, slide-02.png, …
-       deckcraft-cli render-transition FILE --slide N --t T[,T...] [--width PX] OUT.png
-       deckcraft-cli convert IN OUT
-       deckcraft-cli run [--in FILE | --sample] [--cmd ID[=JSON]]... [--save OUT] [--export OUT] [--print]
-       deckcraft-cli commands [FILTER]
-       deckcraft-cli describe COMMAND
-       deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]
-       deckcraft-cli mcp [--connect PORT] [--sample]
-       deckcraft-cli bench [FILE | --sample] [--runs N] [--json]
-       deckcraft-cli links | --version";
-
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let rest = args.get(1..).unwrap_or(&[]);
+    let asks_help = rest.iter().any(|a| a == "--help" || a == "-h");
+    if let Some(page) = args.first().filter(|_| asks_help).and_then(|n| help::page(n)) {
+        outln!("{page}");
+        return ExitCode::SUCCESS;
+    }
     match args.first().map(String::as_str) {
+        Some("help" | "--help" | "-h") => match rest.first() {
+            None => {
+                outln!("{}", help::overview());
+                ExitCode::SUCCESS
+            }
+            Some(name) => match help::page(name) {
+                Some(page) => {
+                    outln!("{page}");
+                    ExitCode::SUCCESS
+                }
+                None => unknown(name),
+            },
+        },
         Some("--version" | "-V" | "version") => {
             outln!("deckcraft-cli {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
@@ -62,24 +54,17 @@ fn main() -> ExitCode {
         Some("render-transition") => report(render_transition(rest)),
         Some("convert") => report(convert(rest)),
         Some("run") => report(run(rest)),
-        Some("--help" | "-h" | "help") => {
-            outln!("{USAGE}");
-            ExitCode::SUCCESS
-        }
-        Some("commands") if rest.first().is_some_and(|a| is_help(a)) => {
-            outln!("{USAGE}");
-            ExitCode::SUCCESS
-        }
         Some("commands") => {
-            let s = Session::new();
             let f = rest.first().map(|x| x.to_lowercase());
-            let list: Vec<Value> = s
-                .commands()
-                .into_iter()
+            for c in deckcraft_engine::command_specs()
+                .iter()
                 .filter(|c| f.as_ref().is_none_or(|f| c.id.to_lowercase().contains(f.as_str()) || c.label.to_lowercase().contains(f.as_str())))
-                .map(|c| serde_json::to_value(c).unwrap_or_default())
-                .collect();
-            outln!("{}", serde_json::to_string_pretty(&list).unwrap_or_default());
+            {
+                match c.params.strip_prefix("{}") {
+                    Some(answer) => outln!("{} — {}{answer}", c.id, c.label),
+                    None => outln!("{} — {}: {}", c.id, c.label, c.params),
+                }
+            }
             ExitCode::SUCCESS
         }
         Some("describe") => report(describe(rest.first().map(String::as_str))),
@@ -90,16 +75,29 @@ fn main() -> ExitCode {
             outln!("Discord   {DISCORD}\nWebsite   {WEBSITE}\nApp page  {APP_PAGE}\nGitHub    {GITHUB}");
             ExitCode::SUCCESS
         }
-        _ => {
-            eprintln!("{USAGE}");
-            eprintln!("\nCommunity: {}  ·  {}", deckcraft_engine::links::DISCORD, deckcraft_engine::links::APP_PAGE);
-            ExitCode::FAILURE
-        }
+        Some(other) => unknown(other),
+        None => usage(),
     }
 }
 
 fn is_help(arg: &str) -> bool {
     matches!(arg, "--help" | "-h")
+}
+
+/// The help page of subcommand `name`, else the overview.
+fn help_page(name: &str) -> String {
+    help::page(name).unwrap_or_else(help::overview)
+}
+
+fn unknown(sub: &str) -> ExitCode {
+    eprintln!("deckcraft-cli: unknown subcommand `{sub}`\n");
+    usage()
+}
+
+fn usage() -> ExitCode {
+    eprintln!("{}", help::overview());
+    eprintln!("\nCommunity: {}  ·  {}", deckcraft_engine::links::DISCORD, deckcraft_engine::links::APP_PAGE);
+    ExitCode::FAILURE
 }
 
 fn report(r: Result<(), String>) -> ExitCode {
@@ -226,7 +224,7 @@ fn bench(args: &[String]) -> Result<(), String> {
 
 fn info(args: &[String]) -> Result<(), String> {
     if args.first().is_some_and(|a| is_help(a)) {
-        outln!("{USAGE}");
+        outln!("{}", help_page("info"));
         return Ok(());
     }
     let path = args.first().ok_or("info needs a FILE")?;
@@ -254,7 +252,7 @@ fn render(args: &[String]) -> Result<(), String> {
             "--edit" => edit = true,
             "--scale" => scale = it.next().and_then(|v| v.parse().ok()).ok_or("--scale needs a number")?,
             "--help" | "-h" => {
-                outln!("{USAGE}");
+                outln!("{}", help_page("render"));
                 return Ok(());
             }
             other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
@@ -403,7 +401,7 @@ fn frame_paths(out: &str, ts: &[f64]) -> Result<Vec<String>, String> {
 
 fn convert(args: &[String]) -> Result<(), String> {
     if args.first().is_some_and(|a| is_help(a)) {
-        outln!("{USAGE}");
+        outln!("{}", help_page("convert"));
         return Ok(());
     }
     let (Some(input), Some(out)) = (args.first(), args.get(1)) else { return Err("convert needs IN and OUT".into()) };
@@ -412,6 +410,8 @@ fn convert(args: &[String]) -> Result<(), String> {
     open(&mut s, Some(input), false)?;
     let r = if matches!(fmt, "png" | "jpeg") {
         s.execute("file.export", &json!({"path": out, "slide": 0}))
+    } else if fmt == "gif" {
+        s.execute("file.export", &json!({"path": out}))
     } else {
         s.execute("file.saveAs", &json!({"path": out}))
     };
@@ -436,18 +436,26 @@ fn run(args: &[String]) -> Result<(), String> {
     let mut cmds = vec![];
     let mut save = None;
     let mut export = None;
+    let mut export_params = json!({});
     let mut print = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--in" => input = Some(it.next().cloned().ok_or("--in needs a file")?),
             "--sample" => sample = true,
-            "--cmd" => cmds.push(it.next().cloned().ok_or("--cmd needs ID[=JSON]")?),
+            "--cmd" => cmds.push(it.next().cloned().ok_or("--cmd needs COMMAND[=PARAMS]")?),
             "--save" => save = Some(it.next().cloned().ok_or("--save needs a path")?),
             "--export" => export = Some(it.next().cloned().ok_or("--export needs a path")?),
+            "--export-params" => {
+                let j = it.next().ok_or("--export-params needs a JSON object")?;
+                export_params = serde_json::from_str::<Value>(j).map_err(|e| format!("--export-params: bad JSON: {e}"))?;
+                if !export_params.is_object() {
+                    return Err("--export-params must be a JSON object".into());
+                }
+            }
             "--print" => print = true,
             "--help" | "-h" => {
-                outln!("{USAGE}");
+                outln!("{}", help_page("run"));
                 return Ok(());
             }
             other => return Err(format!("unknown option `{other}`")),
@@ -472,20 +480,74 @@ fn run(args: &[String]) -> Result<(), String> {
         s.execute("file.saveAs", &json!({"path": p})).map_err(|e| e.to_string())?;
     }
     if let Some(p) = export {
-        s.execute("file.export", &json!({"path": p})).map_err(|e| e.to_string())?;
+        export_params["path"] = json!(p);
+        s.execute("file.export", &export_params).map_err(|e| e.to_string())?;
+    } else if export_params != json!({}) {
+        return Err("--export-params needs --export OUT".into());
     }
     Ok(())
 }
 
 fn describe(id: Option<&str>) -> Result<(), String> {
     if id.is_some_and(is_help) {
-        outln!("{USAGE}");
+        outln!("{}", help_page("describe"));
         return Ok(());
     }
     let id = id.ok_or("describe needs a command id")?;
-    let c = deckcraft_engine::find_command(id).ok_or_else(|| format!("unknown command `{id}`"))?;
-    outln!("{}  —  {}\n  where:    {}\n  shortcut: {}\n  params:   {}", c.id, c.label, c.menu.join(" ▸ "), c.shortcut.unwrap_or("—"), c.params);
+    let c = deckcraft_engine::find_command(id).ok_or_else(|| deckcraft_engine::EngineError::UnknownCommand(id.into()).to_string())?;
+    let mut head = format!("{}: {}", c.id, c.label);
+    if !c.menu.is_empty() {
+        head.push_str(&format!(", in {}", c.menu.join(" ▸ ")));
+    }
+    if let Some(k) = c.shortcut {
+        head.push_str(&format!(", shortcut {k}"));
+    }
+    outln!("{head}.\n");
+    let (args, answer) = c.params.split_once('→').unwrap_or((c.params, ""));
+    let parsed = deckcraft_engine::cmd::parse_params(c.params);
+    match &parsed {
+        Err(_) => outln!("Parameters: {}", args.trim()),
+        Ok(params) if params.is_empty() => outln!("Takes no parameters."),
+        Ok(params) => print_params(params),
+    }
+    let params = parsed.unwrap_or_default();
+    if let Some(acts) = c.acts_on() {
+        outln!("{acts}");
+    }
+    let remark = remark(args);
+    if !remark.is_empty() {
+        outln!("Note: {remark}");
+    }
+    if !answer.trim().is_empty() {
+        outln!("Answers with {}.", answer.trim());
+    }
+    let bare = params.is_empty() || params.iter().any(|p| params.iter().filter(|q| q.object == p.object).all(|q| q.optional));
+    let call = if bare { c.id.to_string() } else { format!("'{}={{…}}'", c.id) };
+    outln!("\nRun it with: deckcraft-cli run --cmd {call}");
     Ok(())
+}
+
+fn print_params(params: &[deckcraft_engine::cmd::Param]) {
+    let name = |p: &deckcraft_engine::cmd::Param| {
+        let or = if p.or { "or " } else { "" };
+        let optional = if p.optional { ", optional" } else { "" };
+        format!("{or}{}{optional}", p.name)
+    };
+    let width = params.iter().map(|p| name(p).chars().count()).max().unwrap_or_default();
+    let sets = params.iter().map(|p| p.object).max().unwrap_or_default() > 0;
+    outln!("Parameters:");
+    for (k, p) in params.iter().enumerate() {
+        if sets && params.get(k.wrapping_sub(1)).is_none_or(|before| before.object != p.object) {
+            outln!("  {}", if p.object == 0 { "either:" } else { "or:" });
+        }
+        let indent = if sets { "    " } else { "  " };
+        outln!("{}", format!("{indent}{:<width$}  {}", name(p), p.about).trim_end());
+    }
+}
+
+fn remark(args: &str) -> &str {
+    let after = args.rfind('}').and_then(|i| args.get(i + 1..)).unwrap_or_default().trim().trim_start_matches('—').trim();
+    after.strip_prefix('(').and_then(|n| n.strip_suffix(')')).unwrap_or(after)
 }
 
 fn app(args: &[String]) -> Result<(), String> {
@@ -499,7 +561,7 @@ fn app(args: &[String]) -> Result<(), String> {
             "--port" => port = it.next().cloned().ok_or("--port needs a value")?,
             "--method" => method = Some(it.next().cloned().ok_or("--method needs a name")?),
             "--help" | "-h" => {
-                outln!("{USAGE}");
+                outln!("{}", help_page("app"));
                 return Ok(());
             }
             other => rest.push(other.to_string()),
@@ -531,7 +593,7 @@ fn mcp(args: &[String]) -> Result<(), String> {
             "--connect" => connect = Some(it.next().cloned().ok_or("--connect needs a port or host:port")?),
             "--sample" => sample = true,
             "--help" | "-h" => {
-                outln!("{USAGE}");
+                outln!("{}", help_page("mcp"));
                 return Ok(());
             }
             other => return Err(format!("unknown mcp option `{other}`")),
@@ -554,6 +616,8 @@ fn mcp(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     fn args(a: &[&str]) -> Vec<String> {
@@ -581,6 +645,46 @@ mod tests {
         assert!(run(&args(&["--help"])).is_ok());
         assert!(describe(Some("--help")).is_ok());
         assert!(mcp(&args(&["-h"])).is_ok());
+    }
+
+    #[test]
+    fn render_refuses_an_unknown_option_instead_of_writing_it_as_a_file() {
+        let out = std::env::temp_dir().join("deckcraft-cli-unknown-option.png");
+        let _ = std::fs::remove_file(&out);
+        for flag in ["--bogus", "-x"] {
+            let args: Vec<String> = ["--sample", flag, &out.to_string_lossy()].iter().map(|a| a.to_string()).collect();
+            let e = render(&args).unwrap_err();
+            assert!(e.contains(&format!("unknown option `{flag}`")), "{flag}: {e}");
+            assert!(!out.exists(), "{flag}: rendered anyway");
+        }
+    }
+
+    /// `run --export OUT.gif --export-params JSON` and `convert IN OUT.gif` write animated GIFs.
+    #[test]
+    fn exports_an_animated_gif() {
+        let dir = std::env::temp_dir().join(format!("deckcraft-cli-gif-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let gif = dir.join("sample.gif").to_string_lossy().to_string();
+        let deck = dir.join("sample.deckcraft").to_string_lossy().to_string();
+        let params = r#"{"width": "small", "secondsPerSlide": 2, "loop": false, "slides": [0, 1]}"#;
+        run(&args(&["--sample", "--save", &deck, "--export", &gif, "--export-params", params])).unwrap();
+        let bytes = std::fs::read(&gif).unwrap();
+        assert!(bytes.starts_with(b"GIF89a"));
+        assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), 640, "small = 640 px wide");
+        assert!(!bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "play once: no loop block");
+
+        let gif2 = dir.join("converted.gif").to_string_lossy().to_string();
+        convert(&args(&[&deck, &gif2])).unwrap();
+        let bytes = std::fs::read(&gif2).unwrap();
+        assert!(bytes.starts_with(b"GIF89a") && bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "loops forever by default");
+
+        // Bad options are errors, not panics.
+        let bad = dir.join("bad.gif").to_string_lossy().to_string();
+        assert!(run(&args(&["--sample", "--export", &bad, "--export-params", r#"{"width": 1e9}"#])).is_err());
+        assert!(run(&args(&["--sample", "--export", &bad, "--export-params", "[1]"])).is_err());
+        assert!(run(&args(&["--sample", "--export-params", "{}"])).is_ok());
+        assert!(run(&args(&["--sample", "--export-params", r#"{"width": 64}"#])).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
