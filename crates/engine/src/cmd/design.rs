@@ -25,7 +25,7 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             colors
         ),
-        cmd!("design.fonts", "Fonts", ["Design", "Variants"], None, "{name} | {major, minor}", has_doc, fonts),
+        cmd!("design.fonts", "Fonts", ["Design", "Variants"], None, "{} opens Create New Theme Fonts | {name} | {major, minor}", has_doc, fonts),
         cmd!(
             "design.background",
             "Format Background",
@@ -204,26 +204,107 @@ fn next_scheme(
 }
 
 fn fonts(s: &mut Session, p: &Value) -> Result<Value> {
-    let scheme = if let Some(name) = str_param(p, "name") {
-        builtin_font_schemes()
-            .into_iter()
-            .find(|f| f.name.eq_ignore_ascii_case(name))
-            .ok_or_else(|| bad("design.fonts", format!("no font scheme `{name}`")))?
-    } else {
-        let major = str_param(p, "major").ok_or_else(|| bad("design.fonts", "give `name`, or `major` and `minor`"))?;
-        let minor = str_param(p, "minor").unwrap_or(major);
-        deckcraft_model::theme::FontScheme {
-            name: "Custom".into(),
-            major: deckcraft_model::theme::FontSet { latin: major.into(), ..Default::default() },
-            minor: deckcraft_model::theme::FontSet { latin: minor.into(), ..Default::default() },
+    let name_v = p.get("name");
+    let major_v = p.get("major");
+    let minor_v = p.get("minor");
+    if name_v.is_none() && major_v.is_none() && minor_v.is_none() {
+        let scheme = current_fonts(s)?;
+        s.ui_requests.push(crate::UiRequest::Dialog { id: "themeFonts".into(), params: font_dialog_params(&scheme) });
+        return ok();
+    }
+    let given = match name_v {
+        None => None,
+        Some(Value::String(n)) => {
+            let n = n.trim();
+            if n.is_empty() {
+                return Err(bad("design.fonts", "name is empty"));
+            }
+            Some(n.to_string())
         }
+        Some(_) => return Err(bad("design.fonts", "`name` must be a string")),
     };
+    let major = face_param("major", major_v)?;
+    let minor = face_param("minor", minor_v)?;
+    let current = current_fonts(s)?;
+    let next = next_font_scheme(&current, given.as_deref(), major.as_deref(), minor.as_deref())?;
+    if next == current {
+        return ok();
+    }
     s.edit(|doc, sel| {
         let mi = master_index(doc, sel);
-        Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("design.fonts", "no master"))?).theme.fonts = scheme;
+        Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("design.fonts", "no master"))?).theme.fonts = next;
         Ok(())
     })?;
     ok()
+}
+
+fn current_fonts(s: &Session) -> Result<deckcraft_model::theme::FontScheme> {
+    let st = s.doc()?;
+    let mi = master_index(&st.doc, &st.selection);
+    st.doc.masters.get(mi).map(|m| m.theme.fonts.clone()).ok_or_else(|| bad("design.fonts", "no master"))
+}
+
+fn font_dialog_params(scheme: &deckcraft_model::theme::FontScheme) -> Value {
+    json!({"name": scheme.name, "major": scheme.major.latin, "minor": scheme.minor.latin})
+}
+
+/// `None` when the key is absent. A present face must be a non-blank string.
+fn face_param(key: &str, v: Option<&Value>) -> Result<Option<String>> {
+    match v {
+        None => Ok(None),
+        Some(Value::String(s)) => {
+            let s = s.trim();
+            if s.is_empty() { Err(bad("design.fonts", format!("`{key}` is empty"))) } else { Ok(Some(s.to_string())) }
+        }
+        Some(_) => Err(bad("design.fonts", format!("`{key}` must be a string"))),
+    }
+}
+
+/// A builtin `name` is applied first, then `major` / `minor` replace only the latin faces (East
+/// Asian, complex-script and per-script slots stay). The stored name is the given string when
+/// faces are overlaid or the name is not a builtin; a name-only builtin keeps its own name.
+/// Faces without a name are a custom scheme: an omitted `minor` copies `major`.
+fn next_font_scheme(
+    current: &deckcraft_model::theme::FontScheme,
+    given: Option<&str>,
+    major: Option<&str>,
+    minor: Option<&str>,
+) -> Result<deckcraft_model::theme::FontScheme> {
+    let mut next = current.clone();
+    if let Some(name) = given {
+        let replaced = if let Some(builtin) = builtin_font_schemes().into_iter().find(|f| f.name.eq_ignore_ascii_case(name)) {
+            next = builtin;
+            true
+        } else {
+            false
+        };
+        if !replaced && major.is_none() && minor.is_none() {
+            return Err(bad("design.fonts", format!("no font scheme `{name}`")));
+        }
+        if major.is_some() || minor.is_some() || !replaced {
+            next.name = name.to_string();
+        }
+    }
+    if given.is_none() {
+        if let Some(face) = major {
+            next.major.latin = face.to_string();
+            if minor.is_none() {
+                next.minor.latin = face.to_string();
+            }
+        }
+        if let Some(face) = minor {
+            next.minor.latin = face.to_string();
+        }
+        next.name = "Custom".into();
+    } else {
+        if let Some(face) = major {
+            next.major.latin = face.to_string();
+        }
+        if let Some(face) = minor {
+            next.minor.latin = face.to_string();
+        }
+    }
+    Ok(next)
 }
 
 fn background(s: &mut Session, p: &Value) -> Result<Value> {
@@ -643,13 +724,17 @@ fn insert_placeholder(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use deckcraft_color::SchemeSlot;
-    use deckcraft_model::theme::builtin_color_schemes;
+    use deckcraft_model::theme::{FontScheme, ScriptFont, builtin_color_schemes, builtin_font_schemes};
     use serde_json::{Value, json};
 
     use crate::{Session, UiRequest};
 
     fn scheme(s: &Session) -> deckcraft_color::ColorScheme {
         s.doc().unwrap().doc.masters[0].theme.colors.clone()
+    }
+
+    fn font_scheme(s: &Session) -> FontScheme {
+        s.doc().unwrap().doc.masters[0].theme.fonts.clone()
     }
 
     fn undo_len(s: &Session) -> usize {
@@ -731,5 +816,99 @@ mod tests {
         s.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(scheme(&s).name, "Meadow");
         assert_eq!(scheme(&s).get(SchemeSlot::Dk1), meadow.get(SchemeSlot::Dk1));
+    }
+
+    #[test]
+    fn fonts_dialog_apply_and_reject() {
+        let mut s = Session::with_new();
+        let original = font_scheme(&s);
+        let n = undo_len(&s);
+        s.execute("design.fonts", &json!({})).unwrap();
+        s.execute("design.fonts", &Value::Null).unwrap();
+        s.execute("design.fonts", &json!([1, 2])).unwrap();
+        assert_eq!(font_scheme(&s), original);
+        assert_eq!(undo_len(&s), n, "opening the dialog does not edit");
+        assert_eq!(s.ui_requests.len(), 3);
+        match &s.ui_requests[0] {
+            UiRequest::Dialog { id, params } => {
+                assert_eq!(id, "themeFonts");
+                assert_eq!(params["name"], original.name);
+                assert_eq!(params["major"], original.major.latin);
+                assert_eq!(params["minor"], original.minor.latin);
+            }
+            other => panic!("expected a dialog, got {other:?}"),
+        }
+
+        s.execute("design.fonts", &json!({"name": "classic"})).unwrap();
+        let classic = builtin_font_schemes().into_iter().find(|f| f.name == "Classic").unwrap();
+        assert_eq!(font_scheme(&s), classic, "a builtin name keeps that scheme, including its own name");
+        assert_eq!(undo_len(&s), n + 1);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Fonts");
+        s.execute("design.fonts", &json!({"name": "Classic"})).unwrap();
+        assert_eq!(undo_len(&s), n + 1, "the same scheme is not an undo step");
+
+        let err = s.execute("design.fonts", &json!({"name": "Nope"})).unwrap_err().to_string();
+        assert!(err.contains("no font scheme `Nope`"), "{err}");
+        assert!(s.execute("design.fonts", &json!({"name": "  "})).is_err());
+        assert!(s.execute("design.fonts", &json!({"name": 1})).is_err());
+        assert!(s.execute("design.fonts", &json!({"major": ""})).is_err());
+        assert!(s.execute("design.fonts", &json!({"major": "  "})).is_err());
+        assert!(s.execute("design.fonts", &json!({"minor": 1})).is_err());
+        assert!(s.execute("design.fonts", &json!({"name": "Classic", "major": ""})).is_err());
+        assert_eq!(font_scheme(&s), classic);
+        assert_eq!(undo_len(&s), n + 1);
+
+        s.edit(|doc, _| {
+            let fonts = &mut std::sync::Arc::make_mut(&mut doc.masters[0]).theme.fonts;
+            fonts.major.ea = "EA Major".into();
+            fonts.minor.cs = "CS Minor".into();
+            fonts.major.scripts.push(ScriptFont { script: "Arab".into(), typeface: "Noto Naskh Arabic".into() });
+            Ok(())
+        })
+        .unwrap();
+        let marked = font_scheme(&s);
+        let n = undo_len(&s);
+
+        s.execute("design.fonts", &json!({"major": " Lato "})).unwrap();
+        let custom = font_scheme(&s);
+        assert_eq!(custom.name, "Custom");
+        assert_eq!(custom.major.latin, "Lato");
+        assert_eq!(custom.minor.latin, "Lato", "an omitted minor copies major");
+        assert_eq!(custom.major.ea, "EA Major");
+        assert_eq!(custom.minor.cs, "CS Minor");
+        assert_eq!(custom.major.scripts, marked.major.scripts);
+        assert_eq!(undo_len(&s), n + 1);
+
+        s.execute("design.fonts", &json!({"minor": "Roboto"})).unwrap();
+        assert_eq!(font_scheme(&s).name, "Custom");
+        assert_eq!(font_scheme(&s).major.latin, "Lato");
+        assert_eq!(font_scheme(&s).minor.latin, "Roboto");
+        assert_eq!(font_scheme(&s).major.ea, "EA Major");
+        assert_eq!(undo_len(&s), n + 2);
+
+        s.execute("design.fonts", &json!({"name": "Classic", "major": "Inter"})).unwrap();
+        assert_eq!(font_scheme(&s).name, "Classic");
+        assert_eq!(font_scheme(&s).major.latin, "Inter");
+        assert_eq!(font_scheme(&s).minor.latin, "Open Sans");
+        assert_eq!(font_scheme(&s).major.ea, "");
+        assert!(font_scheme(&s).major.scripts.is_empty(), "a builtin is applied before the latin overlay");
+        assert_eq!(undo_len(&s), n + 3);
+
+        s.edit(|doc, _| {
+            std::sync::Arc::make_mut(&mut doc.masters[0]).theme.fonts.major.ea = "Kept".into();
+            Ok(())
+        })
+        .unwrap();
+        s.execute("design.fonts", &json!({"name": "Talk", "minor": "Nunito Sans"})).unwrap();
+        assert_eq!(font_scheme(&s).name, "Talk");
+        assert_eq!(font_scheme(&s).major.latin, "Inter");
+        assert_eq!(font_scheme(&s).minor.latin, "Nunito Sans");
+        assert_eq!(font_scheme(&s).major.ea, "Kept");
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Fonts");
+
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(font_scheme(&s).name, "Classic");
+        assert_eq!(font_scheme(&s).major.ea, "Kept");
+        assert_eq!(font_scheme(&s).minor.latin, "Open Sans");
     }
 }

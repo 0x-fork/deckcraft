@@ -1355,11 +1355,17 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
         let r = big_button(ui, Icon::Fonts, "Fonts", true);
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Fonts"));
         egui::Popup::menu(&r).width(220.0).show(|ui| {
             for fs in deckcraft_model::theme::builtin_font_schemes() {
                 if ui.button(format!("{}\n   {} / {}", fs.name, fs.major.latin, fs.minor.latin)).clicked() {
                     run(app, "design.fonts", json!({"name": fs.name}));
                 }
+            }
+            ui.separator();
+            if ui.button("Customize Fonts…").clicked() {
+                run(app, "design.fonts", json!({}));
+                ui.close();
             }
         });
         let r = big_button(ui, Icon::BackgroundStyles, "Background\nStyles", true);

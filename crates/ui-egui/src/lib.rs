@@ -1213,17 +1213,17 @@ fn js_now() -> f64 {
 }
 
 #[cfg(test)]
-mod eyedropper_tests;
-#[cfg(test)]
 mod animpane_tests;
+#[cfg(test)]
+mod eyedropper_tests;
 #[cfg(test)]
 mod huge_deck_tests;
 #[cfg(test)]
 mod ime_tests;
 #[cfg(test)]
-mod ui_soak_tests;
-#[cfg(test)]
 mod slide_size_tests;
+#[cfg(test)]
+mod ui_soak_tests;
 
 #[cfg(test)]
 mod tests {
