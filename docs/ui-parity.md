@@ -18,6 +18,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Zoom dialog: percent or Fit, applies on OK; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (command search skips Export without a path, #79; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -25,6 +26,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Create New Theme Fonts; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -84,6 +86,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line (dash, compound, cap, join, begin/end arrows and sizes), some effects, size (lock aspect ratio); no 3-D, thin picture/texture options |
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, shadow/glow/reflection details (colour, transparency, blur, angle, distance, size), soft edges, size; no 3-D, thin picture/texture options |
 | Format Background pane | yes | yes |
+| Slide Master | Insert Layout, Rename, Delete, Preserve, Insert Placeholder, Title and Footers | Insert Layout, Rename, Delete, Insert Placeholder, and Preserve, Title and Footers checkboxes (`master.preserve`, `master.placeholders`). A master thumbnail selects the master |
 | Selection Pane | front-most first, groups fold, drag to restack, Bring Forward / Send Backward arrows, Show All / Hide All, eye, padlock (Lock), rename in place | same: drag restacks among siblings (a child stays in its group), Ctrl+click toggles, Shift+click selects a run, arrows / Home / End / F2 / Esc in the list, right-click menu |
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
 | Comments pane (threads) | yes | yes: every slide, with Previous and Next on the Review tab |
@@ -211,6 +214,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | trivial | Zoom dialog: percent or Fit, applied on OK. View ▸ Zoom opens it; the arrow keeps the presets |
 | 2026-10-13 | trivial | Command search no longer offers an Export command that fails without a path (#79) |
 | 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme (fills, lines and effects). Not a new dialog; dialogs stay 27 |
+| 2026-10-14 | minor | Slide Master: Preserve, and Title and Footers placeholders, on the open master or layout |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
