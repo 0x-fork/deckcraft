@@ -19,8 +19,8 @@ pub mod icons;
 pub mod media;
 pub mod menus;
 pub mod panes;
-pub mod qat;
 mod preview;
+pub mod qat;
 pub mod ribbon;
 pub mod selpane;
 pub mod settings;
@@ -1524,9 +1524,7 @@ impl SlideApp {
         let Ok(v) = self.session.execute(cmd, &json!({})) else { return };
         let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
         let html = v.get("html").and_then(Value::as_str).unwrap_or("").to_string();
-        if self.session.clipboard.slides.is_empty()
-            && !html.is_empty()
-            && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text))
+        if self.session.clipboard.slides.is_empty() && !html.is_empty() && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text))
         {
             return;
         }
