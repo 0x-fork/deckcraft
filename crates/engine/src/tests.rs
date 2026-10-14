@@ -2739,3 +2739,35 @@ fn three_d_reset_and_flat_shapes_drop_the_xml() {
     s3.apply(&json!({"depth": 3}));
     assert!(s3.to_xml().unwrap().contains("<a:extrusionClr><a:srgbClr val=\"FF0000\"/></a:extrusionClr>"));
 }
+
+/// A presentation read off the UI thread enters the session through `file.adopt`: journaled like
+/// `file.open`, and replayable from the journal without the staged copy.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn background_loads_are_adopted_through_a_command() {
+    let mut src = Session::with_new();
+    src.execute("slide.new", &json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("deckcraft-adopt-{}.deckcraft", std::process::id()));
+    let path = path.to_string_lossy().to_string();
+    src.execute("file.saveAs", &json!({"path": path})).unwrap();
+
+    let mut s = Session::new();
+    let loaded = cmd::file::read_presentation_file(&path).unwrap();
+    let token = s.stage_loaded(loaded);
+    let r = s.execute("file.adopt", &json!({"path": path, "token": token})).unwrap();
+    assert_eq!(r["slides"], 2, "{r}");
+    assert_eq!(s.documents().len(), 1);
+    assert_eq!(s.doc().unwrap().path.as_deref(), Some(path.as_str()));
+    let (id, params) = s.journal.last().cloned().unwrap();
+    assert_eq!(id, "file.adopt");
+    // The token was used up; replaying the entry reads the file again.
+    let mut replay = Session::new();
+    replay.execute(&id, &params).unwrap();
+    assert_eq!(replay.doc().unwrap().doc.slides.len(), 2);
+    // A token staged for another path is not taken for this one.
+    let other = s.stage_loaded(cmd::file::LoadedFile { path: "/elsewhere.pptx".into(), doc: Default::default(), native: true, damaged: vec![] });
+    s.execute("file.adopt", &json!({"path": path, "token": other})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides.len(), 2);
+    assert!(s.execute("file.adopt", &json!({})).is_err());
+    std::fs::remove_file(&path).ok();
+}

@@ -71,10 +71,14 @@ impl SlideApp {
         };
         let Some(o) = self.opening.take() else { return };
         match r {
-            Ok(f) => match deckcraft_engine::cmd::file::add_presentation_file(&mut self.session, f) {
-                Ok(_) => self.note_recent(&o.path),
-                Err(e) => self.set_status(e.to_string()),
-            },
+            Ok(f) => {
+                // Into the session through the command path, like file.open: journaled and guarded.
+                let token = self.session.stage_loaded(f);
+                match self.session.execute("file.adopt", &serde_json::json!({"path": o.path, "token": token})) {
+                    Ok(_) => self.note_recent(&o.path),
+                    Err(e) => self.set_status(e.to_string()),
+                }
+            }
             Err(e) => self.set_status(e),
         }
     }
@@ -144,6 +148,8 @@ mod tests {
         assert_eq!(app.session.documents().len(), 1);
         assert_eq!(app.session.active().unwrap().doc.slides.len(), 3);
         assert_eq!(app.ui.recent.first(), Some(&path));
+        // It went in through the command path (journaled like file.open).
+        assert_eq!(app.session.journal.last().map(|(id, _)| id.as_str()), Some("file.adopt"));
         std::fs::remove_file(&path).ok();
     }
 

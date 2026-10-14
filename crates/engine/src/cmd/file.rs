@@ -19,6 +19,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(query "file.templates", "Starter Templates", [], None, "{} → [{name, summary, theme, slides}]", always, templates),
         cmd!(noundo "file.open", "Open…", ["File"], Some("Cmd+O"), "{path}", always, open),
+        cmd!(
+            noundo "file.adopt",
+            "Open",
+            [],
+            None,
+            "{path, token?} (a presentation the host read in the background and staged with Session::stage_loaded; without one, reads path like file.open)",
+            always,
+            adopt
+        ),
         cmd!(noundo "file.openBytes", "Open Data", [], None, "{name, data: base64}", always, open_bytes),
         cmd!(noundo "file.save", "Save", ["File"], Some("Cmd+S"), "{path?, format?: deckcraft|pptx}", has_doc, save),
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path, format?}", has_doc, save_as),
@@ -163,8 +172,8 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
 }
 
 /// A presentation read from disk, not yet added to a session: [`read_presentation_file`] needs no
-/// session, so a host can run it on a background thread and add the result with
-/// [`add_presentation_file`].
+/// session, so a host can run it on a background thread, hand the result to
+/// [`Session::stage_loaded`] and add it with `file.adopt`.
 #[derive(Debug)]
 pub struct LoadedFile {
     pub path: String,
@@ -184,22 +193,37 @@ pub fn read_presentation_file(path: &str) -> Result<LoadedFile> {
     Ok(LoadedFile { path: path.to_string(), doc, native, damaged })
 }
 
-/// Add a presentation read by [`read_presentation_file`] as the active document. A damaged file
-/// opens as an untitled repaired copy, so Save can't overwrite the original with the empty media.
-pub fn add_presentation_file(s: &mut Session, f: LoadedFile) -> Result<(usize, Vec<String>)> {
+/// Add a loaded presentation as the active document: the shared end of `file.open` and
+/// `file.adopt`. A damaged file opens as an untitled repaired copy, so Save can't overwrite the
+/// original with the empty media.
+fn adopt_loaded(s: &mut Session, f: LoadedFile) -> Result<Value> {
     let LoadedFile { path, doc, native, damaged } = f;
     let keep_path = native && damaged.is_empty();
     let i = add_opened(s, &path, keep_path.then(|| path.clone()), doc);
     report_damage(s, &damaged)?;
-    Ok((i, damaged))
+    let st = s.doc()?;
+    Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts, "damagedMedia": damaged}))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
-    let (i, damaged) = add_presentation_file(s, read_presentation_file(path)?)?;
-    let st = s.doc()?;
-    Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts, "damagedMedia": damaged}))
+    adopt_loaded(s, read_presentation_file(path)?)
+}
+
+/// `file.adopt {path, token?}`: add the presentation a host read in the background and staged
+/// with [`Session::stage_loaded`]. Without that staged file (a replayed journal, a stale token)
+/// it reads `path` like `file.open`, so the journal entry stays replayable.
+fn adopt(s: &mut Session, p: &Value) -> Result<Value> {
+    let path = str_param(p, "path").ok_or_else(|| bad("file.adopt", "missing `path`"))?;
+    let staged = p.get("token").and_then(Value::as_u64).and_then(|t| s.take_loaded(t)).filter(|f| f.path == path);
+    match staged {
+        Some(f) => adopt_loaded(s, f),
+        #[cfg(not(target_arch = "wasm32"))]
+        None => adopt_loaded(s, read_presentation_file(path)?),
+        #[cfg(target_arch = "wasm32")]
+        None => Err(bad("file.adopt", format!("{path} was not loaded"))),
+    }
 }
 #[cfg(target_arch = "wasm32")]
 fn open(_s: &mut Session, _p: &Value) -> Result<Value> {
