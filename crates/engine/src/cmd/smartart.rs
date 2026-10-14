@@ -23,7 +23,7 @@ pub const MAX_LEVEL: u8 = 8;
 const MAX_SHAPES: usize = 40;
 
 /// DeckCraft's layouts, with the names PowerPoint's gallery gives them.
-pub const LAYOUTS: [(&str, &str); 35] = [
+pub const LAYOUTS: [(&str, &str); 45] = [
     ("list", "Vertical Bullet List"),
     ("blockList", "Basic Block List"),
     ("hBulletList", "Horizontal Bullet List"),
@@ -59,6 +59,16 @@ pub const LAYOUTS: [(&str, &str); 35] = [
     ("cycleMatrix", "Cycle Matrix"),
     ("segmentedPyramid", "Segmented Pyramid"),
     ("pie", "Basic Pie"),
+    ("nameTitleOrgChart", "Name and Title Organization Chart"),
+    ("verticalBoxList", "Vertical Box List"),
+    ("trapezoidList", "Trapezoid List"),
+    ("tableList", "Table List"),
+    ("accentProcess", "Accent Process"),
+    ("continuousBlockProcess", "Continuous Block Process"),
+    ("bendingProcess", "Basic Bending Process"),
+    ("linearVenn", "Linear Venn"),
+    ("stackedVenn", "Stacked Venn"),
+    ("nestedTarget", "Nested Target"),
 ];
 /// SmartArt Styles.
 pub const STYLES: [(&str, &str); 9] = [
@@ -113,7 +123,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit SmartArt Text",
             ["SmartArt Design", "Create Graphic"],
             None,
-            "{id?, nodes?: [{text, level}], lines?: [string] (leading tabs set the level), index?, text?} (index + text edits one node)",
+            "{id?, nodes?: [{text, level}], lines?: [string] (leading tabs set the level), index?, text?, title?} (index + text edits one node; title: its Name and Title box)",
             has_selection,
             set_nodes
         ),
@@ -142,9 +152,36 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Layout",
             ["SmartArt Design", "Layouts"],
             None,
-            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target|textCycle|continuousCycle|horizontalHierarchy|gridMatrix|gear|funnel|segmentedCycle|multidirectionalCycle|orgChart|halfCircleOrgChart|cycleMatrix|segmentedPyramid|pie}",
+            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target|textCycle|continuousCycle|horizontalHierarchy|gridMatrix|gear|funnel|segmentedCycle|multidirectionalCycle|orgChart|halfCircleOrgChart|cycleMatrix|segmentedPyramid|pie|nameTitleOrgChart|verticalBoxList|trapezoidList|tableList|accentProcess|continuousBlockProcess|bendingProcess|linearVenn|stackedVenn|nestedTarget}",
             has_selection,
             change_layout
+        ),
+        cmd!(
+            "smartArt.fromText",
+            "Convert to SmartArt",
+            ["Home", "Paragraph"],
+            None,
+            "{id?, kind?} → {id} (a text box or placeholder becomes a SmartArt graphic in its place: one node per paragraph, indent levels kept)",
+            has_selection,
+            from_text
+        ),
+        cmd!(
+            "smartArt.toText",
+            "Convert to Text",
+            ["SmartArt Design", "Reset"],
+            None,
+            "{id?} → {id} (the graphic becomes a text box of its outline, bulleted by level)",
+            has_selection,
+            to_text
+        ),
+        cmd!(
+            "smartArt.toShapes",
+            "Convert to Shapes",
+            ["SmartArt Design", "Reset"],
+            None,
+            "{id?} (the graphic becomes a plain group of its shapes; the outline is dropped)",
+            has_selection,
+            to_shapes
         ),
         cmd!(
             "smartArt.picture",
@@ -183,7 +220,13 @@ pub fn nodes_from_lines<'a>(lines: impl IntoIterator<Item = &'a str>) -> Vec<Dia
         .filter(|l| !l.trim().is_empty())
         .map(|l| {
             let tabs = l.chars().take_while(|c| *c == '\t').count();
-            DiagramNode { text: l.trim().to_string(), level: u8::try_from(tabs).unwrap_or(MAX_LEVEL).min(MAX_LEVEL), picture: None, assistant: false }
+            DiagramNode {
+                text: l.trim().to_string(),
+                level: u8::try_from(tabs).unwrap_or(MAX_LEVEL).min(MAX_LEVEL),
+                picture: None,
+                assistant: false,
+                title: String::new(),
+            }
         })
         .collect()
 }
@@ -215,7 +258,7 @@ fn subtree_end(nodes: &[DiagramNode], i: usize) -> usize {
 /// new node's index.
 pub fn add(nodes: &mut Vec<DiagramNode>, index: Option<usize>, position: &str, text: &str) -> usize {
     let Some(i) = index.filter(|i| *i < nodes.len()) else {
-        nodes.push(DiagramNode { text: text.into(), level: 0, picture: None, assistant: false });
+        nodes.push(DiagramNode { text: text.into(), level: 0, picture: None, assistant: false, title: String::new() });
         return nodes.len() - 1;
     };
     let lv = nodes[i].level;
@@ -232,7 +275,7 @@ pub fn add(nodes: &mut Vec<DiagramNode>, index: Option<usize>, position: &str, t
         "assistant" => (i + 1, (lv + 1).min(MAX_LEVEL)),
         _ => (subtree_end(nodes, i), lv),
     };
-    nodes.insert(at, DiagramNode { text: text.into(), level, picture: None, assistant: position == "assistant" });
+    nodes.insert(at, DiagramNode { text: text.into(), level, picture: None, assistant: position == "assistant", title: String::new() });
     at
 }
 
@@ -593,7 +636,7 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
     match d.kind.as_str() {
         "hierarchy" => return hierarchy(d, area, false),
         "horizontalHierarchy" => return hierarchy(d, area, true),
-        "orgChart" | "halfCircleOrgChart" => return org_chart(d, area, d.kind == "halfCircleOrgChart"),
+        "orgChart" | "halfCircleOrgChart" | "nameTitleOrgChart" => return org_chart(d, area),
         "list" | "hBulletList" => {
             // Vertical / Horizontal Bullet List: a coloured title bar, sub-points in a pale box below.
             let vertical = d.kind == "list";
@@ -990,6 +1033,176 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
                 }
             }
         }
+        "verticalBoxList" => {
+            // Vertical Box List: a pale box per node with its sub-points, its title on a tab
+            // overlapping the box's top left.
+            let h = area.h / nf;
+            for (i, g) in gs.iter().enumerate() {
+                let y = area.y + i as f64 * h;
+                let tab_h = (h * 0.3).min(40.0);
+                let mut bx = text_shape("rect", Xfrm::new(area.x, y + tab_h / 2.0, area.w, h * 0.9 - tab_h / 2.0), &nodes(&g[1..]), false);
+                paint(d, &mut bx, i, true);
+                if let Some(b) = &mut bx.text {
+                    b.body.inset_t = Some(tab_h * 0.6);
+                }
+                out.push((bx, g[1..].to_vec()));
+                titled(&mut out, "roundRect", Xfrm::new(area.x + area.w * 0.05, y, area.w * 0.6, tab_h), i, &g[..1]);
+            }
+        }
+        "trapezoidList" | "tableList" => {
+            // Trapezoid List: a column per node, each a trapezoid with its sub-points. Table List: the
+            // first node as a header bar over a column per other node.
+            let table = d.kind == "tableList";
+            let (head, cols): (Option<&Vec<usize>>, &[Vec<usize>]) =
+                if table { gs.split_first().map(|(h, r)| (Some(h), r)).unwrap_or((None, &[])) } else { (None, &gs) };
+            let top = if head.is_some() { area.h * 0.28 } else { 0.0 };
+            if let Some(h) = head {
+                titled(&mut out, "rect", Xfrm::new(area.x, area.y, area.w, top * 0.9), 0, h);
+            }
+            let m = cols.len().max(1) as f64;
+            let w = area.w / m;
+            for (k, g) in cols.iter().enumerate() {
+                let i = k + usize::from(table);
+                let x = Xfrm::new(area.x + k as f64 * w + w * 0.02, area.y + top, w * 0.96, area.h - top);
+                let mut sh = text_shape(if table { "rect" } else { "trapezoid" }, x, &nodes(g), true);
+                if let Some(b) = &mut sh.text {
+                    b.body.anchor = Some(deckcraft_model::text::Anchor::Top);
+                    if !table {
+                        b.body.inset_l = Some(x.w * 0.2);
+                        b.body.inset_r = Some(x.w * 0.2);
+                        b.body.inset_t = Some(x.h * 0.08);
+                    }
+                }
+                paint(d, &mut sh, i, table);
+                out.push((sh, g.clone()));
+            }
+        }
+        "accentProcess" => {
+            // Accent Process: a title box per step with its sub-points in a pale box below and to the
+            // right, arrows between the titles.
+            let gap = area.w * 0.05;
+            let w = (area.w - gap * (nf - 1.0)) / nf;
+            for (i, g) in gs.iter().enumerate() {
+                let x = area.x + i as f64 * (w + gap);
+                let th = area.h * 0.22;
+                if g.len() > 1 {
+                    let mut sh = text_shape("rect", Xfrm::new(x + w * 0.12, area.y + th * 0.7, w * 0.88, area.h - th * 0.7), &nodes(&g[1..]), false);
+                    paint(d, &mut sh, i, true);
+                    if let Some(b) = &mut sh.text {
+                        b.body.inset_t = Some(th * 0.45);
+                    }
+                    out.push((sh, g[1..].to_vec()));
+                }
+                titled(&mut out, "roundRect", Xfrm::new(x, area.y, w * 0.85, th), i, &g[..1]);
+                if i + 1 < n {
+                    let a = gap * 0.8;
+                    arrow(&mut out, Xfrm::new(x + w + (gap - a) / 2.0 - w * 0.07, area.y + th / 2.0 - a / 2.0, a, a), 0.0, i);
+                }
+            }
+        }
+        "continuousBlockProcess" => {
+            // Continuous Block Process: one big pale arrow behind a row of boxes.
+            let mut big = deco("rightArrow", Xfrm::new(area.x, area.y + area.h * 0.15, area.w, area.h * 0.7), 0.0);
+            paint(d, &mut big, 0, true);
+            out.push((big, vec![]));
+            let w = area.w * 0.85 / nf;
+            let h = area.h * 0.32;
+            for (i, g) in gs.iter().enumerate() {
+                let x = area.x + area.w * 0.02 + i as f64 * w;
+                titled(&mut out, "roundRect", Xfrm::new(x + w * 0.05, area.y + (area.h - h) / 2.0, w * 0.9, h), i, g);
+            }
+        }
+        "bendingProcess" => {
+            // Basic Bending Process: rows of boxes read left to right, wrapping, arrows between.
+            let cols = ((nf * area.w / area.h.max(1.0) / 1.5).sqrt().ceil() as usize).clamp(1, n);
+            let rows = n.div_ceil(cols);
+            let (cw, rh) = (area.w / cols as f64, area.h / rows as f64);
+            let (bw, bh) = (cw * 0.72, (rh * 0.75).min(cw * 0.72 * 0.6));
+            for (i, g) in gs.iter().enumerate() {
+                let (c, r) = (i % cols, i / cols);
+                let x = area.x + c as f64 * cw;
+                let y = area.y + r as f64 * rh + (rh - bh) / 2.0;
+                titled(&mut out, "rect", Xfrm::new(x, y, bw, bh), i, g);
+                if i + 1 < n {
+                    let a = (cw - bw) * 0.7;
+                    if c + 1 < cols {
+                        arrow(&mut out, Xfrm::new(x + bw + (cw - bw - a) / 2.0, y + bh / 2.0 - a / 2.0, a, a), 0.0, i);
+                    } else {
+                        // The bend: down from the row's last box towards the next row's first.
+                        let a = (rh - bh).min(a * 1.5).max(6.0);
+                        arrow(&mut out, Xfrm::new(x + bw / 2.0 - a / 2.0, y + bh + (rh - bh - a) / 2.0, a, a), 90.0, i);
+                    }
+                }
+            }
+        }
+        "linearVenn" | "stackedVenn" => {
+            // Linear Venn: overlapping circles in a row. Stacked Venn: circles nested from the bottom,
+            // the text near each one's top.
+            let linear = d.kind == "linearVenn";
+            if linear {
+                let dc = (area.w / (nf * 0.75 + 0.25)).min(area.h);
+                let step = dc * 0.75;
+                let x0 = area.x + (area.w - (step * (nf - 1.0) + dc)) / 2.0;
+                for (i, g) in gs.iter().enumerate() {
+                    let mut sh = text_shape("ellipse", Xfrm::new(x0 + i as f64 * step, area.y + (area.h - dc) / 2.0, dc, dc), &nodes(g), true);
+                    paint(d, &mut sh, i, false);
+                    if let Some(Fill::Solid { color: c }) = &mut sh.fill {
+                        *c = c.clone().with(ColorTransform::Alpha(55_000));
+                    }
+                    out.push((sh, g.clone()));
+                }
+            } else {
+                let s = area.h.min(area.w);
+                let (cx, bottom) = (area.x + area.w / 2.0, area.y + (area.h + s) / 2.0);
+                for (i, _) in gs.iter().enumerate() {
+                    let dc = s * (1.0 - i as f64 / nf);
+                    let mut sh = deco("ellipse", Xfrm::new(cx - dc / 2.0, bottom - dc, dc, dc), 0.0);
+                    paint(d, &mut sh, i, false);
+                    out.push((sh, vec![]));
+                }
+                // Each circle's text in the band between its top and the next circle's.
+                let band = s / nf;
+                for (i, g) in gs.iter().enumerate() {
+                    let dc = s * (1.0 - i as f64 / nf);
+                    let top = bottom - dc;
+                    let h = if i + 1 < n { band } else { dc };
+                    let w = dc * if i + 1 < n { 0.6 } else { 0.7 };
+                    let mut t =
+                        text_shape("rect", Xfrm::new(cx - w / 2.0, top + if i + 1 < n { band * 0.05 } else { 0.0 }, w, h * 0.9), &nodes(g), true);
+                    paint(d, &mut t, i, false);
+                    t.fill = Some(Fill::None);
+                    t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                    t.effects = None;
+                    out.push((t, g.clone()));
+                }
+            }
+        }
+        "nestedTarget" => {
+            // Nested Target: rounded boxes nested inside each other, the text on each one's top band.
+            let band_x = area.w / 2.0 / nf * 0.6;
+            let band_y = area.h / nf * 0.9 / 2.0;
+            for (i, _) in gs.iter().enumerate() {
+                let (dx, dy) = (band_x * i as f64, band_y * i as f64);
+                let mut sh = deco("roundRect", Xfrm::new(area.x + dx, area.y + dy, area.w - 2.0 * dx, area.h - 2.0 * dy), 0.0);
+                paint(d, &mut sh, i, false);
+                out.push((sh, vec![]));
+            }
+            for (i, g) in gs.iter().enumerate() {
+                let (dx, dy) = (band_x * i as f64, band_y * i as f64);
+                let h = if i + 1 < n { band_y } else { area.h - 2.0 * dy };
+                let mut t = text_shape(
+                    "rect",
+                    Xfrm::new(area.x + dx + band_x * 0.3, area.y + dy, (area.w - 2.0 * dx - band_x * 0.6).max(1.0), h),
+                    &nodes(g),
+                    true,
+                );
+                paint(d, &mut t, i, false);
+                t.fill = Some(Fill::None);
+                t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                t.effects = None;
+                out.push((t, g.clone()));
+            }
+        }
         "gridMatrix" => {
             // Grid Matrix: four quadrants on crossed axes.
             let s = area.h.min(area.w);
@@ -1154,7 +1367,9 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
 /// Organization Chart: [`hierarchy`] with elbow connectors, and assistants beside their parent on
 /// a row of their own between the parent and its other children. `half_circle` draws each node as
 /// its text in an open half ring (Half Circle Organization Chart).
-fn org_chart(d: &Diagram, area: Xfrm, half_circle: bool) -> Vec<Item> {
+fn org_chart(d: &Diagram, area: Xfrm) -> Vec<Item> {
+    let half_circle = d.kind == "halfCircleOrgChart";
+    let name_title = d.kind == "nameTitleOrgChart";
     let nodes = &d.nodes[..d.nodes.len().min(MAX_SHAPES)];
     if nodes.is_empty() {
         return vec![];
@@ -1260,21 +1475,51 @@ fn org_chart(d: &Diagram, area: Xfrm, half_circle: bool) -> Vec<Item> {
     for (i, n) in nodes.iter().enumerate() {
         let depth = slot[i] / 2;
         if half_circle {
-            let s = boxes[i].h.min(boxes[i].w);
+            // Two half rings round the text: the upper left one in the accent, the lower right one
+            // in its tint.
             let x = boxes[i];
-            let mut arc = deco("blockArc", Xfrm::new(x.x + (x.w - s) / 2.0, x.y, s, s), 0.0);
-            arc.geom = Geom::Preset { name: "blockArc".into(), adj: vec![180.0 * 60_000.0, 0.0, 8_000.0] };
-            paint(d, &mut arc, depth, false);
-            out.push((arc, vec![]));
+            for (k, (a0, a1)) in [(140.0, 310.0), (320.0, 130.0)].into_iter().enumerate() {
+                let mut arc = deco("blockArc", x, 0.0);
+                arc.geom = Geom::Preset { name: "blockArc".into(), adj: vec![a0 * 60_000.0, a1 * 60_000.0, 4_000.0] };
+                paint(d, &mut arc, depth, false);
+                if k == 1 {
+                    let c = ColorRef::scheme(accent(d, depth)).with(ColorTransform::LumMod(60_000)).with(ColorTransform::LumOff(40_000));
+                    arc.fill = Some(Fill::solid(c));
+                }
+                arc.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                arc.effects = None;
+                out.push((arc, vec![]));
+            }
             let mut t = text_shape("rect", x, &[n], true);
             paint(d, &mut t, depth, true);
             t.fill = Some(Fill::None);
             t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
             out.push((t, vec![i]));
         } else {
-            let mut sh = text_shape("rect", boxes[i], &[n], true);
+            let mut x = boxes[i];
+            if name_title {
+                // The name in the upper part; the title box overlaps the lower edge.
+                x.h *= 0.85;
+            }
+            let mut sh = text_shape("rect", x, &[n], true);
             paint(d, &mut sh, depth, false);
             out.push((sh, vec![i]));
+            if name_title {
+                let tb = Xfrm::new(x.x + x.w * 0.12, x.y + x.h * 0.72, x.w * 0.8, x.h * 0.42);
+                let title = DiagramNode { text: n.title.clone(), ..Default::default() };
+                let mut t = text_shape("rect", tb, &[&title], true);
+                paint(d, &mut t, depth, true);
+                t.fill = Some(Fill::solid(ColorRef::scheme(SchemeSlot::Lt1)));
+                if let Some(b) = &mut t.text {
+                    for p in &mut b.paragraphs {
+                        for r in &mut p.runs {
+                            r.props.size = Some(11.0);
+                        }
+                        p.end_props.size = Some(11.0);
+                    }
+                }
+                out.push((t, vec![]));
+            }
         }
     }
     out
@@ -1444,7 +1689,7 @@ fn index(p: &Value, cmd: &str) -> Result<usize> {
 pub fn insert(s: &mut Session, kind: &str, mut nodes: Vec<DiagramNode>) -> Result<Value> {
     let kind = if is_kind(kind) { kind } else { "process" };
     if nodes.is_empty() {
-        nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0, picture: None, assistant: false }).collect();
+        nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0, picture: None, assistant: false, title: String::new() }).collect();
     }
     normalize(&mut nodes);
     let d = Diagram { kind: kind.into(), nodes, ..Default::default() };
@@ -1488,12 +1733,16 @@ fn set_nodes(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let one = p.get("index").map(|_| index(p, CMD)).transpose()?;
     let text = str_param(p, "text").map(String::from);
+    let title = str_param(p, "title").map(String::from);
     edit_diagram(s, p, CMD, |d| {
         if let Some(n) = given {
             d.nodes = n;
         }
         if let (Some(i), Some(t)) = (one, text) {
             d.nodes.get_mut(i).ok_or_else(|| bad(CMD, "no such node"))?.text = t;
+        }
+        if let (Some(i), Some(t)) = (one, title) {
+            d.nodes.get_mut(i).ok_or_else(|| bad(CMD, "no such node"))?.title = t;
         }
         Ok(Value::Null)
     })
@@ -1525,6 +1774,120 @@ fn demote(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "smartArt.demote";
     let i = index(p, CMD)?;
     edit_diagram(s, p, CMD, |d| if demote_node(&mut d.nodes, i) { Ok(Value::Null) } else { Err(bad(CMD, "nothing above to demote under")) })
+}
+
+/// Convert to SmartArt: the selected text shape's paragraphs become the nodes of a new graphic in
+/// the shape's place.
+fn from_text(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "smartArt.fromText";
+    let kind = str_param(p, "kind").filter(|k| is_kind(k)).unwrap_or("list").to_string();
+    let id = *targets(s, p)?.first().ok_or_else(|| bad(CMD, "select a text box"))?;
+    let (area, nodes) = {
+        let st = s.doc()?;
+        let shapes = current_shapes(&st.doc, &st.selection).ok_or_else(|| bad(CMD, "no slide"))?;
+        let sh = shapes.iter().find(|x| x.id == id).ok_or_else(|| bad(CMD, "select a text box on the slide"))?;
+        let body =
+            sh.text.as_ref().filter(|b| b.paragraphs.iter().any(|p| !p.text().trim().is_empty())).ok_or_else(|| bad(CMD, "the shape has no text"))?;
+        let mut nodes: Vec<DiagramNode> = body
+            .paragraphs
+            .iter()
+            .filter(|p| !p.text().trim().is_empty())
+            .map(|p| DiagramNode { text: p.text().trim().to_string(), level: p.level.min(MAX_LEVEL), ..Default::default() })
+            .collect();
+        normalize(&mut nodes);
+        // A small text box grows to a size a diagram can use, keeping its top left on the slide.
+        let mut a = xfrm_of(&st.doc, &st.selection, sh);
+        let size = st.doc.slide_size;
+        a.w = a.w.max(size.width * 0.5).min(size.width);
+        a.h = a.h.max(size.height * 0.35).min(size.height);
+        a.x = a.x.min(size.width - a.w).max(0.0);
+        a.y = a.y.min(size.height - a.h).max(0.0);
+        a.rot = 0.0;
+        (a, nodes)
+    };
+    let d = Diagram { kind: kind.clone(), nodes, ..Default::default() };
+    let gid = s.edit(|doc, sel| {
+        let children = regenerate(doc, &d, area);
+        let gid = ShapeId(doc.alloc_id());
+        let g = Shape {
+            id: gid,
+            name: format!("SmartArt ({kind})"),
+            xfrm: Some(area),
+            kind: ShapeKind::Group { children, child: area },
+            diagram: Some(d),
+            ..Default::default()
+        };
+        let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad(CMD, "no slide"))?;
+        let at = shapes.iter().position(|x| x.id == id).ok_or_else(|| bad(CMD, "no such shape"))?;
+        // In the text shape's place in the z-order.
+        shapes[at] = g;
+        sel.shapes = vec![gid];
+        sel.text = None;
+        Ok(gid)
+    })?;
+    Ok(json!({"id": gid.0}))
+}
+
+/// Convert to Text: a text box with the outline, one bulleted paragraph per node.
+fn to_text(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "smartArt.toText";
+    let gid = target_group(s, p, CMD)?;
+    let (_, d) = selected_for(s, gid).ok_or_else(|| bad(CMD, "select a SmartArt graphic"))?;
+    let new = s.edit(|doc, sel| {
+        let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad(CMD, "no slide"))?;
+        let at = shapes.iter().position(|x| x.id == gid).ok_or_else(|| bad(CMD, "the graphic isn't at the top of the slide"))?;
+        let area = shapes[at].xfrm.unwrap_or_default();
+        let mut body = TextBody::default();
+        for n in &d.nodes {
+            let mut para = Paragraph::new(&n.text);
+            para.level = n.level.min(MAX_LEVEL);
+            para.props.bullet = Some(deckcraft_model::text::Bullet::Char { char: "•".into() });
+            para.props.margin_left = Some(18.0 * (para.level as f64 + 1.0));
+            para.props.indent = Some(-14.0);
+            body.paragraphs.push(para);
+        }
+        if body.paragraphs.is_empty() {
+            body.paragraphs.push(Paragraph::new(""));
+        }
+        body.body.wrap = Some(true);
+        body.body.autofit = Some(AutoFit::Shrink { font_scale: 1.0, line_reduction: 0.0 });
+        let id = ShapeId(doc.alloc_id());
+        let tb =
+            Shape { id, name: "Text".into(), xfrm: Some(area), text_box: true, text: Some(body), geom: Geom::preset("rect"), ..Default::default() };
+        let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad(CMD, "no slide"))?;
+        shapes[at] = tb;
+        sel.shapes = vec![id];
+        sel.text = None;
+        Ok(id)
+    })?;
+    Ok(json!({"id": new.0}))
+}
+
+/// Convert to Shapes: keep the drawing as an ordinary group.
+fn to_shapes(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "smartArt.toShapes";
+    let gid = target_group(s, p, CMD)?;
+    s.edit(|doc, sel| {
+        let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad(CMD, "no slide"))?;
+        let g = deckcraft_model::find_shape_mut(shapes, gid).ok_or_else(|| bad(CMD, "no such shape"))?;
+        g.diagram = None;
+        g.name = "Group".into();
+        sel.shapes = vec![gid];
+        Ok(())
+    })?;
+    Ok(Value::Null)
+}
+
+/// The graphic `gid` with its outline (typed text synced).
+fn selected_for(s: &Session, gid: ShapeId) -> Option<(ShapeId, Diagram)> {
+    let st = s.doc().ok()?;
+    let shapes = current_shapes(&st.doc, &st.selection)?;
+    let g = diagram_group(shapes, gid)?;
+    let mut d = g.diagram.clone()?;
+    if let ShapeKind::Group { children, .. } = &g.kind {
+        sync_text(&mut d, children);
+    }
+    Some((g.id, d))
 }
 
 fn set_picture(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1593,7 +1956,11 @@ mod tests {
         n.iter().map(|x| x.level).collect()
     }
     fn mk(levels: &[u8]) -> Vec<DiagramNode> {
-        levels.iter().enumerate().map(|(i, l)| DiagramNode { text: format!("n{i}"), level: *l, picture: None, assistant: false }).collect()
+        levels
+            .iter()
+            .enumerate()
+            .map(|(i, l)| DiagramNode { text: format!("n{i}"), level: *l, picture: None, assistant: false, title: String::new() })
+            .collect()
     }
 
     #[test]

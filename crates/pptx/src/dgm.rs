@@ -126,6 +126,16 @@ pub fn layout_id(kind: &str) -> &'static str {
         "multidirectionalCycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle7",
         "orgChart" => "urn:microsoft.com/office/officeart/2005/8/layout/orgChart1",
         "halfCircleOrgChart" => "urn:microsoft.com/office/officeart/2008/layout/HalfCircleOrganizationChart",
+        "nameTitleOrgChart" => "urn:microsoft.com/office/officeart/2008/layout/NameandTitleOrganizationalChart",
+        "verticalBoxList" => "urn:microsoft.com/office/officeart/2005/8/layout/list1",
+        "trapezoidList" => "urn:microsoft.com/office/officeart/2005/8/layout/hList6",
+        "tableList" => "urn:microsoft.com/office/officeart/2005/8/layout/hList3",
+        "accentProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/process3",
+        "continuousBlockProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/hProcess9",
+        "bendingProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/process5",
+        "linearVenn" => "urn:microsoft.com/office/officeart/2005/8/layout/venn3",
+        "stackedVenn" => "urn:microsoft.com/office/officeart/2005/8/layout/venn2",
+        "nestedTarget" => "urn:microsoft.com/office/officeart/2005/8/layout/target2",
         "cycleMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle4",
         "segmentedPyramid" => "urn:microsoft.com/office/officeart/2005/8/layout/pyramid4",
         "pie" => "urn:microsoft.com/office/officeart/2005/8/layout/chart3",
@@ -174,6 +184,16 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "multidirectionalCycle",
         "orgChart",
         "halfCircleOrgChart",
+        "nameTitleOrgChart",
+        "verticalBoxList",
+        "trapezoidList",
+        "tableList",
+        "accentProcess",
+        "continuousBlockProcess",
+        "bendingProcess",
+        "linearVenn",
+        "stackedVenn",
+        "nestedTarget",
         "cycleMatrix",
         "segmentedPyramid",
         "pie",
@@ -194,6 +214,8 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "target"
     } else if s.contains("timeline") {
         "timeline"
+    } else if s.contains("nameandtitle") {
+        "nameTitleOrgChart"
     } else if s.contains("orgchart") || s.contains("organizationchart") || s.contains("organizationalchart") {
         "orgChart"
     } else if s.contains("hierarchy") {
@@ -225,12 +247,22 @@ fn layout_id_of(kind: &str) -> &'static str {
 
 fn category(kind: &str) -> &'static str {
     match kind {
-        "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" | "timeline" | "gear" | "funnel" => "process",
-        "venn" | "target" => "relationship",
+        "process"
+        | "chevron"
+        | "verticalProcess"
+        | "stepUp"
+        | "pictureProcess"
+        | "timeline"
+        | "gear"
+        | "funnel"
+        | "accentProcess"
+        | "continuousBlockProcess"
+        | "bendingProcess" => "process",
+        "venn" | "target" | "linearVenn" | "stackedVenn" | "nestedTarget" => "relationship",
         "cycle" | "blockCycle" | "radial" | "textCycle" | "continuousCycle" | "segmentedCycle" | "multidirectionalCycle" | "cycleMatrix" | "pie" => {
             "cycle"
         }
-        "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart" => "hierarchy",
+        "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart" | "nameTitleOrgChart" => "hierarchy",
         "pyramid" | "invertedPyramid" | "segmentedPyramid" => "pyramid",
         "matrix" | "titledMatrix" | "gridMatrix" => "matrix",
         _ => "list",
@@ -305,6 +337,17 @@ pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str, pics: &[(usize, Strin
     }
     // A node's picture sits on the presentation point of its picture placeholder, as PowerPoint
     // stores it (`presAssocID` names the node, the blip is a relationship of the data part).
+    // Name and Title: a node's title is the text of its title box's presentation point.
+    for (k, n) in d.nodes.iter().enumerate() {
+        if n.title.is_empty() {
+            continue;
+        }
+        w.open("dgm:pt", A::new().a("modelId", guid(seed, 0x30_0000 + k)).a("type", "pres"));
+        w.empty("dgm:prSet", A::new().a("presAssocID", node(k)).a("presName", "titleText1").a("presStyleLbl", "fgAcc1").a("custT", "1"));
+        w.empty0("dgm:spPr");
+        text(&mut w, &n.title);
+        w.close("dgm:pt");
+    }
     for (k, rid) in pics {
         if *k >= d.nodes.len() {
             continue;
@@ -390,6 +433,7 @@ fn outline_ids(data: &El) -> Vec<(String, DiagramNode)> {
     let Some(pts) = data.child("ptLst") else { return vec![] };
     let mut texts: HashMap<&str, String> = HashMap::new();
     let mut assistants: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut titles: HashMap<&str, String> = HashMap::new();
     let mut doc: Option<&str> = None;
     for pt in pts.children_named("pt").take(MAX_NODES * 4) {
         let Some(id) = pt.attr("modelId") else { continue };
@@ -400,6 +444,16 @@ fn outline_ids(data: &El) -> Vec<(String, DiagramNode)> {
                 texts.insert(id, t);
                 if ty == "asst" {
                     assistants.insert(id);
+                }
+            }
+            "pres" => {
+                // Name and Title: the title box's own text, on its presentation point.
+                let pr = pt.child("prSet");
+                if pr.and_then(|p| p.attr("presName")).is_some_and(|n| n.starts_with("titleText"))
+                    && let Some(node) = pr.and_then(|p| p.attr("presAssocID"))
+                    && let Some(t) = pt.child("t").map(paragraphs).filter(|t| !t.is_empty())
+                {
+                    titles.insert(node, t);
                 }
             }
             _ => {}
@@ -431,7 +485,13 @@ fn outline_ids(data: &El) -> Vec<(String, DiagramNode)> {
         }
         out.push((
             id.to_string(),
-            DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8), picture: None, assistant: assistants.contains(id) },
+            DiagramNode {
+                text: texts.get(id).cloned().unwrap_or_default(),
+                level: level.min(8),
+                picture: None,
+                assistant: assistants.contains(id),
+                title: titles.get(id).cloned().unwrap_or_default(),
+            },
         ));
         if let Some(v) = kids.get(id) {
             stack.extend(v.iter().rev().map(|(_, c)| (*c, level.saturating_add(1))));
@@ -539,7 +599,7 @@ pub fn layout_xml(kind: &str) -> Vec<u8> {
     w.empty0("dgm:dir");
     w.empty("dgm:resizeHandles", A::new().a("val", "exact"));
     w.close("dgm:varLst");
-    if matches!(kind, "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart") {
+    if matches!(kind, "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart" | "nameTitleOrgChart") {
         // Each node over the row of its children, recursively.
         w.empty("dgm:alg", A::new().a("type", "hierChild"));
         w.open("dgm:shape", A::new().a("r:blip", ""));
@@ -708,7 +768,7 @@ mod tests {
     use super::*;
 
     fn nodes(v: &[(&str, u8)]) -> Vec<DiagramNode> {
-        v.iter().map(|(t, l)| DiagramNode { text: (*t).into(), level: *l, picture: None, assistant: false }).collect()
+        v.iter().map(|(t, l)| DiagramNode { text: (*t).into(), level: *l, picture: None, assistant: false, title: String::new() }).collect()
     }
 
     #[test]
@@ -739,6 +799,7 @@ mod tests {
     fn assistants_survive_the_data_model() {
         let mut v = nodes(&[("CEO", 0), ("Aide", 1), ("CTO", 1)]);
         v[1].assistant = true;
+        v[0].title = "Chief Executive".into();
         let d = Diagram { kind: "orgChart".into(), nodes: v, ..Default::default() };
         let xml = data_xml(&d, 5, "rId1", &[]);
         assert!(String::from_utf8(xml.clone()).unwrap().contains("type=\"asst\""));
@@ -789,6 +850,16 @@ mod tests {
             "cycleMatrix",
             "segmentedPyramid",
             "pie",
+            "nameTitleOrgChart",
+            "verticalBoxList",
+            "trapezoidList",
+            "tableList",
+            "accentProcess",
+            "continuousBlockProcess",
+            "bendingProcess",
+            "linearVenn",
+            "stackedVenn",
+            "nestedTarget",
         ] {
             assert_eq!(kind_for(layout_id(k), ""), k);
         }
@@ -800,7 +871,7 @@ mod tests {
         let doc = crate::xml::parse(xml).unwrap();
         assert_eq!(outline(&doc.root), nodes(&[("A", 0), ("", 1)]));
         assert_eq!(kind_for("urn:microsoft.com/office/officeart/2005/8/layout/orgChart1", ""), "orgChart");
-        assert_eq!(kind_for("urn:x/layout/NameandTitleOrganizationalChart", ""), "orgChart");
+        assert_eq!(kind_for("urn:x/layout/NameandTitleOrganizationalChart", ""), "nameTitleOrgChart");
         assert_eq!(kind_for("urn:x/layout/chevron2", "process"), "chevron");
         assert_eq!(kind_for("urn:x/layout/hProcess9", "process"), "process");
         assert_eq!(kind_for("urn:x/layout/default", "list"), "blockList");
