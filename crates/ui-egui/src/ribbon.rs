@@ -53,6 +53,9 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         if icon_toggle(&mut child, Icon::Save, "Save (⌘S)", has_doc, false).clicked() {
             app.save();
         }
+        if icon_toggle(&mut child, Icon::Export, "Export…", has_doc, false).clicked() {
+            let _ = app.run("app.exportDialog", json!({}));
+        }
         if icon_toggle(&mut child, Icon::Undo, "Undo (⌘Z)", enabled(app, "edit.undo"), false).clicked() {
             run(app, "edit.undo", json!({}));
         }
