@@ -413,65 +413,24 @@ pub fn outline_pane(app: &mut SlideApp, ui: &mut Ui) {
             let Some(st) = app.session.active() else { return };
             let doc = st.doc.clone();
             let cur = st.selection.slide;
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            // Only the slides in view (and the current one, whose editor may have the focus) are
+            // laid out; the rest take their last measured height (estimated until first shown).
+            // Laying out every slide's editors each frame made a 2000-slide outline crawl.
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show_viewport(ui, |ui, viewport| {
+                let origin = ui.cursor().top();
+                let margin = 300.0;
                 for (i, s) in doc.slides.iter().enumerate() {
-                    let title_shape = s.shapes.iter().find(|x| x.ph_type().is_some_and(|k| k.is_title())).map(|x| x.id.0);
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("{}", i + 1)).color(t.text_dim));
-                        let (r, _) = ui.allocate_exact_size(vec2(14.0, 10.0), Sense::hover());
-                        ui.painter().rect_stroke(
-                            r,
-                            CornerRadius::same(1),
-                            Stroke::new(1.0, if i == cur { t.accent } else { t.text_dim }),
-                            egui::StrokeKind::Inside,
-                        );
-                        let id = egui::Id::new(("ol-title", s.id.0));
-                        let cur_title = s.title();
-                        let mut v: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| cur_title.clone()));
-                        let resp =
-                            ui.add(egui::TextEdit::singleline(&mut v).font(theme::bold(14.0)).frame(egui::Frame::NONE).desired_width(f32::INFINITY));
-                        if resp.gained_focus() {
-                            let _ = app.run("slide.go", json!({"index": i}));
-                        }
-                        if resp.lost_focus()
-                            && v != cur_title
-                            && let Some(tid) = title_shape
-                        {
-                            let _ = app.run("text.set", json!({"id": tid, "text": v}));
-                        }
-                        if !resp.has_focus() {
-                            ui.data_mut(|d| d.remove::<String>(id));
-                        } else {
-                            ui.data_mut(|d| d.insert_temp(id, v));
-                        }
-                    });
-                    for sh in s.shapes.iter().filter(|x| !x.ph_type().is_some_and(|k| k.is_title())) {
-                        let Some(tb) = &sh.text else { continue };
-                        if tb.is_empty() {
-                            continue;
-                        }
-                        let id = egui::Id::new(("ol-body", s.id.0, sh.id.0));
-                        let cur_text: String =
-                            tb.paragraphs.iter().map(|p| format!("{}{}", "\t".repeat(p.level as usize), p.text())).collect::<Vec<_>>().join("\n");
-                        let mut v: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| cur_text.clone()));
-                        ui.horizontal(|ui| {
-                            ui.add_space(36.0);
-                            let resp =
-                                ui.add(egui::TextEdit::multiline(&mut v).frame(egui::Frame::NONE).desired_width(f32::INFINITY).desired_rows(1));
-                            if resp.gained_focus() {
-                                let _ = app.run("slide.go", json!({"index": i}));
-                            }
-                            if resp.lost_focus() && v != cur_text {
-                                let _ = app.run("text.set", json!({"id": sh.id.0, "text": v}));
-                            }
-                            if !resp.has_focus() {
-                                ui.data_mut(|d| d.remove::<String>(id));
-                            } else {
-                                ui.data_mut(|d| d.insert_temp(id, v.clone()));
-                            }
-                        });
+                    let hid = egui::Id::new(("ol-height", s.id.0));
+                    let known: Option<f32> = ui.data(|d| d.get_temp(hid));
+                    let h = known.unwrap_or_else(|| outline_estimate(s));
+                    let y = ui.cursor().top() - origin;
+                    if i == cur || (y + h >= viewport.min.y - margin && y <= viewport.max.y + margin) {
+                        outline_slide(app, ui, &t, i, s, cur);
+                        let real = ui.cursor().top() - origin - y;
+                        ui.data_mut(|d| d.insert_temp(hid, real));
+                    } else {
+                        ui.allocate_exact_size(vec2(ui.available_width(), (h - ui.spacing().item_spacing.y).max(0.0)), Sense::hover());
                     }
-                    ui.add_space(6.0);
                 }
             });
         },
@@ -481,3 +440,69 @@ pub fn outline_pane(app: &mut SlideApp, ui: &mut Ui) {
 #[cfg(test)]
 #[path = "sorter_tests.rs"]
 mod ui_tests;
+
+/// A slide's outline block height before it has been laid out: title row plus its text lines.
+fn outline_estimate(s: &deckcraft_model::Slide) -> f32 {
+    let lines: usize = s
+        .shapes
+        .iter()
+        .filter(|x| !x.ph_type().is_some_and(|k| k.is_title()))
+        .filter_map(|x| x.text.as_ref())
+        .filter(|tb| !tb.is_empty())
+        .map(|tb| tb.paragraphs.len().max(1))
+        .sum();
+    30.0 + lines as f32 * 19.0
+}
+
+/// One slide in the outline: number, title editor, then its other text.
+fn outline_slide(app: &mut SlideApp, ui: &mut Ui, t: &Tokens, i: usize, s: &deckcraft_model::Slide, cur: usize) {
+    let title_shape = s.shapes.iter().find(|x| x.ph_type().is_some_and(|k| k.is_title())).map(|x| x.id.0);
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(format!("{}", i + 1)).color(t.text_dim));
+        let (r, _) = ui.allocate_exact_size(vec2(14.0, 10.0), Sense::hover());
+        ui.painter().rect_stroke(r, CornerRadius::same(1), Stroke::new(1.0, if i == cur { t.accent } else { t.text_dim }), egui::StrokeKind::Inside);
+        let id = egui::Id::new(("ol-title", s.id.0));
+        let cur_title = s.title();
+        let mut v: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| cur_title.clone()));
+        let resp = ui.add(egui::TextEdit::singleline(&mut v).font(theme::bold(14.0)).frame(egui::Frame::NONE).desired_width(f32::INFINITY));
+        if resp.gained_focus() {
+            let _ = app.run("slide.go", json!({"index": i}));
+        }
+        if resp.lost_focus()
+            && v != cur_title
+            && let Some(tid) = title_shape
+        {
+            let _ = app.run("text.set", json!({"id": tid, "text": v}));
+        }
+        if !resp.has_focus() {
+            ui.data_mut(|d| d.remove::<String>(id));
+        } else {
+            ui.data_mut(|d| d.insert_temp(id, v));
+        }
+    });
+    for sh in s.shapes.iter().filter(|x| !x.ph_type().is_some_and(|k| k.is_title())) {
+        let Some(tb) = &sh.text else { continue };
+        if tb.is_empty() {
+            continue;
+        }
+        let id = egui::Id::new(("ol-body", s.id.0, sh.id.0));
+        let cur_text: String = tb.paragraphs.iter().map(|p| format!("{}{}", "\t".repeat(p.level as usize), p.text())).collect::<Vec<_>>().join("\n");
+        let mut v: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| cur_text.clone()));
+        ui.horizontal(|ui| {
+            ui.add_space(36.0);
+            let resp = ui.add(egui::TextEdit::multiline(&mut v).frame(egui::Frame::NONE).desired_width(f32::INFINITY).desired_rows(1));
+            if resp.gained_focus() {
+                let _ = app.run("slide.go", json!({"index": i}));
+            }
+            if resp.lost_focus() && v != cur_text {
+                let _ = app.run("text.set", json!({"id": sh.id.0, "text": v}));
+            }
+            if !resp.has_focus() {
+                ui.data_mut(|d| d.remove::<String>(id));
+            } else {
+                ui.data_mut(|d| d.insert_temp(id, v.clone()));
+            }
+        });
+    }
+    ui.add_space(6.0);
+}
