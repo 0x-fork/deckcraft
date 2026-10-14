@@ -16,6 +16,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("edit.cut", "Cut", ["Home", "Clipboard"], Some("Cmd+X"), "{scope?: slides}", has_doc, cut),
         cmd!(noundo "edit.copy", "Copy", ["Home", "Clipboard"], Some("Cmd+C"), "{scope?: slides} → {text}", has_doc, copy),
         cmd!("edit.paste", "Paste", ["Home", "Clipboard"], Some("Cmd+V"), "{text?: plain text to paste, scope?: slides}", has_doc, paste),
+        cmd!(
+            "edit.pasteSpecial",
+            "Paste Special",
+            ["Home", "Clipboard"],
+            None,
+            "{as: destinationTheme|keepSource|picture|text} — Use Destination Theme, Keep Source Formatting, Picture (PNG), Keep Text Only",
+            has_doc,
+            paste_special
+        ),
         cmd!("edit.pasteText", "Paste and Match Formatting", ["Edit"], Some("Cmd+Shift+V"), "{text?}", has_doc, paste_text),
         cmd!("edit.duplicate", "Duplicate", ["Edit"], Some("Cmd+D"), "{ids?}", has_selection, duplicate),
         cmd!("edit.delete", "Delete", ["Edit"], Some("Delete"), "{ids?, scope?: slides}", has_doc, delete),
@@ -114,7 +123,8 @@ fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
     media_of_shapes(&shapes, &mut mids);
     let media = st.doc.media.iter().filter(|m| mids.contains(&m.id)).cloned().collect();
     let plain = shapes.iter().filter_map(|x| x.text.as_ref().map(|t| t.text())).collect::<Vec<_>>().join("\n");
-    s.clipboard = crate::Clipboard { shapes, media, plain: plain.clone(), ..Default::default() };
+    let source_theme = st.current_slide().and_then(|sl| st.doc.master_for(sl)).map(|(m, _)| (m.scheme(), m.theme.fonts.clone()));
+    s.clipboard = crate::Clipboard { shapes, media, plain: plain.clone(), source_theme, ..Default::default() };
     Ok(plain)
 }
 
@@ -321,6 +331,113 @@ fn paste_plain(s: &mut Session, text: &str) -> Result<Value> {
     let size = st.doc.slide_size;
     let rect = [size.width * 0.25, size.height * 0.4, size.width * 0.5, 40.0];
     s.execute("insert.textBox", &json!({"rect": rect, "text": text}))
+}
+
+fn paste_special(s: &mut Session, p: &Value) -> Result<Value> {
+    match str_param(p, "as").unwrap_or("destinationTheme") {
+        "destinationTheme" | "useDestinationTheme" => paste(s, &json!({})),
+        "text" | "keepTextOnly" => paste_text(s, &json!({})),
+        "keepSource" | "keepSourceFormatting" => {
+            let saved = s.clipboard.clone();
+            if let Some((scheme, fonts)) = &saved.source_theme {
+                bake_theme(&mut s.clipboard.shapes, scheme, fonts);
+            }
+            let r = paste(s, &json!({}));
+            let pastes = s.clipboard.pastes;
+            s.clipboard = saved;
+            s.clipboard.pastes = pastes;
+            r
+        }
+        "picture" => paste_picture(s),
+        other => Err(bad("edit.pasteSpecial", format!("unknown `as`: {other} (destinationTheme, keepSource, picture, text)"))),
+    }
+}
+
+/// Replace theme colours and theme fonts with the values they have in `scheme` / `fonts`, so the
+/// shapes keep their look under another theme.
+pub(crate) fn bake_theme(shapes: &mut [Shape], scheme: &deckcraft_color::ColorScheme, fonts: &deckcraft_model::theme::FontScheme) {
+    fn rec(v: &mut Value, scheme: &deckcraft_color::ColorScheme, fonts: &deckcraft_model::theme::FontScheme, depth: usize) {
+        if depth > 256 {
+            return;
+        }
+        match v {
+            Value::Object(o) => {
+                if o.get("kind").and_then(Value::as_str) == Some("scheme")
+                    && let Some(slot) = o.get("slot").and_then(|x| serde_json::from_value::<deckcraft_color::SchemeSlot>(x.clone()).ok())
+                    && slot != deckcraft_color::SchemeSlot::PhClr
+                    && let Ok(rgb) = serde_json::to_value(scheme.get(slot))
+                {
+                    o.clear();
+                    o.insert("kind".into(), json!("rgb"));
+                    o.insert("rgb".into(), rgb);
+                    return;
+                }
+                for x in o.values_mut() {
+                    rec(x, scheme, fonts, depth + 1);
+                }
+            }
+            Value::Array(a) => a.iter_mut().for_each(|x| rec(x, scheme, fonts, depth + 1)),
+            Value::String(t) if t.starts_with('+') => {
+                let set = match t.get(1..3) {
+                    Some("mj") => &fonts.major,
+                    Some("mn") => &fonts.minor,
+                    _ => return,
+                };
+                let face = match t.get(3..) {
+                    Some("-lt") => &set.latin,
+                    Some("-ea") => &set.ea,
+                    Some("-cs") => &set.cs,
+                    _ => return,
+                };
+                if !face.is_empty() {
+                    *t = face.clone();
+                }
+            }
+            _ => {}
+        }
+    }
+    for sh in shapes.iter_mut() {
+        let Ok(mut v) = serde_json::to_value(&*sh) else { continue };
+        rec(&mut v, scheme, fonts, 0);
+        if let Ok(baked) = serde_json::from_value::<Shape>(v) {
+            *sh = baked;
+        }
+    }
+}
+
+/// Paste Special › Picture: the copied shapes drawn into one PNG picture.
+fn paste_picture(s: &mut Session) -> Result<Value> {
+    let mut clip = s.clipboard.clone();
+    if clip.shapes.is_empty() {
+        return Err(bad("edit.pasteSpecial", "copy shapes first to paste them as a picture"));
+    }
+    if let Some((scheme, fonts)) = &clip.source_theme {
+        bake_theme(&mut clip.shapes, scheme, fonts);
+    }
+    let st = s.doc()?;
+    let mut doc = (*st.doc).clone();
+    bring_media(&mut doc, &clip.media);
+    let mut slide = st.current_slide().cloned().ok_or_else(|| bad("edit.pasteSpecial", "no slide"))?;
+    let xs: Vec<deckcraft_geom::Xfrm> = clip.shapes.iter().filter_map(|x| x.xfrm).collect();
+    let b = super::arrange::union_bounds(&xs).ok_or_else(|| bad("edit.pasteSpecial", "nothing to draw"))?;
+    let gx = deckcraft_geom::Xfrm::new(b.x0, b.y0, b.width(), b.height());
+    let gid = ShapeId(u32::MAX - 1);
+    let one = if clip.shapes.len() == 1 {
+        let mut sh = clip.shapes[0].clone();
+        sh.id = gid;
+        sh
+    } else {
+        Shape { id: gid, xfrm: Some(gx), kind: deckcraft_model::ShapeKind::Group { children: clip.shapes.clone(), child: gx }, ..Default::default() }
+    };
+    slide.shapes = vec![one];
+    const SCALE: f64 = 2.0;
+    let img = deckcraft_render::render_shape(&doc, &slide, gid, SCALE).ok_or_else(|| bad("edit.pasteSpecial", "the shapes could not be drawn"))?;
+    // render_shape draws the bounds plus an 8 pt margin (room for shadows and outlines).
+    let (w, h) = (img.width as f64 / SCALE, img.height as f64 / SCALE);
+    let same_slide = clip.shapes.iter().any(|c| st.shape(c.id).is_some());
+    let off = if same_slide { s.prefs.duplicate_offset } else { 0.0 };
+    let png = img.to_png();
+    s.execute("insert.picture", &json!({"data": base64_encode(&png), "name": "Picture.png", "rect": [b.x0 - 8.0 + off, b.y0 - 8.0 + off, w, h]}))
 }
 
 fn paste_text(s: &mut Session, p: &Value) -> Result<Value> {

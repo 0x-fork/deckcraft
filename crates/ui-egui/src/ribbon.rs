@@ -295,6 +295,9 @@ fn clipboard_group(app: &mut SlideApp, ui: &mut Ui) {
                 if ui.button("Paste and Match Formatting").clicked() {
                     run(app, "edit.pasteText", json!({}));
                 }
+                if ui.button("Paste Special…").clicked() {
+                    run(app, "app.pasteSpecial", json!({}));
+                }
                 if ui.button("Paste Formatting").clicked() {
                     run(app, "format.painterApply", json!({}));
                 }

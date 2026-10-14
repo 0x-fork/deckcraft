@@ -49,6 +49,10 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
             return true;
         }
         (O, true, false, false) => "app.openDialog",
+        (V, true, false, true) if app.session.active().is_some() => {
+            app.dialog = Some(crate::dialogs::Dialog::new("pasteSpecial"));
+            return true;
+        }
         (P, true, true, false) => "app.palette",
         (Comma, true, false, false) => "app.preferences",
         (Equals | Plus, true, false, false) => "view.zoomIn",
@@ -177,6 +181,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Copy", "edit.copy"),
                 ("Paste", "edit.paste"),
                 ("Paste and Match Formatting", "edit.pasteText"),
+                ("Paste Special…", "app.pasteSpecial"),
                 ("-", ""),
                 ("Select All", "edit.selectAll"),
                 ("Duplicate", "edit.duplicate"),

@@ -327,6 +327,9 @@ pub struct Clipboard {
     pub media: Vec<deckcraft_model::MediaItem>,
     pub text: Option<deckcraft_model::TextBody>,
     pub plain: String,
+    /// The copied shapes' theme colours (colour map applied) and fonts, for Paste Special ›
+    /// Keep Source Formatting.
+    pub source_theme: Option<(deckcraft_color::ColorScheme, deckcraft_model::theme::FontScheme)>,
     /// How many times the shapes were pasted (each paste offsets further).
     pub pastes: u32,
 }
