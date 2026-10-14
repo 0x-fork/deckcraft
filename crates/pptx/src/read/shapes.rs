@@ -166,6 +166,7 @@ fn base(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, nv: Option<&El>) -> Shape {
                             has_custom_prompt: ph.bool("hasCustomPrompt").unwrap_or(false),
                         });
                     }
+                    s.tags = super::tags(imp, part, e);
                 }
                 _ => {}
             }

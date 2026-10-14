@@ -178,6 +178,21 @@ fn choice_has_model3d(el: &El, rels: &Rels) -> bool {
     rec(el, rels, 0)
 }
 
+/// Add-in tags named by `holder`'s `p:custDataLst`: the name/value pairs of each tags part.
+pub fn tags(imp: &Imp, part: &Part, holder: &El) -> Vec<(String, String)> {
+    let Some(list) = holder.child("custDataLst") else { return vec![] };
+    let mut out = Vec::new();
+    for t in list.children_named("tags").take(100) {
+        let Some(doc) = t.attr("r:id").and_then(|id| part.rels.get(id)).and_then(|r| imp.pkg.xml(&r.target)) else { continue };
+        for tag in doc.root.children_named("tag").take(10_000) {
+            if let Some(name) = tag.attr("name") {
+                out.push((name.to_string(), tag.attr("val").unwrap_or("").to_string()));
+            }
+        }
+    }
+    out
+}
+
 /// Replace every `mc:AlternateContent` by the children of the branch we can read best.
 /// A 3-D model choice is left in place (even when its `Requires` prefix is not one we otherwise
 /// understand) so the shape reader can keep the model and its fallback picture. Ink content parts
@@ -426,6 +441,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             p.raw_ext = Some(kept);
         }
     }
+    p.tags = tags(&imp, &pres_part, pres_el);
     // Custom shows.
     if let Some(l) = pres_el.child("custShowLst") {
         for cs in l.children_named("custShow") {
@@ -853,6 +869,7 @@ fn read_slide(imp: &mut Imp, part: &Part, doc: &Doc, id: SlideId, layout: Layout
     let mut ctx = shapes::IdCtx::default();
     if let Some(csld) = root.child("cSld") {
         s.name = csld.attr("name").unwrap_or("").to_string();
+        s.tags = tags(imp, part, csld);
         s.background = background(imp, part, csld);
         if let Some(tree) = csld.child("spTree") {
             s.shapes = shapes::sp_tree(imp, part, &mut ctx, tree, 0);

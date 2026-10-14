@@ -513,6 +513,7 @@ pub fn blank_presentation(size: Size, theme: Theme, title_slide: bool) -> Presen
         next_id: next.max(256),
         embedded_fonts: vec![],
         table_styles: vec![],
+        tags: vec![],
         raw_ext: None,
     };
     if title_slide {
