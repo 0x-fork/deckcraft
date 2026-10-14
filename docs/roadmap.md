@@ -9,6 +9,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines round-trip; the real-deck corpus stays open; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Review previous/next comment; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (six original starter decks; the large template gallery stays after beta; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Zoom dialog; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -146,5 +147,6 @@ plan above.
 | 2026-10-14 | trivial | Chart trendlines round-trip in an owned corpus slice; the real-deck corpus (item 2) stays open |
 | 2026-10-14 | trivial | Review workflow: previous and next comment across the deck |
 | 2026-10-14 | minor | After beta: six original starter decks exist; a larger template gallery remains |
+| 2026-10-14 | trivial | View: Zoom dialog (percent or Fit) |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

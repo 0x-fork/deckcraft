@@ -42,7 +42,7 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         let pct = (app.ui.zoom.unwrap_or(app.canvas_scale) * 100.0).round();
         let lbl = right.add(egui::Label::new(egui::RichText::new(format!("{pct}%")).size(12.0).color(t.text_dim)).sense(Sense::click()));
         if lbl.clicked() {
-            app.dialog = Some(crate::dialogs::Dialog::new("zoom"));
+            let _ = app.run("view.zoomDialog", json!({}));
         }
         if small_icon(&mut right, Icon::ZoomIn, "Zoom In", false).clicked() {
             let _ = app.run("view.zoomIn", json!({}));
