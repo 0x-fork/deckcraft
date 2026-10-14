@@ -461,7 +461,8 @@ fn point_param(p: &Value, key: &str) -> Option<(f64, f64)> {
 /// The table under slide point `at` (frontmost), or the one named by `id`, with its origin.
 pub(crate) fn table_at(s: &Session, p: &Value, at: (f64, f64)) -> Option<(deckcraft_model::ShapeId, (f64, f64))> {
     let st = s.doc().ok()?;
-    let want = id_param(p, "id");
+    // A malformed id names no table (never the one under the pointer instead).
+    let want = id_param(p, "id", "table.draw").ok()?;
     st.shapes().iter().rev().find_map(|sh| {
         let x = sh.xfrm?;
         let ShapeKind::Table(t) = &sh.kind else { return None };
