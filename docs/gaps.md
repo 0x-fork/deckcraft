@@ -25,7 +25,6 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; checklist row stays P so breadth stays 79%; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; checklist letters unchanged, breadth stays 79%, dialogs stay 27; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previous: minor, chart trendlines round-trip; 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (animated GIF export landed, #171; the video gap stays; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture options are pane controls, not a new dialog; dialogs stay 27; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
@@ -357,11 +356,9 @@ Detail in [ui-parity.md](ui-parity.md).
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
   Action Settings, Print, Insert Object…). 8–14 h.
 - **Dialogs**: 30 dialogs vs PowerPoint's ~60 (Font, Find/Replace dialog, Replace Fonts, Print,
-  Insert Object…). Size and Position, Bullets and Numbering, Action Settings and Date and Time are in. 8–14 h.
-- **Dialogs**: 27 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
-  Replace Fonts, Action Settings, Print, Insert Object…). Format Background picture options
-  (transparency, tile, offset, scale, alignment, mirror, and Apply to All copying a picture) are
-  pane controls on `design.background`, not another dialog. 8–14 h.
+  Insert Object…). Size and Position, Bullets and Numbering, Action Settings and Date and Time are in.
+  Format Background picture options (transparency, tile, offset, scale, alignment, mirror, and Apply
+  to All copying a picture) are pane controls on `design.background`, not another dialog. 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
 ## Hardware

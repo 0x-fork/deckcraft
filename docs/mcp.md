@@ -35,6 +35,6 @@ A tool refuses an argument that is not in its schema (`insert_chart: unknown arg
 Useful commands for building decks: `slide.new {layout, title, body}`, `shape.insert {preset,
 rect, text}`, `shape.connect {from, to, preset}`, `shape.freeform {points, closed, smooth}`,
 `shape.merge {op, ids}`, `format.*`, `design.theme`, `transition.set`, `animation.set`,
-`chart.*`, `table.*`, `file.export {path, layout}`. `deckcraft-cli describe COMMAND` prints any
-`chart.*`, `table.*`, `file.export {path, layout}` (PDF) or `{path, width, secondsPerSlide, loop}` (GIF). `deckcraft-cli describe ID` prints any
+`chart.*`, `table.*`, `file.export {path, layout}` (PDF) or `{path, width, secondsPerSlide, loop}`
+(GIF). `deckcraft-cli describe COMMAND` prints any
 command's parameters.

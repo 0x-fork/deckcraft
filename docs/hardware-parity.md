@@ -1,7 +1,6 @@
 # Hardware parity with PowerPoint
 
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (PNG and JPEG slide export record 144 dpi at the default 2 pixels per point; previous: IME input, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (editor rasters on the Retina pixel grid, #184; previous: IME input, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
 
 What hardware PowerPoint uses and what DeckCraft uses, per platform. Dimension score: **~40%
 ready** (estimated), **25–45 h** to parity. Performance (unmeasured, ~55%) is tracked here too
@@ -14,7 +13,6 @@ because it mostly follows from hardware use.
 | Window compositing on the GPU | Metal / DirectX | wgpu (Metal) | wgpu, DX12 only by default (#16) | wgpu (Vulkan, GL) | WebGPU, WebGL2 fallback |
 | Slide rasterization | GPU | **CPU** (`vello_cpu`) | CPU | CPU | CPU (wasm) |
 | Transitions and Morph frames | GPU | CPU-rendered slide images composited as textured quads on the GPU | same | same | same |
-| High-DPI / Retina | yes | yes | yes | yes | yes |
 | Picture export resolution | 2 px per point, tagged so the file is the slide's size | PNG `pHYs` and JPEG density, 144 dpi at the default 2 px per point | same | same | same |
 | High-DPI / Retina | yes | yes; editor slide rasters sit on the physical pixel grid (#184) | yes | yes | yes |
 | Wide gamut / HDR display | partly (P3 images) | no (sRGB) | no | no | no |

@@ -16,14 +16,11 @@ The summary between `<!-- SUMMARY -->
 | P2 | 54 | 14 | 15 | 25 | 40% |
 | P1 | 65 | 39 | 21 | 5 | 76% |
 | P2 | 54 | 14 | 17 | 23 | 42% |
-| P2 | 54 | 13 | 14 | 27 | 37% |
 
 | Area | Parity |
 |---|---|
 | Application shell | 81% |
 | Files | 71% |
-| Application shell | 71% |
-| Files | 72% |
 | Slides | 90% |
 | Views | 93% |
 | Masters & themes | 85% |

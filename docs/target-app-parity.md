@@ -17,7 +17,6 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (essentials discount no longer cites the palette Export failure, #79; percentages unchanged; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers; automation counted at 236 commands; the menu measurement and the d556ff9 snapshot still count 226; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-11 · **Change:** minor (animated GIF export, #171: P2 breadth 36% → 37%, overall unchanged; previous: minor, hours to ~95% per audience added; ready recomputed from written weights, 56% → 55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture and solid options; percentages unchanged; previous: hours to ~95% per audience, ready ~55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
@@ -30,7 +29,6 @@ number.
 | Number | Value | Kind |
 |---|---|---|
 | **Feature breadth** (weighted checklist) | **79%** over 191 features (P0 92%, P1 75%, P2 39%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md) |
-| **Feature breadth** (weighted checklist) | **79%** over 191 features (P0 92%, P1 75%, P2 37%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md), rows re-scored 2026-10-10 |
 | Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
 | **Ready for real work** | **~55%** | **estimated**: weighted dimension table below (was ~56% until the features row was recomputed from written area weights) |
 | **Mainstream practitioner** | **~53%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
@@ -243,7 +241,6 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
   latin faces (one scheme on that master, not a library of saved font schemes, and not East
   Asian or complex-script faces).
   effect schemes (Design ▸ Effects: DeckCraft, Soft, Crisp, Lift, Glow, Plain),
-  backgrounds (solid, gradient, picture, pattern), slide size presets.
   backgrounds (solid, gradient, picture, pattern; a solid fill's transparency; picture
   transparency, tile, offset, scale, alignment and mirror; Apply to All copies a picture),
   slide size presets.
