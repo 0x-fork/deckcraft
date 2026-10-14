@@ -999,6 +999,8 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
     });
     drawing_group(app, ui);
     group(ui, |ui| {
+        // Also under Arrange, but that is disabled until something is selected (#132).
+        big(app, ui, Icon::SelectionPane, "Selection\nPane", "view.pane", json!({"pane": "selection"}));
         big(app, ui, Icon::DesignIdeas, "Design\nIdeas", "view.pane", json!({"pane": "designer"}));
     });
 }
