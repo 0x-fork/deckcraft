@@ -179,24 +179,9 @@ fn duplicate(s: &mut Session, p: &Value) -> Result<Value> {
             let Some(src) = doc.slides.get(*i).map(|x| x.as_ref().clone()) else { continue };
             let mut copy = src;
             copy.id = SlideId(doc.alloc_id());
-            super::edit::reid(doc, &mut copy.shapes);
-            // Animations follow the new shape ids by position.
-            let old_ids: Vec<_> = doc
-                .slides
-                .get(*i)
-                .map(|x| {
-                    let mut v = vec![];
-                    deckcraft_model::walk(&x.shapes, &mut |sh, _| v.push(sh.id));
-                    v
-                })
-                .unwrap_or_default();
-            let mut new_shape_ids = vec![];
-            deckcraft_model::walk(&copy.shapes, &mut |sh, _| new_shape_ids.push(sh.id));
-            for a in &mut copy.animations {
-                if let Some(pos) = old_ids.iter().position(|x| *x == a.shape) {
-                    a.shape = new_shape_ids.get(pos).copied().unwrap_or(a.shape);
-                }
-            }
+            // Animations follow the new shape ids, triggers included.
+            let map = super::edit::reid(doc, &mut copy.shapes);
+            super::edit::remap_animations(&mut copy.animations, &map);
             let section = doc.section_of(src_id(doc, *i));
             let at = (last + 1 + k).min(doc.slides.len());
             new_ids.push(copy.id);

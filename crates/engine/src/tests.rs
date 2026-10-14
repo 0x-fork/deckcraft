@@ -1053,3 +1053,134 @@ fn right_click_in_edited_text_keeps_the_text_selection() {
     assert!(st.selection.text.is_none());
     assert_eq!(st.selection.shapes, vec![b]);
 }
+
+mod copy_remap {
+    use std::sync::Arc;
+
+    use deckcraft_model::style::PictureFill;
+    use deckcraft_model::{Animation, Shape, ShapeId, ShapeKind, Xfrm};
+    use serde_json::json;
+
+    use crate::*;
+
+    /// Slide 0 of `s` gets a picture of `bytes`, a box, and a connector from the picture to the box.
+    /// Returns (picture, box, connector).
+    fn populate(s: &mut Session, bytes: &[u8]) -> (ShapeId, ShapeId, ShapeId) {
+        let st = s.doc_mut().unwrap();
+        let doc = Arc::make_mut(&mut st.doc);
+        let media = doc.add_media("p.png", "image/png", bytes.to_vec());
+        let (p, b, c) = (ShapeId(doc.alloc_id()), ShapeId(doc.alloc_id()), ShapeId(doc.alloc_id()));
+        let x = Some(Xfrm::new(10.0, 10.0, 50.0, 50.0));
+        let slide = Arc::make_mut(&mut doc.slides[0]);
+        slide.shapes.push(Shape {
+            id: p,
+            kind: ShapeKind::Picture { fill: PictureFill { media, ..Default::default() } },
+            xfrm: x,
+            ..Default::default()
+        });
+        slide.shapes.push(Shape { id: b, xfrm: x, ..Default::default() });
+        slide.shapes.push(Shape { id: c, kind: ShapeKind::Connector { start: Some((p, 1)), end: Some((b, 3)) }, xfrm: x, ..Default::default() });
+        (p, b, c)
+    }
+
+    fn select(s: &mut Session, ids: &[ShapeId]) {
+        let sel = &mut s.doc_mut().unwrap().selection;
+        sel.slides.clear();
+        sel.shapes = ids.to_vec();
+    }
+
+    fn shape(s: &Session, slide: usize, id: ShapeId) -> Shape {
+        let d = s.doc().unwrap();
+        d.doc.slides[slide].shapes.iter().find(|x| x.id == id).cloned().unwrap()
+    }
+
+    fn picture_bytes(s: &Session, sh: &Shape) -> Vec<u8> {
+        let ShapeKind::Picture { fill } = &sh.kind else { panic!("not a picture") };
+        s.doc().unwrap().doc.media(fill.media).unwrap().data.as_ref().clone()
+    }
+
+    #[test]
+    fn paste_into_a_deck_with_a_colliding_media_id_shows_the_copied_picture() {
+        let mut a = Session::with_new();
+        let mut b = Session::with_new();
+        let (pa, ..) = populate(&mut a, b"deck a picture");
+        let (pb, ..) = populate(&mut b, b"deck b picture");
+        assert_eq!(picture_bytes(&a, &shape(&a, 0, pa)), b"deck a picture");
+        select(&mut a, &[pa]);
+        a.execute("edit.copy", &json!({})).unwrap();
+        b.clipboard = a.clipboard.clone();
+        b.doc_mut().unwrap().selection.shapes.clear();
+        let r = b.execute("edit.paste", &json!({})).unwrap();
+        let new = ShapeId(r["ids"][0].as_u64().unwrap() as u32);
+        assert_eq!(picture_bytes(&b, &shape(&b, 0, new)), b"deck a picture");
+        // Deck b's own picture is untouched.
+        assert_eq!(picture_bytes(&b, &shape(&b, 0, pb)), b"deck b picture");
+    }
+
+    #[test]
+    fn copied_connectors_follow_copied_ends_and_detach_from_the_rest() {
+        let mut s = Session::with_new();
+        let (p, b, c) = populate(&mut s, b"x");
+        // Both ends copied: the copy connects the copies.
+        let r = s.execute("edit.duplicate", &json!({"ids": [p.0, b.0, c.0]})).unwrap();
+        let ids: Vec<ShapeId> = r["ids"].as_array().unwrap().iter().map(|v| ShapeId(v.as_u64().unwrap() as u32)).collect();
+        let ShapeKind::Connector { start, end } = shape(&s, 0, ids[2]).kind else { panic!() };
+        assert_eq!((start, end), (Some((ids[0], 1)), Some((ids[1], 3))));
+        // Only the connector copied: it doesn't stay glued to the originals.
+        select(&mut s, &[c]);
+        s.execute("edit.copy", &json!({})).unwrap();
+        s.doc_mut().unwrap().selection.shapes.clear();
+        let r = s.execute("edit.paste", &json!({})).unwrap();
+        let only = ShapeId(r["ids"][0].as_u64().unwrap() as u32);
+        let ShapeKind::Connector { start, end } = shape(&s, 0, only).kind else { panic!() };
+        assert_eq!((start, end), (None, None));
+        // The original keeps its ends.
+        let ShapeKind::Connector { start, .. } = shape(&s, 0, c).kind else { panic!() };
+        assert_eq!(start, Some((p, 1)));
+    }
+
+    fn triggered(s: &mut Session, target: ShapeId, trigger: ShapeId) {
+        let st = s.doc_mut().unwrap();
+        let doc = Arc::make_mut(&mut st.doc);
+        Arc::make_mut(&mut doc.slides[0]).animations.push(Animation {
+            shape: target,
+            trigger: Some(trigger),
+            effect: "fade".into(),
+            ..Default::default()
+        });
+    }
+
+    fn resolves(s: &Session, slide: usize) -> (ShapeId, ShapeId) {
+        let d = s.doc().unwrap();
+        let sl = &d.doc.slides[slide];
+        let a = &sl.animations[0];
+        let t = a.trigger.unwrap();
+        assert!(sl.shapes.iter().any(|x| x.id == a.shape) && sl.shapes.iter().any(|x| x.id == t), "{a:?}");
+        (a.shape, t)
+    }
+
+    #[test]
+    fn duplicated_and_pasted_slides_retarget_animations_and_triggers() {
+        let mut s = Session::with_new();
+        let (p, b, _) = populate(&mut s, b"x");
+        triggered(&mut s, p, b);
+        s.execute("slide.duplicate", &json!({"index": 0})).unwrap();
+        let (t, tr) = resolves(&s, 1);
+        assert!(t != p && tr != b);
+        // Pasted slide.
+        s.execute("edit.copy", &json!({"scope": "slides"})).unwrap();
+        s.execute("edit.paste", &json!({"scope": "slides"})).unwrap();
+        let n = s.doc().unwrap().doc.slides.len();
+        let (t2, tr2) = resolves(&s, n - 1);
+        assert!(t2 != t && tr2 != tr);
+        // Save and reload keeps them resolving.
+        let bytes = crate::cmd::file::save_bytes(&s.doc().unwrap().doc, "deckcraft").unwrap();
+        let back = deckcraft_format::load(&bytes).unwrap();
+        for sl in &back.slides {
+            for a in &sl.animations {
+                assert!(sl.shapes.iter().any(|x| x.id == a.shape));
+                assert!(a.trigger.is_none_or(|t| sl.shapes.iter().any(|x| x.id == t)));
+            }
+        }
+    }
+}
