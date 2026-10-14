@@ -25,6 +25,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "text.edit", "Edit Text", [], Some("Enter"), "{id?, at?: [paragraph, char], end?: bool, cell?: [row, col], notes?: bool}", has_slide, edit),
         cmd!(noundo "text.exit", "Stop Editing Text", [], None, "{}", has_doc, exit),
+        cmd!(
+            noundo "text.autocorrect",
+            "AutoCorrect Options",
+            ["Tools"],
+            None,
+            "{on?, twoInitials?, sentenceCaps?, days?, capsLock?, fractions?: bool, add?: [from, to], remove?: from} → the options and the replacement list",
+            always,
+            autocorrect_options
+        ),
         cmd!("text.insert", "Type Text", [], None, "{text} (\\n = new paragraph, \\u000b = line break)", has_text, insert),
         cmd!("text.delete", "Delete Text", [], Some("Backspace"), "{dir?: backward|forward|wordBackward|wordForward}", has_text, delete),
         // The input method's composition: shown in place, an undo step only once committed.
@@ -315,7 +324,7 @@ pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) 
         t.caret = c;
         c
     })?;
-    autocorrect(s)?;
+    autocorrect(s, text.chars().count() == 1)?;
     Ok(json!({"caret": [pos.0, pos.1]}))
 }
 
@@ -333,24 +342,151 @@ fn unlinked_at_link_end(body: &TextBody, at: Pos) -> Option<RunProps> {
     Some(props)
 }
 
-const AUTOCORRECT: &[(&str, &str)] = &[
+/// Built-in AutoCorrect replacements (common slips and symbols).
+pub const AUTOCORRECT: &[(&str, &str)] = &[
     ("teh", "the"),
     ("adn", "and"),
     ("recieve", "receive"),
+    ("recieved", "received"),
     ("seperate", "separate"),
     ("occured", "occurred"),
+    ("occurence", "occurrence"),
     ("thier", "their"),
     ("wich", "which"),
+    ("acheive", "achieve"),
+    ("accross", "across"),
+    ("adress", "address"),
+    ("alot", "a lot"),
+    ("appearence", "appearance"),
+    ("arguement", "argument"),
+    ("basicly", "basically"),
+    ("beggining", "beginning"),
+    ("beleive", "believe"),
+    ("calender", "calendar"),
+    ("commitee", "committee"),
+    ("definately", "definitely"),
+    ("dont", "don't"),
+    ("doesnt", "doesn't"),
+    ("didnt", "didn't"),
+    ("cant", "can't"),
+    ("wont", "won't"),
+    ("isnt", "isn't"),
+    ("embarass", "embarrass"),
+    ("enviroment", "environment"),
+    ("existance", "existence"),
+    ("foward", "forward"),
+    ("freind", "friend"),
+    ("goverment", "government"),
+    ("happend", "happened"),
+    ("i", "I"),
+    ("im", "I'm"),
+    ("ive", "I've"),
+    ("immediatly", "immediately"),
+    ("independant", "independent"),
+    ("knowlege", "knowledge"),
+    ("libary", "library"),
+    ("neccessary", "necessary"),
+    ("necesary", "necessary"),
+    ("noticable", "noticeable"),
+    ("occassion", "occasion"),
+    ("posession", "possession"),
+    ("prefered", "preferred"),
+    ("publically", "publicly"),
+    ("realy", "really"),
+    ("recomend", "recommend"),
+    ("refered", "referred"),
+    ("relevent", "relevant"),
+    ("succesful", "successful"),
+    ("tommorow", "tomorrow"),
+    ("tomorow", "tomorrow"),
+    ("truely", "truly"),
+    ("untill", "until"),
+    ("wierd", "weird"),
+    ("youre", "you're"),
     ("(c)", "©"),
     ("(r)", "®"),
     ("(tm)", "™"),
+    ("(e)", "€"),
+    ("...", "…"),
     ("->", "→"),
     ("<-", "←"),
+    ("=>", "⇒"),
     ("--", "–"),
 ];
 
-/// After a space or punctuation, replace a just-typed autocorrect entry.
-fn autocorrect(s: &mut Session) -> Result<()> {
+const DAYS: &[&str] = &["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
+
+/// The replacement for `word` from your entries, then the built-in list.
+fn replacement(prefs: &crate::Prefs, word: &str) -> Option<String> {
+    if let Some((_, to)) = prefs.ac_entries.iter().find(|(k, _)| k == word) {
+        return Some(to.clone());
+    }
+    if let Some((_, to)) = prefs.ac_entries.iter().find(|(k, _)| k.eq_ignore_ascii_case(word)) {
+        return Some(to.clone());
+    }
+    let (k, to) = AUTOCORRECT.iter().find(|(k, _)| k.eq_ignore_ascii_case(word))?;
+    if prefs.ac_removed.iter().any(|r| r.eq_ignore_ascii_case(k)) {
+        return None;
+    }
+    // "i" only on its own, lower case.
+    if *k == "i" && word != "i" {
+        return None;
+    }
+    Some(if word.chars().next().is_some_and(char::is_uppercase) { ed::change_case(to, "sentence") } else { to.to_string() })
+}
+
+/// What a just-typed `word` becomes (`None`: unchanged). `sentence_start`: nothing but spaces
+/// or a sentence's end (`.`, `!`, `?`) before it in the paragraph. `typing`: one character was
+/// typed (the case rules apply only then).
+pub fn correct_word(prefs: &crate::Prefs, word: &str, sentence_start: bool, typing: bool) -> Option<String> {
+    let mut out = replacement(prefs, word);
+    if typing && out.is_none() {
+        let chars: Vec<char> = word.chars().collect();
+        let letters = chars.iter().all(|c| c.is_alphabetic());
+        if prefs.ac_fractions {
+            out = match word {
+                "1/2" => Some("½".into()),
+                "1/4" => Some("¼".into()),
+                "3/4" => Some("¾".into()),
+                _ => None,
+            };
+        }
+        if out.is_none() && letters && chars.len() >= 3 {
+            let upper = |c: &char| c.is_uppercase();
+            let rest_lower = chars.get(2..).is_some_and(|r| r.iter().all(|c| c.is_lowercase()));
+            let rest_upper = chars.get(1..).is_some_and(|r| r.iter().all(upper));
+            if prefs.ac_two_initials && chars.first().is_some_and(upper) && chars.get(1).is_some_and(upper) && rest_lower {
+                out =
+                    Some(chars.iter().enumerate().map(|(i, c)| if i == 1 { c.to_lowercase().collect::<String>() } else { c.to_string() }).collect());
+            } else if prefs.ac_caps_lock && chars.first().is_some_and(|c| c.is_lowercase()) && rest_upper {
+                out = Some(
+                    chars
+                        .iter()
+                        .enumerate()
+                        .map(|(i, c)| if i == 0 { c.to_uppercase().collect::<String>() } else { c.to_lowercase().collect() })
+                        .collect(),
+                );
+            }
+        }
+        if out.is_none() && prefs.ac_days && DAYS.contains(&word) {
+            out = Some(ed::change_case(word, "sentence"));
+        }
+    }
+    if typing && prefs.ac_sentence_caps && sentence_start {
+        let w = out.clone().unwrap_or_else(|| word.to_string());
+        let mut cs = w.chars();
+        if let Some(f) = cs.next()
+            && f.is_lowercase()
+            && w.chars().all(char::is_alphabetic)
+        {
+            out = Some(f.to_uppercase().chain(cs).collect());
+        }
+    }
+    out.filter(|o| o != word)
+}
+
+/// After a space or punctuation, correct the word just typed.
+fn autocorrect(s: &mut Session, typing: bool) -> Result<()> {
     if !s.prefs.autocorrect {
         return Ok(());
     }
@@ -362,14 +498,31 @@ fn autocorrect(s: &mut Session) -> Result<()> {
     if end == 0 || !line.get(end - 1).is_some_and(|c| c.is_whitespace() || ".,;:!?".contains(*c)) {
         return Ok(());
     }
-    let word_end = end - 1;
+    let mut word_end = end - 1;
     let mut start = word_end;
     while start > 0 && line.get(start - 1).is_some_and(|c| !c.is_whitespace()) {
         start -= 1;
     }
-    let word: String = line.get(start..word_end).map(|w| w.iter().collect()).unwrap_or_default();
-    let Some((_, rep)) = AUTOCORRECT.iter().find(|(k, _)| k.eq_ignore_ascii_case(&word)) else { return Ok(()) };
-    let rep = if word.chars().next().is_some_and(char::is_uppercase) { ed::change_case(rep, "sentence") } else { rep.to_string() };
+    // "word," and "word." also count: the punctuation was typed before the space.
+    let mut word: String = line.get(start..word_end).map(|w| w.iter().collect()).unwrap_or_default();
+    if replacement(&s.prefs, &word).is_none() {
+        let trimmed = word.trim_end_matches(|c: char| ".,;:!?".contains(c));
+        if !trimmed.is_empty() && trimmed.len() < word.len() && !word.ends_with("...") {
+            word_end -= word.chars().count() - trimmed.chars().count();
+            word = trimmed.to_string();
+        }
+    }
+    let before = line.get(..start).map(|b| b.iter().rev().find(|c| !c.is_whitespace()).copied()).unwrap_or(None);
+    let sentence_start = before.is_none_or(|c| ".!?".contains(c));
+    // "word..." becomes "word…", the word corrected too.
+    let ellipsis = word.chars().count() > 3 && word.ends_with("...") && replacement(&s.prefs, "...").is_some();
+    let rep = if ellipsis {
+        let stem = word.trim_end_matches('.');
+        Some(format!("{}…", correct_word(&s.prefs, stem, sentence_start, typing).unwrap_or_else(|| stem.to_string())))
+    } else {
+        correct_word(&s.prefs, &word, sentence_start, typing)
+    };
+    let Some(rep) = rep else { return Ok(()) };
     let delta = rep.chars().count() as isize - word.chars().count() as isize;
     let st = s.doc_mut()?;
     let mut d = (*st.doc).clone();
@@ -386,6 +539,65 @@ fn autocorrect(s: &mut Session) -> Result<()> {
     }
     st.revision += 1;
     Ok(())
+}
+
+fn autocorrect_options(s: &mut Session, p: &Value) -> Result<Value> {
+    let pr = &mut s.prefs;
+    for (key, slot) in [
+        ("on", &mut pr.autocorrect),
+        ("twoInitials", &mut pr.ac_two_initials),
+        ("sentenceCaps", &mut pr.ac_sentence_caps),
+        ("days", &mut pr.ac_days),
+        ("capsLock", &mut pr.ac_caps_lock),
+        ("fractions", &mut pr.ac_fractions),
+    ] {
+        if let Some(v) = p.get(key).and_then(Value::as_bool) {
+            *slot = v;
+        }
+    }
+    if let Some(Value::Array(a)) = p.get("add") {
+        let (Some(from), Some(to)) = (a.first().and_then(Value::as_str), a.get(1).and_then(Value::as_str)) else {
+            return Err(bad("text.autocorrect", "`add` is [from, to]"));
+        };
+        let from = from.trim();
+        if from.is_empty() || from.chars().any(char::is_whitespace) || from.chars().count() > 64 || to.chars().count() > 255 {
+            return Err(bad("text.autocorrect", "`from` is one word (up to 64 characters), `to` up to 255"));
+        }
+        pr.ac_entries.retain(|(k, _)| k != from);
+        pr.ac_removed.retain(|k| !k.eq_ignore_ascii_case(from));
+        if pr.ac_entries.len() >= 2000 {
+            return Err(bad("text.autocorrect", "the list is full"));
+        }
+        pr.ac_entries.push((from.to_string(), to.to_string()));
+    }
+    if let Some(from) = str_param(p, "remove") {
+        let had = pr.ac_entries.len();
+        pr.ac_entries.retain(|(k, _)| k != from);
+        if had == pr.ac_entries.len()
+            && AUTOCORRECT.iter().any(|(k, _)| k.eq_ignore_ascii_case(from))
+            && !pr.ac_removed.iter().any(|r| r.eq_ignore_ascii_case(from))
+        {
+            pr.ac_removed.push(from.to_string());
+        }
+    }
+    let list: Vec<(String, String)> = pr
+        .ac_entries
+        .iter()
+        .cloned()
+        .chain(
+            AUTOCORRECT
+                .iter()
+                .filter(|(k, _)| {
+                    !pr.ac_removed.iter().any(|r| r.eq_ignore_ascii_case(k)) && !pr.ac_entries.iter().any(|(e, _)| e.eq_ignore_ascii_case(k))
+                })
+                .map(|(k, v)| (k.to_string(), v.to_string())),
+        )
+        .collect();
+    Ok(json!({
+        "on": pr.autocorrect, "twoInitials": pr.ac_two_initials, "sentenceCaps": pr.ac_sentence_caps,
+        "days": pr.ac_days, "capsLock": pr.ac_caps_lock, "fractions": pr.ac_fractions,
+        "entries": list,
+    }))
 }
 
 pub(crate) fn paste_body(s: &mut Session, src: &TextBody) -> Result<Value> {

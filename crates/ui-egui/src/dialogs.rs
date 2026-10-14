@@ -47,6 +47,7 @@ fn title(id: &str) -> &'static str {
         "paragraph" => "Paragraph",
         "about" => "About DeckCraft",
         "preferences" => "Preferences",
+        "autocorrect" => "AutoCorrect",
         "export" => "Export",
         "symbol" => "Symbol",
         "photoAlbum" => "Photo Album",
@@ -1902,6 +1903,48 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, _) = buttons(ui, "Close");
             ok
         }
+        "autocorrect" => {
+            let pr = &mut app.session.prefs;
+            ui.checkbox(&mut pr.ac_two_initials, "Correct TWo INitial CApitals");
+            ui.checkbox(&mut pr.ac_sentence_caps, "Capitalize first letter of sentences");
+            ui.checkbox(&mut pr.ac_days, "Capitalize names of days");
+            ui.checkbox(&mut pr.ac_caps_lock, "Correct accidental use of cAPS LOCK key");
+            ui.checkbox(&mut pr.ac_fractions, "Replace fractions (1/2) with fraction characters (½)");
+            ui.checkbox(&mut pr.autocorrect, "Replace text as you type");
+            ui.add_space(4.0);
+            let mut from = d.get("from", "");
+            let mut to = d.get("to", "");
+            ui.horizontal(|ui| {
+                ui.label("Replace");
+                ui.add(egui::TextEdit::singleline(&mut from).desired_width(90.0));
+                ui.label("With");
+                ui.add(egui::TextEdit::singleline(&mut to).desired_width(130.0));
+                if ui.add_enabled(!from.trim().is_empty(), egui::Button::new("Add")).clicked() {
+                    run(app, "text.autocorrect", json!({"add": [from.trim(), to]}));
+                    from.clear();
+                    to.clear();
+                }
+            });
+            d.fields.insert("from".into(), from.clone());
+            d.fields.insert("to".into(), to);
+            let list = app.session.execute("text.autocorrect", &json!({})).ok().and_then(|v| v.get("entries").cloned());
+            let entries: Vec<(String, String)> = list.and_then(|v| serde_json::from_value(v).ok()).unwrap_or_default();
+            let q = from.trim().to_lowercase();
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                egui::Grid::new("ac-list").striped(true).show(ui, |ui| {
+                    for (k, v) in entries.iter().filter(|(k, _)| q.is_empty() || k.to_lowercase().starts_with(&q)) {
+                        ui.label(k);
+                        ui.label(v);
+                        if ui.small_button("Delete").clicked() {
+                            run(app, "text.autocorrect", json!({"remove": k}));
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+            let (ok, cancel) = buttons(ui, "OK");
+            ok || cancel
+        }
         "preferences" => {
             ui.label(egui::RichText::new("General").font(theme::bold(13.0)));
             let mut dark = app.ui.brightness == theme::Brightness::Dark;
@@ -1916,7 +1959,15 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ui.checkbox(&mut app.session.prefs.smart_guides, "Show smart guides");
             ui.checkbox(&mut app.session.prefs.snap_to_grid, "Snap objects to grid");
             ui.checkbox(&mut app.session.prefs.smart_quotes, "Replace straight quotes with smart quotes");
-            ui.checkbox(&mut app.session.prefs.autocorrect, "AutoCorrect as you type");
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut app.session.prefs.autocorrect, "AutoCorrect as you type");
+                if ui.button("AutoCorrect Options…").clicked() {
+                    *d = Dialog::new("autocorrect");
+                }
+            });
+            if d.id != "preferences" {
+                return false;
+            }
             ui.horizontal(|ui| {
                 ui.label("Your name (comments):");
                 ui.text_edit_singleline(&mut app.session.prefs.author);
