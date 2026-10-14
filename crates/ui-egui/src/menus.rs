@@ -305,7 +305,11 @@ mod tests {
             assert_eq!(exports[0].0, "app.exportDialog");
         }
         // Open…, Save As…, Audio/Video from File… and Notes had the same duplicates: every UI command is the only entry with its label.
-        for (id, label, _, _) in crate::UI_COMMANDS {
+        // Commands that need a value (Set Zoom's percent) are left out of the palette.
+        for (id, label, _, params) in crate::UI_COMMANDS {
+            if deckcraft_engine::cmd::needs_arguments(params) {
+                continue;
+            }
             let same: Vec<_> = palette_items(&session, &label.to_lowercase()).into_iter().filter(|(_, l, _)| l == label).collect();
             assert_eq!(same.len(), 1, "{label}");
             assert_eq!(same[0].0, *id, "{label}");
