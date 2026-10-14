@@ -423,9 +423,14 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                 Some(Fill::Pattern(_)) => "pattern",
                 _ => "auto",
             };
-            for (l, k) in
-                [("No fill", "none"), ("Solid fill", "solid"), ("Gradient fill", "gradient"), ("Pattern fill", "pattern"), ("Automatic", "auto")]
-            {
+            for (l, k) in [
+                ("No fill", "none"),
+                ("Solid fill", "solid"),
+                ("Gradient fill", "gradient"),
+                ("Picture or texture fill", "picture"),
+                ("Pattern fill", "pattern"),
+                ("Automatic", "auto"),
+            ] {
                 if ui.radio(kind == k, l).clicked() {
                     match k {
                         "none" => run(app, "shape.fill", json!({"none": true})),
@@ -436,6 +441,7 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                             json!({"gradient": {"stops": [[0, "accent1"], [1, {"scheme": "accent1", "lumMod": 50000}]], "angle": 90}}),
                         ),
                         "pattern" => run(app, "shape.fill", json!({"pattern": {"preset": "pct25", "fg": "accent1", "bg": "bg1"}})),
+                        "picture" => pick_fill_picture(app),
                         _ => run(app, "shape.fill", json!({"reset": true})),
                     }
                 }
@@ -454,6 +460,9 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     let _ = app.run("shape.fill", json!({"transparency": v as f64 / 100.0}));
                 }
             });
+            if let Some(Fill::Picture(pf)) = &sh.fill {
+                picture_fill_options(app, ui, sh.id.0, pf);
+            }
             if let Some(Fill::Gradient(g)) = &sh.fill {
                 let sc = scheme(app);
                 if let Some(ng) = crate::fillui::gradient_editor(ui, "shape-grad", g, &sc) {
@@ -592,6 +601,95 @@ fn fx_slider(
             run(app, "shape.effects", json!({key: {prop: v * scale}}));
         }
     });
+}
+
+/// Asks for a picture file and makes it the selected shapes' fill.
+fn pick_fill_picture(app: &mut SlideApp) {
+    if let Some(pick) = app.services.pick_open.as_mut()
+        && let Some(path) = pick("picture")
+        && let Some(Ok(bytes)) = app.services.read.as_ref().map(|r| r(&path))
+    {
+        run(app, "shape.fill", json!({"picture": deckcraft_engine::cmd::base64_encode(&bytes)}));
+    }
+}
+
+/// A number field for one picture-fill option; runs `shape.fill` with `{pictureProps: {key: v × scale}}`
+/// when it changes.
+fn pic_drag(app: &mut SlideApp, ui: &mut Ui, label: &str, value: f64, suffix: &str, key: &str, scale: f64) {
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+        let mut v = value;
+        let r = ui.add(egui::DragValue::new(&mut v).suffix(suffix).max_decimals(1));
+        if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+            run(app, "shape.fill", json!({"pictureProps": {key: v * scale}}));
+        }
+    });
+}
+
+/// Format Shape ▸ Fill ▸ Picture or texture fill: source, tiling, offsets, transparency.
+fn picture_fill_options(app: &mut SlideApp, ui: &mut Ui, id: u32, pf: &deckcraft_model::style::PictureFill) {
+    use deckcraft_model::style::PictureMode;
+    ui.horizontal(|ui| {
+        ui.label("Picture source");
+        if ui.button("Insert…").clicked() {
+            pick_fill_picture(app);
+        }
+    });
+    let mut tile = matches!(pf.mode, PictureMode::Tile { .. });
+    if ui.checkbox(&mut tile, "Tile picture as texture").changed() {
+        run(app, "shape.fill", json!({"pictureProps": {"tile": tile}}));
+    }
+    match &pf.mode {
+        PictureMode::Tile { tx, ty, sx, sy, flip, align } => {
+            pic_drag(app, ui, "Offset X", *tx, " pt", "offsetX", 1.0);
+            pic_drag(app, ui, "Offset Y", *ty, " pt", "offsetY", 1.0);
+            pic_drag(app, ui, "Scale X", sx * 100.0, "%", "scaleX", 0.01);
+            pic_drag(app, ui, "Scale Y", sy * 100.0, "%", "scaleY", 0.01);
+            let aligns = [
+                ("tl", "Top left"),
+                ("t", "Top"),
+                ("tr", "Top right"),
+                ("l", "Left"),
+                ("ctr", "Center"),
+                ("r", "Right"),
+                ("bl", "Bottom left"),
+                ("b", "Bottom"),
+                ("br", "Bottom right"),
+            ];
+            let mirrors = [("none", "None"), ("x", "Horizontal"), ("y", "Vertical"), ("xy", "Both")];
+            for (label, key, opts, cur) in [("Alignment", "align", &aligns[..], align), ("Mirror type", "mirror", &mirrors[..], flip)] {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+                    let shown = opts.iter().find(|(k, _)| k == cur).map_or(opts[0].1, |(_, l)| *l);
+                    egui::ComboBox::from_id_salt(("picfill", id, key)).selected_text(shown).show_ui(ui, |ui| {
+                        for (k, l) in opts {
+                            if ui.selectable_label(*k == cur.as_str(), *l).clicked() {
+                                run(app, "shape.fill", json!({"pictureProps": {key: k}}));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        PictureMode::Stretch { fill_rect } => {
+            for (i, label) in ["Offset left", "Offset top", "Offset right", "Offset bottom"].into_iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+                    let mut v = fill_rect[i] * 100.0;
+                    let r = ui.add(egui::DragValue::new(&mut v).suffix("%").max_decimals(0));
+                    if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+                        let mut rect = *fill_rect;
+                        rect[i] = v / 100.0;
+                        run(app, "shape.fill", json!({"pictureProps": {"stretch": rect}}));
+                    }
+                });
+            }
+        }
+    }
+    let mut rot = !pf.upright;
+    if ui.checkbox(&mut rot, "Rotate with shape").changed() {
+        run(app, "shape.fill", json!({"pictureProps": {"rotateWithShape": rot}}));
+    }
 }
 
 fn background(app: &mut SlideApp, ui: &mut Ui) {

@@ -2317,3 +2317,43 @@ fn wordart_adjust_handle_drags_and_undoes() {
     assert_eq!(body.warp.as_deref(), Some("textArchUp"));
     assert!(body.warp_adj.is_empty(), "undo restores the default adjusts");
 }
+
+#[test]
+fn shape_picture_fill_options_tile_offset_and_round_trip() {
+    use deckcraft_model::style::PictureMode;
+    let mut img = image::RgbaImage::new(4, 4);
+    img.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let pf = |s: &Session| match s.doc().unwrap().selected_shapes()[0].fill.clone() {
+        Some(deckcraft_model::Fill::Picture(pf)) => pf,
+        other => panic!("{other:?}"),
+    };
+    // Options without a picture fill are a no-op, not an error.
+    s.execute("shape.fill", &json!({"pictureProps": {"tile": true}})).unwrap();
+    s.execute("shape.fill", &json!({"picture": cmd::base64_encode(&png)})).unwrap();
+    s.execute("shape.fill", &json!({"pictureProps": {"stretch": [0.1, 0.2, 5, "x"]}})).unwrap();
+    assert_eq!(pf(&s).mode, PictureMode::Stretch { fill_rect: [0.1, 0.2, 0.99, 0.0] });
+    s.execute("shape.fill", &json!({"pictureProps": {"tile": true, "offsetX": 12, "offsetY": -3, "scaleX": 0.5, "scaleY": 50, "align": "ctr", "mirror": "xy", "rotateWithShape": false}})).unwrap();
+    s.execute("shape.fill", &json!({"pictureProps": {"align": "bogus", "offsetX": f64::NAN}, "transparency": 0.4})).unwrap();
+    let want = PictureMode::Tile { tx: 12.0, ty: -3.0, sx: 0.5, sy: 10.0, flip: "xy".into(), align: "ctr".into() };
+    let got = pf(&s);
+    assert_eq!(got.mode, want);
+    assert!(got.upright);
+    assert!((got.alpha.unwrap() - 0.6).abs() < 1e-9);
+    // PPTX round trip keeps the options.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": "p.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let doc = &s.doc().unwrap().doc;
+    let back = doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| match &sh.fill {
+        Some(deckcraft_model::Fill::Picture(pf)) => Some(pf.clone()),
+        _ => None,
+    });
+    let back = back.unwrap();
+    assert_eq!(back.mode, want);
+    assert!(back.upright);
+    assert!((back.alpha.unwrap() - 0.6).abs() < 1e-6);
+}
