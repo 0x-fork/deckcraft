@@ -75,7 +75,13 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
         "dialog": app.dialog.as_ref().map(|d| d.id.clone()),
         "home": app.backstage_open(),
         "backstage": app.backstage.as_ref().map(|b| b.page.id()),
-        "showing": app.show.as_ref().map(|s| json!({"slide": s.state.slide, "step": s.state.step, "ended": s.ended})),
+        "showing": app.show.as_ref().map(|s| {
+            let (n, aspect) = app.session.active().map(|d| {
+                let h = d.doc.slide_size.height.max(1.0) as f32;
+                (d.doc.slides.len(), d.doc.slide_size.width as f32 / h)
+            }).unwrap_or((0, 16.0 / 9.0));
+            s.showing_value(n, aspect, ctx.content_rect())
+        }),
         "documents": app.session.documents().iter().map(|d| json!({"title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
         "status": app.status.as_ref().map(|s| s.0.clone()),
         "perf": {"frameMs": app.perf.frame_ms, "renderMs": app.perf.render_ms, "fps": app.perf.fps},

@@ -5,6 +5,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** minor (keyboard navigation from Presenter View) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (laser pointer in the show; the presenter window still does not move it; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Show Media Controls hides the show's playback bar and GIF button; breadth stays 66%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (See All Slides and zoom during the show; black and white from the presenter window; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -35,6 +36,8 @@ ready** (estimated), **10–16 h** to parity.
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | The corner button hides with Show Media Controls |
 | See All Slides grid during the show | yes | no | |
 | Zoom into part of a slide during the show | yes | no | |
+| See All Slides grid during the show | yes | yes: G, or All on the show bar and in presenter view; click a thumbnail, Esc closes the grid | Hidden slides are labelled; the first 48 slides are shown |
+| Zoom into part of a slide during the show | yes | yes: Z, then click the slide (or the presenter slide); 2×, Esc or another click leaves it | The presenter keeps the whole slide and draws a frame on the zoomed part |
 | Pen and highlighter ink | yes | pen only (Cmd+P pen, Cmd+A arrow, E erases all ink) | No highlighter, per-stroke eraser, ink colours, or keep/discard annotations prompt |
 | Laser pointer | yes | yes in the show | Cmd/Ctrl+L and the on-screen button draw the show's laser colour and leave no ink. The presenter window does not move that dot |
 | Subtitles and live captions | yes (cloud speech) | no | AI dimension |
@@ -54,8 +57,8 @@ ready** (estimated), **10–16 h** to parity.
 | Notes font size, scrolling | yes | scrolling only | |
 | Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Beta blocker, 3–5 h |
 | Swap displays | yes | no | |
-| Pen, laser, black screen, zoom from presenter view | yes | keys only | |
-| See all slides from presenter view | yes | no | |
+| Pen, laser, black screen, zoom from presenter view | yes | Black, White and Zoom buttons; the audience zoom is framed on the presenter slide | Pen and the laser pointer are still keys only; there is no laser yet |
+| See all slides from presenter view | yes | yes: All slides opens the grid on the show | |
 | Rehearse with Coach (Speaker Coach) | yes (cloud) | no | AI dimension |
 
 ## Rehearse and record
@@ -78,8 +81,9 @@ Reading View in a window with navigation: present (checklist row done).
 | Presenter view on the right display, swap displays, pause/reset timer, clock, notes size | 3–5 |
 | Highlighter, eraser, keep-annotations prompt, laser from presenter view | 2–4 |
 | See All Slides and zoom during the show | 2–3 |
+| Laser pointer, highlighter, eraser, keep-annotations prompt | 2–4 |
 | Record slide show with narration (no camera) | 5–8 |
-| **Total** | **~12–20** (the slide-show row of the feature table carries 10–16 h; recording overlaps the Media row) |
+| **Total** | **~10–17** (the slide-show row of the feature table carries 10–16 h; recording overlaps the Media row) |
 
 ## Revision history
 
@@ -91,4 +95,5 @@ Reading View in a window with navigation: present (checklist row done).
 | 2026-10-11 | minor | Media effects (Play, Pause, Stop) in the click sequence play with their step (#116) |
 | 2026-10-13 | minor | The show has a laser pointer (Cmd/Ctrl+L, the show's laser colour, no ink). Presenter view still does not drive it |
 | 2026-10-14 | trivial | Show Media Controls hides the show's playback bar and GIF button |
+| 2026-10-14 | minor | See All Slides (G) and click-to-zoom (Z) during the show. Presenter view opens that grid and sets black, white and zoom. Checklist breadth stays 66% |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |
