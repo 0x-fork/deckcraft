@@ -42,7 +42,9 @@ pub struct Show {
     /// A dot that follows the pointer and leaves no ink (`Cmd/Ctrl+L`).
     laser: bool,
     strokes: Vec<Vec<Pos2>>,
+    /// Digits typed for Go to Slide, shown until Enter, Esc, or a short pause.
     goto: String,
+    goto_at: f64,
     started: bool,
     show_start: f64,
     /// Elapsed time in presenter view. Pausing it does not pause the show.
@@ -190,6 +192,7 @@ impl Show {
             laser: false,
             strokes: vec![],
             goto: String::new(),
+            goto_at: 0.0,
             started: false,
             show_start: 0.0,
             timer: PresenterTimer::start(0.0),
@@ -427,7 +430,8 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
         } else {
             match k {
                 Escape | Minus => {
-                    if !show.back_out() {
+                    let cancelled = k == Escape && show.clear_goto();
+                    if !cancelled && !show.back_out() {
                         keep = false;
                     }
                 }
@@ -439,14 +443,20 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
                     }
                 }
                 Enter => {
-                    if let Ok(n) = show.goto.parse::<usize>() {
-                        actions.push(show.state.goto(doc, n.saturating_sub(1)));
-                        show.goto.clear();
+                    if !show.goto.is_empty() {
+                        if let Some(i) = show.take_goto()
+                            && i < doc.slides.len()
+                        {
+                            actions.push(show.state.goto(doc, i));
+                        }
                     } else if show.ended {
                         keep = false;
                     } else {
                         actions.push(show.state.next(doc));
                     }
+                }
+                Backspace if !show.goto.is_empty() => {
+                    show.goto.pop();
                 }
                 ArrowLeft | ArrowUp | Backspace | PageUp | P if !(k == P && m.command) => {
                     show.ended = false;
@@ -475,7 +485,9 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
                 OpenBracket if plain(m) => show.nudge_notes(-NOTES_STEP),
                 CloseBracket if plain(m) => show.nudge_notes(NOTES_STEP),
                 Num0 | Num1 | Num2 | Num3 | Num4 | Num5 | Num6 | Num7 | Num8 | Num9 => {
-                    show.goto.push_str(k.name());
+                    if let Some(d) = k.name().chars().next() {
+                        show.push_slide_number(d, now);
+                    }
                 }
                 _ => continue,
             }
@@ -523,6 +535,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
     let srect = fit(avail, &doc);
     let pointer = ctx.input(|i| i.pointer.interact_pos());
+    show.expire_goto(now);
     // The clock of the triggered animations runs before anything reacts to the pointer.
     show.tick_triggers(&doc, now);
     let on_slide = !show.grid
@@ -841,6 +854,14 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     if let Some(c) = show.blank {
         painter.rect_filled(full, CornerRadius::ZERO, c);
+    }
+    if !show.goto.is_empty() {
+        let label = format!("Go to slide {}", show.goto);
+        let w = (28.0 + label.len() as f32 * 10.0).clamp(160.0, full.width() - 32.0);
+        let r = Rect::from_min_size(pos2(full.min.x + 16.0, full.max.y - 96.0), vec2(w, 36.0));
+        painter.rect_filled(r, CornerRadius::same(6), Color32::from_black_alpha(190));
+        painter.text(r.center(), Align2::CENTER_CENTER, label, theme::font(18.0), Color32::WHITE);
+        ctx.request_repaint_after(std::time::Duration::from_millis(200));
     }
     // Pen.
     let resp = ui.interact(full, ui.id().with("show_pen"), if show.pen { Sense::drag() } else { Sense::hover() });
@@ -1307,6 +1328,39 @@ impl Show {
         self.zoom.map(|z| (z.nx, z.ny, z.scale))
     }
 
+    fn push_slide_number(&mut self, digit: char, now: f64) {
+        if !digit.is_ascii_digit() || self.goto.len() >= GOTO_DIGITS {
+            return;
+        }
+        self.goto.push(digit);
+        self.goto_at = if now.is_finite() { now } else { 0.0 };
+    }
+
+    /// 1-based slide number, or `None` for 0 or a non-number. The buffer is cleared either way.
+    fn take_goto(&mut self) -> Option<usize> {
+        let raw = std::mem::take(&mut self.goto);
+        raw.parse::<usize>().ok().and_then(|n| n.checked_sub(1))
+    }
+
+    fn expire_goto(&mut self, now: f64) {
+        if self.goto.is_empty() || !now.is_finite() || !self.goto_at.is_finite() {
+            return;
+        }
+        if now - self.goto_at > GOTO_HOLD {
+            self.goto.clear();
+        }
+    }
+
+    /// Esc drops a number in progress. True when it did.
+    fn clear_goto(&mut self) -> bool {
+        if self.goto.is_empty() {
+            false
+        } else {
+            self.goto.clear();
+            true
+        }
+    }
+
     fn nudge_notes(&mut self, delta: f32) {
         let next = self.notes_px + delta;
         if next.is_finite() {
@@ -1327,6 +1381,7 @@ impl Show {
             "presenterSecs": self.timer.elapsed(now),
             "notesPx": self.notes_px,
             "custom": self.state.custom_name(),
+            "goto": if self.goto.is_empty() { None } else { Some(self.goto.clone()) },
         });
         if self.grid {
             let slides = grid_indices(n_slides);
@@ -1346,6 +1401,8 @@ impl Show {
     }
 }
 
+const GOTO_HOLD: f64 = 3.0;
+const GOTO_DIGITS: usize = 4;
 const ZOOM_SCALE: f32 = 2.0;
 const GRID_CAP: usize = 48;
 const TOOL_BAR_W: f32 = 520.0;
@@ -2104,5 +2161,34 @@ mod tests {
         let v = show.showing_value(1, 16.0 / 9.0, Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), 0.0);
         assert_eq!(v["presenterPaused"], json!(false));
         assert_eq!(v["notesPx"], json!(NOTES_MIN));
+    }
+
+    #[test]
+    fn a_typed_slide_number_jumps_and_then_expires() {
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let mut show = Show::new(&doc, 0, false, false);
+        show.push_slide_number('1', 10.0);
+        show.push_slide_number('2', 10.2);
+        assert_eq!(show.goto, "12");
+        assert_eq!(show.take_goto(), Some(11));
+        assert!(show.goto.is_empty());
+        show.push_slide_number('0', 1.0);
+        assert_eq!(show.take_goto(), None, "slide 0 is not a slide");
+        show.push_slide_number('4', 5.0);
+        show.expire_goto(7.0);
+        assert_eq!(show.goto, "4");
+        show.expire_goto(8.1);
+        assert!(show.goto.is_empty());
+        show.push_slide_number('9', 0.0);
+        assert!(show.clear_goto());
+        assert!(!show.clear_goto());
+        for _ in 0..6 {
+            show.push_slide_number('9', 1.0);
+        }
+        assert_eq!(show.goto.len(), GOTO_DIGITS);
+        show.push_slide_number('a', 1.0);
+        assert!(show.goto.chars().all(|c| c.is_ascii_digit()));
     }
 }
