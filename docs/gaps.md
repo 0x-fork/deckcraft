@@ -140,6 +140,8 @@ Detail in [file-format-parity.md](file-format-parity.md).
   TIFF, BMP), and EMF/WMF through `deckcraft-metafile` (ported from WordCraft: paths, fills, pens,
   pattern and hatch brushes, bitmaps and text; rectangle clip regions are applied, EMF+ records are
   not drawn).
+  pattern and hatch brushes, bitmaps and text; EMF+ only pictures play their EMF+ records;
+  clip regions are not drawn).
   Nothing reads SVG; PowerPoint's Insert Icons stores SVG with a PNG fallback.
 - **Impact:** SVG icons show only their raster fallback, and SVG files can't be inserted.
 - **Estimate:** 4–8 h (an SVG renderer through `resvg`-style crates).

@@ -1947,7 +1947,9 @@ fn curves_file() -> Vec<u8> {
     // A green rectangle region, filled.
     let region = cat(vec![h32(0xDBC0_1002), h32(0), h32(0x1000_0000), f32s(&[220.0, 160.0, 180.0, 30.0])]);
     let fill_region = prec(0x4013, 0x8000 | 2, &h32(0xFF30_A040));
-    let mut all = vec![plus_header(false), pen, fill, outline, line, prec(0x4008, 0x0400 | 2, &region), fill_region];
+    // A cream background first.
+    let clear = prec(0x4009, 0, &h32(0xFFF4_EED8));
+    let mut all = vec![plus_header(false), clear, pen, fill, outline, line, prec(0x4008, 0x0400 | 2, &region), fill_region];
     all.push(prec(0x4002, 0, &[]));
     emf(&[plus_comment(&all)], [0, 0, 420, 200], [0; 4])
 }
@@ -1959,20 +1961,21 @@ fn emfplus_cardinal_curves_and_region_fill() {
         let _ = std::fs::write(path, &bytes);
     }
     let p = parse(&bytes).unwrap();
-    assert_eq!(p.items.len(), 4, "{:?}", p.items.len());
+    assert_eq!(p.items.len(), 5, "{:?}", p.items.len());
+    assert_eq!(path_segs(&p.items[0]).1, Some([0xF4, 0xEE, 0xD8, 0xFF]), "the clear comes first");
     // The closed curve: four cubics through the diamond's corners, closed.
-    let (segs, fill, ..) = path_segs(&p.items[0]);
+    let (segs, fill, ..) = path_segs(&p.items[1]);
     assert_eq!(fill, Some([0xE0, 0x80, 0x20, 0xFF]));
     let cubics: Vec<(f32, f32)> = segs.iter().filter_map(|s| if let Seg::Cubic(.., x, y) = s { Some((*x, *y)) } else { None }).collect();
     assert_eq!(cubics.len(), 4, "{segs:?}");
     assert_eq!(segs.last(), Some(&Seg::Close));
     // The open curve: four cubics and no close; its controls bulge past the straight chords.
-    let (segs, fill, stroke, _) = path_segs(&p.items[2]);
+    let (segs, fill, stroke, _) = path_segs(&p.items[3]);
     assert_eq!((fill, stroke.map(|s| s.0)), (None, Some([0x20, 0x60, 0xC0, 0xFF])));
     assert_eq!(segs.iter().filter(|s| matches!(s, Seg::Cubic(..))).count(), 4);
     assert!(!segs.contains(&Seg::Close));
     // The region fill is its rectangle.
-    let (segs, fill, ..) = path_segs(&p.items[3]);
+    let (segs, fill, ..) = path_segs(&p.items[4]);
     assert_eq!(fill, Some([0x30, 0xA0, 0x40, 0xFF]));
     assert_eq!(segs.iter().filter(|s| matches!(s, Seg::Line(..))).count(), 3, "{segs:?}");
 }
@@ -1992,4 +1995,30 @@ fn emfplus_curve_offsets_and_degenerate_input_are_safe() {
     let no_region = prec(0x4013, 0x8000 | 7, &h32(0xFF00_0000));
     let p = plus_pic(vec![pen, one, past, nan, no_region]);
     assert!(p.items.iter().all(|i| path_segs(i).0.iter().filter(|s| matches!(s, Seg::Cubic(..))).count() == 0));
+}
+
+#[test]
+fn emfplus_clear_paints_the_whole_frame_and_transparent_clears_nothing() {
+    let dot = prec(0x400A, 0x8000, &cat(vec![h32(0xFF00_0000), h32(1), f32s(&[40.0, 40.0, 10.0, 10.0])]));
+    let clear = |argb: u32| prec(0x4009, 0, &h32(argb));
+    // 100 × 50 device units (0..2500 × 0..1250 hundredths of a millimetre at 0.04 units each).
+    let file = |recs: Vec<Vec<u8>>| {
+        let mut all = vec![plus_header(false)];
+        all.extend(recs);
+        parse(&emf(&[plus_comment(&all)], [0, 0, 99, 49], [0, 0, 2500, 1250])).unwrap()
+    };
+    // A translated, clipped world doesn't move or cut the clear.
+    let shift = prec(0x402D, 0, &f32s(&[30.0, 30.0]));
+    let clip = prec(0x4032, 0, &f32s(&[0.0, 0.0, 5.0, 5.0]));
+    let p = file(vec![shift, clip, clear(0xFFFF_FFFF), prec(0x4031, 0, &[]), dot.clone()]);
+    assert_eq!(p.items.len(), 2);
+    let (segs, fill, ..) = path_segs(&p.items[0]);
+    assert_eq!(fill, Some([255, 255, 255, 255]));
+    let xs: Vec<f32> = segs.iter().filter_map(|s| if let Seg::Move(x, _) | Seg::Line(x, _) = s { Some(*x) } else { None }).collect();
+    let span = xs.iter().cloned().fold(f32::MIN, f32::max) - xs.iter().cloned().fold(f32::MAX, f32::min);
+    assert!((span - p.width).abs() < 0.5, "clear spans {span} of {}", p.width);
+    // Transparent: only the dot.
+    assert_eq!(file(vec![clear(0x00FF_FFFF), dot.clone()]).items.len(), 1);
+    // No frame: nothing to clear.
+    assert_eq!(plus_pic(vec![clear(0xFFFF_FFFF), dot]).items.len(), 1);
 }
