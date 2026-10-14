@@ -265,6 +265,22 @@ fn line_spacing_reduction_comes_off_the_percentage() {
 }
 
 #[test]
+fn shrink_gives_up_at_once_when_even_the_smallest_scale_overflows() {
+    // Found by fuzzing: a tiny box with 20,000 paragraphs and shrink on overflow took 15 s to
+    // open, laying out the whole body 13 times in a search that could never fit.
+    let text = (0..400).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n");
+    let (p, sh) = setup(&text, 100.0, 20.0);
+    crate::LAYOUT_PASSES.with(|n| n.set(0));
+    let l = lay(&p, &sh, 100.0, 20.0);
+    assert!(l.overflow && l.font_scale <= 0.11, "scale {}", l.font_scale);
+    assert!(crate::LAYOUT_PASSES.with(|n| n.get()) <= 2, "{} passes", crate::LAYOUT_PASSES.with(|n| n.get()));
+    // Text that fits somewhere in the range still gets the search.
+    let (p, sh) = setup(&(0..12).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n"), 600.0, 200.0);
+    let l = lay(&p, &sh, 600.0, 200.0);
+    assert!(l.font_scale > 0.11 && l.font_scale < 1.0 && !l.overflow, "scale {} overflow {}", l.font_scale, l.overflow);
+}
+
+#[test]
 fn caret_and_hit_roundtrip() {
     let (p, sh) = setup("Hello world", 600.0, 100.0);
     let l = lay(&p, &sh, 600.0, 100.0);

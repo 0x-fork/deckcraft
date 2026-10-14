@@ -1536,6 +1536,12 @@ fn tab_advance(x: f64, stops: &[Tab], default_tab: f64, seg: (f64, f64)) -> f64 
     (next - x).max(1.0)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times `layout_scaled` ran on this thread (tests count autofit's passes).
+    pub(crate) static LAYOUT_PASSES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Lay out a shape's text body.
 pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLayout {
     let bp = resolve::body(ctx, shape);
@@ -1558,9 +1564,16 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
         && l.overflow
         && !saved
     {
+        // Text that overflows even at the smallest scale gets that scale: every larger one
+        // overflows too, so searching would only lay it out a dozen more times (seconds for a
+        // body of tens of thousands of paragraphs, on every redraw of the slide).
+        let smallest = layout_scaled(ctx, shape, body, &bp, opts, 0.1, 0.2);
+        if smallest.overflow {
+            return smallest;
+        }
         // Binary search the largest scale that fits (steps like 90%, 80%… with line reduction).
         let (mut lo, mut hi) = (0.1_f64, scale0);
-        let mut best = None;
+        let mut best = Some(smallest);
         for _ in 0..12 {
             let mid = (lo + hi) / 2.0;
             let red: f64 = ((1.0 - mid) * 0.8_f64).min(0.2).max(reduce0);
@@ -1572,13 +1585,17 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
                 best = Some(t);
             }
         }
-        l = best.unwrap_or_else(|| layout_scaled(ctx, shape, body, &bp, opts, 0.1, 0.2));
+        if let Some(b) = best {
+            l = b;
+        }
     }
     l
 }
 
 #[allow(clippy::too_many_arguments)]
 fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts: &Opts, scale: f64, reduce: f64) -> TextLayout {
+    #[cfg(test)]
+    LAYOUT_PASSES.with(|n| n.set(n.get() + 1));
     let r = opts.rect;
     let vert = bp.vert.unwrap_or(TextDir::Horizontal);
     // East Asian vertical text: CJK stands upright in text turned a quarter turn; stacked text
