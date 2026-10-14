@@ -372,3 +372,18 @@ fn damaged_media_neither_panics_nor_hangs() {
         }
     }
 }
+
+/// MP4s whose sample tables were damaged by a mutation fuzzer (from `tone.m4a`, so CC0 like it):
+/// one claims billions of `stsc` entries, one a 4 GB sample. Symphonia reserved that much memory
+/// up front and the process aborted; now they are corrupt files.
+#[test]
+fn mp4_sample_tables_that_overrun_the_file_are_corrupt() {
+    for name in ["damaged/stsc-count.m4a", "damaged/stsz-size.m4a"] {
+        let b = fixture(name);
+        assert!(matches!(audio::decode(&b), Err(MediaError::Corrupt(_))), "{name}");
+        let _ = probe::probe(&b);
+    }
+    for name in ["tone.m4a", "tone-alac.m4a", "clip-h264.mp4", "clip-h264.mov", "clip-hevc.mp4"] {
+        assert!(audio::decode(&fixture(name)).is_ok() || name.starts_with("clip"), "{name} still decodes");
+    }
+}
