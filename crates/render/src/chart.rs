@@ -130,6 +130,21 @@ pub(crate) fn label(
     crate::draw_text(ctx, rctx, &tmp, &body, r, m, &deckcraft_text::NoFields, None);
 }
 
+fn fmt_num(v: f64) -> String {
+    if (v - v.round()).abs() < 1e-9 { format!("{}", v.round() as i64) } else { format!("{v:.1}") }
+}
+
+/// A scatter or bubble chart's value x axis (min, max, major unit): one scale over every series'
+/// x values, from zero when they're all positive. `None` for other charts and when there are no x values.
+fn value_x_scale(c: &Chart, max_intervals: usize) -> Option<(f64, f64, f64)> {
+    if c.series.is_empty() || !c.series.iter().all(|s| matches!(c.series_kind(s), ChartType::Scatter | ChartType::Bubble)) {
+        return None;
+    }
+    let xs = c.series.iter().flat_map(|s| s.x_values.iter().flatten().copied()).filter(|v| v.is_finite());
+    let (lo, hi) = xs.fold(None, |r: Option<(f64, f64)>, v| Some(r.map_or((v, v), |(a, b)| (a.min(v), b.max(v)))))?;
+    Some(axis_scale(lo.min(0.0), hi, None, None, None, max_intervals, false))
+}
+
 /// Where the legend goes for `c:legendPos`, and the plot area left over.
 /// `size` is the legend block (width, height); the result is its top-left corner and the plot area.
 /// `r` (also the OOXML default and the fallback for unknown values) and `l` are vertical stacks centred
@@ -450,9 +465,30 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     // their own side of the data.
     let backwards = horiz != c.cat_reversed;
     let slot = |i: usize| if backwards { ncat.saturating_sub(i + 1) as f64 + fwd } else { i as f64 + back };
+    // Scatter and bubble charts have a value x axis: one scale over every series' x values, with its
+    // own tick labels in place of category names.
+    let xscale = if horiz { None } else { value_x_scale(c, (plot.width() / (base * 2.5)).floor().clamp(2.0, 12.0) as usize) };
+    let to_x = |v: f64| xscale.map(|(lo, hi, _)| plot.x0 + (v - lo) / (hi - lo).max(1e-9) * plot.width());
+    if let Some(sc) = xscale {
+        for v in ticks(sc) {
+            let pos = plot.x0 + (v - sc.0) / (sc.1 - sc.0).max(1e-9) * plot.width();
+            label(
+                ctx,
+                rctx,
+                m,
+                &fmt_num(v),
+                Rect::new(pos - 30.0, plot.y1 + 3.0, pos + 30.0, plot.y1 + base * 1.6),
+                base,
+                Align::Center,
+                Anchor::Top,
+                text_col,
+                false,
+            );
+        }
+    }
     // Category labels: wrapped onto two lines when they don't fit their band (long date ranges).
     let wraps = !horiz && c.categories.iter().any(|n| n.chars().count() as f64 * base * 0.5 > band);
-    for (i, name) in c.categories.iter().enumerate() {
+    for (i, name) in c.categories.iter().enumerate().filter(|_| xscale.is_none()) {
         let mid = if horiz { plot.y0 + band * (slot(i) + 0.5) } else { plot.x0 + band * (slot(i) + 0.5) };
         if horiz {
             label(
@@ -614,10 +650,12 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             };
             let x = match kind {
                 ChartType::Scatter | ChartType::Bubble => {
-                    let xs: Vec<f64> = s.x_values.iter().flatten().copied().collect();
-                    let (xl, xh) = (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max));
-                    let xv = s.x_values.get(i).copied().flatten().unwrap_or(i as f64);
-                    if xh > xl { plot.x0 + (xv - xl) / (xh - xl) * plot.width() } else { plot.x0 + band * (slot(i) + 0.5) }
+                    match (s.x_values.get(i).copied().flatten().and_then(to_x), s.x_values.iter().flatten().next()) {
+                        (Some(x), _) => x,
+                        // No x values at all: the points are numbered 1, 2, 3...
+                        (None, None) => to_x(i as f64 + 1.0).unwrap_or(plot.x0 + band * (slot(i) + 0.5)),
+                        (None, Some(_)) => continue,
+                    }
                 }
                 _ => plot.x0 + band * (slot(i) + 0.5),
             };
@@ -929,6 +967,14 @@ mod tests {
     use super::*;
 
     const AREA: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+
+    #[test]
+    fn scatter_x_is_a_value_scale_over_all_series() {
+        let mut c = Chart::sample(ChartType::Scatter);
+        c.series[0].x_values = vec![Some(0.5), Some(7.2), None];
+        assert_eq!(value_x_scale(&c, 8), Some((0.0, 8.0, 1.0)));
+        assert_eq!(value_x_scale(&Chart::sample(ChartType::Column), 8), None);
+    }
 
     #[test]
     fn right_legend_is_a_centred_column_and_narrows_the_plot() {
