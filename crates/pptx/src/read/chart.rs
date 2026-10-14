@@ -1,6 +1,6 @@
 //! Chart parts (`c:chartSpace`) → [`Chart`]. The original XML is kept in `Chart.raw`.
 
-use deckcraft_model::chart::{Chart, ChartType, Series, Trendline, TrendlineType};
+use deckcraft_model::chart::{Chart, ChartType, ErrorBars, Series, Trendline, TrendlineType};
 use deckcraft_model::style::Fill;
 
 use crate::xml::El;
@@ -266,6 +266,21 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
             if let Some(v) = s.child("val").or_else(|| s.child("yVal")) {
                 ser.values = numbers(v, &mut budget);
             }
+            // Error bars on the values: a scatter chart's y bars, any other chart's only ones.
+            if let Some(e) = s
+                .children_named("errBars")
+                .find(|e| e.child_val("errDir").is_none_or(|d| d == "y" || !matches!(kind, ChartType::Scatter | ChartType::Bubble)))
+            {
+                let d = ErrorBars::default();
+                ser.error_bars = Some(ErrorBars {
+                    bar_type: e.child_val("errBarType").unwrap_or("both").to_string(),
+                    val_type: e.child_val("errValType").unwrap_or("fixedVal").to_string(),
+                    value: e.child_val("val").and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite()).unwrap_or(d.value),
+                    plus: e.child("plus").map(|p| numbers(p, &mut budget)).unwrap_or_default(),
+                    minus: e.child("minus").map(|p| numbers(p, &mut budget)).unwrap_or_default(),
+                    end_cap: e.child("noEndCap").and_then(|v| v.bool("val")) != Some(true),
+                });
+            }
             if let Some(b) = s.child("bubbleSize") {
                 ser.sizes = numbers(b, &mut budget);
             }
@@ -455,6 +470,14 @@ mod tests {
     fn log_base_is_read() {
         let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:lineChart><c:axId val="1"/><c:axId val="2"/></c:lineChart><c:catAx><c:axId val="1"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:logBase val="10"/><c:orientation val="minMax"/></c:scaling></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
         assert_eq!(read_chart_xml(xml).unwrap().y_log_base, Some(10.0));
+    }
+
+    #[test]
+    fn error_bars_are_read() {
+        let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:errBars><c:errBarType val="plus"/><c:errValType val="percentage"/><c:noEndCap val="1"/><c:val val="20"/></c:errBars><c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>5</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml).unwrap();
+        let e = c.series[0].error_bars.clone().unwrap();
+        assert_eq!((e.bar_type.as_str(), e.val_type.as_str(), e.value, e.end_cap), ("plus", "percentage", 20.0, false));
     }
 
     #[test]
