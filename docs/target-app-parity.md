@@ -15,7 +15,7 @@ number.
 
 | Number | Value | Kind |
 |---|---|---|
-| **Feature breadth** (weighted checklist) | **79%** over 191 features (P0 92%, P1 75%, P2 36%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md), rows re-scored 2026-10-10 |
+| **Feature breadth** (weighted checklist) | **79%** over 191 features (P0 92%, P1 75%, P2 39%) | **measured**: `cargo xtask parity` formula over [parity-checklist.md](parity-checklist.md) |
 | Menu-bar coverage | **59%** (128 of 217 app-specific PowerPoint menu items have a DeckCraft command or UI label of the same name) | **measured** (heuristic lower bound): script matching the 2026-10-07 PowerPoint menu dump against the 226 engine command labels and the UI's strings; excludes the app, Window and Help menus and the subtitle language lists |
 | **Ready for real work** | **~55%** | **estimated**: weighted dimension table below (was ~56% until the features row was recomputed from written area weights) |
 | **Mainstream practitioner** | **~53%** | **estimated**: [method below](#mainstream-practitioner-and-essentials-user) |
@@ -199,7 +199,7 @@ it is the Features row of the dimension table. Automation and Platforms are scor
 | Media | 4 | 67% | ~60% | 8–14 | WMA/WMV decode, record audio/screen, 3-D models and stock content, playback options lost on PPTX round trip (#74) | [file-format-parity.md](file-format-parity.md) |
 | Transitions | 4 | 92% | ~80% | 4–8 | Transition sounds, 3-D transitions approximated in 2-D | [animation-parity.md](animation-parity.md) |
 | Animations | 6 | 79% | ~65% | 10–16 | 64 of PowerPoint's ~190 effects, Animation Pane timeline, preview, rewind lost on save (#77) | [animation-parity.md](animation-parity.md) |
-| Slide show and presenter view | 8 | 66% | ~60% | 10–16 | Second-display placement, laser pointer, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
+| Slide show and presenter view | 8 | 68% | ~60% | 10–16 | Second-display placement, laser from presenter view, recording, subtitles, ink depth | [slideshow-parity.md](slideshow-parity.md) |
 | Review | 3 | 60% | ~45% | 8–14 | Modern comment threads on round trip (#70), compare, version history, real spelling dictionaries | [file-format-parity.md](file-format-parity.md) |
 | Draw (ink) | 2 | 33% | ~30% | 5–9 | Pen pressure, ink to shape/text/math, lasso | [hardware-parity.md](hardware-parity.md) |
 | Undo and clipboard | 3 | 88% | ~75% | 3–5 | Paste Special, image paste (#53) | [ui-parity.md](ui-parity.md) |

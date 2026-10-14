@@ -32,6 +32,8 @@ pub struct Show {
     prefetch: Option<Prefetch>,
     blank: Option<Color32>,
     pen: bool,
+    /// A dot that follows the pointer and leaves no ink (`Cmd/Ctrl+L`).
+    laser: bool,
     strokes: Vec<Vec<Pos2>>,
     goto: String,
     started: bool,
@@ -170,6 +172,7 @@ impl Show {
             prefetch: None,
             blank: None,
             pen: false,
+            laser: false,
             strokes: vec![],
             goto: String::new(),
             started: false,
@@ -183,6 +186,27 @@ impl Show {
             media_clock: None,
             media_cues: vec![],
         }
+    }
+
+    /// Pen and laser are different pointers: turning one on puts the other away.
+    fn set_pen(&mut self, on: bool) {
+        self.pen = on;
+        if on {
+            self.laser = false;
+        }
+    }
+
+    fn set_laser(&mut self, on: bool) {
+        self.laser = on;
+        if on {
+            self.pen = false;
+        }
+    }
+
+    /// The arrow pointer: no ink and no laser dot.
+    fn arrow(&mut self) {
+        self.pen = false;
+        self.laser = false;
     }
 
     fn timeline(&mut self, doc: &Presentation) -> &Timeline {
@@ -390,8 +414,9 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
                 show.ended = false;
                 actions.push(show.state.prev(doc));
             }
-            P if m.command => show.pen = !show.pen,
-            A if m.command => show.pen = false,
+            P if m.command => show.set_pen(!show.pen),
+            L if m.command => show.set_laser(!show.laser),
+            A if m.command => show.arrow(),
             Home => actions.push(show.state.goto(doc, 0)),
             End => actions.push(show.state.goto(doc, doc.slides.len().saturating_sub(1))),
             B | Period => show.blank = if show.blank == Some(Color32::BLACK) { None } else { Some(Color32::BLACK) },
@@ -442,7 +467,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let mut actions: Vec<ShowAction> = vec![];
     // The clock of the triggered animations runs before anything reacts to the pointer.
     show.tick_triggers(&doc, now);
-    let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
+    let on_slide = !show.pen && !show.laser && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
     let gif_click = if clicked && on_slide { gif_hit(&ctx, ui, &show, doc_uid, &doc, app) } else { None };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
     let under = if on_slide && gif_click.is_none() && media_click.is_none() { shapes_under_pointer(&ctx, ui, &mut show, &doc, now) } else { None };
@@ -694,7 +719,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 crate::media::paint_frame(&painter, &app.media, *id, r);
             }
             // Play/pause on the animated GIF under the pointer.
-            if let Some(p) = ctx.input(|i| i.pointer.hover_pos()).filter(|_| !show.pen && now - show.last_move < 2.5) {
+            if let Some(p) = ctx.input(|i| i.pointer.hover_pos()).filter(|_| !show.pen && !show.laser && now - show.last_move < 2.5) {
                 for g in &gifs {
                     let r = on_screen(srect, k, &g.rect);
                     if r.contains(p) {
@@ -723,6 +748,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             s.push(pos2((p.x - srect.min.x) / srect.width(), (p.y - srect.min.y) / srect.height()));
         }
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+    } else if show.laser {
+        ctx.set_cursor_icon(egui::CursorIcon::None);
     } else if pointing {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
     } else if now - show.last_move > 2.5 && !show.reading {
@@ -733,6 +760,14 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     for s in &show.strokes {
         let pts: Vec<Pos2> = s.iter().map(|q| pos2(srect.min.x + q.x * srect.width(), srect.min.y + q.y * srect.height())).collect();
         painter.add(egui::Shape::line(pts, Stroke::new(3.0, pen_col)));
+    }
+    if show.laser
+        && !show.ended
+        && let Some(p) = ctx.input(|i| i.pointer.hover_pos())
+    {
+        let c = theme::to_color32(doc.show.laser_color);
+        painter.circle_filled(p, 16.0, Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), 70));
+        painter.circle_filled(p, 5.5, c);
     }
     // Reading view bar / on-screen controls.
     if show.reading {
@@ -780,7 +815,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             }
         }
         if b(&mut child, if show.pen { "✏ on" } else { "✏" }).clicked() {
-            show.pen = !show.pen;
+            show.set_pen(!show.pen);
+        }
+        if b(&mut child, if show.laser { "◉ on" } else { "◉" }).clicked() {
+            show.set_laser(!show.laser);
         }
         if b(&mut child, "⬛").clicked() {
             show.blank = Some(Color32::BLACK);
@@ -1302,5 +1340,20 @@ mod tests {
         assert!(show.apply(a, &doc, 3.0));
         show.cue_media(&doc, 1, 9.0);
         assert!(show.media_cues.is_empty());
+    }
+
+    #[test]
+    fn the_laser_and_the_pen_are_not_on_together() {
+        let doc = deckcraft_model::Presentation::default();
+        let mut show = Show::new(&doc, 0, false, false);
+        show.set_laser(true);
+        assert!(show.laser && !show.pen);
+        show.set_pen(true);
+        assert!(show.pen && !show.laser);
+        show.set_laser(true);
+        show.arrow();
+        assert!(!show.laser && !show.pen);
+        show.set_laser(false);
+        assert!(!show.laser);
     }
 }
