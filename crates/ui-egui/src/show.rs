@@ -40,6 +40,10 @@ pub struct Show {
     goto: String,
     started: bool,
     show_start: f64,
+    /// Elapsed time in presenter view. Pausing it does not pause the show.
+    timer: PresenterTimer,
+    /// Speaker-notes size in presenter view, in points.
+    notes_px: f32,
     timings: Vec<(usize, f64)>,
     last_move: f64,
     pub ended: bool,
@@ -104,6 +108,8 @@ impl Show {
             goto: String::new(),
             started: false,
             show_start: 0.0,
+            timer: PresenterTimer::start(0.0),
+            notes_px: NOTES_DEFAULT,
             timings: vec![],
             last_move: 0.0,
             ended: false,
@@ -269,6 +275,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.slide_start = now;
         show.step_start = now;
         show.show_start = now;
+        show.timer = PresenterTimer::start(now);
         show.last_move = now;
         if !show.reading {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
@@ -338,6 +345,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             E => show.strokes.clear(),
             G if plain(m) => show.grid = true,
             Z if plain(m) => show.zoom_key(),
+            T if plain(m) => show.timer.toggle(now),
+            R if plain(m) => show.timer.reset(now),
+            OpenBracket if plain(m) => show.nudge_notes(-NOTES_STEP),
+            CloseBracket if plain(m) => show.nudge_notes(NOTES_STEP),
             Num0 | Num1 | Num2 | Num3 | Num4 | Num5 | Num6 | Num7 | Num8 | Num9 => {
                 show.goto.push_str(k.name());
             }
@@ -898,7 +909,14 @@ impl Show {
         self.zoom.map(|z| (z.nx, z.ny, z.scale))
     }
 
-    pub fn showing_value(&self, n_slides: usize, aspect: f32, full: Rect) -> serde_json::Value {
+    fn nudge_notes(&mut self, delta: f32) {
+        let next = self.notes_px + delta;
+        if next.is_finite() {
+            self.notes_px = next.clamp(NOTES_MIN, NOTES_MAX);
+        }
+    }
+
+    pub fn showing_value(&self, n_slides: usize, aspect: f32, full: Rect, now: f64) -> serde_json::Value {
         let mut v = json!({
             "slide": self.state.slide,
             "step": self.state.step,
@@ -907,6 +925,9 @@ impl Show {
             "zoomArm": self.zoom_arm,
             "blank": self.blank_name(),
             "zoom": self.zoom_view().map(|(x, y, scale)| json!({"x": x, "y": y, "scale": scale})),
+            "presenterPaused": self.timer.paused(),
+            "presenterSecs": self.timer.elapsed(now),
+            "notesPx": self.notes_px,
         });
         if self.grid {
             let slides = grid_indices(n_slides);
@@ -929,6 +950,74 @@ impl Show {
 const ZOOM_SCALE: f32 = 2.0;
 const GRID_CAP: usize = 48;
 const TOOL_BAR_W: f32 = 520.0;
+const NOTES_DEFAULT: f32 = 18.0;
+const NOTES_MIN: f32 = 12.0;
+const NOTES_MAX: f32 = 48.0;
+const NOTES_STEP: f32 = 4.0;
+
+/// Presenter-view elapsed time. Pausing freezes the number; the show keeps playing.
+#[derive(Clone, Copy)]
+struct PresenterTimer {
+    origin: f64,
+    frozen: f64,
+    paused: bool,
+}
+
+impl PresenterTimer {
+    fn start(now: f64) -> Self {
+        PresenterTimer { origin: finite_time(now), frozen: 0.0, paused: false }
+    }
+
+    fn elapsed(self, now: f64) -> f64 {
+        if self.paused {
+            return finite_secs(self.frozen);
+        }
+        let dt = now - self.origin;
+        finite_secs(self.frozen + if dt.is_finite() && dt > 0.0 { dt } else { 0.0 })
+    }
+
+    fn paused(self) -> bool {
+        self.paused
+    }
+
+    fn toggle(&mut self, now: f64) {
+        if self.paused {
+            self.origin = finite_time(now);
+            self.paused = false;
+        } else {
+            self.frozen = self.elapsed(now);
+            self.paused = true;
+        }
+    }
+
+    /// Zero the elapsed time. A paused timer stays paused at zero.
+    fn reset(&mut self, now: f64) {
+        self.frozen = 0.0;
+        self.origin = finite_time(now);
+    }
+}
+
+fn finite_time(now: f64) -> f64 {
+    if now.is_finite() { now } else { 0.0 }
+}
+
+fn finite_secs(n: f64) -> f64 {
+    if n.is_finite() && n >= 0.0 { n } else { 0.0 }
+}
+
+fn format_elapsed(secs: f64) -> String {
+    let s = finite_secs(secs) as u64;
+    let s = s.min(99 * 3600 + 59 * 60 + 59);
+    format!("{:02}:{:02}:{:02}", s / 3600, (s / 60) % 60, s % 60)
+}
+
+/// Local wall clock for presenter view. `--:--` where there is no clock (wasm).
+fn wall_clock() -> String {
+    match deckcraft_text::datetime::DateTime::now_local() {
+        Some(t) if t.hour < 24 && t.minute < 60 => format!("{:02}:{:02}", t.hour, t.minute),
+        _ => "--:--".to_string(),
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Zoom {
@@ -1162,24 +1251,26 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     }
     let next_tex = show.next_tex.as_ref().filter(|(k, _)| Some(*k) == next).map(|(_, t)| t.clone());
     let notes = doc.slides.get(cur).map(|s| s.notes_text()).unwrap_or_default();
-    let elapsed = now - show.show_start;
+    let clock = wall_clock();
+    // The presenter clock only moves when this window is drawn again.
+    ctx.request_repaint_after(std::time::Duration::from_millis(500));
     let mut actions = vec![];
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
         |ui, _| {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+            let elapsed = show.timer.elapsed(now);
+            let paused = show.timer.paused();
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_gray(24)).inner_margin(egui::Margin::same(16))).show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{:02}:{:02}:{:02}",
-                            (elapsed / 3600.0) as u32,
-                            (elapsed / 60.0) as u32 % 60,
-                            elapsed as u32 % 60
-                        ))
-                        .size(22.0)
-                        .color(Color32::WHITE),
-                    );
+                    ui.label(egui::RichText::new(format_elapsed(elapsed)).size(22.0).color(if paused {
+                        Color32::from_gray(160)
+                    } else {
+                        Color32::WHITE
+                    }));
+                    ui.add_space(12.0);
+                    ui.label(egui::RichText::new(clock.clone()).size(16.0).color(Color32::from_gray(200)));
                     ui.add_space(20.0);
                     ui.label(egui::RichText::new(format!("Slide {} of {}", cur + 1, doc.slides.len())).size(16.0).color(Color32::from_gray(200)));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1195,6 +1286,12 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                     });
                 });
                 ui.horizontal(|ui| {
+                    if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
+                        show.timer.toggle(now);
+                    }
+                    if ui.button("Reset").clicked() {
+                        show.timer.reset(now);
+                    }
                     if ui.button(if show.blank == Some(Color32::BLACK) { "Black on" } else { "Black" }).clicked() {
                         toggle_blank(show, Color32::BLACK);
                     }
@@ -1249,10 +1346,24 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                         ui.painter().text(nr.center(), Align2::CENTER_CENTER, "End of slide show", theme::font(13.0), Color32::from_gray(170));
                     }
                 }
-                let notes_rect = Rect::from_min_max(pos2(right.min.x, nr.max.y + 16.0), right.max);
+                let notes_head = Rect::from_min_size(pos2(right.min.x, nr.max.y + 12.0), vec2(right.width(), 28.0));
+                let mut head = ui.new_child(egui::UiBuilder::new().max_rect(notes_head));
+                head.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Notes").size(13.0).color(Color32::from_gray(170)));
+                    if ui.button("A-").clicked() {
+                        show.nudge_notes(-NOTES_STEP);
+                    }
+                    ui.label(egui::RichText::new(format!("{}", show.notes_px as i32)).size(13.0).color(Color32::from_gray(200)));
+                    if ui.button("A+").clicked() {
+                        show.nudge_notes(NOTES_STEP);
+                    }
+                });
+                let notes_rect = Rect::from_min_max(pos2(right.min.x, notes_head.max.y + 4.0), right.max);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
                 egui::ScrollArea::vertical().show(&mut child, |ui| {
-                    ui.label(egui::RichText::new(if notes.is_empty() { "No notes." } else { &notes }).size(18.0).color(Color32::from_gray(230)));
+                    ui.label(
+                        egui::RichText::new(if notes.is_empty() { "No notes." } else { &notes }).size(show.notes_px).color(Color32::from_gray(230)),
+                    );
                 });
             });
             if ui.input(|i| i.viewport().close_requested()) {
@@ -1347,5 +1458,47 @@ mod tests {
         show.zoom = Some(Zoom::at(0.4, 0.6));
         assert!(show.apply(ShowAction::Slide(1), &doc, 1.0));
         assert!(show.zoom.is_none(), "a new slide is shown whole");
+    }
+
+    #[test]
+    fn presenter_timer_pauses_resets_and_notes_size_clamps() {
+        let mut t = PresenterTimer::start(10.0);
+        assert!((t.elapsed(12.5) - 2.5).abs() < 1e-9);
+        t.toggle(15.0);
+        assert!(t.paused());
+        assert!((t.elapsed(100.0) - 5.0).abs() < 1e-9);
+        t.reset(100.0);
+        assert!(t.paused());
+        assert_eq!(t.elapsed(200.0), 0.0);
+        t.toggle(200.0);
+        assert!(!t.paused());
+        assert!((t.elapsed(203.0) - 3.0).abs() < 1e-9);
+        t.reset(203.0);
+        assert!(!t.paused());
+        assert!((t.elapsed(204.0) - 1.0).abs() < 1e-9);
+        let bad = PresenterTimer::start(f64::NAN);
+        assert_eq!(bad.elapsed(f64::INFINITY), 0.0);
+        assert_eq!(format_elapsed(3661.4), "01:01:01");
+        assert_eq!(format_elapsed(-1.0), "00:00:00");
+        assert_eq!(format_elapsed(f64::NAN), "00:00:00");
+        let clock = wall_clock();
+        assert!(clock == "--:--" || (clock.len() == 5 && clock.as_bytes().get(2) == Some(&b':')));
+
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let mut show = Show::new(&doc, 0, false, true);
+        assert_eq!(show.notes_px, NOTES_DEFAULT);
+        show.nudge_notes(NOTES_STEP);
+        assert_eq!(show.notes_px, 22.0);
+        show.nudge_notes(1000.0);
+        assert_eq!(show.notes_px, NOTES_MAX);
+        show.nudge_notes(-1000.0);
+        assert_eq!(show.notes_px, NOTES_MIN);
+        show.nudge_notes(f32::NAN);
+        assert_eq!(show.notes_px, NOTES_MIN);
+        let v = show.showing_value(1, 16.0 / 9.0, Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)), 0.0);
+        assert_eq!(v["presenterPaused"], json!(false));
+        assert_eq!(v["notesPx"], json!(NOTES_MIN));
     }
 }

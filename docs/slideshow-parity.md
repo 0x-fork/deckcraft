@@ -1,6 +1,6 @@
 # Slide show and presenter view: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (See All Slides and zoom during the show; black and white from the presenter window; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (presenter timer pause/reset, clock and notes size; previous: minor, See All Slides and zoom) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -37,11 +37,11 @@ ready** (estimated), **10–16 h** to parity.
 |---|---|---|---|
 | Separate presenter window with current slide, next slide, notes | yes | yes (an egui viewport, 1100×700) | |
 | Elapsed timer | yes | yes | |
-| Pause / reset timer, clock | yes | no | |
+| Pause / reset timer, clock | yes | yes: Pause/Resume and Reset in presenter view (T pauses, R resets); the clock is local time, `--:--` where there is no clock | Pausing the timer does not pause the show, animations or rehearsal |
 | Slide counter, previous/next/end buttons | yes | yes | |
-| Notes font size, scrolling | yes | scrolling only | |
-| Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Beta blocker, 3–5 h |
-| Swap displays | yes | no | |
+| Notes font size, scrolling | yes | yes: A- / A+ (and `[` / `]`), 12–48 pt in steps of 4, default 18; the notes scroll | |
+| Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Open PR #433 places the show on a second display when one is attached. This change does not |
+| Swap displays | yes | no | Still open on #433 |
 | Pen, laser, black screen, zoom from presenter view | yes | Black, White and Zoom buttons; the audience zoom is framed on the presenter slide | Pen and the laser pointer are still keys only; there is no laser yet |
 | See all slides from presenter view | yes | yes: All slides opens the grid on the show | |
 | Rehearse with Coach (Speaker Coach) | yes (cloud) | no | AI dimension |
@@ -63,14 +63,15 @@ Reading View in a window with navigation: present (checklist row done).
 
 | Work | Hours |
 |---|---|
-| Presenter view on the right display, swap displays, pause/reset timer, clock, notes size | 3–5 |
+| Presenter view on the right display and a swap-displays command | 2–4 |
 | Laser pointer, highlighter, eraser, keep-annotations prompt | 2–4 |
 | Record slide show with narration (no camera) | 5–8 |
-| **Total** | **~10–17** (the slide-show row of the feature table carries 10–16 h; recording overlaps the Media row) |
+| **Total** | **~9–16** (the slide-show row of the feature table carries 10–16 h; recording overlaps the Media row) |
 
 ## Revision history
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Presenter view pauses and resets its timer (T, R) and changes notes size (A-/A+, brackets). The clock shows local time. Second-display placement and swap stay with #433. Checklist breadth stays 66% |
 | 2026-10-14 | minor | See All Slides (G) and click-to-zoom (Z) during the show. Presenter view opens that grid and sets black, white and zoom. Checklist breadth stays 66% |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |
