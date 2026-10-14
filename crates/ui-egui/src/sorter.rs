@@ -8,7 +8,7 @@ use serde_json::json;
 
 use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens};
-use crate::{SlideApp, widgets};
+use crate::SlideApp;
 
 /// Sorter-only state. Nothing here is part of the document.
 #[derive(Debug, Default)]
