@@ -1954,6 +1954,10 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
                     if let Some(Some(c)) = widgets::color_grid(ui, &sc, None) {
                         run(app, "format.color", json!({"color": cref_param(&c)}));
                     }
+                    if let Some(sh) = app.session.active().and_then(|d| d.selected_shapes().first().map(|s| (*s).clone())) {
+                        ui.separator();
+                        crate::panes::text_transparency_slider(app, ui, &sh);
+                    }
                 });
             }
             let (_, a) = small_button_ex(ui, Icon::TextOutline, "Text Outline", sel, false, true);

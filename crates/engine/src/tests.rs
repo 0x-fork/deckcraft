@@ -1265,3 +1265,36 @@ fn shape_effects_props_adjust_shadow_glow_and_reflection() {
     assert!((r.start_alpha - 0.7).abs() < 1e-9);
     assert_eq!((r.end_pos, r.dist, r.blur), (1.0, 5.0, 0.5));
 }
+
+/// Text Fill › Transparency (#32): the text keeps its colour, own or inherited, and gets an alpha;
+/// 0 makes it opaque again, and it is one undo step.
+#[test]
+fn text_transparency_keeps_the_colour_and_sets_alpha() {
+    use deckcraft_model::{ColorTransform, Fill};
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100], "text": "Hi"})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    let fill = |s: &Session| {
+        let st = s.doc().unwrap();
+        st.shape(id).unwrap().text.as_ref().unwrap().paragraphs[0].runs[0].props.fill.clone()
+    };
+    // Inherited colour: the run gets the colour it showed, now 25% transparent.
+    s.execute("format.textTransparency", &json!({"value": 0.25})).unwrap();
+    let Some(Fill::Solid { color }) = fill(&s) else { panic!("solid fill expected: {:?}", fill(&s)) };
+    assert!((color.alpha() - 0.75).abs() < 1e-9, "{color:?}");
+    // Its own colour stays; the alpha is replaced, not stacked.
+    s.execute("format.color", &json!({"color": "#C00000"})).unwrap();
+    s.execute("format.textTransparency", &json!({"value": 0.6})).unwrap();
+    s.execute("format.textTransparency", &json!({"value": 0.5})).unwrap();
+    let Some(Fill::Solid { color }) = fill(&s) else { panic!() };
+    assert_eq!(color.base, deckcraft_model::ColorBase::Rgb { rgb: deckcraft_model::Rgba::rgb(0xC0, 0, 0) });
+    assert_eq!(color.mods.iter().filter(|m| matches!(m, ColorTransform::Alpha(_))).count(), 1);
+    assert!((color.alpha() - 0.5).abs() < 1e-9);
+    s.execute("format.textTransparency", &json!({"value": 0})).unwrap();
+    let Some(Fill::Solid { color }) = fill(&s) else { panic!() };
+    assert!(color.mods.is_empty(), "opaque drops the alpha: {color:?}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    let Some(Fill::Solid { color }) = fill(&s) else { panic!() };
+    assert!((color.alpha() - 0.5).abs() < 1e-9);
+    assert!(s.execute("format.textTransparency", &json!({})).is_err());
+}
