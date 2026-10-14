@@ -11,6 +11,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt Transform gallery; previous: hours to ~95% per audience added; ready 56% → 55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (progress log: owned PPTX corpus round-trip, notes-master header and footer; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus for comments, links, custom shows, groups and inherited placeholders; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors; previous: minor, hours to ~95% per audience) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -124,6 +125,9 @@ Ranked; detail and the full beta plan in [docs/roadmap.md](docs/roadmap.md).
 2. **PPTX on real decks:** owned corpus now covers comments, links and actions, custom shows,
    rotated groups and placeholders that inherit from the layout. Still open: a larger corpus,
    embedded fonts, #70, #74, #77, EMF/WMF and SVG. 36–64 h.
+2. **PPTX on real decks:** owned corpus now covers text effects, autofit, columns, vertical and
+   RTL text, tabs, line spacing, theme effects, fills, bevels and connectors. Still open: a larger
+   corpus, embedded fonts, #70, #74, #77, EMF/WMF and SVG. 36–64 h.
 3. **Localization:** catalog, system language (#15), zh-Hans, es, fr, de, ja with IME. 27–46 h.
 4. **Output:** vector PDF, printing. 10–16 h.
 5. **Depth that users hit:** font weights (#69), chart data and elements, Animation Pane timeline,
@@ -150,6 +154,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | WordArt Transform: Shape Format ▸ Text Effects shows the 40 text warps and No Transform; `format.textWarp` applies one to the selected text. Adjust handles are still open |
 | 2026-10-13 | PPTX corpus round-trip for decks we author (open → save → reopen, package parts and text). A notes master's header and footer are kept instead of being replaced by an empty notes master |
 | 2026-10-13 | PPTX round trip of comments, hyperlinks and actions, custom shows, rotated groups, and placeholders that inherit from the layout. Paragraph default formatting (`defRPr`, including a link) and action sounds (the clip, stop-previous, and a custom show's "Show and return") are kept. Embedded fonts and comment threads stay open |
+| 2026-10-13 | PPTX round trip of text effects, autofit, columns, vertical and RTL text, tab stops, line spacing, theme effects, gradient and pattern fills, 3-D bevels and connectors. A run keeps its inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML is written back. Embedded fonts and #70, #74, #77 stay open |
 | 2026-10-13 | Slide transitions like PowerPoint: every transition and option measured frame by frame against PowerPoint's video export and retuned (curves, directions, soft edges, 3-D perspective, contents moving over backgrounds); PowerPoint's own XML elements and defaults read and written (diagonal Wipe, Zoom, Shape In/Out, Glitter Hexagons, Shred In/Out, Page Curl Single); `deckcraft-cli render-transition` renders frames headless |
 | 2026-10-13 | Wild text cases measured against PowerPoint (102 synthetic slides): bidi by run language, East Asian vertical text upright, mongolianVert/wordArtVert/wordArtVertRtl, underline styles and strikethrough at the font's metrics, centre/right/decimal tabs, East Asian, Thai, Hindi, Arabic and Hebrew numbering, small caps, all-caps "ß", transparent text, soft hyphens, kinsoku, rtlCol and just/dist anchoring, emoji presentation, fallback faces that no longer move the baseline |
 | 2026-10-13 | Render matches PowerPoint more closely on wild shape, picture and table cases: even-odd custom paths, dashes and caps, arrowheads, radial and path gradients, tile rects, rotWithShape, gradient lines, shadows cast by what is drawn (group and perspective too), group fill, picture borders, tiles, reflection, recolour (biLevel, alphaInv, brightness/contrast), table borders and grid default, 20+ preset shapes by their ECMA formulas, default miter joins, and approximate 3-D bevels, cameras and face lighting |
@@ -185,6 +190,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | trivial | Progress log: codec parsers reject overflowing numeric fields (#426) |
 | 2026-10-13 | trivial | Progress log: owned PPTX corpus round-trip; notes-master header and footer |
 | 2026-10-13 | trivial | Progress log: PPTX corpus for comments, links, custom shows, groups and inherited placeholders |
+| 2026-10-13 | trivial | Progress log: PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors |
 | 2026-10-13 | trivial | Progress log: wild text cases |
 | 2026-10-13 | trivial | Progress log: slide show for interactive decks |
 | 2026-10-12 | trivial | Progress log: File tab (Backstage, #76) |

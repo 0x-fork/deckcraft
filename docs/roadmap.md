@@ -4,6 +4,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M9 text warps narrowed to adjust handles; the Transform gallery applies a preset) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus check started; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers comments, links, custom shows, groups and inherited placeholders; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -37,6 +38,11 @@ points and lead the beta plan.
    custom shows, grouped rotated objects, and placeholders that inherit from the layout, and keeps
    paragraph default formatting and action sounds. Still open: a larger corpus, embedded fonts,
    comment threads, media options and rewind (#70, #74, #77), EMF/WMF and SVG. 31–55 h.
+2. **PPTX on real decks:** the owned corpus now round-trips text effects, autofit, columns,
+   vertical and RTL text, tab stops, line spacing, theme effects, gradient and pattern fills, 3-D
+   bevels and connectors, and keeps a run's inner shadow, reflection and soft edge plus a bevel
+   preset that had no 3-D XML. Still open: a larger corpus, embedded fonts, comment threads, media
+   options and rewind (#70, #74, #77), EMF/WMF and SVG. 31–55 h.
 3. **Review the open PRs:** equations (#55), browser print (#66), Morph alignment (#67), macOS
    open-with (#68), font lookup (#80), Ukrainian (#34, after the catalog exists). 4–8 h.
 
@@ -107,6 +113,7 @@ on common paths. On 2026-10-07 it was ~80% there with these blockers:
 | First real release run: signing, notarization, installers verified on each OS | Signed releases v0.1.0–v0.4.0 published; installers not hand-checked on each OS; Windows startup crashes on some GPUs (#40, #59) |
 | PPTX fidelity on a corpus of real decks | First owned check in CI; notes-master header and footer kept. A larger corpus is still beta item 2 |
 | PPTX fidelity on a corpus of real decks | Owned check for comments, links, custom shows, groups and inherited placeholders. A larger corpus, embedded fonts and #70/#74/#77 stay open; beta item 2 |
+| PPTX fidelity on a corpus of real decks | Owned check for text effects, body layout, theme effects, fills, bevels and connectors. A larger corpus, embedded fonts and #70/#74/#77 stay open; beta item 2 |
 | Presenter view and Animation Pane polish | Still open; beta items 9 and 10 |
 | Soak and fuzz the editor | Still open; beta item 1 |
 | UI fidelity pass on the most-used ribbon groups and dialogs; first run | Partly (start-screen fixes #20, #49); beta item 11 |
@@ -123,5 +130,6 @@ plan above.
 | 2026-10-13 | minor | M9: the WordArt Transform gallery applies a text warp; adjust handles stay open |
 | 2026-10-13 | trivial | Owned PPTX corpus check started; notes-master header and footer kept. Beta item 2 stays open for a larger corpus |
 | 2026-10-13 | trivial | Owned PPTX corpus covers comments, links and actions, custom shows, rotated groups and inherited placeholders. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
+| 2026-10-13 | trivial | Owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

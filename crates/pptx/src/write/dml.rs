@@ -342,6 +342,15 @@ pub fn effects(w: &mut W, fx: &Effects) {
     w.close("a:effectLst");
 }
 
+/// `a:sp3d` for a bevel preset when the shape or theme style has no kept 3-D XML.
+/// The preset name is limited to ASCII letters and digits so it cannot break the markup.
+pub fn bevel_sp3d(preset: &str) -> Option<String> {
+    if preset.is_empty() || preset.len() > 32 || !preset.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(format!("<a:sp3d><a:bevelT prst=\"{preset}\"/></a:sp3d>"))
+}
+
 pub fn xfrm(w: &mut W, tag: &str, x: &Xfrm, child: Option<&Xfrm>) {
     let x = if x.is_finite() { *x } else { Xfrm::default() };
     let rot = ang(x.rot);
@@ -602,10 +611,10 @@ pub fn rpr(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, r: &RunProps) {
         .o("spc", r.spacing.map(|s| (s.clamp(-4000.0, 4000.0) * 100.0).round() as i64))
         .o("baseline", r.baseline.map(|b| pct(b.clamp(-10.0, 10.0))))
         .b("noProof", r.no_proof);
+    let has_fx = r.shadow.is_some() || r.inner_shadow.is_some() || r.glow.is_some() || r.reflection.is_some() || r.soft_edge.is_some();
     let has_kids = r.outline.is_some()
         || r.fill.is_some()
-        || r.shadow.is_some()
-        || r.glow.is_some()
+        || has_fx
         || r.highlight.is_some()
         || r.underline_color.is_some()
         || r.font.is_some()
@@ -627,8 +636,19 @@ pub fn rpr(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, r: &RunProps) {
             f => fill(w, x, o, f),
         }
     }
-    if r.shadow.is_some() || r.glow.is_some() {
-        effects(w, &Effects { outer_shadow: r.shadow.clone(), glow: r.glow.clone(), ..Default::default() });
+    if has_fx {
+        // Same child order as a shape's effect list: glow, inner shadow, outer shadow, reflection, soft edge.
+        effects(
+            w,
+            &Effects {
+                outer_shadow: r.shadow.clone(),
+                inner_shadow: r.inner_shadow.clone(),
+                glow: r.glow.clone(),
+                reflection: r.reflection.clone(),
+                soft_edge: r.soft_edge,
+                ..Default::default()
+            },
+        );
     }
     if let Some(h) = &r.highlight {
         w.open0("a:highlight");
