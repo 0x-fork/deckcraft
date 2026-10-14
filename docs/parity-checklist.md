@@ -24,7 +24,7 @@ The summary between `<!-- SUMMARY -->
 | Format | 83% |
 | Arrange | 100% |
 | Text | 80% |
-| Tables | 89% |
+| Tables | 95% |
 | Charts | 65% |
 | SmartArt | 33% |
 | Pictures | 52% |
@@ -171,7 +171,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Tables | Insert/delete rows and columns | P0 | D |
 | Tables | Merge and split cells | P1 | D |
 | Tables | Distribute rows/columns, sizes | P1 | D |
-| Tables | Cell fill, borders, margins, alignment | P1 | P |
+| Tables | Cell fill, borders, margins, alignment | P1 | D |
 | Tables | Keyboard navigation between cells | P0 | D |
 | Charts | Insert chart (column, bar, line, area, pie, doughnut, scatter) | P0 | D |
 | Charts | Other chart types (radar, stock, combo, waterfall, funnel, treemap, sunburst, histogram, box) | P2 | P |

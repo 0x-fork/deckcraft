@@ -55,6 +55,33 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             cell_fill
         ),
+        cmd!(
+            "table.borders",
+            "Borders",
+            ["Table Design", "Draw Borders"],
+            None,
+            "{which: all|outside|inside|insideH|insideV|top|bottom|left|right|diagDown|diagUp|none, color?, width?: pt, dash?: solid|dash|dot…, cells?: [[r,c],…] (default: selected cells or all), id?}",
+            has_selection,
+            borders
+        ),
+        cmd!(
+            "table.cellMargins",
+            "Cell Margins",
+            ["Table Layout", "Alignment"],
+            None,
+            "{preset?: normal|none|narrow|wide, left?, right?, top?, bottom?: pt, cells?, id?}",
+            has_selection,
+            cell_margins
+        ),
+        cmd!(
+            "table.cellAlign",
+            "Align Cell Text",
+            ["Table Layout", "Alignment"],
+            None,
+            "{anchor: top|middle|bottom, cells?, id?}",
+            has_selection,
+            cell_align
+        ),
         cmd!("table.distributeRows", "Distribute Rows", ["Table Layout", "Cell Size"], None, "{id?}", has_selection, |s, p| distribute(s, p, true)),
         cmd!("table.distributeColumns", "Distribute Columns", ["Table Layout", "Cell Size"], None, "{id?}", has_selection, |s, p| distribute(
             s, p, false
@@ -195,26 +222,162 @@ fn options(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-fn cell_fill(s: &mut Session, p: &Value) -> Result<Value> {
-    let fill = if bool_or(p, "none", false) { Some(deckcraft_model::Fill::None) } else { color_param(p, "color").map(deckcraft_model::Fill::solid) };
+/// The cells a command acts on: `cells`, else the selected cell range, else the cell holding the
+/// caret, else every cell.
+fn target_cells(s: &Session, p: &Value) -> Result<impl Fn(&Table) -> Vec<(usize, usize)> + use<>> {
     let cells: Option<Vec<(usize, usize)>> = p
         .get("cells")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|c| Some((c.get(0)?.as_u64()? as usize, c.get(1)?.as_u64()? as usize))).collect());
-    let sel = s.doc()?.selection.cells;
+        .map(|a| a.iter().take(100_000).filter_map(|c| Some((c.get(0)?.as_u64()? as usize, c.get(1)?.as_u64()? as usize))).collect());
+    let st = s.doc()?;
+    let sel = st.selection.cells.map(|(_, a, b)| (a, b)).or_else(|| st.selection.text.as_ref().and_then(|t| t.cell).map(|c| (c, c)));
+    Ok(move |t: &Table| match (&cells, sel) {
+        (Some(c), _) => c.clone(),
+        (None, Some((a, b))) => {
+            // The selection can name cells outside the table; only walk the ones that exist.
+            let (r1, c1) = (a.0.max(b.0).min(t.n_rows().saturating_sub(1)), a.1.max(b.1).min(t.n_cols().saturating_sub(1)));
+            (a.0.min(b.0)..=r1).flat_map(|r| (a.1.min(b.1)..=c1).map(move |c| (r, c))).collect()
+        }
+        _ => (0..t.n_rows()).flat_map(|r| (0..t.n_cols()).map(move |c| (r, c))).collect(),
+    })
+}
+
+fn cell_fill(s: &mut Session, p: &Value) -> Result<Value> {
+    let fill = if bool_or(p, "none", false) { Some(deckcraft_model::Fill::None) } else { color_param(p, "color").map(deckcraft_model::Fill::solid) };
+    let targets = target_cells(s, p)?;
     with_table(s, p, "table.cellFill", move |t| {
-        let list: Vec<(usize, usize)> = match (&cells, sel) {
-            (Some(c), _) => c.clone(),
-            (None, Some((_, a, b))) => {
-                // The selection can name cells outside the table; only walk the ones that exist.
-                let (r1, c1) = (a.0.max(b.0).min(t.n_rows().saturating_sub(1)), a.1.max(b.1).min(t.n_cols().saturating_sub(1)));
-                (a.0.min(b.0)..=r1).flat_map(|r| (a.1.min(b.1)..=c1).map(move |c| (r, c))).collect()
-            }
-            _ => (0..t.n_rows()).flat_map(|r| (0..t.n_cols()).map(move |c| (r, c))).collect(),
-        };
-        for (r, c) in list {
+        for (r, c) in targets(t) {
             if let Some(cell) = t.cell_mut(r, c) {
                 cell.fill.clone_from(&fill);
+            }
+        }
+        Ok(())
+    })
+}
+
+const LEFT: usize = 0;
+const RIGHT: usize = 1;
+const TOP: usize = 2;
+const BOTTOM: usize = 3;
+
+fn borders(s: &mut Session, p: &Value) -> Result<Value> {
+    use deckcraft_model::Line;
+    let which = str_param(p, "which").unwrap_or("all").to_string();
+    const WHICH: [&str; 12] = ["all", "outside", "inside", "insideH", "insideV", "top", "bottom", "left", "right", "diagDown", "diagUp", "none"];
+    if !WHICH.contains(&which.as_str()) {
+        return Err(bad("table.borders", format!("unknown `which` {which:?}; one of {}", WHICH.join(", "))));
+    }
+    let color = color_param(p, "color").unwrap_or_else(|| deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 0, 0)));
+    let width = f64_param(p, "width").filter(|w| w.is_finite()).unwrap_or(1.0).clamp(0.0, 100.0);
+    let mut line = Line::solid(color, width);
+    if let Some(d) = str_param(p, "dash").filter(|d| *d != "solid") {
+        if !deckcraft_model::style::Dash::PRESETS.contains(&d) {
+            return Err(bad("table.borders", format!("unknown dash {d:?}; one of {}", deckcraft_model::style::Dash::PRESETS.join(", "))));
+        }
+        line.dash = Some(deckcraft_model::style::Dash::Preset { name: d.to_string() });
+    }
+    // "none" clears to no line, so the table style's own lines don't show through either.
+    let line = if which == "none" { Line::none() } else { line };
+    let targets = target_cells(s, p)?;
+    with_table(s, p, "table.borders", move |t| {
+        let list = targets(t);
+        let (Some(r0), Some(r1), Some(c0), Some(c1)) =
+            (list.iter().map(|x| x.0).min(), list.iter().map(|x| x.0).max(), list.iter().map(|x| x.1).min(), list.iter().map(|x| x.1).max())
+        else {
+            return Ok(());
+        };
+        let (rows, cols) = (t.n_rows(), t.n_cols());
+        // Set one side of a cell and the facing side of its neighbour, as PowerPoint does.
+        let set = |t: &mut Table, r: usize, c: usize, side: usize| {
+            if let Some(cell) = t.cell_mut(r, c) {
+                cell.borders[side] = Some(line.clone());
+            }
+            let n = match side {
+                LEFT => c.checked_sub(1).map(|c| (r, c, RIGHT)),
+                RIGHT => (c + 1 < cols).then_some((r, c + 1, LEFT)),
+                TOP => r.checked_sub(1).map(|r| (r, c, BOTTOM)),
+                _ => (r + 1 < rows).then_some((r + 1, c, TOP)),
+            };
+            if let Some((r, c, side)) = n
+                && let Some(cell) = t.cell_mut(r, c)
+            {
+                cell.borders[side] = Some(line.clone());
+            }
+        };
+        for (r, c) in list {
+            if r < r0 || r > r1 || c < c0 || c > c1 {
+                continue;
+            }
+            let outer = [c == c0, c == c1, r == r0, r == r1];
+            for side in [LEFT, RIGHT, TOP, BOTTOM] {
+                let horizontal = side == TOP || side == BOTTOM;
+                let on = match which.as_str() {
+                    "all" | "none" => true,
+                    "outside" => outer[side],
+                    "inside" => !outer[side],
+                    "insideH" => horizontal && !outer[side],
+                    "insideV" => !horizontal && !outer[side],
+                    "top" => side == TOP && outer[side],
+                    "bottom" => side == BOTTOM && outer[side],
+                    "left" => side == LEFT && outer[side],
+                    "right" => side == RIGHT && outer[side],
+                    _ => false,
+                };
+                if on {
+                    set(t, r, c, side);
+                }
+            }
+            if let Some(cell) = t.cell_mut(r, c) {
+                match which.as_str() {
+                    "diagDown" => cell.diag_down = Some(line.clone()),
+                    "diagUp" => cell.diag_up = Some(line.clone()),
+                    "none" => {
+                        cell.diag_down = None;
+                        cell.diag_up = None;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
+fn cell_margins(s: &mut Session, p: &Value) -> Result<Value> {
+    // PowerPoint's presets (left/right, top/bottom).
+    let base = match str_param(p, "preset") {
+        Some("none") => [0.0; 4],
+        Some("narrow") => [3.6; 4],
+        Some("wide") => [14.4, 14.4, 14.4, 14.4],
+        Some("normal") | None => [7.2, 7.2, 3.6, 3.6],
+        Some(o) => return Err(bad("table.cellMargins", format!("unknown preset {o:?}; one of normal, none, narrow, wide"))),
+    };
+    let side = |k: &str, i: usize| f64_param(p, k).filter(|v| v.is_finite()).map_or(base[i], |v| v.clamp(0.0, 400.0));
+    let m = [side("left", 0), side("right", 1), side("top", 2), side("bottom", 3)];
+    let targets = target_cells(s, p)?;
+    with_table(s, p, "table.cellMargins", move |t| {
+        for (r, c) in targets(t) {
+            if let Some(cell) = t.cell_mut(r, c) {
+                cell.margins = Some(m);
+            }
+        }
+        Ok(())
+    })
+}
+
+fn cell_align(s: &mut Session, p: &Value) -> Result<Value> {
+    use deckcraft_model::text::Anchor;
+    let a = match str_param(p, "anchor").unwrap_or("top") {
+        "middle" | "center" | "ctr" => Anchor::Middle,
+        "bottom" | "b" => Anchor::Bottom,
+        "top" | "t" => Anchor::Top,
+        o => return Err(bad("table.cellAlign", format!("unknown anchor {o:?}; one of top, middle, bottom"))),
+    };
+    let targets = target_cells(s, p)?;
+    with_table(s, p, "table.cellAlign", move |t| {
+        for (r, c) in targets(t) {
+            if let Some(cell) = t.cell_mut(r, c) {
+                cell.anchor = Some(a);
             }
         }
         Ok(())

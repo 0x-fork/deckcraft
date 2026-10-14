@@ -2584,6 +2584,53 @@ fn table_design(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
     });
+    group(ui, |ui| {
+        let r = big_button(ui, Icon::Borders, "Borders", true);
+        egui::Popup::menu(&r).show(|ui| {
+            let pen = app.table_pen.clone();
+            for (label, which) in [
+                ("No Border", "none"),
+                ("All Borders", "all"),
+                ("Outside Borders", "outside"),
+                ("Inside Borders", "inside"),
+                ("Top Border", "top"),
+                ("Bottom Border", "bottom"),
+                ("Left Border", "left"),
+                ("Right Border", "right"),
+                ("Inside Horizontal Border", "insideH"),
+                ("Inside Vertical Border", "insideV"),
+                ("Diagonal Down Border", "diagDown"),
+                ("Diagonal Up Border", "diagUp"),
+            ] {
+                let mut p = pen.clone();
+                p["which"] = json!(which);
+                menu_item(app, ui, Icon::Borders, label, "table.borders", p);
+            }
+            ui.separator();
+            ui.menu_button("Pen Weight", |ui| {
+                for w in [0.25, 0.5, 0.75, 1.0, 1.5, 2.25, 3.0, 4.5, 6.0] {
+                    let cur = app.table_pen.get("width").and_then(Value::as_f64) == Some(w);
+                    if ui.radio(cur, format!("{w} pt")).clicked() {
+                        app.table_pen["width"] = json!(w);
+                    }
+                }
+            });
+            ui.menu_button("Pen Style", |ui| {
+                for (l, d) in [("Solid", "solid"), ("Dash", "dash"), ("Dot", "sysDot"), ("Dash Dot", "dashDot"), ("Long Dash", "lgDash")] {
+                    let cur = app.table_pen.get("dash").and_then(Value::as_str).unwrap_or("solid") == d;
+                    if ui.radio(cur, l).clicked() {
+                        app.table_pen["dash"] = json!(d);
+                    }
+                }
+            });
+            ui.menu_button("Pen Color", |ui| {
+                let sc = scheme(app);
+                if let Some(Some(c)) = widgets::color_grid(ui, &sc, None) {
+                    app.table_pen["color"] = cref_param(&c);
+                }
+            });
+        });
+    });
 }
 
 /// A Picture Styles gallery tile: a landscape "picture" in the style's shape and frame.
@@ -2721,10 +2768,18 @@ fn table_layout(app: &mut SlideApp, ui: &mut Ui) {
             });
             ui.horizontal(|ui| {
                 for (l, a) in [("Top", "top"), ("Center", "middle"), ("Bottom", "bottom")] {
-                    if ui.small_button(l).clicked() {
-                        run(app, "format.anchor", json!({"anchor": a}));
+                    if ui.small_button(l).on_hover_text(format!("Align text to the {l} of the cell").to_lowercase()).clicked() {
+                        run(app, "table.cellAlign", json!({"anchor": a}));
                     }
                 }
+                ui.menu_button("Cell Margins", |ui| {
+                    for (l, preset) in [("Normal", "normal"), ("None", "none"), ("Narrow", "narrow"), ("Wide", "wide")] {
+                        if ui.button(l).clicked() {
+                            run(app, "table.cellMargins", json!({"preset": preset}));
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
     });
