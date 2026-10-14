@@ -191,6 +191,17 @@ pub fn pdf_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
     deckcraft_pdf::export(doc, &pdf_options(p, doc.slides.len())?).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+/// The output extensions [`format_for_path`] maps to a writer of that format.
+pub const WRITABLE_EXTENSIONS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "pdf", "png", "jpg", "jpeg", "txt", "md"];
+
+/// The format a file named `path` is written in, or `None` when its extension names no format
+/// DeckCraft writes (`.odp`, `.gif`, `.svg`, no extension …): [`format_for_path`] would save
+/// those as native `.deckcraft` bytes under the wrong name.
+pub fn writable_format_for_path(path: &str) -> Option<&'static str> {
+    let ext = std::path::Path::new(path).extension()?.to_str()?.to_ascii_lowercase();
+    WRITABLE_EXTENSIONS.contains(&ext.as_str()).then(|| format_for_path(path))
+}
+
 pub fn format_for_path(path: &str) -> &'static str {
     let l = path.to_ascii_lowercase();
     if l.ends_with(".pptx") || l.ends_with(".potx") || l.ends_with(".ppsx") {

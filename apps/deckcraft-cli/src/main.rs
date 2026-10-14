@@ -240,9 +240,9 @@ fn render_transition(args: &[String]) -> Result<(), String> {
 
 fn convert(args: &[String]) -> Result<(), String> {
     let (Some(input), Some(out)) = (args.first(), args.get(1)) else { return Err("convert needs IN and OUT".into()) };
+    let fmt = output_format(out)?;
     let mut s = Session::new();
     open(&mut s, Some(input), false)?;
-    let fmt = deckcraft_engine::cmd::file::format_for_path(out);
     let r = if matches!(fmt, "png" | "jpeg") {
         s.execute("file.export", &json!({"path": out, "slide": 0}))
     } else {
@@ -251,6 +251,16 @@ fn convert(args: &[String]) -> Result<(), String> {
     r.map_err(|e| e.to_string())?;
     outln!("{out}");
     Ok(())
+}
+
+/// The format `convert`, `run --save` and `run --export` write to `path`, or an error naming the
+/// supported extensions when `path`'s extension isn't one (rather than native bytes under that name).
+fn output_format(path: &str) -> Result<&'static str, String> {
+    use deckcraft_engine::cmd::file::{WRITABLE_EXTENSIONS, writable_format_for_path};
+    writable_format_for_path(path).ok_or_else(|| {
+        let ext = std::path::Path::new(path).extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_else(|| "(none)".into());
+        format!("{path}: unsupported output format {ext} (supported: .{})", WRITABLE_EXTENSIONS.join(", ."))
+    })
 }
 
 fn run(args: &[String]) -> Result<(), String> {
@@ -271,6 +281,9 @@ fn run(args: &[String]) -> Result<(), String> {
             "--print" => print = true,
             other => return Err(format!("unknown option `{other}`")),
         }
+    }
+    for p in save.iter().chain(&export) {
+        output_format(p)?;
     }
     let mut s = Session::new();
     open(&mut s, input.as_deref(), sample)?;

@@ -182,6 +182,19 @@ fn sample_deck_builds_and_renders() {
 }
 
 #[test]
+fn writable_format_for_path_rejects_formats_deckcraft_does_not_write() {
+    use crate::cmd::file::writable_format_for_path as f;
+    assert_eq!(f("a.deckcraft"), Some("deckcraft"));
+    assert_eq!(f("dir/A.PPTX"), Some("pptx"));
+    assert_eq!(f("a.pdf"), Some("pdf"));
+    assert_eq!(f("a.jpg"), Some("jpeg"));
+    assert_eq!(f("a.txt"), Some("outline"));
+    for path in ["a.odp", "a.gif", "a.svg", "a.outline", "a", "dir.v2/a"] {
+        assert_eq!(f(path), None, "{path}");
+    }
+}
+
+#[test]
 fn save_and_reopen_native() {
     let mut s = Session::new();
     sample::open_sample(&mut s).unwrap();
