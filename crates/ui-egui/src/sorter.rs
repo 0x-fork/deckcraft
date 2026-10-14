@@ -414,7 +414,9 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     let width = notes_rect.width();
     let r = crate::notes::editor(&mut child, &mut draft, &look, |e| {
         e.id(edit_id).hint_text("Click to add text").desired_width(width).desired_rows(12).frame(egui::Frame::NONE)
-    });
+    })
+    .response
+    .response;
     if r.lost_focus() && draft.edited {
         draft.edited = false;
         let _ = app.run("slide.notes", json!({"body": draft.body, "index": idx}));

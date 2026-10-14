@@ -646,7 +646,15 @@ fn sp(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, math: bool) {
         style(w, st);
     }
     if let Some(tb) = &s.text {
-        dml::text_body(w, x, o, "p:txBody", tb, math);
+        // A shape's text without its own anchor sits in the middle in the model; a file without
+        // one would put it at the top, so say so.
+        if s.ph.is_none() && !s.text_box && tb.body.anchor.is_none() {
+            let mut tb = tb.clone();
+            tb.body.anchor = Some(deckcraft_model::text::Anchor::Middle);
+            dml::text_body(w, x, o, "p:txBody", &tb, math);
+        } else {
+            dml::text_body(w, x, o, "p:txBody", tb, math);
+        }
     }
     w.close("p:sp");
 }

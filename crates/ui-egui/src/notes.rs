@@ -184,13 +184,14 @@ fn galley(ui: &Ui, body: &TextBody, size: f32, color: Color32, wrap: f32) -> Arc
 }
 
 /// A multiline editor for the draft that draws its formatting; `configure` sets the id, hint,
-/// size and frame. Edits update the draft's text and formatted body.
+/// size and frame. Edits update the draft's text and formatted body. Returns the field's output
+/// (galley and caret too, for spelling marks).
 pub fn editor(
     ui: &mut Ui,
     draft: &mut Draft,
     look: &Look,
     configure: impl for<'a> FnOnce(egui::TextEdit<'a>) -> egui::TextEdit<'a>,
-) -> egui::Response {
+) -> egui::text_edit::TextEditOutput {
     let color = look.color.unwrap_or_else(|| ui.visuals().override_text_color.unwrap_or_else(|| ui.visuals().widgets.inactive.text_color()));
     let size = look.size;
     let before = draft.body.clone();
@@ -218,7 +219,7 @@ pub fn editor(
             at += p.char_len() + 1;
         }
     }
-    out.response.response
+    out
 }
 
 #[cfg(test)]

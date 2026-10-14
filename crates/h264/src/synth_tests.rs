@@ -579,3 +579,34 @@ fn largest_accepted_h264_size_is_over_the_default_budget() {
         deckcraft_bitstream::budget::PictureShape { width: 16384, height: 16384, shift_x: 1, shift_y: 1, chroma_planes: 2, bytes_per_sample: 1 };
     assert!(!shape.fits(16 + 1 + 3, deckcraft_bitstream::budget::DECODE_MEMORY_BUDGET));
 }
+
+fn gap_stream(gaps: bool) -> Vec<u8> {
+    let mut seed = 7u32;
+    let a: Vec<Option<Vec<u8>>> = (0..NMB).map(|_| Some(random_mb(&mut seed))).collect();
+    let mut stream = sps(66, 2, gaps, PocType::T2);
+    stream.extend(pps(false, false));
+    stream.extend(slice_nal(&Pic { idr: true, frame_num: 0, ref_idc: 3, mbs: a, ..Default::default() }, false));
+    // frame_num 1..=9 are missing.
+    stream.extend(slice_nal(&Pic { frame_num: 10, ref_idc: 2, mbs: vec![None; NMB], ..Default::default() }, false));
+    stream
+}
+
+#[test]
+fn frame_num_gap_is_concealed_even_when_the_sps_forbids_gaps() {
+    // A cut or lossy stream: the gap is filled (bounded) instead of dropping the picture.
+    let mut dec = Decoder::with_threads(1);
+    let mut out = dec.decode(&gap_stream(false), 0).unwrap();
+    out.extend(dec.flush());
+    assert_eq!(out.len(), 2);
+    assert_eq!(dec.stats().frame_num_gaps, 1);
+}
+
+#[test]
+fn frame_num_gap_is_filled_when_the_sps_allows_gaps() {
+    let mut dec = Decoder::with_threads(1);
+    let mut out = dec.decode(&gap_stream(true), 0).unwrap();
+    out.extend(dec.flush());
+    assert!(dec.take_error().is_none());
+    assert_eq!(out.len(), 2);
+    assert_eq!(dec.stats().frame_num_gaps, 1);
+}

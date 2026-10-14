@@ -8,17 +8,22 @@
 #![forbid(unsafe_code)]
 
 pub mod cmd;
+pub mod compare;
 pub mod connect;
+pub mod drawtable;
 pub mod fonts;
 pub mod gif_export;
 pub mod guard;
 pub mod icons;
+pub mod inkshape;
 pub mod keys;
 pub mod links;
 pub mod recovery;
 pub mod sample;
 pub mod sounds;
+pub mod spell;
 pub mod templates;
+pub mod thesaurus;
 pub mod tools;
 
 use std::sync::Arc;
@@ -212,6 +217,8 @@ pub struct DocState {
     pub missing_fonts: Vec<String>,
     /// An input method's composition in progress ([`Composition`]).
     pub composition: Option<Composition>,
+    /// Review › Compare in progress: the revised copy.
+    pub compare: Option<compare::Compare>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -238,6 +245,7 @@ impl DocState {
             title,
             missing_fonts: Vec::new(),
             composition: None,
+            compare: None,
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -311,6 +319,18 @@ pub struct Prefs {
     pub duplicate_offset: f64,
     pub autocorrect: bool,
     pub smart_quotes: bool,
+    /// AutoCorrect options (Tools ▸ AutoCorrect): fix TWo INitial CApitals, capitalize the first
+    /// letter of sentences and the names of days, fix accidental cAPS lOCK, and replace 1/2, 1/4
+    /// and 3/4 with fraction characters.
+    pub ac_two_initials: bool,
+    pub ac_sentence_caps: bool,
+    pub ac_days: bool,
+    pub ac_caps_lock: bool,
+    pub ac_fractions: bool,
+    /// Your own "replace … with …" entries; they win over the built-in list.
+    pub ac_entries: Vec<(String, String)>,
+    /// Built-in entries you deleted.
+    pub ac_removed: Vec<String>,
     pub author: String,
     pub undo_limit: usize,
     /// Minutes between AutoRecover saves of unsaved presentations.
@@ -326,12 +346,42 @@ impl Default for Prefs {
             duplicate_offset: 12.0,
             autocorrect: true,
             smart_quotes: true,
+            ac_two_initials: true,
+            ac_sentence_caps: true,
+            ac_days: true,
+            ac_caps_lock: true,
+            ac_fractions: true,
+            ac_entries: Vec::new(),
+            ac_removed: Vec::new(),
             author: "Presenter".into(),
             undo_limit: 500,
             recovery_minutes: 1.0,
         }
     }
 }
+
+impl Prefs {
+    /// The preferences with every value in a range the editor can use: `prefs.json` is a file
+    /// on disk, and a hand-edited or damaged one (a zero grid, a huge paste offset or undo
+    /// limit) must not break editing or exhaust memory. Out-of-range numbers take their
+    /// defaults or the nearest usable value.
+    pub fn sanitized(mut self) -> Prefs {
+        let d = Prefs::default();
+        let within = |v: f64, lo: f64, hi: f64, default: f64| if v.is_finite() { v.clamp(lo, hi) } else { default };
+        self.grid_spacing =
+            if self.grid_spacing.is_finite() && self.grid_spacing > 0.0 { self.grid_spacing.clamp(0.5, 1000.0) } else { d.grid_spacing };
+        self.duplicate_offset = within(self.duplicate_offset, -1000.0, 1000.0, d.duplicate_offset);
+        self.undo_limit = self.undo_limit.min(MAX_UNDO_LIMIT);
+        self.recovery_minutes = within(self.recovery_minutes, 0.1, 24.0 * 60.0, d.recovery_minutes);
+        if self.author.chars().count() > 256 {
+            self.author = self.author.chars().take(256).collect();
+        }
+        self
+    }
+}
+
+/// The most undo steps [`Prefs::undo_limit`] can keep.
+pub const MAX_UNDO_LIMIT: usize = 10_000;
 
 /// Things a command or tool asks the UI to do (open a dialog, show a pane, start the show…).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

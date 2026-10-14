@@ -92,6 +92,11 @@ pub enum Hit {
         path: usize,
         index: usize,
     },
+    /// WordArt warp adjust (yellow handle). `index` is `adj` / `adjN`.
+    Warp {
+        id: ShapeId,
+        index: usize,
+    },
     /// Line end 0/1 of a line-like shape.
     LineEnd {
         id: ShapeId,
@@ -161,9 +166,21 @@ enum Drag {
         index: usize,
         out: bool,
     },
+    /// WordArt: `base` is the adjust list at mouse-down (empty means the preset defaults).
+    Warp {
+        id: ShapeId,
+        index: usize,
+        name: String,
+        base: Vec<f64>,
+        orig: Xfrm,
+    },
     Marquee {
         start: Point,
         add: bool,
+    },
+    /// Dragging drawing guide `index`.
+    Guide {
+        index: usize,
     },
     Create {
         start: Point,
@@ -197,6 +214,10 @@ enum Drag {
 
 /// Shape-gallery names that draw a freeform path instead of a preset.
 pub const FREEFORM_TOOLS: [(&str, &str); 3] = [("curve", "Curve"), ("freeform", "Freeform: Shape"), ("scribble", "Freeform: Scribble")];
+
+/// Draw Table's pencil and eraser, as `ToolKind::Shape` presets (Insert › Table › Draw Table).
+pub const DRAW_TABLE: &str = "drawTable";
+pub const TABLE_ERASER: &str = "tableEraser";
 
 pub fn is_freeform_tool(name: &str) -> bool {
     FREEFORM_TOOLS.iter().any(|f| f.0 == name)
@@ -238,6 +259,12 @@ pub struct ToolState {
     pub edit_vertex: Option<(usize, usize)>,
     /// The point type last chosen for a vertex (path, index, type): handle drags follow it.
     pub vertex_kind: Option<(usize, usize, String)>,
+    /// Drawing guides are shown (View › Guides): they can be dragged and shapes snap to them.
+    pub guides_visible: bool,
+    /// The guide being dragged and where it is now (slide points); `None` once dropped.
+    pub guide_drag: Option<(usize, f64)>,
+    /// The drawing guide under the pointer, for the cursor.
+    pub guide_hover: Option<usize>,
 }
 
 impl ToolState {
@@ -267,6 +294,45 @@ pub fn box_handles(x: &Xfrm) -> ([Point; 8], Point) {
     let rot =
         Affine::translate(Vec2::new(x.x + w / 2.0, x.y + h / 2.0)) * Affine::rotate(x.rot.to_radians()) * Point::new(0.0, up * (h / 2.0 + 20.0));
     (pts, rot)
+}
+
+/// WordArt adjust handles for `sh`, in shape-local points (the text rectangle). Empty when the
+/// resolved body has no warp DeckCraft draws, or the shape has no text to store one on.
+pub fn wordart_handles(
+    doc: &deckcraft_model::Presentation,
+    sel: &crate::Selection,
+    sh: &Shape,
+    w: f64,
+    h: f64,
+) -> Vec<deckcraft_geom::warp::WarpHandle> {
+    if sh.text.is_none() {
+        return Vec::new();
+    }
+    let Some(ctx) = crate::cmd::text::ctx_for(doc, sel) else { return Vec::new() };
+    let bp = deckcraft_model::resolve::body(&ctx, sh);
+    let Some(name) = bp.warp.as_deref().filter(|n| deckcraft_geom::warp::is_supported(n)) else { return Vec::new() };
+    let tr = deckcraft_render::shape_geometry(sh, w, h).text_rect;
+    deckcraft_geom::warp::handles(name, &bp.warp_adj, tr)
+}
+
+/// Write one warp adjust, keeping the others from `base` (empty = the preset defaults).
+fn set_warp_adj(sh: &mut Shape, name: &str, base: &[f64], index: usize, value: f64) {
+    let Some(text) = sh.text.as_mut() else { return };
+    if !value.is_finite() || index > 7 {
+        return;
+    }
+    let defaults = deckcraft_geom::warp::adjust_defaults(name);
+    let n = defaults.len().max(index + 1).min(8);
+    if n == 0 {
+        return;
+    }
+    let mut adj = Vec::with_capacity(n);
+    for i in 0..n {
+        let v = if i == index { value } else { base.get(i).copied().filter(|v| v.is_finite()).or_else(|| defaults.get(i).copied()).unwrap_or(0.0) };
+        adj.push(v);
+    }
+    text.body.warp = Some(name.to_string());
+    text.body.warp_adj = adj;
 }
 
 impl Session {
@@ -319,6 +385,11 @@ impl Session {
                 for hd in &geo.handles {
                     if (x.affine() * hd.pos - p).hypot() <= tol * 1.6 {
                         return Some(Hit::Adjust { id: *id, index: hd.index });
+                    }
+                }
+                for hd in wordart_handles(&st.doc, &st.selection, sh, x.w, x.h) {
+                    if (x.affine() * hd.pos - p).hypot() <= tol * 1.6 {
+                        return Some(Hit::Warp { id: *id, index: hd.index });
                     }
                 }
                 let (pts, rot) = box_handles(&x);
@@ -375,6 +446,8 @@ impl Session {
                     return Ok(Value::Null);
                 }
                 self.tool.hover = self.hit_test(p, tol);
+                self.tool.guide_hover =
+                    if self.tool.hover.is_none() && matches!(self.tool.kind, ToolKind::Select) { self.guide_at(p, tol) } else { None };
                 let line_tool = matches!(&self.tool.kind, ToolKind::Shape { preset } if deckcraft_geom::preset::is_line_like(preset));
                 if line_tool {
                     self.update_sites(p, tol, None);
@@ -399,7 +472,7 @@ impl Session {
         }
     }
 
-    fn begin(&mut self, label: &str) {
+    pub(crate) fn begin(&mut self, label: &str) {
         if let Some(st) = self.active_mut()
             && st.interaction.is_none()
         {
@@ -413,6 +486,14 @@ impl Session {
             && !Arc::ptr_eq(&i.doc, &st.doc)
         {
             crate::push_undo(st, HistoryEntry { label: i.label, doc: i.doc, selection: i.selection });
+        }
+    }
+
+    /// End the interaction only when it is the one `label` started. A twist must not commit a drag.
+    pub(crate) fn commit_named(&mut self, label: &str) {
+        let ours = self.active().and_then(|st| st.interaction.as_ref()).is_some_and(|i| i.label == label);
+        if ours {
+            self.commit();
         }
     }
 
@@ -435,6 +516,10 @@ impl Session {
                 self.tool.path_smooth = preset == "curve";
                 self.tool.path_closing = false;
                 return Ok(Value::Null);
+            }
+            ToolKind::Shape { preset } if preset == TABLE_ERASER => {
+                // Click a border to merge the cells on either side; elsewhere does nothing.
+                return Ok(self.execute("table.eraseLine", &json!({"at": [p.x, p.y], "tol": tol.max(4.0)})).unwrap_or(Value::Null));
             }
             ToolKind::Shape { .. } | ToolKind::TextBox => {
                 self.tool.drag = Some(Drag::Create { start: p });
@@ -526,6 +611,18 @@ impl Session {
                 })?;
                 self.tool.drag = Some(Drag::Move { ids: vec![id], start: p, origs, moved: false, duplicate: mods.alt, enter_text: None });
             }
+            Some(Hit::Warp { id, index }) => {
+                let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
+                let found = st.shape(id).and_then(|sh| {
+                    let ctx = crate::cmd::text::ctx_for(&st.doc, &st.selection)?;
+                    let bp = deckcraft_model::resolve::body(&ctx, sh);
+                    bp.warp.map(|n| (n, bp.warp_adj))
+                });
+                if let Some((name, base)) = found {
+                    self.begin("Adjust WordArt");
+                    self.tool.drag = Some(Drag::Warp { id, index, name, base, orig });
+                }
+            }
             Some(Hit::Shape { id, text }) => {
                 let selected = st.selection.shapes.contains(&id);
                 let toggle = mods.shift || mods.cmd;
@@ -567,6 +664,14 @@ impl Session {
                     let _ = self.execute("animation.painterApply", &json!({"ids": [id]}));
                 }
             }
+            None if self.guide_at(p, tol).is_some() => {
+                // Away from every shape a press on a guide picks the guide up.
+                if let Some(index) = self.guide_at(p, tol) {
+                    let pos = st.doc.guides.get(index).map(|g| g.pos).unwrap_or(0.0);
+                    self.tool.drag = Some(Drag::Guide { index });
+                    self.tool.guide_drag = Some((index, pos));
+                }
+            }
             None => {
                 let add = mods.shift || mods.cmd;
                 self.select(|_, sel| {
@@ -586,6 +691,13 @@ impl Session {
     fn drag(&mut self, p: Point, mods: Mods, tol: f64) -> Result<Value> {
         let Some(drag) = self.tool.drag.clone() else { return Ok(Value::Null) };
         match drag {
+            Drag::Guide { index } => {
+                let vertical = self.active().and_then(|d| d.doc.guides.get(index)).is_some_and(|g| g.vertical);
+                let pos = if vertical { p.x } else { p.y };
+                // Guides move in whole points unless snapping is off, as in PowerPoint.
+                let pos = if self.prefs.snap_to_grid && !mods.alt { pos.round() } else { pos };
+                self.tool.guide_drag = Some((index, pos));
+            }
             Drag::Move { ids, start, origs, moved, duplicate, enter_text } => {
                 let mut d = p - start;
                 if !moved && (d.hypot() < tol.max(1.0) || origs.is_empty()) {
@@ -730,6 +842,23 @@ impl Session {
                 }
                 return Ok(Value::Null);
             }
+            Drag::Warp { id, index, name, base, orig } => {
+                let v = {
+                    let st = self.doc()?;
+                    let Some(sh) = st.shape(id) else { return Ok(Value::Null) };
+                    let tr = deckcraft_render::shape_geometry(sh, orig.w, orig.h).text_rect;
+                    let hs = deckcraft_geom::warp::handles(&name, &base, tr);
+                    let Some(h) = hs.iter().find(|h| h.index == index) else { return Ok(Value::Null) };
+                    h.value_at(orig.affine().inverse() * p)
+                };
+                self.edit(|doc, sel| {
+                    let list = crate::shapes_mut(doc, sel).ok_or_else(|| cmd::bad("adjust", "no slide"))?;
+                    if let Some(sh) = deckcraft_model::find_shape_mut(list, id) {
+                        set_warp_adj(sh, &name, &base, index, v);
+                    }
+                    Ok(())
+                })?;
+            }
             Drag::Marquee { start, .. } => {
                 self.tool.marquee = Some(Rect::from_points(start, p));
             }
@@ -742,6 +871,13 @@ impl Session {
                     }
                     let s0 = self.glue_at(start, tol).map(|g| g.2).unwrap_or(start);
                     line_xfrm(s0, q, 0.0)
+                } else if matches!(&self.tool.kind, ToolKind::Shape { preset } if preset == DRAW_TABLE)
+                    && crate::cmd::table::table_at(self, &Value::Null, (start.x, start.y)).is_some()
+                {
+                    // The pencil inside a table draws a straight border, across or down.
+                    let q = if (p.x - start.x).abs() >= (p.y - start.y).abs() { Point::new(p.x, start.y) } else { Point::new(start.x, p.y) };
+                    let r = Rect::from_points(start, q);
+                    Xfrm::new(r.x0, r.y0, r.width(), r.height())
                 } else {
                     let mut r = Rect::from_points(start, p);
                     if mods.shift {
@@ -832,6 +968,18 @@ impl Session {
         self.tool.glue = None;
         let mut out = Value::Null;
         match drag {
+            Some(Drag::Guide { index }) => {
+                // Dropped off the slide: the guide is deleted.
+                let (_, pos) = self.tool.guide_drag.take().unwrap_or((index, 0.0));
+                let size = self.doc()?.doc.slide_size;
+                let vertical = self.doc()?.doc.guides.get(index).is_some_and(|g| g.vertical);
+                let limit = if vertical { size.width } else { size.height };
+                out = if pos < 0.0 || pos > limit {
+                    self.execute("guide.delete", &json!({"index": index}))?
+                } else {
+                    self.execute("guide.move", &json!({"index": index, "pos": pos}))?
+                };
+            }
             Some(Drag::Move { moved: false, enter_text: Some((id, at)), .. }) => {
                 // Plain click on text: caret at the click (in a table, in the clicked cell).
                 if self.edit_text_at(id, at)? {
@@ -869,6 +1017,16 @@ impl Session {
                 let preview = self.tool.preview.take();
                 let dragged = (p - start).hypot() > 2.0;
                 let res = match &kind {
+                    ToolKind::Shape { preset } if preset == DRAW_TABLE => {
+                        // Inside a table: split cells along the line. Elsewhere: a one-cell table.
+                        if crate::cmd::table::table_at(self, &Value::Null, (start.x, start.y)).is_some() {
+                            self.execute("table.drawLine", &json!({"from": [start.x, start.y], "to": [p.x, p.y]})).unwrap_or(Value::Null)
+                        } else if let Some(x) = preview.filter(|x| dragged && x.w >= 8.0 && x.h >= 8.0) {
+                            self.execute("insert.table", &json!({"rows": 1, "cols": 1, "rect": [x.x, x.y, x.w, x.h]}))?
+                        } else {
+                            Value::Null
+                        }
+                    }
                     ToolKind::Shape { preset } => {
                         let line = deckcraft_geom::preset::is_line_like(preset);
                         let rect = match preview.filter(|_| dragged) {
@@ -902,7 +1060,8 @@ impl Session {
                     }
                     _ => Value::Null,
                 };
-                if !self.tool.sticky {
+                // The table pencil stays on until you pick another tool, as in PowerPoint.
+                if !self.tool.sticky && !matches!(&kind, ToolKind::Shape { preset } if preset == DRAW_TABLE) {
                     self.tool.kind = ToolKind::Select;
                 }
                 out = res;
@@ -1027,7 +1186,8 @@ impl Session {
                 | Hit::Vertex { id, .. }
                 | Hit::Frame { id }
                 | Hit::TableColumn { id, .. }
-                | Hit::TableRow { id, .. },
+                | Hit::TableRow { id, .. }
+                | Hit::Warp { id, .. },
             ) => Some(*id),
             None => None,
         };
@@ -1064,7 +1224,7 @@ impl Session {
             || matches!(
                 self.hit_test(p, tol),
                 Some(
-                    Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::Frame { .. } | Hit::TableColumn { .. } | Hit::TableRow { .. }
+                    Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::Warp { .. } | Hit::Frame { .. } | Hit::TableColumn { .. } | Hit::TableRow { .. }
                 )
             )
         {
@@ -1246,6 +1406,22 @@ impl Session {
         })
     }
 
+    /// The drawing guide within `tol` of `p` (only while guides are shown).
+    pub fn guide_at(&self, p: Point, tol: f64) -> Option<usize> {
+        if !self.tool.guides_visible {
+            return None;
+        }
+        let st = self.active()?;
+        st.doc
+            .guides
+            .iter()
+            .enumerate()
+            .map(|(i, g)| (i, if g.vertical { (p.x - g.pos).abs() } else { (p.y - g.pos).abs() }))
+            .filter(|(_, d)| *d <= tol.max(2.0))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    }
+
     /// Smart guides: snap `r` edges/centres to the slide and other shapes. Returns the offset to
     /// apply and the guides to draw.
     fn snap_rect(&self, r: Rect, exclude: &[ShapeId], tol: f64, enabled: bool) -> (Vec2, Vec<Guide>) {
@@ -1264,6 +1440,15 @@ impl Session {
             (size.height / 2.0, Rect::new(0.0, size.height / 2.0, size.width, size.height / 2.0)),
             (size.height, Rect::new(0.0, size.height, size.width, size.height)),
         ];
+        if self.tool.guides_visible {
+            for g in &st.doc.guides {
+                if g.vertical {
+                    xs.push((g.pos, Rect::new(g.pos, 0.0, g.pos, size.height)));
+                } else {
+                    ys.push((g.pos, Rect::new(0.0, g.pos, size.width, g.pos)));
+                }
+            }
+        }
         for sh in st.shapes() {
             if exclude.contains(&sh.id) || sh.hidden {
                 continue;

@@ -459,8 +459,7 @@ impl Exporter<'_> {
             }
             let Some(font) = self.font(&run.face) else { continue };
             let n = run.glyphs.len();
-            let char_starts: Vec<usize> = text.char_indices().map(|(b, _)| b).chain(std::iter::once(text.len())).collect();
-            let one_to_one = char_starts.len() - 1 == n;
+            let ranges = glyph_text_ranges(&text, run.chars, &run.cells, n);
             let (x0, y0) = (run.glyphs[0].1, run.glyphs[0].2);
             let kg: Vec<KrillaGlyph> = run
                 .glyphs
@@ -468,13 +467,7 @@ impl Exporter<'_> {
                 .enumerate()
                 .map(|(gi, g)| {
                     let next = run.glyphs.get(gi + 1).map_or(g.1 + run.face.advance(g.0) * run.size / run.face.upem.max(1.0), |nx| nx.1);
-                    let range = if one_to_one {
-                        char_starts[gi]..char_starts[gi + 1]
-                    } else if gi == 0 {
-                        0..text.len()
-                    } else {
-                        text.len()..text.len()
-                    };
+                    let range = ranges.get(gi).cloned().unwrap_or(text.len()..text.len());
                     KrillaGlyph::new(GlyphId::new(g.0), ((next - g.1) / run.size) as f32, 0.0, ((g.2 - y0) / run.size) as f32, 0.0, range, None)
                 })
                 .collect();
@@ -601,6 +594,20 @@ impl Exporter<'_> {
         s.draw_text(Point::from_xy((pw - 72.0) as f32, (ph - 30.0) as f32), font, 9.0, &n.to_string(), false, TextDirection::Auto);
         s.set_fill(None);
     }
+}
+
+/// Byte range in `text` (the run's characters `chars`) of each of `n` glyphs, for the ToUnicode map.
+/// `cells` holds each glyph's shaping-cluster head (paragraph character index); a cluster runs to the
+/// next head in the run, so a ligature maps to all its characters and every glyph of a cluster shares
+/// its range (krilla then writes the text once).
+fn glyph_text_ranges(text: &str, chars: (usize, usize), cells: &[(usize, char)], n: usize) -> Vec<std::ops::Range<usize>> {
+    let starts: Vec<usize> = text.char_indices().map(|(b, _)| b).collect();
+    let byte = |ci: usize| ci.checked_sub(chars.0).and_then(|i| starts.get(i).copied()).unwrap_or(text.len());
+    let mut heads: Vec<usize> = cells.iter().map(|c| c.0).collect();
+    heads.sort_unstable();
+    heads.dedup();
+    let end = |ci: usize| heads.get(heads.partition_point(|&h| h <= ci)).copied().unwrap_or(chars.1);
+    (0..n).map(|gi| cells.get(gi).map_or(text.len()..text.len(), |&(ci, _)| byte(ci)..byte(end(ci)))).collect()
 }
 
 fn to_path(bp: &kurbo::BezPath) -> Option<krilla::geom::Path> {

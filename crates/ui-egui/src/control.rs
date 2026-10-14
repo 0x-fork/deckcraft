@@ -83,6 +83,7 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
             let now = ctx.input(|i| i.time);
             s.showing_value(n, aspect, ctx.content_rect(), now)
         }),
+        "animPreview": app.anim_preview_report().map(|(slide, time, duration)| json!({"slide": slide, "time": time, "duration": duration})),
         "documents": app.session.documents().iter().map(|d| json!({"title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
         "status": app.status.as_ref().map(|s| s.0.clone()),
         "perf": {"frameMs": app.perf.frame_ms, "renderMs": app.perf.render_ms, "fps": app.perf.fps},
@@ -141,6 +142,10 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
         }
         "ui.key" => {
             let Some(k) = s("key") else { return err("missing `key`") };
+            if app.anim_preview_active() && app.show.is_none() && matches!(k.to_ascii_lowercase().as_str(), "escape" | "esc") {
+                app.stop_anim_preview();
+                return ok(json!({"preview": false}));
+            }
             if let Some(show) = app.show.as_ref()
                 && !show.ended
                 && let Some(key) = key_from(k)
@@ -236,7 +241,11 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 };
             }
             if let Some(z) = p.get("zoom") {
-                app.ui.zoom = z.as_f64().map(|v| v as f32);
+                app.ui.zoom = z
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|v| v.clamp(*crate::ZOOM_RANGE.start(), *crate::ZOOM_RANGE.end()));
             }
             if let Some(d) = p.get("dark").and_then(Value::as_bool) {
                 let _ = app.run("view.dark", json!({"on": d}));
