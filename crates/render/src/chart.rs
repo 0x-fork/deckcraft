@@ -379,6 +379,8 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         }
     }
     let zero = to_v(0.0f64.clamp(min, max));
+    // Error bars, drawn over every series: (position across the value axis, from, to, cap length, cap).
+    let mut err_marks: Vec<(f64, f64, f64, f64, bool)> = vec![];
     if let Some(bk) = bar_kind {
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
@@ -420,6 +422,13 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 ctx.set_transform(m);
                 ctx.set_paint(color(series_fill(rctx, c, *si, Some(s)), 1.0));
                 ctx.fill_rect(&r.abs());
+                if let Some(e) = &s.error_bars {
+                    let (end, mid) = if horiz { (if v >= 0.0 { b } else { a }, r.center().y) } else { (if v >= 0.0 { b } else { a }, r.center().x) };
+                    if let Some((lo, hi)) = e.range(&s.values, i, end) {
+                        let (p0, p1) = if horiz { (to_v(lo), to_v(hi)) } else { (to_axis(sec, lo), to_axis(sec, hi)) };
+                        err_marks.push((mid, p0, p1, bar.min(base * 0.8) * 0.5, e.end_cap));
+                    }
+                }
                 if c.data_labels {
                     let t = c.data_label(s, s.values.get(i).copied().flatten().unwrap_or(0.0));
                     let lr = if horiz {
@@ -475,6 +484,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 }
                 _ => plot.x0 + band * (i as f64 + 0.5),
             };
+            if let Some((lo, hi)) = s.error_bars.as_ref().and_then(|e| e.range(&s.values, i, v)) {
+                err_marks.push((x, to_axis(sec, lo), to_axis(sec, hi), base * 0.4, s.error_bars.as_ref().is_some_and(|e| e.end_cap)));
+            }
             pts.push(Point::new(x, to_axis(sec, v)));
         }
         if pts.is_empty() {
@@ -510,6 +522,25 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 ctx.fill_path(&kurbo::Circle::new(*q, 3.5).to_path(0.1));
             }
         }
+    }
+    if !err_marks.is_empty() {
+        let mut p = BezPath::new();
+        for &(mid, a, b, cap, end_cap) in &err_marks {
+            // A horizontal bar chart's error bars run across, its value axis being horizontal.
+            let pt = |along: f64, across: f64| if horiz { Point::new(along, across) } else { Point::new(across, along) };
+            p.move_to(pt(a, mid));
+            p.line_to(pt(b, mid));
+            if end_cap {
+                for e in [a, b] {
+                    p.move_to(pt(e, mid - cap));
+                    p.line_to(pt(e, mid + cap));
+                }
+            }
+        }
+        ctx.set_transform(m);
+        ctx.set_paint(color(text_col, 1.0));
+        ctx.set_stroke(kurbo::Stroke::new(0.75));
+        ctx.stroke_path(&p);
     }
     // Axis line.
     let mut ax = BezPath::new();
