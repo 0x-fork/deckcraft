@@ -78,6 +78,7 @@ pub(crate) fn emphasis_persists(effect: &str) -> bool {
 
 fn uses_default_smoothing(effect: &str) -> bool {
     matches!(effect, "fly" | "float" | "rise" | "peek" | "lines" | "arcs" | "turns" | "shapes" | "loops" | "customPath")
+        || deckcraft_model::anim::preset_path(effect).is_some()
 }
 
 impl EffectSpec {

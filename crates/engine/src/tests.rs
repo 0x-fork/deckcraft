@@ -1523,3 +1523,26 @@ fn damaged_native_file_opens_as_repaired_copy() {
     assert_eq!(std::fs::read(dir.join("bad.deckcraft")).unwrap(), bad, "original untouched");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn motion_path_presets_have_paths_ids_and_round_trip() {
+    use deckcraft_model::anim::{ANIMATIONS, AnimClass, preset_path};
+    let paths: Vec<_> = ANIMATIONS.iter().filter(|a| a.2 == AnimClass::Path).collect();
+    // Preset ids identify the effect when PowerPoint's file is read back: no two share one.
+    let mut ids: Vec<u32> = paths.iter().map(|a| a.3).collect();
+    ids.sort_unstable();
+    let n = ids.len();
+    ids.dedup();
+    assert_eq!(ids.len(), n, "duplicate motion-path preset ids");
+    assert!(n >= 40, "{n} motion paths");
+    let mut s = session();
+    let id = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 50, 50]})).unwrap()["id"].clone();
+    s.execute("animation.set", &json!({"ids": [id], "effect": "heart", "class": "path"})).unwrap();
+    let a = s.doc().unwrap().doc.slides[s.doc().unwrap().selection.slide].animations[0].clone();
+    assert_eq!(a.path, preset_path("heart"));
+    let p = s.doc().unwrap().doc.as_ref().clone();
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&p).unwrap()).unwrap();
+    let b = back.slides.iter().flat_map(|sl| &sl.animations).next().unwrap();
+    assert_eq!((b.effect.as_str(), b.class), ("heart", AnimClass::Path));
+    assert!(b.path.as_deref().is_some_and(|p| p.contains('L')));
+}
