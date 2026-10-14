@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (interactive-deck clicks in the slide show; previous: minor (3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101; previous: minor, core-workflow alpha gate added; stage stays alpha; before that: major, first itemized gap list; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -159,6 +159,20 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### Animation Pane, effect count and preview
 Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a **beta blocker**.
 
+### Interactive decks: media-action links, audio-triggered effects and click boxes
+- **Evidence:** the slide show plays click-triggered animations, keeps each slide's state across
+  visits and ignores shapes an animation has hidden (`crates/anim/src/interact.rs`). Still open,
+  found by running three classroom game decks (Jeopardy-style boards, hide-and-reveal, score
+  counters): a click on a shape whose action is "play sound" (`ppaction://media`, 126 and 486
+  shapes in two decks) does nothing; triggers that start on `onStopAudio` or `begin` conditions are
+  not read as triggers; click boxes are the shape's bounding box (a hexagon's corners count) and do
+  not follow a shape that a motion path has moved; the PPTX writer turns every "on click" after the
+  first effect of a trigger into "after previous", so a trigger with several click steps saved from
+  DeckCraft plays all of them at once.
+- **Impact:** games built around sound effects on buttons, or around a button that counts up with
+  repeated clicks, lose that part when they are saved from DeckCraft or played in it.
+- **Estimate:** 4–8 h.
+
 ### Notes and Handout masters
 - **Evidence:** checklist row missing; PPTX writes a notes master but there's no view to edit it,
   and no handout master at all.
@@ -257,6 +271,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
+| 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |
 | 2026-10-12 | minor | Text warps render (all 40 presets, adjusts round-trip); the warp gap is now the gallery, command and handles |

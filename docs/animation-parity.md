@@ -1,6 +1,6 @@
 # Transitions and animations: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** major (transitions measured frame by frame against PowerPoint for Windows' video export and retuned; previous: created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (interactive-deck clicks in the slide show; previous: major (transitions measured frame by frame against PowerPoint for Windows' video export and retuned; previous: created)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Transitions and animations are what make a deck a presentation, and the part of PowerPoint people
 notice first when it's missing. Scores roll up into [target-app-parity.md](target-app-parity.md)
@@ -67,7 +67,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Effect Options (direction, sequence by paragraph) | yes | yes |
 | Effect dialog: sound, after-animation dim/hide, animate text by word/letter, smooth start/end, bounce end, repeat, rewind | yes | partly; rewind lost on PPTX save (#77) |
 | By-paragraph text builds, sub-bullets follow parents | yes | yes |
-| Triggers (on click of a shape) | yes | yes |
+| Triggers (on click of a shape) | yes | yes; played in the show: a step per click, the sequence starts over after its last step, a click completes a playing step |
 | Triggers on a media bookmark | yes | no |
 | Animation Painter | yes | yes (#54) |
 | Animation Pane: list, reorder, remove | yes | yes |
@@ -94,4 +94,5 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-13 | major | Transitions measured frame by frame against PowerPoint's video export and retuned (mean diff 35.7 → 15.0); PowerPoint's XML defaults and option meanings; new options |
+| 2026-10-13 | minor | Triggers now play in the slide show (they were read and written but never started), effects of different triggers apply in the order they were clicked |
 | 2026-10-10 | major | Created: 48/48 transitions, 64 of ~190 animation effects, pane and option depth, estimates |

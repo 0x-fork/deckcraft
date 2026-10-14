@@ -1711,3 +1711,54 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
     let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
     assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
 }
+
+#[test]
+fn placed_shapes_give_the_click_boxes_of_a_slide_in_drawing_order() {
+    use deckcraft_model::text::{Action, Hyperlink};
+    let link = Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: false };
+    let rect = |id: u32, x: f64, click: Option<Hyperlink>| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(x, 50.0, 100.0, 40.0)),
+        click,
+        ..Default::default()
+    };
+    let group = Shape {
+        id: ShapeId(10),
+        xfrm: Some(Xfrm::new(300.0, 50.0, 200.0, 40.0)),
+        click: Some(link.clone()),
+        kind: ShapeKind::Group { children: vec![rect(11, 0.0, None), rect(12, 100.0, None)], child: Xfrm::new(0.0, 0.0, 200.0, 40.0) },
+        ..Default::default()
+    };
+    let hidden = Shape { hidden: true, ..rect(13, 0.0, Some(link.clone())) };
+    let p = deck_with(vec![rect(1, 0.0, None), rect(2, 150.0, Some(link.clone())), hidden, group]);
+    let placed = place_slide(&p, 0);
+    // Back to front, a group before its children; the hidden shape is not there.
+    let ids: Vec<u32> = placed.shapes.iter().map(|s| s.id.0).collect();
+    assert_eq!(ids, vec![1, 2, 10, 11, 12]);
+    // Only the shapes with an action carry a link.
+    let linked: Vec<u32> = placed.shapes.iter().filter(|s| s.link.is_some()).map(|s| s.id.0).collect();
+    assert_eq!(linked, vec![2, 10]);
+    // The children know their group, whose box covers them.
+    let group = &placed.shapes[2];
+    assert!(group.is_group && group.parent.is_none());
+    for child in &placed.shapes[3..] {
+        assert_eq!(child.parent, Some(2));
+        assert!(child.rect.x0 >= group.rect.x0 - 0.01 && child.rect.x1 <= group.rect.x1 + 0.01);
+    }
+    // Shape actions come out as links owned by their shape, not as text links.
+    assert!(placed.links.iter().all(|l| !l.text));
+    assert_eq!(placed.links.iter().map(|l| l.shape.0).collect::<Vec<_>>(), vec![2, 10]);
+}
+
+#[test]
+fn a_text_hyperlink_belongs_to_the_shape_that_holds_the_text() {
+    use deckcraft_model::text::{Action, Hyperlink};
+    let mut body = TextBody::from_text("click here");
+    for r in &mut body.paragraphs[0].runs {
+        r.props.link = Some(Hyperlink { action: Action::FirstSlide, tooltip: String::new(), highlight_click: false });
+    }
+    let sh = Shape { id: ShapeId(7), xfrm: Some(Xfrm::new(100.0, 100.0, 300.0, 60.0)), text: Some(body), ..Default::default() };
+    let placed = place_slide(&deck_with(vec![sh]), 0);
+    assert!(placed.links.iter().any(|l| l.text && l.shape == ShapeId(7)));
+    assert!(placed.shapes.iter().all(|s| s.link.is_none()), "a text link is not the shape's own action");
+}
