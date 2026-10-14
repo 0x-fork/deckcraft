@@ -1170,7 +1170,8 @@ pub fn symbol_char(face: &FontFace, font: &str, c: char) -> Option<char> {
     Some(symbol_font_char(face, &s, Some(font)).unwrap_or_else(|| map_symbol_bullet(&s, Some(font)).chars().next().unwrap_or('•')))
 }
 
-fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
+/// The Unicode bullet for a symbol-font bullet character (Wingdings, Symbol), or the character.
+pub fn map_symbol_bullet(c: &str, font: Option<&str>) -> String {
     let f = font.unwrap_or("").to_ascii_lowercase();
     let first = c.chars().next().unwrap_or('•');
     if f.starts_with("webdings") {

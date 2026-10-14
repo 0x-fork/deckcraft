@@ -32,7 +32,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("slide.hide", "Hide Slide", ["Slide Show", "Set Up"], None, "{index?, hidden?: bool}", has_slide, hide),
         cmd!("slide.layout", "Layout", ["Home", "Slides"], None, "{layout: name or kind, index?}", has_slide, set_layout),
         cmd!("slide.reset", "Reset", ["Home", "Slides"], None, "{index?}", has_slide, reset),
-        cmd!("slide.notes", "Notes", ["View"], None, "{text, index?}", has_slide, notes),
+        cmd!(
+            "slide.notes",
+            "Notes",
+            ["View"],
+            None,
+            "{text | body: formatted notes (as in slide.inspect's notesBody), index?} (text as typed: untouched notes keep their formatting)",
+            has_slide,
+            notes
+        ),
         cmd!("slide.rename", "Rename Slide", [], None, "{name, index?}", has_slide, rename),
         cmd!("section.add", "Add Section", ["Home", "Slides", "Section"], None, "{name?, at?: slide index}", has_slide, section_add),
         cmd!("section.rename", "Rename Section", ["Home", "Slides", "Section"], None, "{index, name}", has_slide, section_rename),
@@ -468,10 +476,20 @@ fn reset(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn notes(s: &mut Session, p: &Value) -> Result<Value> {
     let i = index_of(s, p)?;
+    // Formatted notes as a whole (the notes editors), or text: then only what was retyped
+    // changes, so bold, levels and bullets around it survive.
+    let body = match p.get("body") {
+        Some(b) => Some(serde_json::from_value::<TextBody>(b.clone()).map_err(|e| bad("slide.notes", format!("invalid `body`: {e}")))?),
+        None => None,
+    };
     let text = str_param(p, "text").unwrap_or("").to_string();
     s.edit(|doc, _| {
         if let Some(sl) = doc.slides.get_mut(i) {
-            Arc::make_mut(sl).notes = TextBody::from_text(&text);
+            let notes = &mut Arc::make_mut(sl).notes;
+            match body {
+                Some(b) => *notes = b,
+                None => deckcraft_model::edit::replace_text(notes, &text),
+            }
         }
         Ok(())
     })?;

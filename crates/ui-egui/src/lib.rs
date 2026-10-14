@@ -18,6 +18,7 @@ pub mod fillui;
 pub mod icons;
 pub mod media;
 pub mod menus;
+pub mod notes;
 pub mod panes;
 pub mod qat;
 pub mod ribbon;
@@ -277,7 +278,7 @@ pub struct SlideApp {
     pub last_recovery: f64,
     /// Quit was confirmed (changes saved or discarded): let the window close.
     pub quit_confirmed: bool,
-    pub(crate) notes_buf: (u64, usize, String),
+    pub(crate) notes_buf: (u64, usize, notes::Draft),
     /// Faces borrowed from the font database for text the interface fonts can't draw (#101).
     pub ui_fonts: uifonts::UiFonts,
     /// Thumbnail pane drag (slide index, current drop index).
@@ -334,7 +335,7 @@ impl SlideApp {
             last_time: 0.0,
             last_recovery: 0.0,
             quit_confirmed: false,
-            notes_buf: (0, usize::MAX, String::new()),
+            notes_buf: (0, usize::MAX, notes::Draft::default()),
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
@@ -2002,5 +2003,91 @@ mod tests {
         let d = harness.state().session.active().unwrap();
         let body = d.doc.slides[0].shapes[0].text.as_ref().unwrap();
         assert_eq!(body.paragraphs[0].runs[0].props.lang.as_deref(), Some("fr-FR"));
+    }
+
+    /// Speaker notes keep their formatting when edited in the notes pane: typing into a bold
+    /// heading, Enter in a bulleted point, then saving as .pptx and reopening.
+    #[test]
+    fn editing_notes_in_the_pane_keeps_their_formatting() {
+        use deckcraft_model::text::{Bullet, ParaProps, Paragraph, Run, RunProps, TextBody};
+        let point = |runs: Vec<Run>| Paragraph {
+            level: 1,
+            props: ParaProps {
+                margin_left: Some(22.5),
+                indent: Some(-22.5),
+                bullet: Some(Bullet::Char { char: "§".into() }),
+                bullet_font: Some("Wingdings".into()),
+                ..Default::default()
+            },
+            runs,
+            ..Default::default()
+        };
+        let bold = RunProps { bold: Some(true), ..Default::default() };
+        let notes = TextBody {
+            paragraphs: vec![
+                Paragraph { runs: vec![Run::with("Metodický prehľad", bold.clone())], ..Default::default() },
+                Paragraph::new("Žiaci pracujú vo dvojiciach."),
+                point(vec![Run::with("Cieľ: ", bold.clone()), Run::new("vysvetliť cyklus")]),
+                point(vec![Run::new("Reflexia")]),
+                Paragraph::new("Pomôcky: počítač"),
+            ],
+            ..Default::default()
+        };
+        let mut session = Session::with_new();
+        session.execute("slide.notes", &json!({"index": 0, "body": notes})).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, Services::default()),
+        );
+        harness.run_steps(2);
+        let id = egui::Id::new("notes_edit");
+        let caret = |h: &mut egui_kittest::Harness<'_, SlideApp>, at: usize| {
+            let mut st = egui::TextEdit::load_state(&h.ctx, id).unwrap_or_default();
+            st.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+            egui::TextEdit::store_state(&h.ctx, id, st);
+        };
+        let chars = |s: &str, of: &str| s.find(of).map(|b| s[..b].chars().count() + of.chars().count()).unwrap();
+        let text = notes.text();
+        harness.ctx.memory_mut(|m| m.request_focus(id));
+        harness.run_steps(1);
+        // Type into the bold heading.
+        caret(&mut harness, chars(&text, "prehľad"));
+        harness.run_steps(1);
+        harness.event(egui::Event::Text(" hodiny".into()));
+        harness.run_steps(1);
+        // Enter after a bulleted point, and type the next one.
+        let text = text.replacen("prehľad", "prehľad hodiny", 1);
+        caret(&mut harness, chars(&text, "cyklus"));
+        harness.run_steps(1);
+        harness.key_press(egui::Key::Enter);
+        harness.event(egui::Event::Text("Nový bod".into()));
+        harness.run_steps(1);
+        // Leave the field: the notes are saved.
+        harness.ctx.memory_mut(|m| m.surrender_focus(id));
+        harness.run_steps(2);
+        let check = |n: &TextBody| {
+            assert_eq!(
+                n.text(),
+                "Metodický prehľad hodiny\nŽiaci pracujú vo dvojiciach.\nCieľ: vysvetliť cyklus\nNový bod\nReflexia\nPomôcky: počítač"
+            );
+            assert_eq!(n.paragraphs[0].runs.len(), 1, "{n:?}");
+            assert_eq!(n.paragraphs[0].runs[0].props.bold, Some(true));
+            assert_eq!(n.paragraphs[1].props, ParaProps::default());
+            assert_eq!(n.paragraphs[2].runs[0].props.bold, Some(true), "the bold label");
+            assert_eq!(n.paragraphs[2].runs[1].props.bold, None);
+            for i in [2, 3, 4] {
+                assert_eq!((n.paragraphs[i].level, &n.paragraphs[i].props), (1, &notes.paragraphs[2].props), "point {i}");
+            }
+            assert_eq!((n.paragraphs[5].level, &n.paragraphs[5].props), (0, &ParaProps::default()));
+        };
+        check(&harness.state().session.active().unwrap().doc.slides[0].notes);
+        // Saved as .pptx and reopened.
+        let s = &mut harness.state_mut().session;
+        let data = s.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].clone();
+        s.execute("file.openBytes", &json!({"name": "notes.pptx", "data": data})).unwrap();
+        check(&s.active().unwrap().doc.slides[0].notes);
     }
 }

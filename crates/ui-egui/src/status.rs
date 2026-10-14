@@ -111,9 +111,18 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
     if st.selection.target != deckcraft_engine::Target::Slides {
         return;
     }
-    let idx = st.selection.slide;
-    let uid = st.uid;
-    let current = st.current_slide().map(|s| s.notes_text()).unwrap_or_default();
+    let (idx, uid) = (st.selection.slide, st.uid);
+    // Save an edited draft once the field has lost focus or another slide is shown (before
+    // anything reloads it), to the slide it was written on.
+    let id = egui::Id::new("notes_edit");
+    let focused = ui.ctx().memory(|m| m.has_focus(id));
+    if app.notes_buf.2.edited && (!focused || app.notes_buf.0 != uid || app.notes_buf.1 != idx) {
+        app.notes_buf.2.edited = false;
+        if app.notes_buf.0 == uid {
+            let _ = app.run("slide.notes", json!({"body": app.notes_buf.2.body, "index": app.notes_buf.1}));
+        }
+    }
+    let notes = app.session.active().and_then(|st| st.current_slide()).map(|s| s.notes.clone()).unwrap_or_default();
     egui::Panel::bottom("notes")
         .resizable(true)
         .default_size(app.ui.notes_height)
@@ -124,42 +133,26 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
             let rect = ui.max_rect();
             ui.painter()
                 .line_segment([pos2(rect.min.x - 8.0, rect.min.y - 6.0), pos2(rect.max.x + 8.0, rect.min.y - 6.0)], Stroke::new(1.0, t.separator));
-            // Keep a local buffer per slide; commit when it changes and the field loses focus.
-            let id = egui::Id::new("notes_edit");
-            let focused = ui.ctx().memory(|m| m.has_focus(id));
-            // Focus can leave in the frame before the field is drawn (Escape, a click on a
-            // thumbnail): what was typed is still committed, to the slide it was typed for.
-            let was_focused = ui.ctx().memory(|m| m.had_focus_last_frame(id));
-            if app.notes_buf.0 != uid || app.notes_buf.1 != idx {
-                let (old_uid, old_idx, typed) = std::mem::replace(&mut app.notes_buf, (uid, idx, current.clone()));
-                let old = app.session.active().and_then(|d| d.doc.slides.get(old_idx)).map(|s| s.notes_text());
-                if was_focused && old_uid == uid && old.is_some_and(|o| o != typed) {
-                    let _ = app.run("slide.notes", json!({"text": typed, "index": old_idx}));
-                }
+            // Keep a local draft per slide, following the notes while the field isn't focused.
+            if app.notes_buf.0 != uid || app.notes_buf.1 != idx || (!focused && app.notes_buf.2.body != notes) {
+                app.notes_buf = (uid, idx, crate::notes::Draft::new(&notes));
             }
-            if !focused && !was_focused && app.notes_buf.2 != current {
-                app.notes_buf.2 = current.clone();
-            }
-            let mut buf = app.notes_buf.2.clone();
+            let mut draft = app.notes_buf.2.clone();
+            let look = crate::notes::Look { size: 13.0, color: None };
             // Long notes scroll inside the pane instead of spilling over the slide (#221).
             let r = egui::ScrollArea::vertical()
                 .max_height(ui.available_height())
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut buf)
-                            .id(id)
-                            .hint_text("Click to add notes")
-                            .frame(egui::Frame::NONE)
-                            .desired_width(f32::INFINITY)
-                            .desired_rows(2)
-                            .font(theme::font(13.0)),
-                    )
+                    crate::notes::editor(ui, &mut draft, &look, |e| {
+                        e.id(id).hint_text("Click to add notes").frame(egui::Frame::NONE).desired_width(f32::INFINITY).desired_rows(2)
+                    })
                 })
                 .inner;
-            app.notes_buf.2 = buf.clone();
-            if r.lost_focus() && buf != current {
-                let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));
+            if r.lost_focus() && draft.edited {
+                draft.edited = false;
+                let _ = app.run("slide.notes", json!({"body": draft.body, "index": idx}));
             }
+            app.notes_buf.2 = draft;
         });
 }
