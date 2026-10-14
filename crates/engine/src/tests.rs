@@ -1679,3 +1679,57 @@ fn undo_history_is_capped_by_memory_as_well_as_steps() {
     }
     assert_eq!(s.doc().unwrap().history.undo.len(), 120);
 }
+
+#[test]
+fn artistic_effects_apply_change_remove_and_round_trip() {
+    use deckcraft_model::ShapeKind;
+    let mut img = image::RgbaImage::new(40, 30);
+    for (x, y, p) in img.enumerate_pixels_mut() {
+        *p = if x < 20 { image::Rgba([200, 30, 30, 255]) } else { image::Rgba([20, 20, 220, if y < 5 { 0 } else { 255 }]) };
+    }
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.picture", &json!({"name": "a.png", "data": cmd::base64_encode(&png)})).unwrap();
+    let fill = |s: &Session| match &s.doc().unwrap().selected_shapes()[0].kind {
+        ShapeKind::Picture { fill } => fill.clone(),
+        k => panic!("{k:?}"),
+    };
+    let original = fill(&s).media;
+    assert!(s.execute("picture.artisticEffect", &json!({"effect": "artisticBogus"})).is_err());
+    // Every effect draws something of the same size and keeps transparency.
+    for (e, _) in cmd::artistic::EFFECTS {
+        s.execute("picture.artisticEffect", &json!({"effect": e})).unwrap();
+        let f = fill(&s);
+        assert_eq!(f.artistic.as_ref().map(|a| (a.effect.as_str(), a.original)), Some((*e, original)));
+        assert_ne!(f.media, original);
+        let data = s.doc().unwrap().doc.media(f.media).unwrap().data.clone();
+        let out = image::load_from_memory(&data).unwrap().to_rgba8();
+        assert_eq!(out.dimensions(), (40, 30));
+        assert_eq!(out.get_pixel(30, 1)[3], 0, "{e}");
+    }
+    // A pencil sketch is grey.
+    s.execute("picture.artisticEffect", &json!({"effect": "artisticPencilGrayscale"})).unwrap();
+    let data = s.doc().unwrap().doc.media(fill(&s).media).unwrap().data.clone();
+    let out = image::load_from_memory(&data).unwrap().to_rgba8();
+    assert!(out.pixels().all(|p| p[0] == p[1] && p[1] == p[2]));
+    // Saved and reopened, the effect and the original are both there.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    let mut t = Session::new();
+    t.execute("file.openBytes", &json!({"name": "a.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let back = t.doc().unwrap().doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| match &sh.kind {
+        ShapeKind::Picture { fill } => Some(fill.clone()),
+        _ => None,
+    });
+    let back = back.unwrap();
+    let art = back.artistic.clone().unwrap();
+    assert_eq!(art.effect, "artisticPencilGrayscale");
+    assert_eq!(*t.doc().unwrap().doc.media(art.original).unwrap().data, png);
+    // None (and Reset Picture) puts the original back.
+    s.execute("picture.artisticEffect", &json!({"effect": "none"})).unwrap();
+    assert_eq!((fill(&s).media, fill(&s).artistic), (original, None));
+    s.execute("picture.artisticEffect", &json!({"effect": "artisticBlur"})).unwrap();
+    s.execute("picture.reset", &json!({})).unwrap();
+    assert_eq!((fill(&s).media, fill(&s).artistic), (original, None));
+}
