@@ -198,11 +198,18 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
         if let Some(v) = g.child_val("varyColors") {
             c.vary_colors = v == "1" || v == "true";
         }
+        // A bar group without c:gapWidth / c:overlap takes the schema's defaults (150 %, 0 %),
+        // not the 219 % / -27 % PowerPoint writes into its new charts.
+        let bar_group = g.is("barChart") || g.is("bar3DChart");
         if let Some(v) = g.child_val("gapWidth").and_then(|v| v.parse::<f64>().ok()) {
             c.gap_width = (v / 100.0).clamp(0.0, 5.0);
+        } else if bar_group {
+            c.gap_width = 1.5;
         }
         if let Some(v) = g.child_val("overlap").and_then(|v| v.parse::<f64>().ok()) {
             c.overlap = (v / 100.0).clamp(-1.0, 1.0);
+        } else if bar_group {
+            c.overlap = 0.0;
         }
         if let Some(v) = g.child_val("holeSize").and_then(|v| v.parse::<f64>().ok()) {
             c.hole_size = (v / 100.0).clamp(0.0, 0.9);
@@ -326,6 +333,8 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
     // the chart): the axes' and legend's, else the whole chart's; the title's own.
     let chart_size = text_size(root.child("txPr"));
     c.text_size = [val_ax, cat_ax, ch.child("legend")].into_iter().flatten().find_map(|e| text_size(e.child("txPr"))).or(chart_size);
+    // Text colour likewise: the axes' and legend's, else the whole chart's.
+    c.text_color = [val_ax, cat_ax, ch.child("legend"), Some(root)].into_iter().flatten().find_map(|e| text_color(e.child("txPr")));
     c.title_size = ch.child("title").and_then(|t| text_size(t.child("tx").and_then(|x| x.child("rich"))).or_else(|| text_size(t.child("txPr"))));
     Some(c)
 }
@@ -355,6 +364,27 @@ fn trendline(e: &El) -> Option<Trendline> {
         disp_eq: e.child("dispEq").and_then(|d| d.bool("val")).unwrap_or(false),
         disp_r_sqr: e.child("dispRSqr").and_then(|d| d.bool("val")).unwrap_or(false),
     })
+}
+
+/// The colour of the first `a:defRPr` or `a:rPr` with a solid fill under `e`.
+fn text_color(e: Option<&El>) -> Option<deckcraft_model::ColorRef> {
+    fn rec(e: &El, depth: usize) -> Option<deckcraft_model::ColorRef> {
+        if depth > 8 {
+            return None;
+        }
+        for c in e.elements() {
+            if (c.is("defRPr") || c.is("rPr"))
+                && let Some(Fill::Solid { color }) = simple_fill(Some(c))
+            {
+                return Some(color);
+            }
+            if let Some(v) = rec(c, depth + 1) {
+                return Some(v);
+            }
+        }
+        None
+    }
+    rec(e?, 0)
 }
 
 /// The size in points of the first `a:defRPr` or `a:rPr` with one under `e` (`sz` in hundredths).
@@ -473,6 +503,16 @@ mod tests {
         assert_eq!(fmt("").as_deref(), Some("#,##0"));
         assert_eq!(fmt(r#"<c:numFmt formatCode="General" sourceLinked="1"/>"#).as_deref(), Some("#,##0"));
         assert_eq!(fmt(r#"<c:numFmt formatCode="0.0" sourceLinked="0"/>"#).as_deref(), Some("0.0"));
+    }
+
+    #[test]
+    fn text_colour_is_read_from_the_axes() {
+        // LibreOffice's templates set light axis text for dark slides on the axes' c:txPr.
+        let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:defRPr></a:pPr></a:p></c:txPr></c:catAx><c:valAx><c:axId val="2"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml.as_bytes()).unwrap();
+        assert_eq!(c.text_color, Some(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255))));
+        // No c:gapWidth / c:overlap: the schema's 150 % and 0 %.
+        assert_eq!((c.gap_width, c.overlap), (1.5, 0.0));
     }
 
     #[test]

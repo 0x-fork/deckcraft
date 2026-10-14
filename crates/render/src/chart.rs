@@ -36,6 +36,43 @@ pub(crate) fn series_fill(ctx: &Ctx, c: &Chart, i: usize, s: Option<&deckcraft_m
     }
 }
 
+/// The fill of point `k` of a series: its own (`c:dPt`) where the file gives one, else the series'.
+fn point_fill(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series, k: usize) -> Rgba {
+    match s.point_fills.iter().find(|(p, _)| *p == k).map(|(_, f)| f) {
+        Some(Fill::Solid { color: cc }) => ctx.color(cc, None),
+        _ => series_fill(ctx, c, i, Some(s)),
+    }
+}
+
+fn polyline(pts: &[Point]) -> BezPath {
+    let mut p = BezPath::new();
+    for (k, q) in pts.iter().enumerate() {
+        if k == 0 {
+            p.move_to(*q);
+        } else {
+            p.line_to(*q);
+        }
+    }
+    p
+}
+
+/// A smoothed line (`c:smooth`) through `pts`: a Catmull-Rom spline as cubic Béziers, the curve
+/// PowerPoint draws, passing through every point.
+pub(crate) fn smooth_path(pts: &[Point]) -> BezPath {
+    let mut p = BezPath::new();
+    let Some(first) = pts.first() else { return p };
+    p.move_to(*first);
+    for k in 0..pts.len() - 1 {
+        let p0 = pts[k.saturating_sub(1)];
+        let (p1, p2) = (pts[k], pts[k + 1]);
+        let p3 = pts[(k + 2).min(pts.len() - 1)];
+        let c1 = p1 + (p2 - p0) / 6.0;
+        let c2 = p2 - (p3 - p1) / 6.0;
+        p.curve_to(c1, c2, p2);
+    }
+    p
+}
+
 /// A line series' colour: its line's own (where PowerPoint keeps it), else its fill's, else the
 /// palette's.
 pub(crate) fn series_line(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series) -> Rgba {
@@ -450,10 +487,15 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
         let ns = bars.len().max(1);
+        // Gap width and overlap are fractions of one bar's width: a category's band holds its bars
+        // (overlapping by `overlap` of a bar between neighbours) plus one gap.
         let gap = c.gap_width.clamp(0.0, 5.0);
-        let group = band / (1.0 + gap);
         let stacked = bk.stacked();
-        let bar = if stacked { group } else { group / ns as f64 };
+        let ov = if stacked { 1.0 } else { c.overlap.clamp(-1.0, 1.0) };
+        let n = ns as f64;
+        let bar = band / (n - (n - 1.0) * ov + gap);
+        let step = bar * (1.0 - ov);
+        let group = bar + step * (n - 1.0);
         for i in 0..ncat {
             let mut pos_acc = 0.0;
             let mut neg_acc = 0.0;
@@ -465,7 +507,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             for (bi, (si, s)) in bars.iter().enumerate() {
                 let sec = c.on_secondary(s);
                 let v = s.values.get(i).copied().flatten().unwrap_or(0.0) / total;
-                let start = band * (i as f64 + back) + (band - group) / 2.0 + if stacked { 0.0 } else { bar * bi as f64 };
+                let start = band * (i as f64 + back) + (band - group) / 2.0 + if stacked { 0.0 } else { step * bi as f64 };
                 let (a, b) = if waterfall {
                     c.waterfall_bars().get(i).copied().unwrap_or_default()
                 } else if stacked {
@@ -499,7 +541,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     };
                     series_color(rctx, c, slot)
                 } else {
-                    series_fill(rctx, c, *si, Some(s))
+                    point_fill(rctx, c, *si, s, i)
                 };
                 ctx.set_transform(m);
                 ctx.set_paint(color(fill, 1.0));
@@ -579,14 +621,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
         if pts.is_empty() {
             continue;
         }
-        let mut p = BezPath::new();
-        for (k, q) in pts.iter().enumerate() {
-            if k == 0 {
-                p.move_to(*q);
-            } else {
-                p.line_to(*q);
-            }
-        }
+        let p = if s.smooth && !area_kind && pts.len() > 2 { smooth_path(&pts) } else { polyline(&pts) };
         ctx.set_transform(m);
         if area_kind {
             let mut a = p.clone();
