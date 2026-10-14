@@ -276,7 +276,22 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
     let by_id = |id: &Option<String>| pa.children_named("valAx").find(|a| id.is_some() && a.child_val("axId") == id.as_deref());
     let val_ax = by_id(&primary_val).or_else(|| pa.children_named("valAx").find(vertical)).or_else(|| pa.children_named("valAx").last());
     let num = |a: &El, k: &str| a.child_val(k).and_then(|v| v.parse::<f64>().ok()).filter(|v| v.is_finite());
-    let format_code = |a: &El| a.child("numFmt").and_then(|n| n.attr("formatCode")).map(str::to_string);
+    // An axis' number format: its own unless linked to the source (`sourceLinked="1"`, or no
+    // c:numFmt at all), in which case the data's format of the first series plotted on it.
+    let source_format = |ax: &El| {
+        let id = ax.child_val("axId");
+        pa.elements()
+            .filter(|g| g.children_named("axId").any(|a| a.attr("val") == id))
+            .flat_map(|g| g.children_named("ser"))
+            .find_map(|s| {
+                s.child("val").or_else(|| s.child("yVal")).and_then(|v| v.find("numCache")).and_then(|c| c.child("formatCode")).map(|f| f.text())
+            })
+            .filter(|f| !f.is_empty() && f != "General")
+    };
+    let format_code = |a: &El| match a.child("numFmt") {
+        Some(n) if n.attr("sourceLinked") != Some("1") => n.attr("formatCode").map(str::to_string),
+        n => source_format(a).or_else(|| n.and_then(|n| n.attr("formatCode")).map(str::to_string)),
+    };
     let deleted = |a: &El| a.child("delete").and_then(|d| d.bool("val")) == Some(true);
     if c.kind == ChartType::Combo && c.series.iter().any(|s| s.secondary_axis) {
         let primary_id = val_ax.and_then(|a| a.child_val("axId"));
@@ -441,6 +456,20 @@ mod tests {
             .replace("<c:axId val=\"3\"/><c:axId val=\"4\"/></c:lineChart>", "<c:axId val=\"1\"/><c:axId val=\"2\"/></c:lineChart>");
         let c = read_chart_xml(single.as_bytes()).unwrap();
         assert!(c.series.iter().all(|s| !s.secondary_axis));
+    }
+
+    #[test]
+    fn linked_axis_formats_come_from_the_data() {
+        // No c:numFmt on the value axis, or a source-linked one: the series' own format.
+        let xml = |ax_fmt: &str| {
+            format!(
+                r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:formatCode>#,##0</c:formatCode><c:ptCount val="1"/><c:pt idx="0"><c:v>1200</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/></c:catAx><c:valAx><c:axId val="2"/>{ax_fmt}<c:axPos val="l"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#
+            )
+        };
+        let fmt = |x: &str| read_chart_xml(xml(x).as_bytes()).unwrap().y_format;
+        assert_eq!(fmt("").as_deref(), Some("#,##0"));
+        assert_eq!(fmt(r#"<c:numFmt formatCode="General" sourceLinked="1"/>"#).as_deref(), Some("#,##0"));
+        assert_eq!(fmt(r#"<c:numFmt formatCode="0.0" sourceLinked="0"/>"#).as_deref(), Some("0.0"));
     }
 
     #[test]
