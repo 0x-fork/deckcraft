@@ -39,7 +39,7 @@ perspective-correct subdivided meshes.
 |---|---|---|
 | Effect Options per transition | yes | yes |
 | Duration, advance on click / after time, Apply To All | yes | yes |
-| Transition sounds | yes | **no** (the model has the field; no picker, no playback) |
+| Transition sounds | yes | partly: Transitions › Sound › Other Sound… embeds a file, it plays as the slide comes in and round-trips; no built-in sounds, Stop Previous Sound or Loop Until Next Sound |
 | Preview in the editor | yes | yes |
 | Morph: objects move, resize, recolour | yes | yes |
 | Morph: Words and Characters | yes | yes (#5) |
@@ -84,7 +84,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Animation Pane timeline, preview from selected, effect dialog depth | 5–8 |
 | The remaining ~126 effects (most are parameter variations of existing ones) | 3–6 |
 | Rewind and other effect options on round trip (#77) | 1–2 |
-| Transition sounds | 1–2 |
+| Transition sounds: built-in sounds, Stop Previous Sound, Loop Until Next Sound | 1–2 |
 | Morph across pictures, `!!` names, align once per transition (#67) | 2–4 |
 | Cloth, paper and particle transitions as real meshes (Curtains, Peel Off, Page Curl, Airplane, Origami, Vortex, Shred, Honeycomb) | 4–8 |
 | **Total** | **~16–30** (the Transitions and Animations rows of the feature table; part of the Features dimension's 140–240 h) |

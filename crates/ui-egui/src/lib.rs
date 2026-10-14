@@ -619,6 +619,13 @@ impl SlideApp {
         Ok(())
     }
 
+    /// Transitions › Sound › Other Sound…: pick an audio file for the selected slides.
+    pub(crate) fn pick_transition_sound(&mut self) {
+        if self.services.pick_open.is_some() {
+            self.pick_and_insert("audio", "transition.sound");
+        }
+    }
+
     fn pick_and_insert(&mut self, purpose: &str, cmd: &str) {
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick(purpose) {

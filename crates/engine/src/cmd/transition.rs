@@ -30,6 +30,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_slide,
             timing
         ),
+        cmd!(
+            "transition.sound",
+            "Sound",
+            ["Transitions", "Timing"],
+            None,
+            "{path? | data: base64, name?; none?: true (No Sound); index?} — the sound plays as the slide comes in",
+            has_slide,
+            sound
+        ),
         cmd!("transition.applyAll", "Apply To All", ["Transitions", "Timing"], None, "{}", has_slide, apply_all),
         cmd!(query "transition.list", "Transition Gallery", [], None, "{} → [{id, label, category, duration, options}]", always, list),
     ]
@@ -106,6 +115,42 @@ fn timing(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     ok()
+}
+
+/// Transitions › Sound: embed an audio file as the slides' transition sound, or `none` to remove it.
+fn sound(s: &mut Session, p: &Value) -> Result<Value> {
+    let list = slide_indices(s, p)?;
+    if bool_param(p, "none") == Some(true) {
+        s.edit(|doc, _| {
+            for i in list {
+                if let Some(sl) = doc.slides.get_mut(i)
+                    && let Some(t) = Arc::make_mut(sl).transition.as_mut()
+                {
+                    t.sound = None;
+                }
+            }
+            Ok(())
+        })?;
+        return Ok(json!({"sound": null}));
+    }
+    let (name, bytes) = super::insert::media_bytes(p, "transition.sound")?;
+    let ct = super::insert::content_type(&name, &bytes);
+    let bytes = Arc::new(bytes);
+    let audible = deckcraft_media::probe(&bytes).is_ok_and(|i| i.audio.is_some());
+    let bytes = Arc::try_unwrap(bytes).unwrap_or_else(|a| (*a).clone());
+    if !audible && !ct.starts_with("audio/") {
+        return Err(bad("transition.sound", format!("{name} is not a sound file ({ct})")));
+    }
+    let media = s.edit(|doc, _| {
+        let media = doc.add_media(&name, ct, bytes);
+        for i in list {
+            if let Some(sl) = doc.slides.get_mut(i) {
+                Arc::make_mut(sl).transition.get_or_insert_with(Transition::default).sound = Some(media);
+            }
+        }
+        Ok(media)
+    })?;
+    Ok(json!({"sound": name, "media": media.0, "playable": audible}))
 }
 
 fn apply_all(s: &mut Session, _p: &Value) -> Result<Value> {
