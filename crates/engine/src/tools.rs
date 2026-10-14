@@ -1025,7 +1025,9 @@ impl Session {
                 | Hit::LineEnd { id, .. }
                 | Hit::Handle { id, .. }
                 | Hit::Vertex { id, .. }
-                | Hit::Frame { id },
+                | Hit::Frame { id }
+                | Hit::TableColumn { id, .. }
+                | Hit::TableRow { id, .. },
             ) => Some(*id),
             None => None,
         };
