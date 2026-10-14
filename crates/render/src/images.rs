@@ -226,6 +226,97 @@ pub fn dpi(bytes: &[u8]) -> Option<(f64, f64)> {
     None
 }
 
+/// A copy of a PNG with a `pHYs` chunk saying `dpi` dots per inch.
+///
+/// Anything that is not a PNG, or a resolution the reader would reject, is returned unchanged.
+/// A file that already has `pHYs` is left alone.
+pub(crate) fn stamp_png_dpi(png: &[u8], dpi: f64) -> Vec<u8> {
+    let Some(ppm) = pixels_per_metre(dpi) else { return png.to_vec() };
+    let Some(end) = ihdr_end(png) else { return png.to_vec() };
+    if has_phys(png) {
+        return png.to_vec();
+    }
+    let mut body = Vec::with_capacity(13);
+    body.extend_from_slice(b"pHYs");
+    body.extend_from_slice(&ppm.to_be_bytes());
+    body.extend_from_slice(&ppm.to_be_bytes());
+    body.push(1);
+    let crc = png_crc(&body);
+    let mut out = Vec::with_capacity(png.len() + 21);
+    out.extend_from_slice(png.get(..end).unwrap_or(png));
+    out.extend_from_slice(&9u32.to_be_bytes());
+    out.extend_from_slice(&body);
+    out.extend_from_slice(&crc.to_be_bytes());
+    if let Some(rest) = png.get(end..) {
+        out.extend_from_slice(rest);
+    }
+    out
+}
+
+/// Dots per inch as pixels per metre, the unit a PNG `pHYs` chunk stores.
+fn pixels_per_metre(dpi: f64) -> Option<u32> {
+    if !dpi.is_finite() || !(1.0..=10_000.0).contains(&dpi) {
+        return None;
+    }
+    let ppm = (dpi / 0.0254).round();
+    if !ppm.is_finite() || !(1.0..=u32::MAX as f64).contains(&ppm) {
+        return None;
+    }
+    Some(ppm as u32)
+}
+
+fn ihdr_end(png: &[u8]) -> Option<usize> {
+    if !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return None;
+    }
+    let len = be_u32(png, 8)? as usize;
+    if png.get(12..16) != Some(b"IHDR".as_slice()) {
+        return None;
+    }
+    let end = 8usize.checked_add(12)?.checked_add(len)?;
+    (end <= png.len()).then_some(end)
+}
+
+fn has_phys(png: &[u8]) -> bool {
+    let mut i = 8usize;
+    for _ in 0..64 {
+        let len = match be_u32(png, i) {
+            Some(n) => n as usize,
+            None => return false,
+        };
+        let Some(kind) = png.get(i + 4..i + 8) else { return false };
+        if kind == b"pHYs" {
+            return true;
+        }
+        if kind == b"IDAT" || kind == b"IEND" {
+            return false;
+        }
+        i = match i.checked_add(12).and_then(|n| n.checked_add(len)) {
+            Some(n) if n <= png.len() => n,
+            _ => return false,
+        };
+    }
+    false
+}
+
+fn be_u32(bytes: &[u8], i: usize) -> Option<u32> {
+    let s = bytes.get(i..i + 4)?;
+    let s: [u8; 4] = s.try_into().ok()?;
+    Some(u32::from_be_bytes(s))
+}
+
+fn png_crc(data: &[u8]) -> u32 {
+    let mut c = 0xFFFF_FFFFu32;
+    for &b in data {
+        c ^= u32::from(b);
+        for _ in 0..8 {
+            let mask = 0u32.wrapping_sub(c & 1);
+            c = (c >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !c
+}
+
 /// A premultiplied pixmap of the picture, downsampled so its longer side is near `want` px.
 pub fn decode_for(bytes: &Arc<Vec<u8>>, want: f64, adj: &PictureAdjust) -> Option<Arc<Pixmap>> {
     let addr = Arc::as_ptr(bytes) as usize;

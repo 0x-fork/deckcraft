@@ -193,7 +193,26 @@ fn png_encodes() {
     let img = render_slide(&p, 0, &RenderOpts { scale: 0.1, ..Default::default() });
     let png = img.to_png();
     assert!(png.starts_with(&[0x89, b'P', b'N', b'G']));
+    assert_eq!(image_dpi(&png), None, "an untagged screenshot stays without a resolution");
     assert!(!img.to_jpeg(80).is_empty());
+}
+
+#[test]
+fn a_retina_export_records_144_dpi_and_still_decodes() {
+    assert_eq!(dpi_for_scale(2.0), 144.0);
+    assert_eq!(dpi_for_scale(1.0), 72.0);
+    assert_eq!(dpi_for_scale(f64::NAN), 72.0);
+    let img = Image { width: 4, height: 2, pixels: [255, 0, 0, 255].repeat(8) };
+    let png = img.to_png_at(144.0);
+    assert_eq!(image_dpi(&png), Some((144.0, 144.0)));
+    let decoded = image::load_from_memory(&png).unwrap();
+    assert_eq!((decoded.width(), decoded.height()), (4, 2));
+    let again = images::stamp_png_dpi(&png, 72.0);
+    assert_eq!(again.len(), png.len(), "a second pHYs chunk is not written");
+    assert_eq!(image_dpi(&again), Some((144.0, 144.0)));
+    let jpeg = img.to_jpeg_at(90, Some(144.0));
+    assert_eq!(image_dpi(&jpeg), Some((144.0, 144.0)));
+    assert_eq!(image_dpi(&img.to_jpeg(90)), None);
 }
 
 #[test]

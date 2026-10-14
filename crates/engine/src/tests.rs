@@ -2249,3 +2249,31 @@ fn notes_master_view_edits_and_saves() {
     s.execute("view.closeMaster", &json!({})).unwrap();
     assert_eq!(s.execute("view.notesMaster", &json!({})).unwrap()["created"], false);
 }
+
+/// Default picture export is 2 px per point. The file says 144 dpi, so Preview shows the slide's size.
+#[test]
+fn a_png_export_records_the_slide_resolution() {
+    let mut s = session();
+    let dir = std::env::temp_dir().join(format!("deckcraft-dpi-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let png = dir.join("slide.png");
+    s.execute("file.export", &json!({"path": png.to_str().unwrap(), "format": "png"})).unwrap();
+    let bytes = std::fs::read(&png).unwrap();
+    assert_eq!(deckcraft_render::image_dpi(&bytes), Some((144.0, 144.0)));
+    assert_eq!(png_size(&bytes), Some((1920, 1080)), "960×540 pt at 2 px per point");
+    let one = dir.join("one.png");
+    s.execute("file.export", &json!({"path": one.to_str().unwrap(), "format": "png", "scale": 1})).unwrap();
+    let one_bytes = std::fs::read(&one).unwrap();
+    assert_eq!(deckcraft_render::image_dpi(&one_bytes), Some((72.0, 72.0)));
+    assert_eq!(png_size(&one_bytes), Some((960, 540)));
+    let jpg = dir.join("slide.jpg");
+    s.execute("file.export", &json!({"path": jpg.to_str().unwrap(), "format": "jpeg"})).unwrap();
+    assert_eq!(deckcraft_render::image_dpi(&std::fs::read(&jpg).unwrap()), Some((144.0, 144.0)));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let w: [u8; 4] = bytes.get(16..20)?.try_into().ok()?;
+    let h: [u8; 4] = bytes.get(20..24)?.try_into().ok()?;
+    Some((u32::from_be_bytes(w), u32::from_be_bytes(h)))
+}

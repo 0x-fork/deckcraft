@@ -108,7 +108,7 @@ impl Headless {
             i,
             &deckcraft_engine::render::RenderOpts { scale, edit: p.get("edit").and_then(Value::as_bool).unwrap_or(false), ..Default::default() },
         );
-        let png = img.to_png();
+        let png = img.to_png_at(deckcraft_engine::render::dpi_for_scale(scale));
         if let Some(path) = s(p, "path") {
             std::fs::write(path, &png).map_err(|e| format!("{path}: {e}"))?;
             return Ok(json!({"path": path, "width": img.width, "height": img.height}));

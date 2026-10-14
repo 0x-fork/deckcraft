@@ -358,7 +358,7 @@ fn render_transition(args: &[String]) -> Result<(), String> {
             let name = format!("{stem}-t{t:.3}.png");
             p.with_file_name(name).to_string_lossy().into_owned()
         };
-        std::fs::write(&path, img.to_png()).map_err(|e| format!("{path}: {e}"))?;
+        std::fs::write(&path, img.to_png_at(render::dpi_for_scale(opts.scale))).map_err(|e| format!("{path}: {e}"))?;
         outln!("{path} ({}×{}) {} {} t={t}", img.width, img.height, tr.kind, tr.option);
     }
     Ok(())
