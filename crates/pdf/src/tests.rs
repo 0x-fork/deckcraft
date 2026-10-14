@@ -99,3 +99,53 @@ fn fmt(v: f64) -> String {
     let s = format!("{:.2}", v as f32);
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
+
+fn ph(kind: deckcraft_model::PhType, x: f64, y: f64, w: f64, h: f64, text: &str) -> deckcraft_model::Shape {
+    deckcraft_model::Shape {
+        xfrm: Some(deckcraft_model::Xfrm::new(x, y, w, h)),
+        ph: Some(deckcraft_model::Placeholder { kind, ..Default::default() }),
+        text: Some(TextBody::from_text(text)),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn notes_pages_and_handouts_follow_their_masters() {
+    use deckcraft_model::PhType;
+    let mut p = deck(2);
+    let paper = (612.0, 792.0);
+    // No masters: the default layout (slide at the top, one-inch side margins).
+    let (slide, notes) = notes_frames(&p, paper);
+    assert_eq!((slide.x0, slide.y0), (72.0, 54.0));
+    assert!(notes.y0 > slide.y1);
+    // A notes master moves the slide and the notes, scaled from the notes size to the paper.
+    p.notes_size = deckcraft_model::Size::new(612.0, 792.0);
+    p.notes_master = Some(Arc::new(deckcraft_model::Master {
+        shapes: vec![
+            ph(PhType::SlideImage, 100.0, 400.0, 412.0, 300.0, ""),
+            ph(PhType::Body, 50.0, 50.0, 500.0, 300.0, ""),
+            ph(PhType::Header, 0.0, 0.0, 300.0, 30.0, "Q3 review"),
+            ph(PhType::Date, 312.0, 0.0, 300.0, 30.0, ""),
+            ph(PhType::SlideNum, 312.0, 760.0, 300.0, 30.0, "<#>"),
+        ],
+        ..Default::default()
+    }));
+    let (slide, notes) = notes_frames(&p, paper);
+    assert!(slide.y0 >= 400.0 && slide.y1 <= 700.0 + 1e-6 && slide.x0 >= 100.0 - 1e-6, "{slide:?}");
+    assert!(((slide.width() / slide.height()) - p.slide_size.width / p.slide_size.height).abs() < 1e-6);
+    assert_eq!(notes, Rect::new(50.0, 50.0, 550.0, 350.0));
+    let texts = master_texts(&p, p.notes_master.as_deref().unwrap(), paper, 7);
+    let got: Vec<(&str, bool)> = texts.iter().map(|(_, t, r)| (t.as_str(), *r)).collect();
+    assert_eq!(got, [("Q3 review", false), ("7", true)], "empty date left out, number is the page");
+    // Notes pages and handouts export with the masters.
+    for layout in [PageLayout::Notes, PageLayout::Handouts { per_page: 3 }] {
+        if layout != PageLayout::Notes {
+            p.handout_master = Some(Arc::new(deckcraft_model::Master {
+                shapes: vec![ph(PhType::Footer, 0.0, 760.0, 300.0, 30.0, "Confidential")],
+                ..Default::default()
+            }));
+        }
+        let bytes = export(&p, &PdfOptions { layout, ..Default::default() }).unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
+    }
+}

@@ -142,7 +142,7 @@ pub fn export(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
     let pages: Vec<Vec<(usize, Rect)>> = match opts.layout {
         PageLayout::Slides => slides.iter().map(|&i| vec![(i, Rect::new(0.0, 0.0, sw, sh))]).collect(),
         PageLayout::Notes => {
-            let b = notes_slide_box(opts.paper, sw / sh);
+            let b = notes_frames(pres, opts.paper).0;
             slides.iter().map(|&i| vec![(i, b)]).collect()
         }
         PageLayout::Handouts { per_page } => {
@@ -179,12 +179,11 @@ pub fn export(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
             }
             match opts.layout {
                 PageLayout::Notes => {
-                    if let Some((i, b)) = v.first() {
+                    if let Some((i, _)) = v.first() {
                         let notes = pres.slides[*i].notes_text();
-                        let area = Rect::new(72.0, b.y1 + 36.0, pw - 72.0, ph - 54.0);
-                        ex.paragraphs(&mut s, &notes, area, 12.0);
+                        ex.paragraphs(&mut s, &notes, notes_frames(pres, opts.paper).1, 12.0);
                     }
-                    ex.footer(&mut s, pw, ph, v.first().map(|x| x.0 + 1).unwrap_or(1));
+                    ex.page_texts(&mut s, pres.notes_master.as_deref(), pw, ph, v.first().map(|x| x.0 + 1).unwrap_or(1));
                 }
                 PageLayout::Handouts { per_page } => {
                     if per_page == 3 {
@@ -192,7 +191,7 @@ pub fn export(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
                             ex.note_lines(&mut s, Rect::new(b.x1 + 24.0, b.y0, pw - 54.0, b.y1));
                         }
                     }
-                    ex.footer(&mut s, pw, ph, page_of.get(&v[0].0).map(|p| p + 1).unwrap_or(1));
+                    ex.page_texts(&mut s, pres.handout_master.as_deref(), pw, ph, page_of.get(&v[0].0).map(|p| p + 1).unwrap_or(1));
                 }
                 PageLayout::Slides => {}
             }
@@ -204,6 +203,58 @@ pub fn export(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
         page.finish();
     }
     pdf.finish().map_err(|e| PdfError::Write(format!("{e:?}")))
+}
+
+/// A notes-size master's rect of placeholder `kind`, scaled to a page of `paper` points.
+fn master_rect(pres: &Presentation, m: &deckcraft_model::Master, kind: deckcraft_model::PhType, paper: (f64, f64)) -> Option<Rect> {
+    let x = m.shapes.iter().find(|s| s.ph_type() == Some(kind))?.xfrm?;
+    let (kx, ky) = (paper.0 / pres.notes_size.width.max(1.0), paper.1 / pres.notes_size.height.max(1.0));
+    let r = Rect::new(x.x * kx, x.y * ky, (x.x + x.w) * kx, (x.y + x.h) * ky);
+    (r.width() > 1.0 && r.height() > 1.0).then_some(r)
+}
+
+/// A notes page's slide box and notes area on `paper`: where the notes master puts its slide image
+/// and body placeholders, or the default layout when it has none.
+pub fn notes_frames(pres: &Presentation, paper: (f64, f64)) -> (Rect, Rect) {
+    let (pw, ph) = paper;
+    let aspect = pres.slide_size.width.max(1.0) / pres.slide_size.height.max(1.0);
+    let nm = pres.notes_master.as_deref();
+    let slide = match nm.and_then(|m| master_rect(pres, m, deckcraft_model::PhType::SlideImage, paper)) {
+        // The slide keeps its own shape, centred in the frame.
+        Some(f) => {
+            let (w, h) = if f.width() / f.height() > aspect { (f.height() * aspect, f.height()) } else { (f.width(), f.width() / aspect) };
+            Rect::from_center_size(f.center(), (w, h))
+        }
+        None => notes_slide_box(paper, aspect),
+    };
+    let notes = nm
+        .and_then(|m| master_rect(pres, m, deckcraft_model::PhType::Body, paper))
+        .unwrap_or_else(|| Rect::new(72.0, slide.y1 + 36.0, pw - 72.0, ph - 54.0));
+    (slide, notes)
+}
+
+/// The header, date, footer and page-number text a master puts on page `n`, with where it goes
+/// and whether it's right-aligned. Placeholders with no text are left out; the page number is
+/// always `n`.
+pub fn master_texts(pres: &Presentation, m: &deckcraft_model::Master, paper: (f64, f64), n: usize) -> Vec<(Rect, String, bool)> {
+    use deckcraft_model::PhType;
+    let mut out = vec![];
+    for kind in [PhType::Header, PhType::Date, PhType::Footer, PhType::SlideNum] {
+        let Some(r) = master_rect(pres, m, kind, paper) else { continue };
+        let Some(sh) = m.shapes.iter().find(|s| s.ph_type() == Some(kind)) else { continue };
+        let text = if kind == PhType::SlideNum { n.to_string() } else { sh.text.as_ref().map(|t| t.text()).unwrap_or_default().trim().to_string() };
+        if text.is_empty() {
+            continue;
+        }
+        let right = sh
+            .text
+            .as_ref()
+            .and_then(|t| t.paragraphs.first())
+            .and_then(|p| p.props.align)
+            .map_or(matches!(kind, PhType::Date | PhType::SlideNum), |a| a == deckcraft_model::text::Align::Right);
+        out.push((r, text, right));
+    }
+    out
 }
 
 /// Slide boxes for a handout page (portrait paper, half-inch-ish margins).
@@ -445,6 +496,23 @@ impl Exporter<'_> {
         s.set_stroke(None);
     }
 
+    /// A notes or handout page's header, date, footer and page number from its master; just the
+    /// page number when the deck has no such master.
+    fn page_texts(&mut self, s: &mut Surface, master: Option<&deckcraft_model::Master>, pw: f64, ph: f64, n: usize) {
+        let Some(m) = master else { return self.footer(s, pw, ph, n) };
+        let Some((font, face)) = self.ui_font() else { return };
+        let size = 9.0;
+        let k = size / face.upem.max(1.0);
+        s.set_fill(Some(grey(0x60, 1.0)));
+        for (r, text, right) in master_texts(self.pres, m, (pw, ph), n) {
+            let line = text.lines().next().unwrap_or("");
+            let w: f64 = line.chars().map(|c| face.advance(face.glyph_for(c)) * k).sum();
+            let x = if right { r.x1 - w } else { r.x0 };
+            let y = r.y0 + (r.height() + size * 0.7) / 2.0;
+            s.draw_text(Point::from_xy(x as f32, y as f32), font.clone(), size as f32, line, false, TextDirection::Auto);
+        }
+        s.set_fill(None);
+    }
     fn footer(&mut self, s: &mut Surface, pw: f64, ph: f64, n: usize) {
         let Some((font, _)) = self.ui_font() else { return };
         s.set_fill(Some(grey(0x60, 1.0)));
