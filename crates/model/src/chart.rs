@@ -174,6 +174,8 @@ pub struct Chart {
     pub y_max: Option<f64>,
     /// The value axis' major unit, when the chart fixes it.
     pub y_major: Option<f64>,
+    /// `c:scaling/c:logBase`: the value axis is logarithmic in this base (2–1000).
+    pub y_log_base: Option<f64>,
     /// The value axis' number format (an Excel format code such as `#,##0` or `0.0%`).
     pub y_format: Option<String>,
     /// The value axis is deleted (`c:delete`): no labels, though gridlines may stay.
@@ -217,6 +219,7 @@ impl Default for Chart {
             y_min: None,
             y_max: None,
             y_major: None,
+            y_log_base: None,
             y_format: None,
             y_hidden: false,
             y2_min: None,
@@ -309,6 +312,22 @@ impl Chart {
         let (fmin, fmax, major) = if secondary { (self.y2_min, self.y2_max, self.y2_major) } else { (self.y_min, self.y_max, self.y_major) };
         let full_percent = !secondary && self.kind.percent();
         Some(axis_scale(lo, hi, fmin, fmax, major, max_intervals, !full_percent))
+    }
+
+    /// A logarithmic value axis' scale in exponents — (min, max, unit), so its labels are
+    /// `base^min`, `base^(min+unit)`… — covering the positive values: whole powers, as PowerPoint
+    /// and LibreOffice draw them. `None` when the axis isn't logarithmic or nothing is positive.
+    pub fn log_axis_scale(&self, max_intervals: usize) -> Option<(f64, f64, f64)> {
+        let b = self.y_log_base.filter(|b| b.is_finite() && *b >= 2.0)?;
+        let vals = self.series.iter().filter(|s| !self.on_secondary(s)).flat_map(|s| s.values.iter().flatten().copied());
+        let (lo, hi) = vals
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .fold(None, |r: Option<(f64, f64)>, v| Some(r.map_or((v, v), |(a, z)| (a.min(v), z.max(v)))))?;
+        let e = |v: f64| v.log(b);
+        let lo = self.y_min.filter(|v| *v > 0.0).map_or(e(lo).floor(), e);
+        let hi = self.y_max.filter(|v| *v > 0.0).map_or(e(hi).ceil(), e).max(lo + 1.0);
+        let unit = ((hi - lo) / max_intervals.max(1) as f64).ceil().max(1.0);
+        Some((lo, lo + ((hi - lo) / unit).ceil() * unit, unit))
     }
 
     /// A value axis label in the axis' number format and the chart's language.
@@ -430,6 +449,17 @@ pub fn nice_scale(lo: f64, hi: f64) -> (f64, f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_axes_run_over_whole_powers() {
+        let mut c = Chart::sample(ChartType::Line);
+        c.series.truncate(1);
+        c.series[0].values = vec![Some(1.0), Some(10.0), Some(1000.0), Some(50000.0)];
+        assert_eq!(c.log_axis_scale(8), None);
+        c.y_log_base = Some(10.0);
+        assert_eq!(c.log_axis_scale(8), Some((0.0, 5.0, 1.0)));
+        assert_eq!(c.log_axis_scale(2), Some((0.0, 6.0, 3.0)));
+    }
 
     #[test]
     fn nice_scale_covers() {

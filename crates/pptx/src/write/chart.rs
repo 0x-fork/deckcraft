@@ -273,6 +273,9 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     w.open0("c:valAx");
     w.val("c:axId", AX_VAL);
     w.open0("c:scaling");
+    if let Some(b) = c.y_log_base {
+        w.val("c:logBase", fmt_num(b));
+    }
     w.val("c:orientation", "minMax");
     if let Some(m) = c.y_max.filter(|v| v.is_finite()) {
         w.val("c:max", fmt_num(m));

@@ -249,7 +249,16 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     // As many major units as the value axis has room for labels (PowerPoint's automatic unit).
     let axis_len = if horiz { area.width() - base * 4.5 } else { area.height() - base * 1.8 };
     let max_intervals = (axis_len / if horiz { base * 6.0 } else { base * 1.9 }).floor().clamp(2.0, 12.0) as usize;
-    let (min, max, step) = c.axis_scale(false, max_intervals).unwrap_or_else(|| axis_scale(0.0, 1.0, None, None, None, max_intervals, true));
+    // A logarithmic axis is scaled in exponents of its base.
+    let log = c.log_axis_scale(max_intervals).map(|sc| (c.y_log_base.unwrap_or(10.0), sc));
+    let (min, max, step) = match log {
+        Some((_, sc)) => sc,
+        None => c.axis_scale(false, max_intervals).unwrap_or_else(|| axis_scale(0.0, 1.0, None, None, None, max_intervals, true)),
+    };
+    let to_e = |v: f64| match log {
+        Some((b, _)) => v.max(f64::MIN_POSITIVE).log(b).max(min - 1.0),
+        None => v,
+    };
     // A combo chart's secondary value axis, on the right (vertical value axes only).
     let second = if horiz { None } else { c.axis_scale(true, max_intervals) };
     let ticks = |(lo, hi, st): (f64, f64, f64)| {
@@ -257,8 +266,11 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         (0..=n).map(move |k| lo + k as f64 * st)
     };
     // Label gutters as wide as the longest value label.
-    let label_w =
-        |sec: bool, sc: (f64, f64, f64)| ticks(sc).map(|v| c.axis_label(sec, v).chars().count()).max().unwrap_or(1) as f64 * base * 0.55 + base * 0.6;
+    let primary_ticks: Vec<f64> = ticks((min, max, step)).map(|k| log.map_or(k, |(b, _)| b.powf(k))).collect();
+    let label_w = |sec: bool, sc: (f64, f64, f64)| {
+        let vals: Vec<f64> = if sec { ticks(sc).collect() } else { primary_ticks.clone() };
+        vals.iter().map(|v| c.axis_label(sec, *v).chars().count()).max().unwrap_or(1) as f64 * base * 0.55 + base * 0.6
+    };
     let gutter = if horiz {
         base * 4.5
     } else if c.y_hidden {
@@ -276,14 +288,17 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         crate::paint::fill_path(ctx, rctx, f, None, &plot.to_path(0.1), plot, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
     }
     let span = (max - min).max(1e-9);
-    let to_v = |v: f64| if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() };
+    let to_v = |v: f64| {
+        let v = to_e(v);
+        if horiz { plot.x0 + (v - min) / span * plot.width() } else { plot.y1 - (v - min) / span * plot.height() }
+    };
     // A series' value as a position on its own axis.
     let to_axis = |sec: bool, v: f64| match (sec, second) {
         (true, Some((min2, max2, _))) => plot.y1 - (v - min2) / (max2 - min2).max(1e-9) * plot.height(),
         _ => to_v(v),
     };
     // Gridlines and value labels.
-    for v in ticks((min, max, step)) {
+    for &v in &primary_ticks {
         let pos = to_v(v);
         let text = if c.y_hidden { String::new() } else { c.axis_label(false, v) };
         let mut g = BezPath::new();
@@ -378,7 +393,10 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             );
         }
     }
-    let zero = to_v(0.0f64.clamp(min, max));
+    let zero = match log {
+        Some((b, _)) => to_v(b.powf(min)),
+        None => to_v(0.0f64.clamp(min, max)),
+    };
     if let Some(bk) = bar_kind {
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
