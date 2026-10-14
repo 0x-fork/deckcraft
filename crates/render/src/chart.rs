@@ -420,10 +420,15 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();
         let ns = bars.len().max(1);
+        // Gap width and overlap are fractions of one bar's width: a category's band holds its bars
+        // (overlapping by `overlap` of a bar between neighbours) plus one gap.
         let gap = c.gap_width.clamp(0.0, 5.0);
-        let group = band / (1.0 + gap);
         let stacked = bk.stacked();
-        let bar = if stacked { group } else { group / ns as f64 };
+        let ov = if stacked { 1.0 } else { c.overlap.clamp(-1.0, 1.0) };
+        let n = ns as f64;
+        let bar = band / (n - (n - 1.0) * ov + gap);
+        let step = bar * (1.0 - ov);
+        let group = bar + step * (n - 1.0);
         for i in 0..ncat {
             let mut pos_acc = 0.0;
             let mut neg_acc = 0.0;
@@ -435,7 +440,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             for (bi, (si, s)) in bars.iter().enumerate() {
                 let sec = c.on_secondary(s);
                 let v = s.values.get(i).copied().flatten().unwrap_or(0.0) / total;
-                let start = band * i as f64 + (band - group) / 2.0 + if stacked { 0.0 } else { bar * bi as f64 };
+                let start = band * i as f64 + (band - group) / 2.0 + if stacked { 0.0 } else { step * bi as f64 };
                 let (a, b) = if stacked {
                     if v >= 0.0 {
                         let r = (pos_acc, pos_acc + v);

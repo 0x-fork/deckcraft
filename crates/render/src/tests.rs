@@ -171,6 +171,25 @@ fn column_points_take_their_own_fill_and_smooth_lines_curve() {
     assert!(red(480), "the middle column takes its point's fill");
     assert!(!red(200) && !red(760), "the others keep the series colour");
 
+    // Two series, gap 150 %, no overlap: each bar is a band / 3.5 wide (PowerPoint's and
+    // LibreOffice's geometry), not band / 2.5 split in two.
+    let mut c = Chart::sample(ChartType::Column);
+    c.title = None;
+    c.legend = None;
+    c.series.truncate(2);
+    c.categories = vec!["A".into()];
+    c.series[0].values = vec![Some(10.0)];
+    c.series[1].values = vec![Some(10.0)];
+    c.series[0].fill = Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))));
+    (c.gap_width, c.overlap) = (1.5, 0.0);
+    let sh = Shape { id: ShapeId(622), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let y = (0..540).rev().find(|y| (0..960).any(|x| img.pixel(x, *y)[..3] == [255, 0, 0])).unwrap() - 5;
+    let reds = (0..960).filter(|x| img.pixel(*x, y)[..3] == [255, 0, 0]).count() as f64;
+    // The plot is ~850 px wide with one category: a bar is ~240 px (it was ~170 when the band
+    // was split as 1 + gap and then shared between the series).
+    assert!((200.0..280.0).contains(&reds), "bar {reds} px");
+
     // A smoothed line through a peak overshoots no point but leaves the straight chord.
     let pts = [kurbo::Point::new(0.0, 0.0), kurbo::Point::new(10.0, 10.0), kurbo::Point::new(20.0, 0.0)];
     let p = crate::chart::smooth_path(&pts);

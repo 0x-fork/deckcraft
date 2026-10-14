@@ -173,11 +173,18 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
         if let Some(v) = g.child_val("varyColors") {
             c.vary_colors = v == "1" || v == "true";
         }
+        // A bar group without c:gapWidth / c:overlap takes the schema's defaults (150 %, 0 %),
+        // not the 219 % / -27 % PowerPoint writes into its new charts.
+        let bar_group = g.is("barChart") || g.is("bar3DChart");
         if let Some(v) = g.child_val("gapWidth").and_then(|v| v.parse::<f64>().ok()) {
             c.gap_width = (v / 100.0).clamp(0.0, 5.0);
+        } else if bar_group {
+            c.gap_width = 1.5;
         }
         if let Some(v) = g.child_val("overlap").and_then(|v| v.parse::<f64>().ok()) {
             c.overlap = (v / 100.0).clamp(-1.0, 1.0);
+        } else if bar_group {
+            c.overlap = 0.0;
         }
         if let Some(v) = g.child_val("holeSize").and_then(|v| v.parse::<f64>().ok()) {
             c.hole_size = (v / 100.0).clamp(0.0, 0.9);
@@ -392,6 +399,8 @@ mod tests {
         let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:defRPr></a:pPr></a:p></c:txPr></c:catAx><c:valAx><c:axId val="2"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
         let c = read_chart_xml(xml.as_bytes()).unwrap();
         assert_eq!(c.text_color, Some(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255))));
+        // No c:gapWidth / c:overlap: the schema's 150 % and 0 %.
+        assert_eq!((c.gap_width, c.overlap), (1.5, 0.0));
     }
 
     #[test]
