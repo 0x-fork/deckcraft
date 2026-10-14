@@ -305,6 +305,7 @@ fn typed(s: &Session, body: &TextBody, at: Pos, text: &str) -> String {
 }
 
 pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) -> Result<Value> {
+    let inherited = inherited_aligns_for_edit(s);
     let text = {
         let st = s.doc()?;
         match &st.selection.text {
@@ -324,7 +325,7 @@ pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) 
         t.caret = c;
         for pi in at.0..=c.0 {
             if let Some(para) = body.paragraphs.get_mut(pi) {
-                promote_rtl_if_needed(para);
+                promote_rtl_if_needed(para, &inherited);
             }
         }
         c
@@ -333,10 +334,37 @@ pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) 
     Ok(json!({"caret": [pos.0, pos.1]}))
 }
 
-fn promote_rtl_if_needed(para: &mut deckcraft_model::text::Paragraph) {
+/// Per outline level (0..=8), whether shape `id` on the current slide already resolves an
+/// alignment for its paragraphs (its own list style, the layout's or the master's). All `false`
+/// when the shape can't be resolved (notes, a shape that is gone).
+fn inherited_aligns(s: &Session, id: ShapeId) -> [bool; 9] {
+    let mut out = [false; 9];
+    let Ok(st) = s.doc() else { return out };
+    let Some(sh) = st.shape(id) else { return out };
+    let Some(ctx) = ctx_for(&st.doc, &st.selection) else { return out };
+    for (lvl, set) in out.iter_mut().enumerate() {
+        let para = deckcraft_model::text::Paragraph { level: lvl as u8, ..Default::default() };
+        *set = resolve::para(&ctx, sh, &para).align.is_some();
+    }
+    out
+}
+
+/// The aligns [`inherited_aligns`] gives for the text being edited (none for notes).
+fn inherited_aligns_for_edit(s: &Session) -> [bool; 9] {
+    match s.doc().ok().and_then(|st| st.selection.text.clone()) {
+        Some(t) if !t.notes => inherited_aligns(s, t.shape),
+        _ => [false; 9],
+    }
+}
+
+/// A paragraph with no direction of its own whose first strong character is right-to-left
+/// (Arabic, Hebrew, Kurdish…) becomes right-to-left, and right-aligned when nothing (the
+/// paragraph or what it inherits, `inherited`) sets its alignment.
+fn promote_rtl_if_needed(para: &mut deckcraft_model::text::Paragraph, inherited: &[bool; 9]) {
     if para.props.rtl.is_none() && deckcraft_model::bidi::first_strong_is_rtl(&para.text()) {
         para.props.rtl = Some(true);
-        if para.props.align.is_none() {
+        let inherits_align = inherited.get(usize::from(para.level)).copied().unwrap_or(false);
+        if para.props.align.is_none() && !inherits_align {
             para.props.align = Some(Align::Right);
         }
     }
@@ -612,6 +640,7 @@ fn autocorrect_options(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 pub(crate) fn paste_body(s: &mut Session, src: &TextBody) -> Result<Value> {
+    let inherited = inherited_aligns_for_edit(s);
     let pos = edit_text(s, |body, t| {
         let (a, b) = t.ordered();
         let at = ed::delete(body, a, b);
@@ -620,7 +649,7 @@ pub(crate) fn paste_body(s: &mut Session, src: &TextBody) -> Result<Value> {
         t.caret = c;
         for pi in at.0..=c.0 {
             if let Some(para) = body.paragraphs.get_mut(pi) {
-                promote_rtl_if_needed(para);
+                promote_rtl_if_needed(para, &inherited);
             }
         }
         c
@@ -1056,6 +1085,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         None => s.doc()?.selection.shapes.first().copied().ok_or_else(|| bad("text.set", "missing `id` (or select a shape)"))?,
     };
     let cell = p.get("cell").and_then(Value::as_array).and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize)));
+    let inherited = inherited_aligns(s, id);
     edit_shapes(s, &json!({"id": id}), "text.set", |sh| {
         let target = match (&mut sh.kind, cell) {
             (ShapeKind::Table(t), Some((r, c))) => t.cell_mut(r, c).map(|x| &mut x.text),
@@ -1074,7 +1104,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
                 para.level = *lv;
                 para.props = pp.clone();
             }
-            promote_rtl_if_needed(para);
+            promote_rtl_if_needed(para, &inherited);
             for r in &mut para.runs {
                 r.props = keep.clone();
             }
@@ -1282,6 +1312,30 @@ fn replace_font(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc_mut()?;
     st.missing_fonts = crate::fonts::missing_fonts(&st.doc);
     Ok(json!({"replaced": n}))
+}
+
+#[cfg(test)]
+mod rtl_promote_tests {
+    use deckcraft_model::text::{Align, Paragraph, Run};
+
+    use super::promote_rtl_if_needed;
+
+    fn para(text: &str) -> Paragraph {
+        Paragraph { runs: vec![Run::new(text)], ..Default::default() }
+    }
+
+    #[test]
+    fn right_aligns_only_when_no_alignment_is_set_or_inherited() {
+        let mut p = para("مرحبا");
+        promote_rtl_if_needed(&mut p, &[false; 9]);
+        assert_eq!((p.props.rtl, p.props.align), (Some(true), Some(Align::Right)));
+        let mut p = para("مرحبا");
+        promote_rtl_if_needed(&mut p, &[true; 9]);
+        assert_eq!((p.props.rtl, p.props.align), (Some(true), None));
+        let mut p = para("Hello مرحبا");
+        promote_rtl_if_needed(&mut p, &[false; 9]);
+        assert_eq!((p.props.rtl, p.props.align), (None, None));
+    }
 }
 
 #[cfg(test)]

@@ -488,7 +488,9 @@ fn right_to_left_paragraphs() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
     s.execute("text.edit", &json!({"id": title})).unwrap();
-    s.execute("text.insert", &json!({"text": "Year 2024 (Retrait) only"})).unwrap();
+    // Explicitly left-to-right first, so typing Arabic doesn't already turn it right-to-left (#169).
+    s.execute("format.rtl", &json!({"on": false})).unwrap();
+    s.execute("text.insert", &json!({"text": "سنة 2024 (Retrait) فقط"})).unwrap();
     s.execute("format.rtl", &json!({})).unwrap();
     let para = |s: &Session| s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
     assert_eq!(para(&s).rtl, Some(true));
@@ -530,16 +532,26 @@ fn typing_kurdish_or_arabic_auto_detects_rtl_and_advances_caret_smoothly() {
         }
         last_x = cx;
 
-        // Caret must remain near the right margin (e.g. > 400.0 pt in title placeholder)
-        // and must NOT jump back to the left margin (e.g. ~7.2 pt).
-        assert!(cx > 400.0, "caret should not jump to left margin: {cx}");
+        // The title is centred: the caret must NOT jump back to the left margin (~7.2 pt).
+        assert!(cx > 100.0, "caret should not jump to left margin: {cx}");
     }
 
     // Caret advances leftwards overall as text is appended
     assert!(last_x < first_x.unwrap(), "caret should advance leftwards: last={last_x} first={:?}", first_x);
     let para = s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
     assert_eq!(para.rtl, Some(true), "auto-detected as RTL");
-    assert_eq!(para.align, Some(deckcraft_model::text::Align::Right), "aligned right");
+    assert_eq!(para.align, None, "the title keeps the alignment it inherits");
+
+    // A text box inherits the deck's default (left) alignment, which it keeps too.
+    s.execute("text.exit", &json!({})).ok();
+    let id = s.execute("insert.textBox", &json!({"rect": [10, 10, 300, 100], "text": ""})).unwrap()["id"].as_u64().unwrap();
+    s.execute("text.edit", &json!({"id": id})).unwrap();
+    s.execute("text.insert", &json!({"text": "مرحبا"})).unwrap();
+    let st = s.doc().unwrap();
+    let sh = st.shape(deckcraft_model::ShapeId(id as u32)).unwrap();
+    let para = sh.text.as_ref().unwrap().paragraphs[0].props.clone();
+    assert_eq!(para.rtl, Some(true));
+    assert_eq!(para.align, None, "the text box keeps the alignment it inherits");
 }
 
 #[test]

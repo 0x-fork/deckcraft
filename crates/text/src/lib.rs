@@ -712,11 +712,8 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
             rtl: false,
         };
     };
-    let mut props = resolve::para(ctx, shape, para);
-    let rtl = props.rtl.unwrap_or_else(|| deckcraft_model::bidi::first_strong_is_rtl(&para.text()));
-    if rtl && para.props.align.is_none() {
-        props.align = Some(Align::Right);
-    }
+    let props = resolve::para(ctx, shape, para);
+    let rtl = props.rtl.unwrap_or(false);
     let mut styles: Vec<Style> = vec![];
     let mut faces: Vec<Arc<FontFace>> = vec![];
     // The logical paragraph: its text and each character's style.
