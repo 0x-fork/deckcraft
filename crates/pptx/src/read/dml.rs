@@ -566,8 +566,8 @@ pub fn paragraph(imp: &mut Imp, part: &Part, p: &El) -> Paragraph {
             "r" => {
                 let props = e.child("rPr").map(|r| rpr(imp, part, r)).unwrap_or_default();
                 let text: String = e.child("t").map(|t| t.text()).unwrap_or_default();
-                // Vertical tab inside text is a soft break in some writers.
-                for (i, piece) in text.split('\u{b}').enumerate() {
+                // A vertical tab or line feed inside text is a line break, as it lays out and as export writes it.
+                for (i, piece) in text.split(['\u{b}', '\n']).enumerate() {
                     if i > 0 {
                         para.runs.push(Run { text: String::new(), props: props.clone(), kind: RunKind::Break });
                     }

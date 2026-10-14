@@ -282,13 +282,13 @@ pub fn parse(bytes: &[u8]) -> Result<Doc, PptxError> {
             Event::Text(t) => {
                 if let Some(p) = stack.last_mut() {
                     let s = t.decode().map(|c| c.into_owned()).unwrap_or_default();
-                    push_text(p, &s);
+                    push_text(p, &line_ends(s));
                 }
             }
             Event::CData(t) => {
                 if let Some(p) = stack.last_mut() {
                     let s = String::from_utf8_lossy(&t).into_owned();
-                    push_text(p, &s);
+                    push_text(p, &line_ends(s));
                 }
             }
             Event::GeneralRef(r) => {
@@ -322,6 +322,12 @@ pub fn parse(bytes: &[u8]) -> Result<Doc, PptxError> {
     }
     let root = root.ok_or_else(|| PptxError::Xml("no root element".into()))?;
     Ok(Doc { root })
+}
+
+/// XML 1.0 §2.11: a literal CR LF or lone CR in the document reads as LF. A `&#13;` reference is
+/// not literal and reaches `push_text` through `GeneralRef`, so it stays a CR.
+fn line_ends(s: String) -> String {
+    if s.contains('\r') { s.replace("\r\n", "\n").replace('\r', "\n") } else { s }
 }
 
 fn push_text(p: &mut El, s: &str) {
@@ -505,6 +511,13 @@ impl W {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_cr_lf_and_lone_cr_read_as_lf_but_char_ref_stays() {
+        let d = parse(b"<a:p><a:t>one\r\ntwo\rthree&#13;four</a:t><a:t><![CDATA[x\r\ny]]></a:t></a:p>").expect("parse");
+        let t: Vec<String> = d.root.children_named("t").map(|t| t.text()).collect();
+        assert_eq!(t, vec!["one\ntwo\nthree\rfour".to_string(), "x\ny".to_string()]);
+    }
 
     #[test]
     fn parse_basic_and_entities() {
