@@ -1584,6 +1584,7 @@ fn hyperlink(s: &mut Session, p: &Value) -> Result<Value> {
         highlight_click: bool_or(p, "highlightClick", false),
         sound: None,
         stop_sound: false,
+        zoom_return: None,
     };
     if s.doc()?.selection.text.is_some() {
         return super::text::link_text(s, link, &display);
@@ -1632,7 +1633,7 @@ fn shape_action(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let highlight = bool_param(p, "highlight").unwrap_or(true);
     let tooltip = str_param(p, "tooltip").unwrap_or("").to_string();
-    let link = action.map(|action| Hyperlink { action, tooltip, highlight_click: highlight, sound: None, stop_sound: false });
+    let link = action.map(|action| Hyperlink { action, tooltip, highlight_click: highlight, sound: None, stop_sound: false, zoom_return: None });
     edit_shapes(s, p, CMD, |sh| {
         if hover {
             sh.hover = link.clone();
@@ -1665,7 +1666,14 @@ fn action_button(s: &mut Session, p: &Value) -> Result<Value> {
         xfrm: Some(rect),
         geom: Geom::preset(preset),
         style: Some(ShapeStyle::accent(SchemeSlot::Accent1)),
-        click: action.map(|a| Hyperlink { action: a, tooltip: String::new(), highlight_click: true, sound: None, stop_sound: false }),
+        click: action.map(|a| Hyperlink {
+            action: a,
+            tooltip: String::new(),
+            highlight_click: true,
+            sound: None,
+            stop_sound: false,
+            zoom_return: None,
+        }),
         ..Default::default()
     };
     let id = add_shape(s, shape, true)?;

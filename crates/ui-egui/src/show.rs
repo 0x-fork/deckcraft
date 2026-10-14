@@ -570,7 +570,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         app.media.toggle(doc_uid, &doc, id, &clip, crate::media::Owner::Show);
     } else if clicked && let Some(Pick::Text(l)) = under.as_ref().and_then(|u| u.pick.clone()) {
         let last = show.last_viewed;
-        match show.state.follow(&doc, &l.action, last) {
+        match show.state.follow_link(&doc, &l, last) {
             LinkJump::Show(a) => actions.push(a),
             LinkJump::Open(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
             LinkJump::Exit => keep = false,

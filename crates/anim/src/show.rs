@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use deckcraft_model::Presentation;
-use deckcraft_model::text::Action;
+use deckcraft_model::text::{Action, Hyperlink};
 
 use crate::Timeline;
 use crate::interact::SlideRun;
@@ -78,6 +78,9 @@ pub struct ShowState {
     order: Option<Vec<usize>>,
     /// Name of the custom show being played, when there is one.
     custom: Option<String>,
+    /// Return to Zoom: (zoom slide, last zoomed slide). Advancing past the last zoomed slide goes
+    /// back to the zoom slide, fully built.
+    pub zoom: Option<(usize, usize)>,
 }
 
 /// Slide indices the show visits in order: the custom show or range from Set Up Slide Show, minus
@@ -252,6 +255,16 @@ impl ShowState {
             self.playing = true;
             return ShowAction::PlayStep(self.step);
         }
+        if let Some((back, until)) = self.zoom
+            && until == self.slide
+            && back < pres.slides.len()
+        {
+            self.zoom = None;
+            self.enter(pres, back);
+            self.step = ShowState::steps(pres, back);
+            self.playing = false;
+            return ShowAction::Slide(back);
+        }
         match self.next_index(pres) {
             Some(i) => {
                 self.enter(pres, i);
@@ -331,6 +344,7 @@ impl ShowState {
         if i >= pres.slides.len() {
             return ShowAction::None;
         }
+        self.zoom = None;
         self.enter(pres, i);
         ShowAction::Slide(i)
     }
@@ -361,6 +375,18 @@ impl ShowState {
             Some(i) => LinkJump::Show(self.goto(pres, i)),
             None => LinkJump::None,
         }
+    }
+
+    /// Follow a clicked link, honouring a zoom's Return to Zoom (see [`Hyperlink::zoom_return`]).
+    pub fn follow_link(&mut self, pres: &Presentation, link: &Hyperlink, last_viewed: Option<usize>) -> LinkJump {
+        let from = self.slide;
+        let jump = self.follow(pres, &link.action, last_viewed);
+        if let Some(until) = link.zoom_return.and_then(|id| pres.slides.iter().position(|s| s.id == id))
+            && matches!(jump, LinkJump::Show(ShowAction::Slide(_)))
+        {
+            self.zoom = Some((from, until));
+        }
+        jump
     }
 
     /// Seconds after which the current slide advances by itself (Advance Slide ▸ After), when the

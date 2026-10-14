@@ -84,6 +84,7 @@ pub fn rich_deck() -> Presentation {
                                 highlight_click: false,
                                 sound: None,
                                 stop_sound: false,
+                                zoom_return: None,
                             }),
                             ..Default::default()
                         },
@@ -155,7 +156,14 @@ pub fn rich_deck() -> Presentation {
         }],
         ..Default::default()
     });
-    b.click = Some(Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: true, sound: None, stop_sound: false });
+    b.click = Some(Hyperlink {
+        action: Action::NextSlide,
+        tooltip: String::new(),
+        highlight_click: true,
+        sound: None,
+        stop_sound: false,
+        zoom_return: None,
+    });
     let mut c = shape(&mut p, "Freeform", 450.0, 120.0, 100.0, 100.0);
     c.geom = Geom::Custom {
         paths: vec![CustomPath {
@@ -339,8 +347,14 @@ pub fn rich_deck() -> Presentation {
     let target = p.slides[1].id;
     let mut link = shape(&mut p, "Go to shapes", 600.0, 450.0, 200.0, 40.0);
     link.text = Some(TextBody::from_text("Back to shapes"));
-    link.click =
-        Some(Hyperlink { action: Action::Slide { slide: target }, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false });
+    link.click = Some(Hyperlink {
+        action: Action::Slide { slide: target },
+        tooltip: String::new(),
+        highlight_click: false,
+        sound: None,
+        stop_sound: false,
+        zoom_return: None,
+    });
     let mut eq = shape(&mut p, "Equation", 100.0, 450.0, 300.0, 40.0);
     eq.text = Some(TextBody {
         paragraphs: vec![Paragraph {
@@ -1734,4 +1748,63 @@ fn legacy_ole_object_is_written_in_the_fallback_form() {
     assert!(xml.contains("<p:pic>") && !xml.contains("spid"), "{xml}");
     assert!(preview.is_some(), "the preview picture is kept");
     assert!(parts.iter().any(|(_, k, _)| k.ends_with("/oleObject")), "the embedding is kept: {parts:?}");
+}
+
+/// Insert › Zoom: slide, section and summary zooms are linked pictures of their targets, with
+/// Return to Zoom on section and summary zooms; a summary zoom makes its own slide; all of it is
+/// one undo step and saves as linked pictures.
+#[test]
+fn zoom_inserts_linked_slide_pictures() {
+    use deckcraft_engine::Session;
+    use deckcraft_model::text::Action;
+    use serde_json::json;
+    let mut s = Session::with_new();
+    for t in ["Intro", "Plan", "Budget", "Risks"] {
+        s.execute("slide.new", &json!({"title": t})).unwrap();
+    }
+    // Slides: 0 title, 1 Intro, 2 Plan, 3 Budget, 4 Risks.
+    s.execute("slide.go", &json!({"index": 0})).unwrap();
+    let r = s.execute("insert.zoom", &json!({"slides": [2]})).unwrap();
+    assert_eq!(r["returnToZoom"], false);
+    let doc = s.doc().unwrap().doc.clone();
+    let zoom = doc.slides[0].shapes.iter().find(|sh| sh.name.starts_with("Slide Zoom")).expect("slide zoom");
+    let link = zoom.click.as_ref().unwrap();
+    assert_eq!(link.action, Action::Slide { slide: doc.slides[2].id });
+    assert_eq!(link.zoom_return, None);
+    assert_eq!(link.tooltip, "Plan");
+    let ShapeKind::Picture { fill } = &zoom.kind else { panic!() };
+    assert!(doc.media(fill.media).is_some_and(|m| m.data.starts_with(b"\x89PNG")));
+
+    // Section zoom: back after the section's last slide.
+    s.execute("section.add", &json!({"name": "Start", "at": 0})).unwrap();
+    s.execute("section.add", &json!({"name": "Money", "at": 3})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    let money = doc.sections.iter().position(|x| x.name == "Money").unwrap();
+    s.execute("slide.go", &json!({"index": 0})).unwrap();
+    s.execute("insert.zoom", &json!({"kind": "section", "sections": [money]})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    let sec = doc.slides[0].shapes.iter().find(|sh| sh.name.starts_with("Section Zoom")).unwrap();
+    let last = *doc.sections[money].slides.last().unwrap();
+    assert_eq!(sec.click.as_ref().unwrap().zoom_return, Some(last));
+
+    // Summary zoom on slides 1 and 3: a new slide in front, parts 1–2 and 3–4.
+    let before = doc.slides.len();
+    s.execute("insert.zoom", &json!({"kind": "summary", "slides": [1, 3]})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(doc.slides.len(), before + 1);
+    let sum = &doc.slides[1];
+    assert!(sum.title().contains("Summary"));
+    let tiles: Vec<_> = sum.shapes.iter().filter_map(|sh| sh.click.as_ref()).collect();
+    assert_eq!(tiles.len(), 2);
+    assert_eq!(tiles[0].zoom_return, Some(doc.slides[3].id), "part one runs to the slide before part two");
+    assert_eq!(tiles[1].zoom_return, Some(doc.slides.last().unwrap().id));
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides.len(), before, "one undo step");
+
+    // Saved as linked pictures.
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap()).unwrap();
+    let z = back.slides[0].shapes.iter().find(|sh| matches!(sh.kind, ShapeKind::Picture { .. }) && sh.click.is_some()).unwrap();
+    assert!(matches!(z.click.as_ref().unwrap().action, Action::Slide { .. }));
+    assert!(s.execute("insert.zoom", &json!({"slides": [42]})).is_err());
+    assert!(s.execute("insert.zoom", &json!({"kind": "slide"})).is_err());
 }

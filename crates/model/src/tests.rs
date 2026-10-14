@@ -171,6 +171,7 @@ fn hyperlinked_runs_take_the_theme_hyperlink_look() {
         highlight_click: false,
         sound: None,
         stop_sound: false,
+        zoom_return: None,
     });
     let hlink = Some(Fill::solid(ColorRef::scheme(SchemeSlot::Hlink)));
     // The title's master style colours its text tx1; a link is hlink and underlined instead.
@@ -179,8 +180,14 @@ fn hyperlinked_runs_take_the_theme_hyperlink_look() {
     assert_eq!((r.fill, r.underline.as_deref()), (hlink.clone(), Some("sng")));
     assert_eq!(ctx.color(&ColorRef::scheme(SchemeSlot::Hlink), None), p.masters[0].theme.colors.get(SchemeSlot::Hlink));
     // A slide link looks the same.
-    let slide =
-        Some(Hyperlink { action: Action::Slide { slide: s.id }, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false });
+    let slide = Some(Hyperlink {
+        action: Action::Slide { slide: s.id },
+        tooltip: String::new(),
+        highlight_click: false,
+        sound: None,
+        stop_sound: false,
+        zoom_return: None,
+    });
     assert_eq!(resolve::run(&ctx, title, &para, &RunProps { link: slide, ..Default::default() }).fill, hlink);
     // The run's own colour and underline win; u="none" removes the underline.
     let red = Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))));

@@ -783,6 +783,7 @@ fn media(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, m: &deckcraft_
             highlight_click: false,
             sound: None,
             stop_sound: false,
+            zoom_return: None,
         });
     }
     cnvpr(w, x, o, id, &s2);

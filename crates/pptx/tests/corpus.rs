@@ -64,6 +64,7 @@ fn talk() -> Presentation {
                                     highlight_click: false,
                                     sound: None,
                                     stop_sound: false,
+                                    zoom_return: None,
                                 }),
                                 ..Default::default()
                             },

@@ -1238,6 +1238,8 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
+        let r = big_button(ui, Icon::Zoom, "Zoom", enabled(app, "insert.zoom"));
+        egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).width(300.0).show(|ui| zoom_menu(app, ui));
         big(app, ui, Icon::Link, "Link", "app.dialog", json!({"id": "hyperlink"}));
         let r = big_button(ui, Icon::Action, "Action", enabled(app, "insert.actionButton"));
         egui::Popup::menu(&r).show(|ui| {
@@ -3507,4 +3509,62 @@ fn smooth_corners_row(app: &mut SlideApp, ui: &mut egui::Ui) {
             run(app, "shape.smoothCorners", json!({"smoothing": state.1, "radius": state.0}));
         }
     });
+}
+
+/// Insert › Zoom: pick Summary, Section or Slide Zoom and what it zooms to, as PowerPoint's
+/// Insert Zoom dialogs do (a checklist of slides or sections).
+fn zoom_menu(app: &mut SlideApp, ui: &mut Ui) {
+    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else { return };
+    let id = egui::Id::new("insert_zoom_menu");
+    let (mut kind, mut picked): (u8, Vec<usize>) = ui.data_mut(|d| d.get_temp(id).unwrap_or((0, vec![])));
+    ui.horizontal(|ui| {
+        for (k, label) in [(0u8, "Slide Zoom"), (1, "Section Zoom"), (2, "Summary Zoom")] {
+            if ui.selectable_label(kind == k, label).clicked() && kind != k {
+                kind = k;
+                picked.clear();
+            }
+        }
+    });
+    ui.separator();
+    let items: Vec<String> = if kind == 1 {
+        doc.sections.iter().map(|s| s.name.clone()).collect()
+    } else {
+        doc.slides
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let t = s.title();
+                format!("{}. {}", i + 1, t.lines().next().unwrap_or("").trim())
+            })
+            .collect()
+    };
+    if items.is_empty() {
+        ui.label(if kind == 1 { "The presentation has no sections. Add one with Home › Section." } else { "No slides." });
+    }
+    egui::ScrollArea::vertical().max_height(260.0).show(ui, |ui| {
+        for (i, label) in items.iter().enumerate() {
+            let mut on = picked.contains(&i);
+            if ui.checkbox(&mut on, label).changed() {
+                if on {
+                    picked.push(i);
+                } else {
+                    picked.retain(|x| *x != i);
+                }
+            }
+        }
+    });
+    ui.data_mut(|d| d.insert_temp(id, (kind, picked.clone())));
+    ui.separator();
+    if ui.add_enabled(!picked.is_empty(), egui::Button::new("Insert")).clicked() {
+        let mut v = picked.clone();
+        v.sort_unstable();
+        let p = match kind {
+            1 => json!({"kind": "section", "sections": v}),
+            2 => json!({"kind": "summary", "slides": v}),
+            _ => json!({"kind": "slide", "slides": v}),
+        };
+        run(app, "insert.zoom", p);
+        ui.data_mut(|d| d.remove::<(u8, Vec<usize>)>(id));
+        ui.close();
+    }
 }

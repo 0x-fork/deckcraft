@@ -14,7 +14,7 @@ use deckcraft_model::{Comment, CustomShow, Geom, LayoutType, PhType, Presentatio
 const CHIME: &[u8] = b"RIFFdeckcraft-chime-WAVEfmt ";
 
 fn link(action: Action) -> Hyperlink {
-    Hyperlink { action, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false }
+    Hyperlink { action, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false, zoom_return: None }
 }
 
 fn box_at(p: &mut Presentation, name: &str, x: f64, y: f64) -> Shape {
@@ -72,6 +72,7 @@ fn deck() -> Presentation {
                             highlight_click: false,
                             sound: None,
                             stop_sound: false,
+                            zoom_return: None,
                         }),
                         ..Default::default()
                     },
@@ -97,6 +98,7 @@ fn deck() -> Presentation {
         highlight_click: true,
         sound: None,
         stop_sound: false,
+        zoom_return: None,
     });
     a.shapes.push(site);
 
@@ -116,13 +118,26 @@ fn deck() -> Presentation {
     }
 
     let mut hover = box_at(&mut p, "Hover", 40.0, 500.0);
-    hover.hover =
-        Some(Hyperlink { action: Action::PreviousSlide, tooltip: "Back one".into(), highlight_click: false, sound: None, stop_sound: true });
+    hover.hover = Some(Hyperlink {
+        action: Action::PreviousSlide,
+        tooltip: "Back one".into(),
+        highlight_click: false,
+        sound: None,
+        stop_sound: true,
+        zoom_return: None,
+    });
     a.shapes.push(hover);
 
     let mut home = box_at(&mut p, "Home", 800.0, 460.0);
     home.geom = Geom::preset("actionButtonHome");
-    home.click = Some(Hyperlink { action: Action::FirstSlide, tooltip: String::new(), highlight_click: true, sound: None, stop_sound: false });
+    home.click = Some(Hyperlink {
+        action: Action::FirstSlide,
+        tooltip: String::new(),
+        highlight_click: true,
+        sound: None,
+        stop_sound: false,
+        zoom_return: None,
+    });
     a.shapes.push(home);
 
     let mut board = box_at(&mut p, "To board", 140.0, 500.0);
@@ -132,6 +147,7 @@ fn deck() -> Presentation {
         highlight_click: false,
         sound: Some(chime),
         stop_sound: false,
+        zoom_return: None,
     });
     a.shapes.push(board);
 

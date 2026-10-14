@@ -99,7 +99,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slides | Reset slide | P1 | D |
 | Slides | Slides from outline | P2 | D |
 | Slides | Copy/paste slides between decks | P1 | P |
-| Slides | Zoom (summary, section and slide zoom) | P2 | M |
+| Slides | Zoom (summary, section and slide zoom) | P2 | P |
 | Views | Normal view (thumbnails, slide, notes) | P0 | D |
 | Views | Outline view | P1 | D |
 | Views | Slide Sorter | P0 | D |

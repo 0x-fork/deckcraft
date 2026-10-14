@@ -863,6 +863,7 @@ fn hyperlinks_draw_in_the_hyperlink_colour_underlined() {
         highlight_click: false,
         sound: None,
         stop_sound: false,
+        zoom_return: None,
     });
     let hlink = Some(Fill::solid(ColorRef::scheme(deckcraft_color::SchemeSlot::Hlink)));
     let red = Some(Fill::solid(ColorRef::rgb(Rgba::rgb(200, 0, 0))));
@@ -2039,7 +2040,8 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
 #[test]
 fn placed_shapes_give_the_click_boxes_of_a_slide_in_drawing_order() {
     use deckcraft_model::text::{Action, Hyperlink};
-    let link = Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false };
+    let link =
+        Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false, zoom_return: None };
     let rect = |id: u32, x: f64, click: Option<Hyperlink>| Shape {
         id: ShapeId(id),
         xfrm: Some(Xfrm::new(x, 50.0, 100.0, 40.0)),
@@ -2079,7 +2081,14 @@ fn a_text_hyperlink_belongs_to_the_shape_that_holds_the_text() {
     use deckcraft_model::text::{Action, Hyperlink};
     let mut body = TextBody::from_text("click here");
     for r in &mut body.paragraphs[0].runs {
-        r.props.link = Some(Hyperlink { action: Action::FirstSlide, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false });
+        r.props.link = Some(Hyperlink {
+            action: Action::FirstSlide,
+            tooltip: String::new(),
+            highlight_click: false,
+            sound: None,
+            stop_sound: false,
+            zoom_return: None,
+        });
     }
     let sh = Shape { id: ShapeId(7), xfrm: Some(Xfrm::new(100.0, 100.0, 300.0, 60.0)), text: Some(body), ..Default::default() };
     let placed = place_slide(&deck_with(vec![sh]), 0);

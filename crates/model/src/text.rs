@@ -344,6 +344,10 @@ pub struct Hyperlink {
     /// `endSnd`: stop the sound that is already playing.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stop_sound: bool,
+    /// Zoom (Insert ▸ Zoom) with Return to Zoom: in the show, after this slide is shown and
+    /// advanced past, go back to the slide with the zoom. Saved to .pptx as a plain slide link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zoom_return: Option<crate::SlideId>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

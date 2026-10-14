@@ -489,6 +489,7 @@ pub fn hyperlink(imp: &mut Imp, part: &Part, h: &El) -> Option<Hyperlink> {
         highlight_click: h.bool("highlightClick").unwrap_or(false),
         stop_sound: h.bool("endSnd").unwrap_or(false),
         sound: h.child("snd").and_then(|s| media_ref(imp, part, s)),
+        zoom_return: None,
     })
 }
 
