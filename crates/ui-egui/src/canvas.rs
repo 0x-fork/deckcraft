@@ -227,6 +227,12 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     ime_output(app, ui, xf);
     media_bar(app, ui, xf);
     gif_buttons(app, ui, xf, &gifs);
+    if resp.secondary_clicked()
+        && let Some(p) = resp.interact_pointer_pos()
+    {
+        let word = app.session.active().and_then(|st| app.squiggles.word_at(st, xf.to_slide(p), 4.0 / xf.scale.max(0.01) as f64));
+        app.squiggles.menu_word = word;
+    }
     context_menu(app, &resp);
 }
 
@@ -498,6 +504,14 @@ fn poly(p: &egui::Painter, pts: [Pos2; 4], stroke: Stroke) {
 }
 
 fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &Tokens) {
+    // Spelling squiggles under misspelt words (checked in the background).
+    if let Some(st) = app.session.active() {
+        let lines = app.squiggles.update(st, Some(ui.ctx()));
+        let scale = (xf.to_screen(Point::new(1.0, 0.0)) - xf.to_screen(Point::new(0.0, 0.0))).length();
+        for (a, b) in lines {
+            crate::squiggles::paint(painter, xf.to_screen(a), xf.to_screen(b), scale);
+        }
+    }
     let Some(st) = app.session.active() else { return };
     let sel_stroke = Stroke::new(1.0, t.selection);
     let editing = st.selection.text.clone();
@@ -768,6 +782,32 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 ui.close();
             }
             return;
+        }
+        // A misspelt word under the pointer: its suggestions, then Ignore All and Add to Dictionary.
+        if let Some(w) = app.squiggles.menu_word.clone() {
+            if w.suggestions.is_empty() {
+                ui.label(egui::RichText::new("(no spelling suggestions)").weak());
+            }
+            for to in &w.suggestions {
+                if ui.button(egui::RichText::new(to).strong()).clicked() {
+                    let _ = app.run("review.spellingChange", json!({"shape": w.shape, "para": w.para, "start": w.start, "word": w.word, "to": to}));
+                    app.squiggles.menu_word = None;
+                    ui.close();
+                }
+            }
+            if ui.button("Ignore All").clicked() {
+                app.squiggles.ignore(&w.word);
+                app.squiggles.menu_word = None;
+                ui.close();
+            }
+            if ui.button("Add to Dictionary").clicked() {
+                if let Err(e) = app.session.execute("review.addToDictionary", &json!({"word": w.word})) {
+                    app.set_status(e.to_string());
+                }
+                app.squiggles.menu_word = None;
+                ui.close();
+            }
+            ui.separator();
         }
         let has_sel = app.session.active().is_some_and(|d| !d.selection.shapes.is_empty());
         for (l, id) in [("Cut", "edit.cut"), ("Copy", "edit.copy"), ("Paste", "edit.paste")] {
