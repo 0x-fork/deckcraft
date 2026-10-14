@@ -105,6 +105,7 @@ pub fn rich_deck() -> Presentation {
     let mut a = shape(&mut p, "Gradient Star", 100.0, 120.0, 150.0, 150.0);
     a.geom = Geom::Preset { name: "star5".into(), adj: vec![20000.0] };
     a.fill = Some(Fill::Gradient(Gradient {
+        tile: [0.0; 4],
         stops: vec![
             GradientStop { pos: 0.0, color: ColorRef::scheme(SchemeSlot::Accent1) },
             GradientStop { pos: 1.0, color: ColorRef::scheme(SchemeSlot::Accent2).with(ColorTransform::LumMod(75000)) },
@@ -230,6 +231,7 @@ pub fn rich_deck() -> Presentation {
             mode: PictureMode::Stretch { fill_rect: [0.0; 4] },
             alpha: Some(0.5),
             adjust: PictureAdjust { brightness: 0.2, contrast: -0.1, grayscale: true, ..Default::default() },
+            upright: false,
         },
     };
     let mut tiled = shape(&mut p, "Tiled", 350.0, 120.0, 200.0, 150.0);
@@ -856,4 +858,136 @@ fn wordart_warps_and_their_adjusts_round_trip() {
     let inflate = &by_name(&q.slides[0], "Inflate").text.as_ref().expect("text").body;
     assert_eq!(inflate.warp.as_deref(), Some("textInflate"));
     assert!(inflate.warp_adj.is_empty());
+}
+
+/// Slide XML of a deck exported with one slide per transition (kind, option, ms, advance after).
+fn transition_deck(list: &[(&str, &str, u32, Option<u32>)]) -> (Presentation, Vec<String>) {
+    let mut p = defaults::new_presentation(None);
+    let base = p.slides[0].as_ref().clone();
+    p.slides.clear();
+    for (kind, option, ms, adv) in list {
+        let mut s = base.clone();
+        s.id = SlideId(p.alloc_id());
+        s.transition = Some(Transition {
+            kind: kind.to_string(),
+            option: option.to_string(),
+            duration_ms: *ms,
+            advance_on_click: adv.is_none(),
+            advance_after_ms: *adv,
+            ..Default::default()
+        });
+        p.slides.push(Arc::new(s));
+    }
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+    let xml = (1..=list.len())
+        .map(|i| {
+            let mut x = String::new();
+            std::io::Read::read_to_string(&mut zip.by_name(&format!("ppt/slides/slide{i}.xml")).expect("slide"), &mut x).expect("read");
+            x
+        })
+        .collect();
+    (p, xml)
+}
+
+#[test]
+fn transition_xml_matches_powerpoints_elements() {
+    // The elements, attributes and namespaces PowerPoint itself writes for these effect options
+    // (observed on files it saved), inside `mc:AlternateContent` with a `p:fade` fallback for
+    // the 2010+ effects.
+    let cases: &[(&str, &str, &[&str], &str)] = &[
+        ("wipe", "ru", &[r#"<p:strips dir="ru"/>"#], "p14"),
+        ("wipe", "u", &[r#"<p:wipe dir="u"/>"#], "p14"),
+        ("zoom", "in", &[r#"<p14:warp dir="in"/>"#], "p14"),
+        ("zoom", "rotate", &["<p:newsflash/>"], "p14"),
+        ("shape", "out", &[r#"<p:zoom dir="out"/>"#], "p14"),
+        ("glitter", "hexD", &[r#"<p14:glitter dir="d" pattern="hexagon"/>"#], "p14"),
+        ("shred", "particlesOut", &[r#"<p14:shred pattern="rectangle" dir="out"/>"#], "p14"),
+        ("wind", "l", &[r#"<p15:prstTrans prst="wind" invX="1"/>"#], "p15"),
+        ("wind", "r", &[r#"<p15:prstTrans prst="wind"/>"#], "p15"),
+        ("fallOver", "r", &[r#"<p15:prstTrans prst="fallOver" invX="1"/>"#], "p15"),
+        ("pageCurlDouble", "singleR", &[r#"<p15:prstTrans prst="pageCurlSingle" invX="1"/>"#], "p15"),
+        ("orbit", "u", &[r#"<p14:prism dir="u" isContent="1" isInverted="1"/>"#], "p14"),
+        ("vortex", "r", &[r#"<p14:vortex dir="r"/>"#], "p14"),
+        ("morph", "words", &[r#"<p159:morph option="byWord"/>"#], "p159"),
+    ];
+    let list: Vec<(&str, &str, u32, Option<u32>)> = cases.iter().map(|c| (c.0, c.1, 2000, Some(1000))).collect();
+    let (p, xml) = transition_deck(&list);
+    for ((kind, option, wants, req), x) in cases.iter().zip(&xml) {
+        for w in *wants {
+            assert!(x.contains(w), "{kind}/{option}: {w} in {x}");
+        }
+        assert!(x.contains(&format!(r#"Requires="{req}""#)), "{kind}/{option}");
+        assert!(x.contains(r#"p14:dur="2000""#) && x.contains(r#"advTm="1000""#) && x.contains(r#"advClick="0""#), "{kind}/{option}");
+        assert!(x.contains("<mc:Fallback>"), "{kind}/{option}");
+    }
+    // Back in, everything is as it was.
+    let bytes = deckcraft_pptx::export(&p).expect("export");
+    let q = deckcraft_pptx::import(&bytes).expect("import");
+    for ((kind, option, ..), s) in cases.iter().zip(&q.slides) {
+        let t = s.transition.as_ref().expect("transition");
+        assert_eq!(
+            (t.kind.as_str(), t.option.as_str(), t.duration_ms, t.advance_after_ms, t.advance_on_click),
+            (*kind, *option, 2000, Some(1000), false)
+        );
+    }
+}
+
+#[test]
+fn transition_defaults_read_like_powerpoint() {
+    // PowerPoint leaves out an option when it is the element's default; these are its defaults.
+    let cases: &[(&str, &str, &str)] = &[
+        ("<p:push/>", "push", "l"),
+        ("<p:wipe/>", "wipe", "l"),
+        ("<p:strips/>", "wipe", "lu"),
+        ("<p:randomBar/>", "randomBar", "horz"),
+        ("<p:checker/>", "checker", "horz"),
+        ("<p:blinds/>", "blinds", "horz"),
+        ("<p:comb/>", "comb", "horz"),
+        ("<p:zoom/>", "shape", "out"),
+        (r#"<p:zoom dir="in"/>"#, "shape", "in"),
+        ("<p:split/>", "split", "horzOut"),
+        ("<p14:doors/>", "doors", "horz"),
+        ("<p14:window/>", "window", "horz"),
+        ("<p14:pan/>", "pan", "l"),
+        ("<p14:warp/>", "zoom", "out"),
+        ("<p14:glitter/>", "glitter", "l"),
+        ("<p14:shred/>", "shred", "stripsIn"),
+        ("<p14:reveal/>", "reveal", "smoothlyLeft"),
+        ("<p14:prism/>", "cube", "l"),
+        (r#"<p15:prstTrans prst="airplane"/>"#, "airplane", "r"),
+        (r#"<p15:prstTrans prst="peelOff"/>"#, "peelOff", "l"),
+        (r#"<p15:prstTrans prst="pageCurlSingle"/>"#, "pageCurlDouble", "singleL"),
+    ];
+    let (_, xml) = transition_deck(&[("fade", "smoothly", 2000, None)]);
+    let Some(x) = xml.first() else { panic!("no slide") };
+    let start = x.find("<mc:AlternateContent").expect("transition");
+    let end = x.find("</mc:AlternateContent>").expect("transition end") + "</mc:AlternateContent>".len();
+    let p14 = r#"xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main""#;
+    let p15 = r#"xmlns:p15="http://schemas.microsoft.com/office/powerpoint/2012/main""#;
+    for (el, kind, option) in cases {
+        let tr = format!(r#"<p:transition {p14} {p15} spd="slow" p14:dur="2000">{el}</p:transition>"#);
+        let edited = format!("{}{}{}", &x[..start], tr, &x[end..]);
+        let mut p = defaults::new_presentation(None);
+        let base = p.slides[0].as_ref().clone();
+        p.slides = vec![Arc::new(base)];
+        let bytes = deckcraft_pptx::export(&p).expect("export");
+        let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+        let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for i in 0..zip.len() {
+            let mut f = zip.by_index(i).expect("entry");
+            let name = f.name().to_string();
+            let mut data = vec![];
+            std::io::Read::read_to_end(&mut f, &mut data).expect("read");
+            if name == "ppt/slides/slide1.xml" {
+                data = edited.clone().into_bytes();
+            }
+            out.start_file(name, zip::write::SimpleFileOptions::default()).expect("start");
+            std::io::Write::write_all(&mut out, &data).expect("write");
+        }
+        let bytes = out.finish().expect("finish").into_inner();
+        let q = deckcraft_pptx::import(&bytes).expect("import");
+        let t = q.slides[0].transition.as_ref().expect("transition");
+        assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
+    }
 }

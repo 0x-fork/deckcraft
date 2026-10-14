@@ -1382,7 +1382,7 @@ fn transitions(app: &mut SlideApp, ui: &mut Ui) {
         let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !opts.is_empty());
         egui::Popup::menu(&r).show(|ui| {
             for o in opts {
-                if ui.button(option_label(o)).clicked() {
+                if ui.button(deckcraft_model::anim::transition_option_label(&kind, o)).clicked() {
                     run(app, "transition.options", json!({"option": o}));
                 }
             }
