@@ -1,6 +1,6 @@
 # Where DeckCraft falls short of PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Photo Album is one of 28 dialogs; Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain; previous: minor, 3-D bevel, camera and face lighting) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Edit Photo Album reuses the Photo Album dialog, still 28; Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain; previous: trivial, Photo Album counted) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -203,7 +203,7 @@ Detail in [ui-parity.md](ui-parity.md).
 - **Window chrome** (#71 macOS controls misaligned, #26 GNOME title bar, #41 system light/dark).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
-- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Photo Album is one of them). Still missing Font,
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Photo Album is one of them; Edit Photo Album reopens it). Still missing Font,
   Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object…. 8–14 h.
 - **Command palette defaults to an Export entry that fails** (#79). 0.5 h.
 
@@ -256,7 +256,7 @@ Detail in [localization-parity.md](localization-parity.md).
 
 | Date | Change | Summary |
 |---|---|---|
-| 2026-10-14 | trivial | Photo Album dialog counted (28 vs ~60). Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain |
+| 2026-10-14 | trivial | Edit Photo Album reuses the Photo Album dialog (still 28 vs ~60). Font, Bullets, Find, Replace Fonts, Action Settings, Print and Insert Object remain |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |

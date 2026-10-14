@@ -18,7 +18,7 @@ fn png() -> Vec<u8> {
 }
 
 fn harness(app: SlideApp) -> Harness<'static, SlideApp> {
-    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+    let mut h = Harness::builder().with_size(egui::vec2(1600.0, 1200.0)).with_step_dt(1.0 / 60.0).build_ui_state(
         |ui, app: &mut SlideApp| {
             app.logic(ui.ctx());
             app.ui(ui);
@@ -74,6 +74,41 @@ fn create_inserts_the_album_in_one_step() {
     assert_eq!(pics[0].line.as_ref().and_then(|l| l.width), Some(1.5));
     let text: Vec<_> = st.doc.slides[2].shapes.iter().filter(|sh| sh.text_box).filter_map(|sh| sh.text.as_ref().map(|t| t.text())).collect();
     assert_eq!(text, ["Text Box"]);
+}
+
+#[test]
+fn update_reflows_the_open_album() {
+    let data = deckcraft_engine::cmd::base64_encode(&png());
+    let mut app = SlideApp::new(Session::with_new(), Services::default());
+    app.run("insert.photoAlbum", json!({"pictures": [{"name": "hill.png", "data": data}, {"name": "lake.png", "data": data}], "layout": "1"}))
+        .expect("create");
+    assert_eq!(slides_of(&app), 3);
+    app.run("insert.photoAlbumEdit", json!({})).expect("edit");
+    let mut h = harness(app);
+    assert!(h.query_by_label("hill.png").is_some(), "the album's pictures are listed");
+    assert!(h.query_by_label("Update").is_some());
+    h.get_by_label("ALL pictures black and white").click();
+    h.run_steps(2);
+    h.get_by_label("1 picture").click();
+    h.run_steps(2);
+    h.get_by_label("2 pictures").click();
+    h.run_steps(2);
+    h.get_by_label("Update").click();
+    h.run_steps(4);
+    assert!(h.state().dialog.is_none(), "Update closes the dialog");
+    assert_eq!(slides(&h), 2);
+    let st = h.state().session.active().unwrap();
+    assert_eq!(st.history.undo.last().map(|u| u.label.as_str()), Some("Edit Photo Album…"));
+    let pics: Vec<_> = st.doc.slides[1].shapes.iter().filter(|sh| matches!(sh.kind, ShapeKind::Picture { .. })).collect();
+    assert_eq!(pics.len(), 2);
+    match &pics[0].kind {
+        ShapeKind::Picture { fill } => assert!(fill.adjust.grayscale),
+        _ => panic!("picture"),
+    }
+}
+
+fn slides_of(app: &SlideApp) -> usize {
+    app.session.active().map(|d| d.doc.slides.len()).unwrap_or(0)
 }
 
 #[test]
