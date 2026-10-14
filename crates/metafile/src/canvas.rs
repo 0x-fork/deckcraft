@@ -332,8 +332,8 @@ pub(crate) struct Canvas {
     clip: Option<Vec<[f64; 4]>>,
     /// Device bounds of the picture, so excluding from the default clip has a surface to cut.
     surface: Option<[f64; 4]>,
-    /// EMF+ device clip rectangle `[l, t, r, b]`: drawing is cut to it geometrically.
-    plus_clip: Option<[f64; 4]>,
+    /// EMF+ convex device clip polygon: drawing is cut to it geometrically.
+    plus_clip: Option<Vec<P>>,
 }
 
 impl Canvas {
@@ -374,12 +374,13 @@ impl Canvas {
     }
 
     fn push(&mut self, raw: Raw) {
-        match self.plus_clip {
+        match self.plus_clip.take() {
             None => self.push_raw(raw),
             Some(c) => {
-                for r in crate::cliprect::clip_raw(raw, c) {
+                for r in crate::cliprect::clip_raw(raw, &c) {
                     self.push_raw(r);
                 }
+                self.plus_clip = Some(c);
             }
         }
     }
@@ -509,8 +510,8 @@ impl Canvas {
         self.brush = brush;
     }
 
-    /// Sets the device clip rectangle `[l, t, r, b]` (None: unclipped).
-    pub fn set_clip(&mut self, clip: Option<[f64; 4]>) {
+    /// Sets the EMF+ convex device clip polygon (None: unclipped).
+    pub fn set_clip(&mut self, clip: Option<Vec<P>>) {
         self.plus_clip = clip;
     }
 
@@ -529,6 +530,11 @@ impl Canvas {
         self.text.bk_opaque = false;
         self.text.align = align;
         self.text.font = Some(Arc::new(font));
+    }
+
+    /// Pushes an item already in device units (a nested metafile's drawing).
+    pub fn push_device(&mut self, raw: Raw) {
+        self.push(raw);
     }
 
     /// Fills logical `ops` with a ready-made tile, laid from the device origin.
