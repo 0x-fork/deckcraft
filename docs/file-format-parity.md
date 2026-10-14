@@ -50,8 +50,7 @@ PowerPoint opens and saves; Viewer = opens only).
 |---|---|---|---|
 | PNG, JPEG, GIF (animated), BMP, TIFF, WebP | yes | yes | `image` 0.25; animated GIFs play since #39 |
 | SVG | yes (with PNG fallback) | **no** | The PNG fallback shows; SVG files can't be inserted |
-| EMF / WMF | yes | partial | Drawn as vectors (paths, pens, pattern and hatch brushes, bitmaps, text in the document's fonts with the file's character advances). Rectangle clip regions (`INTERSECTCLIPRECT`, `EXCLUDECLIPRECT`, `EXTSELECTCLIPRGN`) limit later drawing; EMF+ records are not drawn. Legacy OLE objects (VML preview) and ActiveX controls show their pictures |
-| EMF / WMF | yes | partial | Drawn as vectors (paths, pens, pattern and hatch brushes, bitmaps, text in the document's fonts with the file's character advances); clip regions; EMF+ only pictures play every EMF+ drawing record (brushes incl. gradients and textures, pens, paths, curves, images, strings, transforms, clipping; see `crates/metafile/src/emfplus.rs` for the few exceptions). Legacy OLE objects (VML preview) and ActiveX controls show their pictures |
+| EMF / WMF | yes | partial | Drawn as vectors (paths, pens, pattern and hatch brushes, bitmaps, text in the document's fonts with the file's character advances). Rectangle clip regions (`INTERSECTCLIPRECT`, `EXCLUDECLIPRECT`, `EXTSELECTCLIPRGN`) limit later drawing. EMF+ only pictures play every EMF+ drawing record (brushes incl. gradients and textures, pens, paths, curves, images, strings, transforms, clipping; see `crates/metafile/src/emfplus.rs` for the few exceptions). Legacy OLE objects (VML preview) and ActiveX controls show their pictures |
 | HEIC | yes (macOS) | no | |
 | Audio: MP3, AAC/M4A, ALAC, WAV, AIFF, CAF, FLAC, Ogg Vorbis, Opus | yes (Ogg/Opus partly) | yes | Pure-Rust decoders in `crates/media`, `crates/opus` |
 | WMA | yes (Windows) | embedded, not playable | |
@@ -91,13 +90,9 @@ the round trip even though DeckCraft doesn't model it.
 | Pictures with crop, recolour, duotone, alpha, luminance | yes | yes | |
 | Tables with styles | yes | yes | Merges and both diagonal borders round-trip |
 | Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw`. Trendlines (type, order or period, forecast, intercept, equation and R²) are read, written and drawn. A combo chart's secondary value axis is read and is not written back when the chart is rebuilt |
-| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, box) | no | no | |
+| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept; edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
 | SmartArt (`dgm`) | drawing part only, as a group; text laid out on its `dsp:txXfrm` rectangle | as shapes | Diagram data model lost on save |
 | SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save. A diagram with no relationship parts keeps its XML; the drawing and data parts are still dropped (#203) |
-| Tables with styles | yes | yes | |
-| Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw` |
-| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept; edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
-| SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save |
 | Equations (OMML, `a14:m`) | no | no | PR #55 open |
 | Audio / video (`p14:media`, trim, fades, bookmarks) | yes | partly | Playback options lost on save (#74) |
 | Ink (`contentPart`) | yes | as a group of freeform lines | PowerPoint sees shapes, not ink |

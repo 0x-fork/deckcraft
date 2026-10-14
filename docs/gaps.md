@@ -138,10 +138,8 @@ Detail in [file-format-parity.md](file-format-parity.md).
 ### SVG pictures don't render
 - **Evidence:** `crates/render/src/images.rs` decodes through `image` 0.25 (PNG, JPEG, WebP, GIF,
   TIFF, BMP), and EMF/WMF through `deckcraft-metafile` (ported from WordCraft: paths, fills, pens,
-  pattern and hatch brushes, bitmaps and text; rectangle clip regions are applied, EMF+ records are
-  not drawn).
-  pattern and hatch brushes, bitmaps and text; EMF+ only pictures play their EMF+ records;
-  clip regions are not drawn).
+  pattern and hatch brushes, bitmaps and text; rectangle clip regions are applied, EMF+ only
+  pictures play their EMF+ records).
   Nothing reads SVG; PowerPoint's Insert Icons stores SVG with a PNG fallback.
 - **Impact:** SVG icons show only their raster fallback, and SVG files can't be inserted.
 - **Estimate:** 4–8 h (an SVG renderer through `resvg`-style crates).
@@ -207,10 +205,6 @@ Detail in [file-format-parity.md](file-format-parity.md).
 
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
-  chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
-  whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are not drawn. A combo
-  chart's secondary value axis is read (`y2_*`, `Series.secondary_axis`) and is not written back
-  when the chart is rebuilt.
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, Pareto,
   box & whisker) are read, drawn, inserted, edited and saved as `chartEx` (kept unchanged, else
   written from the model, with a plain chart fallback). Waterfalls float and total, funnels,
@@ -220,13 +214,11 @@ Detail in [file-format-parity.md](file-format-parity.md).
   (their cached geography too, also through edits) and drawn as value-coloured tiles with a
   colour scale, since DeckCraft ships no map boundaries. Radar charts are drawn polar (filled
   or lines), stock charts as high-low lines with close dashes or up/down bars and saved as
-  `c:stockChart`, and combo charts start as columns with a line. Secondary-axis writing and
-  trendlines are tracked separately.
-  whisker) aren't read. Trendlines round-trip (`corpus_charts.rs`) and are drawn: linear,
-  exponential, logarithmic, polynomial, power and moving average, with forecast and the equation
-  and R² label. A moving average is drawn with neither label. A combo chart's secondary value axis
-  is read (`y2_*`, `Series.secondary_axis`) and
-  is not written back when the chart is rebuilt.
+  `c:stockChart`, and combo charts start as columns with a line. Trendlines round-trip
+  (`corpus_charts.rs`) and are drawn: linear, exponential, logarithmic, polynomial, power and
+  moving average, with forecast and the equation and R² label. A moving average is drawn with
+  neither label. A combo chart's secondary value axis is read (`y2_*`,
+  `Series.secondary_axis`) and is not written back when the chart is rebuilt.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 
