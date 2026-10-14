@@ -26,6 +26,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; checklist letters unchanged, breadth stays 79%, dialogs stay 27; previous: 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previous: minor, chart trendlines round-trip; 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (animation preview plays on the editor canvas; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (a two-finger twist rotates the selection; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -371,7 +372,7 @@ Detail in [hardware-parity.md](hardware-parity.md).
   or wgpu path).
 - **Software-only video decode**; PowerPoint uses VideoToolbox/Media Foundation. 8–14 h (copy
   FilmCraft's hardware decode).
-- **No pen pressure or tilt for ink**; no pinch-zoom or trackpad gestures. 3–6 h.
+- **No pen pressure or tilt for ink**; no pinch-zoom (it does not keep the point under the pointer). A two-finger twist does rotate the selected shapes. 3–6 h.
 
 ## Localization
 
@@ -453,6 +454,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme. The checklist row stays P, so breadth stays 79%. Dialogs stay 27 |
 | 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Checklist letters unchanged (breadth stays 79%); dialogs stay 27 |
 | 2026-10-13 | minor | Animation preview plays the current slide on the editor canvas; the pane gap keeps the timeline, preview from the selected effect, and the remaining effects |
+| 2026-10-14 | minor | A two-finger twist rotates the selected shapes. Pinch-zoom is still open |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

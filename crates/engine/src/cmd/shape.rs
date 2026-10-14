@@ -42,7 +42,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("shape.move", "Move", [], None, "{dx?, dy?: pt (relative) | x?, y?: pt (absolute), ids?}", has_selection, move_by),
         cmd!("shape.resize", "Size", ["Shape Format", "Size"], None, "{w?, h?: pt, lockAspect?: bool, ids?}", has_selection, resize),
         cmd!("shape.setBounds", "Position and Size", [], None, "{x, y, w, h, ids?}", has_selection, set_bounds),
-        cmd!("shape.rotate", "Rotation", ["Shape Format", "Arrange", "Rotate"], None, "{deg?: absolute, by?: relative, ids?}", has_selection, rotate),
+        cmd!(
+            "shape.rotate",
+            "Rotation",
+            ["Shape Format", "Arrange", "Rotate"],
+            None,
+            "{deg?: absolute, by?: relative, ids?, gesture?: move|end}",
+            has_selection,
+            rotate
+        ),
         cmd!(
             "shape.sizePosition",
             "Size and Position…",
@@ -345,6 +353,15 @@ fn size_position(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rotate(s: &mut Session, p: &Value) -> Result<Value> {
+    // A trackpad twist sends many small steps. `gesture: move` keeps them as one undo;
+    // `gesture: end` commits that step and does not rotate again.
+    if p.get("gesture").and_then(Value::as_str) == Some("end") {
+        s.commit_named("Rotation");
+        return Ok(json!({}));
+    }
+    if p.get("gesture").and_then(Value::as_str) == Some("move") {
+        s.begin("Rotation");
+    }
     let (abs, by) = (f64_param(p, "deg"), f64_param(p, "by"));
     edit_geometry(s, p, "shape.rotate", |sh| {
         if let Some(x) = sh.xfrm.as_mut() {
@@ -1330,4 +1347,52 @@ fn ink_to_shape(s: &mut Session, _p: &Value) -> Result<Value> {
         sel.shapes = new.clone();
         Ok(json!({"shapes": new.iter().map(|i| i.0).collect::<Vec<_>>(), "kept": remaining}))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use serde_json::json;
+
+    fn rotation(s: &Session) -> f64 {
+        let st = s.active().unwrap();
+        let id = st.selection.shapes[0];
+        st.shape(id).unwrap().xfrm.unwrap().rot
+    }
+
+    #[test]
+    fn a_twist_is_one_undo_and_wraps_past_a_full_turn() {
+        let mut s = Session::with_new();
+        s.execute("edit.select", &json!({"ids": []})).unwrap();
+        let id = s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 80.0, 40.0]})).unwrap();
+        let id = id.get("id").and_then(Value::as_u64).unwrap();
+        s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        assert!((rotation(&s) - 0.0).abs() < 0.01);
+
+        s.execute("shape.rotate", &json!({"by": 10.0, "gesture": "move"})).unwrap();
+        s.execute("shape.rotate", &json!({"by": 350.0, "gesture": "move"})).unwrap();
+        assert!((rotation(&s) - 0.0).abs() < 0.01, "10 + 350 wraps to 0, got {}", rotation(&s));
+        s.execute("shape.rotate", &json!({"by": 20.0, "gesture": "move"})).unwrap();
+        s.execute("shape.rotate", &json!({"gesture": "end", "ids": []})).unwrap();
+        assert!((rotation(&s) - 20.0).abs() < 0.01);
+        assert_eq!(s.active().unwrap().history.undo.last().unwrap().label, "Rotation");
+        assert!(s.active().unwrap().interaction.is_none());
+
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!((rotation(&s) - 0.0).abs() < 0.01, "one undo undoes the whole twist");
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert!((rotation(&s) - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn ending_a_twist_does_not_commit_a_drag() {
+        let mut s = Session::with_new();
+        s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [10.0, 10.0, 30.0, 30.0]})).unwrap();
+        let st = s.active_mut().unwrap();
+        st.interaction = Some(crate::Interaction { label: "Move".into(), doc: st.doc.clone(), selection: st.selection.clone() });
+        s.execute("shape.rotate", &json!({"gesture": "end", "ids": []})).unwrap();
+        assert_eq!(s.active().unwrap().interaction.as_ref().unwrap().label, "Move");
+    }
 }

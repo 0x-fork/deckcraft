@@ -341,6 +341,8 @@ pub struct SlideApp {
     pub sorter: sorter::State,
     /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
     pub(crate) slides_focused: bool,
+    /// A trackpad twist is in progress (one undo step when it ends).
+    twisting: bool,
 }
 
 impl SlideApp {
@@ -388,6 +390,7 @@ impl SlideApp {
             doc_window: None,
             sorter: sorter::State::default(),
             slides_focused: false,
+            twisting: false,
         }
     }
 
@@ -1077,6 +1080,7 @@ impl SlideApp {
                 Err(e) => self.set_status(e),
             }
         }
+        canvas::trackpad_twist(self, ctx);
     }
 
     /// Borrow faces for interface text in scripts the interface fonts lack (#101): the open
@@ -1489,6 +1493,50 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    fn shape_rot(app: &SlideApp) -> f64 {
+        let d = app.session.active().unwrap();
+        let id = d.selection.shapes[0];
+        d.shape(id).unwrap().xfrm.unwrap().rot
+    }
+
+    /// A two-finger twist is egui's Rotate event. Over the canvas it turns the selection;
+    /// letting go is one undo step. Off the canvas it does nothing.
+    #[test]
+    fn a_trackpad_twist_rotates_the_shape_under_the_canvas() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let id = harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 100.0, 60.0]})).unwrap();
+        let id = id.get("id").and_then(|v| v.as_u64()).unwrap();
+        harness.state_mut().session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        harness.run_steps(1);
+        let canvas = harness.state().canvas_rect.expect("canvas");
+        let outside = egui::pos2(1.0, 1.0);
+        assert!(!canvas.contains(outside), "the ribbon corner is not the canvas: {canvas:?}");
+
+        harness.input_mut().events.push(egui::Event::PointerMoved(outside));
+        harness.input_mut().events.push(egui::Event::Rotate(20.0_f32.to_radians()));
+        harness.run_steps(1);
+        assert!((shape_rot(harness.state()) - 0.0).abs() < 0.01, "off the canvas, still {}", shape_rot(harness.state()));
+
+        harness.input_mut().events.push(egui::Event::PointerMoved(canvas.center()));
+        harness.input_mut().events.push(egui::Event::Rotate(20.0_f32.to_radians()));
+        harness.run_steps(1);
+        harness.input_mut().events.push(egui::Event::PointerMoved(canvas.center()));
+        harness.input_mut().events.push(egui::Event::Rotate(10.0_f32.to_radians()));
+        harness.run_steps(1);
+        assert!((shape_rot(harness.state()) - 30.0).abs() < 0.05, "twist landed on {}", shape_rot(harness.state()));
+        harness.run_steps(1);
+        assert!(harness.state().session.active().unwrap().interaction.is_none());
+        harness.state_mut().session.execute("edit.undo", &json!({})).unwrap();
+        assert!((shape_rot(harness.state()) - 0.0).abs() < 0.01, "one undo, got {}", shape_rot(harness.state()));
+    }
 
     fn title_text(app: &SlideApp) -> String {
         let d = app.session.active().unwrap();
