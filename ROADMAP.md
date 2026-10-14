@@ -36,6 +36,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: copy and paste rich text and pictures with other apps; previous: hours to ~95% per audience added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (animation preview on the canvas; breadth 79% → 80%, Animations 79% → 85%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Format Shape fill transparency follows the selection; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (progress log: web file picker keeps its document and slide, #414; previous: minor, hours to ~95% per audience added; ready 56% → 55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -220,6 +221,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-14 | A two-finger twist on the trackpad rotates the selected shapes, as one undo step. Pinch-zoom is unchanged |
 | 2026-10-14 | A trackpad swipe turns the page: sideways when the slide fits the window, and any flick during the slide show. One gesture turns one page. Pinch-zoom is unchanged |
 | 2026-10-14 | Format Shape: the Fill transparency slider shows the selected solid fill, and leaving it no longer clears that transparency |
+| 2026-10-13 | Web file picker: a picture, sound, video or outline finishes on the document and slide that asked for it, and is dropped if that presentation was closed or the picker dismissed (#414) |
 | 2026-10-13 | Slide transitions like PowerPoint: every transition and option measured frame by frame against PowerPoint's video export and retuned (curves, directions, soft edges, 3-D perspective, contents moving over backgrounds); PowerPoint's own XML elements and defaults read and written (diagonal Wipe, Zoom, Shape In/Out, Glitter Hexagons, Shred In/Out, Page Curl Single); `deckcraft-cli render-transition` renders frames headless |
 | 2026-10-13 | Wild text cases measured against PowerPoint (102 synthetic slides): bidi by run language, East Asian vertical text upright, mongolianVert/wordArtVert/wordArtVertRtl, underline styles and strikethrough at the font's metrics, centre/right/decimal tabs, East Asian, Thai, Hindi, Arabic and Hebrew numbering, small caps, all-caps "ß", transparent text, soft hyphens, kinsoku, rtlCol and just/dist anchoring, emoji presentation, fallback faces that no longer move the baseline |
 | 2026-10-13 | Render matches PowerPoint more closely on wild shape, picture and table cases: even-odd custom paths, dashes and caps, arrowheads, radial and path gradients, tile rects, rotWithShape, gradient lines, shadows cast by what is drawn (group and perspective too), group fill, picture borders, tiles, reflection, recolour (biLevel, alphaInv, brightness/contrast), table borders and grid default, 20+ preset shapes by their ECMA formulas, default miter joins, and approximate 3-D bevels, cameras and face lighting |
@@ -289,6 +291,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-14 | trivial | Progress log: copy and paste rich text and pictures with other apps |
 | 2026-10-13 | trivial | Progress log: animation preview on the editor canvas; breadth 80%, Animations 85% |
 | 2026-10-14 | trivial | Progress log: Format Shape fill transparency follows the selection |
+| 2026-10-13 | trivial | Progress log: web file picker keeps its document and slide (#414) |
 | 2026-10-13 | trivial | Progress log: wild text cases |
 | 2026-10-13 | trivial | Progress log: slide show for interactive decks |
 | 2026-10-12 | trivial | Progress log: File tab (Backstage, #76) |
