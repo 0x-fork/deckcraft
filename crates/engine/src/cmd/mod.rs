@@ -2,8 +2,8 @@
 
 pub mod animation;
 pub mod arrange;
-pub mod background;
 pub mod artistic;
+pub mod background;
 pub mod design;
 pub mod edit;
 pub mod file;

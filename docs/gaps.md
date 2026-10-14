@@ -123,7 +123,6 @@ Detail in [file-format-parity.md](file-format-parity.md).
   exist to compare against. `corpus_charts.rs` round-trips one owned slice (a combo chart with
   data labels and trendlines, a merged table with diagonal borders, text columns, autofit,
   vertical text and a WordArt warp). That is still a generated deck, not a corpus of real ones.
-### PPTX corpus is only decks we author
 - **Evidence:** `crates/pptx/tests/corpus_kinds.rs` builds decks in this repo and checks open → save →
   reopen (package parts and text): tables, charts, animations, media, sections, and several masters
   and layouts. A handout master with a header, footer, date and slide number used to disappear on
@@ -133,10 +132,6 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
   `standards/test-corpora.md`), add render checks, have the owner open outputs in PowerPoint, fix
   what breaks. **Beta blocker.**
-  (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
-- **Estimate:** 20–35 h: build an owned corpus in `storytold/photocraft-corpus` style (craftrules
-  `standards/test-corpora.md`), add import → render → export → re-import checks, have the owner open
-  outputs in PowerPoint, fix what breaks. **Beta blocker.**
 
 ### Round trip loses media playback options and animation rewind (#74, #77)
 - **Evidence:** issues filed 2026-10-10 by an automated reviewer; media playback options and the

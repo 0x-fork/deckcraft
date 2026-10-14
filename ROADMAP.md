@@ -139,8 +139,6 @@ Ranked; detail and the full beta plan in [docs/roadmap.md](docs/roadmap.md).
    corpus, embedded fonts, #70, #74, #77, EMF/WMF and SVG. 36–64 h.
 2. **PPTX on real decks:** owned corpus, round-trip checks, fixes; #70, #74, #77; EMF/WMF and SVG.
    `corpus_media.rs` keeps 3-D models and animation bounce end. 36–64 h.
-2. **PPTX on real decks:** a larger owned corpus and the remaining round-trip losses; #70, #74, #77;
-   EMF/WMF and SVG. 36–64 h.
 3. **Localization:** catalog, system language (#15), zh-Hans, es, fr, de, ja with IME. 27–46 h.
 4. **Output:** vector PDF, printing. 10–16 h.
 5. **Depth that users hit:** font weights (#69), chart data and elements, Animation Pane timeline,

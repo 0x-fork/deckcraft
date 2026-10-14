@@ -76,10 +76,8 @@ the round trip even though DeckCraft doesn't model it.
 | Presentation, slide size, sections (p14), custom shows | yes | yes | |
 | Slide masters, layouts, placeholders and inheritance | yes | yes | |
 | Themes: colour, font (Latin/EA/CS), effect schemes, background styles | yes | yes | Unknown theme parts kept |
-| Notes slides and notes master | yes | yes | Header, footer, date and slide-number text on the notes master is kept. No notes-master editing view |
-| Handout master | no | no | |
-| Notes slides and notes master | yes | yes | No notes-master editing view |
-| Handout master | yes | yes | Header, footer, date and slide-number text is kept. No handout-master editing view |
+| Notes slides and notes master | yes | yes | Header, footer, date and slide-number text on the notes master is kept. Edited in View ▸ Notes Master |
+| Handout master | yes | yes | Header, footer, date and slide-number text is kept. Edited in View ▸ Handout Master |
 | Shapes: preset geometry (~180 presets), custom geometry, groups, connectors | yes | yes | Presets re-derived in `crates/geom/src/preset.rs` (and `preset/extra.rs`). Outlines, dashes, arrowheads and ink inside a group, and text, keep their size in points whatever the group's child-coordinate scale (#233). |
 | Fills: solid, gradient, picture (stretch/tile/crop), pattern, group | yes | yes | |
 | Lines: dash, compound, caps, joins, arrowheads | yes | yes | |
@@ -116,13 +114,10 @@ the round trip even though DeckCraft doesn't model it.
 ### What would move the PPTX number
 
 1. A larger owned corpus (corporate templates, SmartArt, chartex charts, EMF, embedded fonts,
-   every transition and animation) in a corpus repo. `crates/pptx/tests/corpus.rs` already checks
-   open → save → reopen (parts and text) for decks we author. Still needed: render checks and a
-   PowerPoint reference render for each (owner runs PowerPoint).
-1. A larger owned corpus (corporate templates, SmartArt, chartex charts, EMF, embedded fonts,
-   every transition and animation) in a corpus repo, with a PowerPoint reference render for each.
-   `crates/pptx/tests/corpus_kinds.rs` already checks tables, charts, animations, media, sections
-   and masters/layouts (open → save → reopen).
+   every transition and animation) in a corpus repo. `crates/pptx/tests/corpus.rs` and
+   `corpus_kinds.rs` already check open → save → reopen (parts and text) for decks we author:
+   tables, charts, animations, media, sections and masters/layouts among them. Still needed:
+   render checks and a PowerPoint reference render for each (owner runs PowerPoint).
 2. The round-trip losses above (#70, #74, #77).
 3. SVG rendering. EMF+ records inside EMF/WMF are still not drawn.
 

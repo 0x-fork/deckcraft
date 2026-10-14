@@ -35,11 +35,8 @@ ready** (estimated), **10–16 h** to parity.
 | Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable |
 | Media playback with controls, play across slides, full-screen video | yes | yes | Seeks and loops preserve new-generation video frames and end-of-stream; queue regression and repeated seeks across H.264/HEVC/VP9/AV1 in `crates/media`. WMA/WMV not decodable |
 | Media playback with controls, play across slides, full-screen video, Play/Pause/Stop in the click sequence | yes | yes | WMA/WMV not decodable; click sequence since #116 |
-| Animated GIFs play; pause from their corner button | yes | yes (#39) | |
 | Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable. Slide Show ▸ Show Media Controls (on by default) hides the playback bar |
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | The corner button hides with Show Media Controls |
-| See All Slides grid during the show | yes | no | |
-| Zoom into part of a slide during the show | yes | no | |
 | See All Slides grid during the show | yes | yes: G, or All on the show bar and in presenter view; click a thumbnail, Esc closes the grid | Hidden slides are labelled; the first 48 slides are shown |
 | Zoom into part of a slide during the show | yes | yes: Z, then click the slide (or the presenter slide); 2×, Esc or another click leaves it | The presenter keeps the whole slide and draws a frame on the zoomed part |
 | Pen and highlighter ink | yes | pen only (Cmd+P pen, Cmd+A arrow, E erases all ink) | No highlighter, per-stroke eraser, ink colours, or keep/discard annotations prompt |
@@ -58,11 +55,8 @@ ready** (estimated), **10–16 h** to parity.
 | Pause / reset timer, clock | yes | yes: Pause/Resume and Reset in presenter view (T pauses, R resets); the clock is local time, `--:--` where there is no clock | Pausing the timer does not pause the show, animations or rehearsal |
 | Slide counter, previous/next/end buttons | yes | yes | |
 | Keyboard navigation while Presenter View has focus | yes | yes | Shares the audience window's key handling; handled keys are consumed before buttons, and the presenter stays available at the end screen |
-| Notes font size, scrolling | yes | scrolling only | |
-| Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Beta blocker, 3–5 h |
-| Swap displays | yes | no | |
 | Notes font size, scrolling | yes | yes: A- / A+ (and `[` / `]`), 12–48 pt in steps of 4, default 18; the notes scroll | |
-| Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Open PR #433 places the show on a second display when one is attached. This change does not |
+| Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Beta blocker, 3–5 h. Open PR #433 places the show on a second display when one is attached. This change does not |
 | Swap displays | yes | no | Still open on #433 |
 | Pen, laser, black screen, zoom from presenter view | yes | Black, White and Zoom buttons; the audience zoom is framed on the presenter slide | Pen and the laser pointer are still keys only; there is no laser yet |
 | See all slides from presenter view | yes | yes: All slides opens the grid on the show | |
