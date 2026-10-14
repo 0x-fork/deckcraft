@@ -3469,6 +3469,8 @@ fn an_exhausted_id_space_refuses_growth() {
     assert!(s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 100, 50]})).is_err());
     assert!(s.execute("slide.duplicate", &json!({})).is_err());
     assert!(s.execute("edit.duplicate", &json!({})).is_err());
+    assert!(s.execute("insert.smartArt", &json!({"kind": "blockList", "items": ["Plan", "Build"]})).is_err());
+    assert!(s.execute("insert.textBox", &json!({"text": "Hi"})).is_err());
     // What the deck holds is untouched: same slides, same ids, no duplicates.
     let after = s.doc().unwrap().doc.clone();
     assert_eq!(after.slides.len(), before.slides.len());

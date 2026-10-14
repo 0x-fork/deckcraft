@@ -522,9 +522,9 @@ pub fn blank_presentation(size: Size, theme: Theme, title_slide: bool) -> Presen
         // A fresh deck starts at id 256 and this builds a handful of ids, so the slide always
         // fits; should that ever stop holding, the deck arrives without its title slide rather
         // than with a duplicated id.
-        let s = new_slide(&mut p, first_layout);
-        debug_assert!(s.is_some(), "a fresh deck cannot run out of ids");
-        p.slides.extend(s.map(|s| vec![Arc::new(s)]).unwrap_or_default());
+        if let Some(s) = new_slide(&mut p, first_layout) {
+            p.slides.push(Arc::new(s));
+        }
     }
     p
 }
