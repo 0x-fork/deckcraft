@@ -1052,6 +1052,7 @@ dependencies = [
 name = "deckcraft-metafile"
 version = "0.7.0"
 dependencies = [
+ "image",
  "kurbo",
  "thiserror 2.0.21",
 ]
