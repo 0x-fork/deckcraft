@@ -8,12 +8,8 @@ The summary between `<!-- SUMMARY -->
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
 | P0 | 72 | 61 | 11 | 0 | 92% |
-| P1 | 65 | 39 | 20 | 6 | 75% |
-| P2 | 54 | 13 | 15 | 26 | 38% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
-| P1 | 65 | 38 | 21 | 6 | 75% |
-| P2 | 54 | 13 | 16 | 25 | 39% |
+| P1 | 65 | 39 | 21 | 5 | 76% |
+| P2 | 54 | 14 | 17 | 23 | 42% |
 
 | Area | Parity |
 |---|---|
@@ -22,7 +18,7 @@ The summary between `<!-- SUMMARY -->
 | Slides | 90% |
 | Views | 93% |
 | Masters & themes | 85% |
-| Shapes | 88% |
+| Shapes | 91% |
 | Format | 83% |
 | Arrange | 100% |
 | Text | 80% |
@@ -31,7 +27,7 @@ The summary between `<!-- SUMMARY -->
 | SmartArt | 50% |
 | Pictures | 48% |
 | Media | 67% |
-| Transitions | 92% |
+| Transitions | 100% |
 | Animations | 79% |
 | Slide show | 66% |
 | Review | 60% |
