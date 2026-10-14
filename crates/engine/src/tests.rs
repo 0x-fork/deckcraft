@@ -483,6 +483,300 @@ fn grown_table_frame_covers_its_drawn_rows() {
     assert!(matches!(s.hit_test(below_stored, 1.0), Some(tools::Hit::Shape { .. })));
 }
 
+/// A table at (100, 100): columns `cols` wide, rows 40 pt tall, cells holding `data`.
+fn table_at(s: &mut Session, cols: &[f64], data: serde_json::Value) -> deckcraft_model::ShapeId {
+    let rows = data.as_array().map_or(1, Vec::len);
+    let w: f64 = cols.iter().sum();
+    let r =
+        s.execute("insert.table", &json!({"rows": rows, "cols": cols.len(), "rect": [100.0, 100.0, w, 40.0 * rows as f64], "data": data})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    for (c, cw) in cols.iter().enumerate() {
+        s.execute("table.columnWidth", &json!({"id": id, "col": c, "width": cw})).unwrap();
+    }
+    s.execute("edit.deselect", &json!({})).unwrap();
+    id
+}
+
+fn table_of(s: &Session, id: deckcraft_model::ShapeId) -> deckcraft_model::Table {
+    match &s.doc().unwrap().shape(id).unwrap().kind {
+        deckcraft_model::ShapeKind::Table(t) => t.clone(),
+        k => panic!("not a table: {k:?}"),
+    }
+}
+
+fn tev(kind: PointerKind, x: f64, y: f64) -> PointerEvent {
+    PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 }
+}
+
+fn text_sel(s: &Session) -> Option<TextSel> {
+    s.doc().unwrap().selection.text.clone()
+}
+
+/// Slide point of the caret before character `ch` of paragraph `para` in the text being edited.
+fn caret_point(s: &Session, para: usize, ch: usize) -> deckcraft_geom::Point {
+    let st = s.doc().unwrap();
+    text_point(st, st.selection.text.as_ref().unwrap(), para, ch)
+}
+
+/// Slide point of the caret before character `ch` of paragraph `para` of text `t`.
+fn text_point(st: &DocState, t: &TextSel, para: usize, ch: usize) -> deckcraft_geom::Point {
+    let (l, m) = cmd::text::text_frame(st, t).unwrap();
+    let (x, top, bot) = l.caret(deckcraft_text::Pos { para, ch }).unwrap();
+    m * deckcraft_geom::Point::new(x, (top + bot) / 2.0)
+}
+
+#[test]
+fn cell_text_is_laid_out_where_the_cell_draws_it() {
+    // The caret and hit testing of a cell's text use the cell's rect, not the table's.
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", ""]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1], "at": [0, 0]})).unwrap();
+    let c = caret_point(&s, 0, 0);
+    assert!(c.x > 300.0 && c.x < 320.0 && c.y > 100.0 && c.y < 140.0, "caret of cell (0, 1) at {c:?}");
+    // An empty cell still has a caret.
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 1]})).unwrap();
+    let c = caret_point(&s, 0, 0);
+    assert!(c.x > 300.0 && c.y > 140.0 && c.y < 180.0, "caret of empty cell (1, 1) at {c:?}");
+    // Hit testing: the start and the end of "Hello world".
+    let st = s.doc().unwrap();
+    let t = TextSel { shape: id, cell: Some((0, 0)), ..Default::default() };
+    assert_eq!(cmd::text::text_pos_at(st, &t, deckcraft_geom::Point::new(101.0, 115.0)), (0, 0));
+    assert_eq!(cmd::text::text_pos_at(st, &t, deckcraft_geom::Point::new(295.0, 115.0)), (0, 11));
+}
+
+#[test]
+fn double_click_in_a_cell_selects_the_word_clicked() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", "d"]]));
+    // Where "world" is drawn.
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let p = caret_point(&s, 0, 8);
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // As the UI sends it: press, release, press, double-click (on release), then the release.
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    assert!(text_sel(&s).is_none(), "a click on an unselected table selects it");
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 0)), ((0, 6), (0, 11))), "the word under the double-click");
+    // The control channel sends the double-click alone.
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    assert_eq!(text_sel(&s).map(|t| t.ordered()), Some(((0, 6), (0, 11))));
+}
+
+#[test]
+fn clicks_while_editing_a_cell_move_the_caret_between_cells() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "Second cell"], ["c", "d"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1], "at": [0, 0]})).unwrap();
+    let p6 = caret_point(&s, 0, 6);
+    let p11 = caret_point(&s, 0, 11);
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 0]})).unwrap();
+    // A click in another cell of the table moves the caret there, at the click.
+    s.pointer(tev(PointerKind::Down, p6.x, p6.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.shape, t.cell, t.caret, t.anchor), (id, Some((0, 1)), (0, 6), (0, 6)));
+    // Dragging selects within that cell, even past its edge.
+    s.pointer(tev(PointerKind::Drag, p11.x, p11.y)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 600.0, p11.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, 600.0, p11.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 1)), ((0, 6), (0, 11))));
+    // Shift+click in another cell starts a new caret there instead of extending across cells.
+    let shift = Mods { shift: true, ..Default::default() };
+    s.pointer(PointerEvent { mods: shift, ..tev(PointerKind::Down, 150.0, 165.0) }).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 165.0)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.is_range()), (Some((1, 0)), false));
+    // Typing goes into the clicked cell.
+    s.execute("text.insert", &json!({"text": "X"})).unwrap();
+    assert_eq!(table_of(&s, id).cell(1, 0).unwrap().text.text(), "cX");
+    // A click outside the table stops editing.
+    s.pointer(tev(PointerKind::Down, 50.0, 400.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 50.0, 400.0)).unwrap();
+    assert!(text_sel(&s).is_none());
+}
+
+#[test]
+fn a_click_in_a_selected_table_enters_the_clicked_cell() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "Hello world"]]));
+    s.pointer(tev(PointerKind::Down, 350.0, 160.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 350.0, 160.0)).unwrap();
+    assert_eq!((s.doc().unwrap().selection.shapes.clone(), text_sel(&s)), (vec![id], None), "the first click selects the table");
+    let st = s.doc().unwrap();
+    let p = text_point(st, &TextSel { shape: id, cell: Some((1, 1)), ..Default::default() }, 0, 6);
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.caret), (Some((1, 1)), (0, 6)), "caret at the click");
+    // Dragging a selected table still moves it.
+    s.execute("text.exit", &json!({})).unwrap();
+    s.pointer(tev(PointerKind::Down, 150.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 170.0, 130.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 170.0, 130.0)).unwrap();
+    assert!(text_sel(&s).is_none());
+    assert_ne!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().x, 100.0);
+}
+
+#[test]
+fn caret_moves_by_line_in_a_wrapped_cell() {
+    let mut s = session();
+    let id = table_at(&mut s, &[90.0, 200.0], json!([["one two three four five six seven", "b"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0], "at": [0, 0]})).unwrap();
+    s.execute("text.move", &json!({"to": "down"})).unwrap();
+    let down = text_sel(&s).unwrap().caret;
+    assert!(down.0 == 0 && down.1 > 0, "down goes to the next line of the paragraph: {down:?}");
+    s.execute("text.move", &json!({"to": "lineEnd"})).unwrap();
+    let end = text_sel(&s).unwrap().caret;
+    assert!(end.1 > down.1 && end.1 < 33, "end of the second line: {end:?}");
+    s.execute("text.move", &json!({"to": "up"})).unwrap();
+    assert!(text_sel(&s).unwrap().caret.1 < down.1);
+}
+
+#[test]
+fn table_borders_are_hit_where_they_are_drawn() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    let hit = |s: &Session, x: f64, y: f64| s.hit_test(deckcraft_geom::Point::new(x, y), 3.0);
+    assert_eq!(hit(&s, 201.0, 125.0), Some(tools::Hit::TableColumn { id, col: 0 }));
+    assert_eq!(hit(&s, 400.0, 125.0), Some(tools::Hit::TableColumn { id, col: 2 }), "the right edge");
+    assert_eq!(hit(&s, 150.0, 139.0), Some(tools::Hit::TableRow { id, row: 0 }));
+    assert_eq!(hit(&s, 150.0, 181.0), Some(tools::Hit::TableRow { id, row: 1 }), "the bottom edge");
+    assert!(matches!(hit(&s, 100.0, 125.0), Some(tools::Hit::Shape { .. })), "the left edge moves the table");
+    assert!(matches!(hit(&s, 150.0, 125.0), Some(tools::Hit::Shape { .. })));
+    // Hovering a border shows it (the UI picks the resize cursor from the hover).
+    s.pointer(tev(PointerKind::Move, 300.0, 170.0)).unwrap();
+    assert_eq!(s.tool.hover, Some(tools::Hit::TableColumn { id, col: 1 }));
+    // A border inside a merged cell isn't there.
+    s.execute("table.merge", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    assert!(matches!(hit(&s, 200.0, 120.0), Some(tools::Hit::Shape { .. })));
+    assert_eq!(hit(&s, 200.0, 160.0), Some(tools::Hit::TableColumn { id, col: 0 }));
+}
+
+#[test]
+fn dragging_column_borders_resizes_columns() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    let undo_depth = s.doc().unwrap().history.undo.len();
+    // An inner border: the two columns share the change, the table keeps its width.
+    s.pointer(tev(PointerKind::Down, 200.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 215.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 230.0, 128.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 230.0, 128.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![130.0, 70.0, 100.0]);
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 300.0);
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo_depth + 1, "one undo step per drag");
+    // Columns don't collapse.
+    s.pointer(tev(PointerKind::Down, 230.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 500.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 500.0, 125.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![200.0 - cmd::table::MIN_COLUMN_WIDTH, cmd::table::MIN_COLUMN_WIDTH, 100.0]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0, 100.0]);
+    // The right edge: the last column and the table get wider.
+    s.pointer(tev(PointerKind::Down, 400.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 450.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 450.0, 120.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0, 150.0]);
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 350.0);
+    // A click on a border without dragging changes nothing.
+    let before = s.doc().unwrap().doc.clone();
+    s.pointer(tev(PointerKind::Down, 200.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 200.0, 125.0)).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc().unwrap().doc));
+}
+
+#[test]
+fn dragging_a_row_border_sets_the_row_height() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "d"]]));
+    let drawn = |s: &Session| {
+        let st = s.doc().unwrap();
+        tools::table_rows(st, &table_of(s, id))
+    };
+    s.pointer(tev(PointerKind::Down, 150.0, 140.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, 170.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 170.0)).unwrap();
+    assert_eq!(drawn(&s), vec![70.0, 40.0]);
+    let st = s.doc().unwrap();
+    assert_eq!(cmd::xfrm_of(&st.doc, &st.selection, st.shape(id).unwrap()).h, 110.0, "the table grows");
+    // Rows still fit their text: dragging the border up stops at the text.
+    s.pointer(tev(PointerKind::Down, 150.0, 170.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, 60.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 60.0)).unwrap();
+    let h = drawn(&s)[0];
+    assert!(h > 10.0 && h < 40.0, "row 0 shrinks to its text: {h}");
+    // The bottom edge sizes the last row.
+    let bottom = 100.0 + drawn(&s).iter().sum::<f64>();
+    s.pointer(tev(PointerKind::Down, 150.0, bottom)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, bottom + 20.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, bottom + 20.0)).unwrap();
+    assert_eq!(drawn(&s)[1], 60.0);
+}
+
+#[test]
+fn dragging_a_border_while_editing_a_cell_keeps_editing() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1]})).unwrap();
+    s.pointer(tev(PointerKind::Down, 200.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 180.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 180.0, 120.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![80.0, 120.0]);
+    assert_eq!(text_sel(&s).and_then(|t| t.cell), Some((0, 1)));
+}
+
+#[test]
+fn column_width_can_keep_the_table_width() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"]]));
+    s.execute("table.columnWidth", &json!({"id": id, "col": 1, "width": 150.0, "keepTotal": true})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 150.0, 50.0]);
+    s.execute("table.columnWidth", &json!({"id": id, "col": 1, "width": 1000.0, "keepTotal": true})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 200.0 - cmd::table::MIN_COLUMN_WIDTH, cmd::table::MIN_COLUMN_WIDTH]);
+    // The last column has no neighbour: the table changes width.
+    s.execute("table.columnWidth", &json!({"id": id, "col": 2, "width": 80.0, "keepTotal": true})).unwrap();
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 100.0 + (200.0 - cmd::table::MIN_COLUMN_WIDTH) + 80.0);
+}
+
+#[test]
+fn rotated_tables_hit_the_cell_under_the_pointer() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
+    s.execute("shape.rotate", &json!({"ids": [id], "deg": 90})).unwrap();
+    let st = s.doc().unwrap();
+    let f = cmd::table::table_frame(st, st.shape(id).unwrap()).unwrap();
+    let p = f.affine * deckcraft_geom::Point::new(150.0, 60.0);
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    assert_eq!(text_sel(&s).and_then(|t| t.cell), Some((1, 1)));
+}
+
+#[test]
+fn tab_moves_between_cells_skipping_merged_ones() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    s.execute("table.merge", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let cell = |s: &Session| text_sel(s).and_then(|t| t.cell);
+    let shift = Mods { shift: true, ..Default::default() };
+    s.key("Tab", Mods::default()).unwrap();
+    assert_eq!(cell(&s), Some((0, 2)), "the cell under the merge is skipped");
+    s.key("Tab", shift).unwrap();
+    assert_eq!(cell(&s), Some((0, 0)));
+    s.key("Tab", shift).unwrap();
+    assert_eq!(cell(&s), Some((0, 0)), "Shift+Tab in the first cell stays");
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 2]})).unwrap();
+    s.key("Tab", Mods::default()).unwrap();
+    assert_eq!((cell(&s), table_of(&s, id).n_rows()), (Some((2, 0)), 3), "Tab in the last cell adds a row");
+}
+
 #[test]
 fn right_to_left_paragraphs() {
     let mut s = session();
@@ -2480,4 +2774,57 @@ fn what_a_command_acts_on_names_only_keys_it_takes() {
     assert_eq!(acts("shape.setDefault").as_deref(), Some("Acts on the selected shapes."));
     assert_eq!(acts("format.size").as_deref(), Some("Acts on the selected text or shapes."));
     assert_eq!(acts("slide.new"), None);
+}
+
+/// Tables whose style the file defines (#292, #294: its look and background drawn) edit like the
+/// others: the caret is laid out with the file style's lettering, clicks and double-clicks land
+/// in the cell where it is drawn, and borders still resize.
+#[test]
+fn tables_with_a_file_defined_style_edit_and_resize() {
+    use deckcraft_model::style::{ColorRef, Fill};
+    use deckcraft_model::table::{TablePart, TablePartStyle, TableStyleDef};
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", "d"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let built_in = caret_point(&s, 0, 8);
+    s.execute("text.exit", &json!({})).unwrap();
+    // The table's style, defined by the file: a plain (not bold) header, a filled body, a
+    // background.
+    {
+        let style = table_of(&s, id).style;
+        let d = s.doc_mut().unwrap();
+        let doc = std::sync::Arc::make_mut(&mut d.doc);
+        let solid = |r, g, b| Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(r, g, b))));
+        doc.table_styles.push(TableStyleDef {
+            id: style,
+            name: "File style".into(),
+            parts: vec![
+                (TablePart::WholeTbl, TablePartStyle { fill: solid(230, 240, 250), ..Default::default() }),
+                (TablePart::FirstRow, TablePartStyle { fill: solid(40, 60, 90), bold: Some(false), ..Default::default() }),
+            ],
+            background: Some(TablePartStyle { fill: solid(200, 200, 200), ..Default::default() }),
+            raw: String::new(),
+        });
+    }
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let p = caret_point(&s, 0, 8);
+    assert!((p.x - built_in.x).abs() > 0.5, "the header is laid out in the file style's (regular) weight: {p:?} vs {built_in:?}");
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // A double-click selects the word drawn there.
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 0)), ((0, 6), (0, 11))));
+    // A click in another cell moves the caret there.
+    s.pointer(tev(PointerKind::Down, 400.0, 160.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 400.0, 160.0)).unwrap();
+    assert_eq!(text_sel(&s).unwrap().cell, Some((1, 1)));
+    // Border drag, while editing: the columns resize, editing goes on.
+    s.pointer(tev(PointerKind::Down, 300.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 320.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 330.0, 121.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 330.0, 121.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![230.0, 170.0]);
+    assert_eq!(text_sel(&s).unwrap().cell, Some((1, 1)));
 }

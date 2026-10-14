@@ -106,6 +106,16 @@ pub enum Hit {
     Frame {
         id: ShapeId,
     },
+    /// The right edge of table column `col` (dragging it resizes the column).
+    TableColumn {
+        id: ShapeId,
+        col: usize,
+    },
+    /// The bottom edge of table row `row` (dragging it resizes the row).
+    TableRow {
+        id: ShapeId,
+        row: usize,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +170,18 @@ enum Drag {
     },
     TextSelect {
         shape: ShapeId,
+    },
+    /// Dragging a table border: the right edge of column `index`, or the bottom edge of row
+    /// `index`. `start` is the table-local press point, `size` the column's width or the row's
+    /// drawn height then, `frame` where the table was drawn.
+    TableBorder {
+        id: ShapeId,
+        column: bool,
+        index: usize,
+        start: Point,
+        size: f64,
+        frame: Affine,
+        moved: bool,
     },
     Ink {
         points: Vec<(f64, f64, f32)>,
@@ -429,25 +451,9 @@ impl Session {
             }
             ToolKind::Select => {}
         }
-        let st = self.doc()?;
-        // Clicking inside the text being edited moves the caret / starts a text selection. Its
-        // handles and its frame (see `Hit::Frame`) win: they size, rotate or move the box.
-        if let Some(e) = edited_box(st)
-            && edit_zone(&e.xfrm, p, tol) != EditZone::Outside
-            && !matches!(self.hit_test(p, tol), Some(Hit::Resize { .. } | Hit::Rotate { .. } | Hit::Adjust { .. } | Hit::Frame { .. }))
-            && let Some(sh) = st.shape(e.id)
-        {
-            let pos = text_pos(st, sh, p);
-            let shift = mods.shift;
-            self.select(|_, sel| {
-                if let Some(tt) = sel.text.as_mut() {
-                    tt.caret = pos;
-                    if !shift {
-                        tt.anchor = pos;
-                    }
-                }
-            })?;
-            self.tool.drag = Some(Drag::TextSelect { shape: e.id });
+        // Clicking inside the text being edited moves the caret / starts a text selection.
+        if let Some((shape, pos)) = self.place_caret(p, tol, mods.shift)? {
+            self.tool.drag = Some(Drag::TextSelect { shape });
             return Ok(json!({"caret": [pos.0, pos.1]}));
         }
         let hit = self.hit_test(p, tol);
@@ -482,6 +488,8 @@ impl Session {
         }
         let st = self.doc()?;
         match hit {
+            Some(Hit::TableColumn { id, col }) => self.begin_table_border(id, true, col, p)?,
+            Some(Hit::TableRow { id, row }) => self.begin_table_border(id, false, row, p)?,
             Some(Hit::Resize { id, handle }) => {
                 let orig = st.shape(id).map(|s| xfrm_of(&st.doc, &st.selection, s)).unwrap_or_default();
                 self.begin("Size");
@@ -538,8 +546,10 @@ impl Session {
                 let origs: Vec<(ShapeId, Xfrm)> =
                     ids.iter().filter_map(|i| st.shape(*i).filter(|s| !s.locked).map(|s| (*i, xfrm_of(&st.doc, &st.selection, s)))).collect();
                 // A click (no drag) on text puts the caret there; unselected text boxes and
-                // placeholders take the caret straight away like PowerPoint.
-                let enter_text = (text && !toggle && (selected || is_text_first(st, id))).then_some((id, p));
+                // placeholders take the caret straight away like PowerPoint. A click in a selected
+                // table puts the caret in the clicked cell.
+                let table = st.shape(id).is_some_and(|s| matches!(s.kind, ShapeKind::Table(_)));
+                let enter_text = (!toggle && ((text && (selected || is_text_first(st, id))) || (table && selected))).then_some((id, p));
                 let ids2 = ids.clone();
                 self.select(|_, sel| {
                     sel.shapes = ids2;
@@ -749,15 +759,36 @@ impl Session {
                 self.tool.preview = Some(x);
             }
             Drag::TextSelect { shape } => {
+                // The selection stays in the shape or table cell where it started.
                 let st = self.doc()?;
-                if let Some(sh) = st.shape(shape) {
-                    let pos = text_pos(st, sh, p);
+                if let Some(t) = st.selection.text.as_ref().filter(|t| t.shape == shape) {
+                    let pos = cmd::text::text_pos_at(st, t, p);
                     self.select(|_, sel| {
                         if let Some(t) = sel.text.as_mut() {
                             t.caret = pos;
                         }
                     })?;
                 }
+            }
+            Drag::TableBorder { id, column, index, start, size, frame, moved } => {
+                let local = frame.inverse() * p;
+                let d = if column { local.x - start.x } else { local.y - start.y };
+                if !moved && d.abs() < tol.max(1.0) {
+                    return Ok(Value::Null);
+                }
+                if !moved {
+                    self.begin(if column { "Column Width" } else { "Row Height" });
+                }
+                // An inner column border moves between its two columns (the table keeps its
+                // width); the right edge widens the last column and the table. A row's height is
+                // a minimum: rows still grow to fit their text.
+                if column {
+                    let width = (size + d).max(cmd::table::MIN_COLUMN_WIDTH);
+                    self.execute("table.columnWidth", &json!({"id": id, "col": index, "width": width, "keepTotal": true}))?;
+                } else {
+                    self.execute("table.rowHeight", &json!({"id": id, "row": index, "height": (size + d).max(1.0)}))?;
+                }
+                self.tool.drag = Some(Drag::TableBorder { id, column, index, start, size, frame, moved: true });
             }
             Drag::Freeform { mode, mut points, pressed } => {
                 // Dragging scribbles (except for curves, which only take clicked points).
@@ -802,11 +833,8 @@ impl Session {
         let mut out = Value::Null;
         match drag {
             Some(Drag::Move { moved: false, enter_text: Some((id, at)), .. }) => {
-                // Plain click on text: caret at the click.
-                let st = self.doc()?;
-                if let Some(sh) = st.shape(id) {
-                    let pos = text_pos(st, sh, at);
-                    self.execute("text.edit", &json!({"id": id, "at": [pos.0, pos.1]}))?;
+                // Plain click on text: caret at the click (in a table, in the clicked cell).
+                if self.edit_text_at(id, at)? {
                     out = json!({"editing": id});
                 }
             }
@@ -925,8 +953,12 @@ impl Session {
             self.tool.sticky = false;
             return Ok(Value::Null);
         }
-        let st = self.doc()?;
-        if st.selection.text.is_some() {
+        // The double-click's second press started a click (caret on release): this replaces it.
+        if matches!(self.tool.drag, Some(Drag::Move { moved: false, .. })) {
+            self.tool.drag = None;
+        }
+        // In the text being edited: select the word double-clicked.
+        if self.place_caret(p, tol, false)?.is_some() {
             return self.execute("text.selectWord", &json!({}));
         }
         match self.hit_test(p, tol) {
@@ -934,18 +966,12 @@ impl Session {
                 let st = self.doc()?;
                 let Some(sh) = st.shape(id).cloned() else { return Ok(Value::Null) };
                 match &sh.kind {
-                    ShapeKind::Table(_) => {
-                        let x = xfrm_of(&st.doc, &st.selection, &sh);
-                        let local = x.affine().inverse() * p;
-                        if let ShapeKind::Table(t) = &sh.kind {
-                            let cell = deckcraft_render_cell(t, &table_rows(st, t), local);
-                            return self.execute("text.edit", &json!({"id": id, "cell": [cell.0, cell.1]}));
+                    ShapeKind::Table(_) | ShapeKind::Shape | ShapeKind::Connector { .. } if !sh.is_line() => {
+                        // Caret at the double-click (in a table, in the clicked cell), then select
+                        // the word there.
+                        if !self.edit_text_at(id, p)? {
+                            return Ok(Value::Null);
                         }
-                        Ok(Value::Null)
-                    }
-                    ShapeKind::Shape | ShapeKind::Connector { .. } if !sh.is_line() => {
-                        let pos = text_pos(st, &sh, p);
-                        self.execute("text.edit", &json!({"id": id, "at": [pos.0, pos.1]}))?;
                         self.execute("text.selectWord", &json!({}))
                     }
                     ShapeKind::Group { .. } => {
@@ -1016,6 +1042,95 @@ impl Session {
             "selected": st.selection.shapes,
             "editing": st.selection.text.is_some(),
         }))
+    }
+
+    /// A click at `p` inside the text being edited: the caret goes there (`extend`: the selection
+    /// grows to it). In a table being edited, a click in another cell moves the caret into that
+    /// cell. Returns the edited shape and the caret, or `None` when `p` isn't in the edited text
+    /// (or is on a handle or a table border).
+    fn place_caret(&mut self, p: Point, tol: f64, extend: bool) -> Result<Option<(ShapeId, (usize, usize))>> {
+        let st = self.doc()?;
+        let Some(mut t) = st.selection.text.clone().filter(|t| !t.notes) else { return Ok(None) };
+        let Some(sh) = st.shape(t.shape) else { return Ok(None) };
+        // A text box: in its own (rotated) frame, short of the band that moves it (`Hit::Frame`).
+        // A table cell: anywhere over the table.
+        let inside = match t.cell {
+            None => edited_box(st).is_some_and(|e| edit_zone(&e.xfrm, p, tol) != EditZone::Outside),
+            Some(_) => xfrm_of(&st.doc, &st.selection, sh).bounds().inflate(tol, tol).contains(p),
+        };
+        if !inside
+            || matches!(
+                self.hit_test(p, tol),
+                Some(
+                    Hit::Resize { .. }
+                        | Hit::Rotate { .. }
+                        | Hit::Adjust { .. }
+                        | Hit::Frame { .. }
+                        | Hit::TableColumn { .. }
+                        | Hit::TableRow { .. }
+                )
+            )
+        {
+            return Ok(None);
+        }
+        let old_cell = t.cell;
+        if old_cell.is_some()
+            && let Some(f) = cmd::table::table_frame(st, sh)
+        {
+            t.cell = f.cell_at(f.local(p)).or(old_cell);
+        }
+        let pos = cmd::text::text_pos_at(st, &t, p);
+        // A selection can't span cells: a click in another cell starts afresh.
+        let extend = extend && t.cell == old_cell;
+        let cell = t.cell;
+        self.select(|_, sel| {
+            if let Some(tt) = sel.text.as_mut() {
+                tt.cell = cell;
+                tt.caret = pos;
+                if !extend {
+                    tt.anchor = pos;
+                }
+            }
+        })?;
+        Ok(Some((t.shape, pos)))
+    }
+
+    /// Start editing shape `id`'s text with the caret at slide point `p`; for a table, in the cell
+    /// at `p`. Returns whether editing started.
+    fn edit_text_at(&mut self, id: ShapeId, p: Point) -> Result<bool> {
+        let st = self.doc()?;
+        let Some(sh) = st.shape(id) else { return Ok(false) };
+        let params = match cmd::table::table_frame(st, sh) {
+            Some(f) => {
+                let Some((r, c)) = f.cell_at(f.local(p)) else { return Ok(false) };
+                let pos = cmd::text::text_pos_at(st, &TextSel { shape: id, cell: Some((r, c)), ..Default::default() }, p);
+                json!({"id": id, "cell": [r, c], "at": [pos.0, pos.1]})
+            }
+            None => {
+                let pos = text_pos(st, sh, p);
+                json!({"id": id, "at": [pos.0, pos.1]})
+            }
+        };
+        self.execute("text.edit", &params)?;
+        Ok(true)
+    }
+
+    /// Press on a table border: dragging it resizes the column or row. Editing a cell of the
+    /// table goes on; otherwise the table becomes the selection.
+    fn begin_table_border(&mut self, id: ShapeId, column: bool, index: usize, p: Point) -> Result<()> {
+        let st = self.doc()?;
+        let Some(f) = st.shape(id).and_then(|sh| cmd::table::table_frame(st, sh)) else { return Ok(()) };
+        let size = if column { f.cols.get(index) } else { f.heights.get(index) }.copied().unwrap_or(0.0);
+        let (start, frame) = (f.local(p), f.affine);
+        if !st.selection.text.as_ref().is_some_and(|t| t.shape == id) {
+            self.select(|_, sel| {
+                sel.shapes = vec![id];
+                sel.text = None;
+                sel.cells = None;
+            })?;
+        }
+        self.tool.drag = Some(Drag::TableBorder { id, column, index, start, size, frame, moved: false });
+        Ok(())
     }
 
     fn is_picture(&self, id: ShapeId) -> bool {
@@ -1475,6 +1590,15 @@ fn hit_shape(st: &crate::DocState, sh: &Shape, p: Point, tol: f64) -> Option<Hit
     let x = xfrm_of(&st.doc, &st.selection, sh);
     let inv = x.affine().inverse();
     let local = inv * p;
+    // Table borders resize rows and columns.
+    let near = local.x >= -tol && local.y >= -tol && local.x <= x.w + tol && local.y <= x.h + tol;
+    if near && let Some(f) = cmd::table::table_frame(st, sh) {
+        match f.border_at(f.local(p), tol) {
+            Some(cmd::table::TableBorder::Column(col)) => return Some(Hit::TableColumn { id: sh.id, col }),
+            Some(cmd::table::TableBorder::Row(row)) => return Some(Hit::TableRow { id: sh.id, row }),
+            None => {}
+        }
+    }
     match &sh.kind {
         ShapeKind::Group { children, child } => {
             // A group is hit when any child is hit; the group is what gets selected.
@@ -1543,46 +1667,12 @@ fn hit_shape(st: &crate::DocState, sh: &Shape, p: Point, tol: f64) -> Option<Hit
 
 /// Text position under slide point `p` in shape `sh`.
 pub fn text_pos(st: &crate::DocState, sh: &Shape, p: Point) -> (usize, usize) {
-    let x = xfrm_of(&st.doc, &st.selection, sh);
-    let t = TextSel { shape: sh.id, ..Default::default() };
-    match cmd::text::layout_for(st, &t) {
-        Some(l) => {
-            // The text's own transform: flips don't mirror text, vertical text is turned.
-            let tr = deckcraft_render::shape_geometry(sh, x.w, x.h).text_rect;
-            let local = deckcraft_render::text_transform(x.affine(), tr, l.rotation).inverse() * p;
-            let h = l.hit(local);
-            (h.para, h.ch)
-        }
-        None => (0, 0),
-    }
+    cmd::text::text_pos_at(st, &TextSel { shape: sh.id, ..Default::default() }, p)
 }
 
 /// Row heights of table `t` as drawn: rows grow to fit their text.
 pub fn table_rows(st: &crate::DocState, t: &deckcraft_model::Table) -> Vec<f64> {
     cmd::table_drawn_heights(&st.doc, &st.selection, t)
-}
-
-/// Which table cell contains a table-local point (`heights` from [`table_rows`]).
-fn deckcraft_render_cell(t: &deckcraft_model::Table, heights: &[f64], p: Point) -> (usize, usize) {
-    let mut y = 0.0;
-    let mut row = heights.len().saturating_sub(1);
-    for (i, h) in heights.iter().enumerate() {
-        if p.y < y + h {
-            row = i;
-            break;
-        }
-        y += h;
-    }
-    let mut x = 0.0;
-    let mut col = t.cols.len().saturating_sub(1);
-    for (i, w) in t.cols.iter().enumerate() {
-        if p.x < x + w {
-            col = i;
-            break;
-        }
-        x += w;
-    }
-    (row, col)
 }
 
 #[cfg(test)]
