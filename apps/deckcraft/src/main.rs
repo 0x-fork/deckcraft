@@ -14,6 +14,8 @@
 
 mod audio;
 mod control_server;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod display;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
@@ -194,7 +196,18 @@ fn main() -> eframe::Result {
         options.viewport = options.viewport.with_icon(icon);
     }
     #[cfg(all(unix, not(target_os = "macos")))]
-    if std::env::var_os("DISPLAY").is_some() && std::env::var_os("DECKCRAFT_WAYLAND").is_none() {
+    let x11 = match display::choose_from_env() {
+        display::Choice::X11 => true,
+        display::Choice::Default => false,
+        display::Choice::None => {
+            // winit's own error says little to someone who started DeckCraft from a console.
+            log::error!("no display: DISPLAY and WAYLAND_DISPLAY are not set");
+            eprintln!("DeckCraft needs a graphical session: neither DISPLAY nor WAYLAND_DISPLAY is set.");
+            false
+        }
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if x11 {
         options.event_loop_builder = Some(Box::new(|b| {
             use winit::platform::x11::EventLoopBuilderExtX11;
             b.with_x11();
