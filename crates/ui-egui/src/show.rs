@@ -399,7 +399,7 @@ fn part_textures(ctx: &egui::Context, doc: &Presentation, from: Option<usize>, t
     let opts = RenderOpts { scale: size.0 as f64 / doc.slide_size.width.max(1.0), size: Some(size), threads, ..Default::default() };
     let tex = |i: usize, part: SlidePart, name: &str| {
         let img = deckcraft_render::render_slide_part(doc, i, part, &opts);
-        ctx.load_texture(name, crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR)
+        crate::textures::upload(ctx, name, crate::textures::to_color_image(&img, false))
     };
     [
         from.map(|i| tex(i, SlidePart::Backdrop, "trans-old-back")),
@@ -649,7 +649,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let painter = ui.painter_at(full);
     painter.rect_filled(full, CornerRadius::ZERO, Color32::BLACK);
     let ppp = ctx.pixels_per_point();
-    let size = ((srect.width() * ppp).round().max(1.0) as u32, (srect.height() * ppp).round().max(1.0) as u32);
+    // A huge screen or DPI mustn't ask for a picture the GPU can't hold: render at most its limit
+    // (drawn stretched to the screen).
+    let size = crate::textures::fit_size(
+        ((srect.width() * ppp).round().clamp(1.0, u32::MAX as f32) as u32, (srect.height() * ppp).round().clamp(1.0, u32::MAX as f32) as u32),
+        crate::textures::max_side(&ctx),
+    );
     if show.ended {
         painter.text(
             pos2(full.center().x, full.min.y + 40.0),
@@ -697,10 +702,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             };
             let tex = match show.tex.take() {
                 Some((_, mut h)) => {
-                    h.set(ci, egui::TextureOptions::LINEAR);
+                    crate::textures::replace(&ctx, &mut h, ci);
                     h
                 }
-                None => ctx.load_texture("show", ci, egui::TextureOptions::LINEAR),
+                None => crate::textures::upload(&ctx, "show", ci),
             };
             show.tex = Some((key, tex.clone()));
             Some(tex)
@@ -753,10 +758,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             let ci = crate::textures::to_color_image(&img, false);
             let frame = match tr.morph.take() {
                 Some(mut h) => {
-                    h.set(ci, egui::TextureOptions::LINEAR);
+                    crate::textures::replace(&ctx, &mut h, ci);
                     h
                 }
-                None => ctx.load_texture("morph", ci, egui::TextureOptions::LINEAR),
+                None => crate::textures::upload(&ctx, "morph", ci),
             };
             painter.image(frame.id(), srect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             tr.morph = Some(frame);
@@ -1696,16 +1701,17 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     if let Some(n) = next
         && show.next_tex.as_ref().is_none_or(|(k, _)| *k != n)
     {
+        // A very tall slide shape would otherwise ask for a picture taller than the GPU's limit.
+        let next_size = crate::textures::fit_size(
+            (480, (480.0 * doc.slide_size.height / doc.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+            crate::textures::max_side(ctx),
+        );
         let img = deckcraft_render::render_slide(
             doc,
             n,
-            &RenderOpts {
-                scale: 480.0 / doc.slide_size.width.max(1.0),
-                size: Some((480, (480.0 * doc.slide_size.height / doc.slide_size.width.max(1.0)) as u32)),
-                ..Default::default()
-            },
+            &RenderOpts { scale: next_size.0 as f64 / doc.slide_size.width.max(1.0), size: Some(next_size), ..Default::default() },
         );
-        show.next_tex = Some((n, ctx.load_texture("presenter-next", crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR)));
+        show.next_tex = Some((n, crate::textures::upload(ctx, "presenter-next", crate::textures::to_color_image(&img, false))));
     }
     let next_tex = show.next_tex.as_ref().filter(|(k, _)| Some(*k) == next).map(|(_, t)| t.clone());
     let notes = doc.slides.get(cur).map(|s| s.notes_text()).unwrap_or_default();
@@ -1963,7 +1969,7 @@ mod tests {
         s.execute("transition.set", &json!({"kind": "fade", "index": 1})).unwrap();
         let doc = s.active().unwrap().doc.clone();
         let ctx = egui::Context::default();
-        let red = ctx.load_texture("show", egui::ColorImage::filled([1, 1], Color32::RED), egui::TextureOptions::LINEAR);
+        let red = crate::textures::upload(&ctx, "show", egui::ColorImage::filled([1, 1], Color32::RED));
         let mut show = Show::new(&doc, 0, false, false);
         show.tex = Some((Key { slide: 0, step: 0, size: (1, 1), doc: 0, hidden: vec![], gif: 0, plays: vec![] }, red.clone()));
         assert!(show.apply(ShowAction::Slide(1), &doc, 0.0));

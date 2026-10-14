@@ -1002,13 +1002,16 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     if cache.key != key || cache.tex.is_empty() {
         cache = IdeaThumbs { key, tex: vec![] };
         let mut render = |name: String, d: &deckcraft_model::Presentation| {
-            let h = (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)) as u32;
+            let (px, h) = crate::textures::fit_size(
+                (px, (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+                crate::textures::max_side(ui.ctx()),
+            );
             let img = deckcraft_render::render_slide(
                 d,
                 idx,
                 &deckcraft_render::RenderOpts { scale: px as f64 / d.slide_size.width.max(1.0), size: Some((px, h)), ..Default::default() },
             );
-            let tex = ui.ctx().load_texture(format!("idea-{name}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+            let tex = crate::textures::upload(ui.ctx(), format!("idea-{name}"), crate::textures::to_color_image(&img, false));
             cache.tex.push((name, tex, px, h));
         };
         for (id, _) in &ideas {

@@ -1344,6 +1344,8 @@ mod replacefonts_tests;
 #[cfg(test)]
 mod slide_size_tests;
 #[cfg(test)]
+mod texture_limit_tests;
+#[cfg(test)]
 mod ui_soak_tests;
 
 #[cfg(test)]
