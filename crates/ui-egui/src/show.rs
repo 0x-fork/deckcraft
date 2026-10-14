@@ -343,7 +343,7 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
 
 pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
-    let Some(doc) = app.session.active().map(|d| d.doc.clone()) else {
+    let Some((doc_uid, doc)) = app.session.active().map(|d| (d.uid, d.doc.clone())) else {
         app.show = None;
         return;
     };
@@ -369,14 +369,14 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     // The clock of the triggered animations runs before anything reacts to the pointer.
     show.tick_triggers(&doc, now);
     let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
-    let gif_click = if clicked && on_slide { gif_hit(&ctx, ui, &show, &doc, app) } else { None };
+    let gif_click = if clicked && on_slide { gif_hit(&ctx, ui, &show, doc_uid, &doc, app) } else { None };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
     let under = if on_slide && gif_click.is_none() && media_click.is_none() { shapes_under_pointer(&ctx, ui, &mut show, &doc, now) } else { None };
     let pointing = under.as_ref().is_some_and(|u| u.pick.is_some());
     if let Some(id) = gif_click {
         let _ = app.run("media.gifPlay", json!({"id": id}));
     } else if let Some((id, clip)) = media_click {
-        app.media.toggle(&doc, id, &clip, crate::media::Owner::Show);
+        app.media.toggle(doc_uid, &doc, id, &clip, crate::media::Owner::Show);
     } else if clicked && let Some(Pick::Text(l)) = under.as_ref().and_then(|u| u.pick.clone()) {
         let last = show.last_viewed;
         match show.state.follow(&doc, &l.action, last) {
@@ -441,7 +441,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let step = show.state.step;
         show.cue_media(&doc, step, now - show.step_start);
     }
-    show_media(app, &mut show, &doc);
+    show_media(app, &mut show, doc_uid, &doc);
     run_media_cues(app, &mut show, &doc);
     // Draw.
     let full = ui.max_rect();
@@ -475,7 +475,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             })
             .map(|m| m.0)
             .collect();
-        let gifs = app.media.gifs(&doc, idx, now, &app.session.gif_paused);
+        let gifs = app.media.gifs(doc_uid, &doc, idx, now, &app.session.gif_paused);
         let times: Vec<_> = gifs.iter().map(|g| (g.id, g.t)).collect();
         crate::media::gif_repaint(&ctx, &gifs);
         let gif = crate::media::gif_key(&gifs);
@@ -762,7 +762,7 @@ pub(crate) const TRANSITION_SOUND: ShapeId = ShapeId(u32::MAX);
 
 /// Start the media of a newly shown slide: media from the previous slide stops unless it plays
 /// across slides; media set to start automatically plays. Everything stops at the end.
-fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
+fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentation) {
     let cur = if show.ended { None } else { Some(show.state.slide) };
     if show.media_slide == cur {
         return;
@@ -797,7 +797,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
     if let Some(i) = cur {
         for (id, _, clip) in crate::media::slide_media(doc, i) {
             if clip.autoplay && !keep.contains(&id) {
-                app.media.play(doc, id, &clip, None, crate::media::Owner::Show);
+                app.media.play(doc_uid, doc, id, &clip, None, crate::media::Owner::Show);
             }
         }
     }
@@ -940,13 +940,13 @@ fn on_screen(srect: Rect, k: f32, x: &deckcraft_geom::Xfrm) -> Rect {
 }
 
 /// The animated GIF whose play/pause button is under the pointer on the shown slide.
-fn gif_hit(ctx: &egui::Context, ui: &Ui, show: &Show, doc: &Presentation, app: &mut SlideApp) -> Option<ShapeId> {
+fn gif_hit(ctx: &egui::Context, ui: &Ui, show: &Show, doc_uid: u64, doc: &Presentation, app: &mut SlideApp) -> Option<ShapeId> {
     let p = ctx.input(|i| i.pointer.interact_pos())?;
     let full = ui.max_rect();
     let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
     let srect = fit(avail, doc);
     let k = srect.width() / doc.slide_size.width.max(1.0) as f32;
-    let gifs = app.media.gifs(doc, show.state.slide, ctx.input(|i| i.time), &app.session.gif_paused);
+    let gifs = app.media.gifs(doc_uid, doc, show.state.slide, ctx.input(|i| i.time), &app.session.gif_paused);
     gifs.iter().rev().find(|g| crate::media::gif_button_rect(on_screen(srect, k, &g.rect)).contains(p)).map(|g| g.id)
 }
 

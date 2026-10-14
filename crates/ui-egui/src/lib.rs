@@ -732,8 +732,8 @@ impl SlideApp {
                 }
                 UiRequest::Media { action, shape, ms } => {
                     let owner = if self.show.is_some() { media::Owner::Show } else { media::Owner::Editor };
-                    if let Some(doc) = self.session.active().map(|d| d.doc.clone()) {
-                        self.media.request(&doc, &action, shape, ms, owner);
+                    if let Some((uid, doc)) = self.session.active().map(|d| (d.uid, d.doc.clone())) {
+                        self.media.request(uid, &doc, &action, shape, ms, owner);
                     }
                 }
             }
@@ -1067,8 +1067,11 @@ impl SlideApp {
         self.perf.frame_ms = now_ms() - t0;
     }
 
-    /// Media clocks and video textures; the editor's media stops when its slide is left.
+    /// Media clocks and video textures. Voices belong to the open presentation: closing the last
+    /// one, or switching decks, stops them. The editor's media also stops when its slide is left.
     fn tick_media(&mut self, ctx: &egui::Context) {
+        let uid = self.session.active().map(|d| d.uid);
+        self.media.set_document(uid);
         if !self.media.any_active() {
             self.session.media_status.clear();
             return;
