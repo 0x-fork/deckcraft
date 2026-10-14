@@ -284,16 +284,23 @@ impl Show {
     }
 
     /// On entering a slide: auto-play its first step when it begins With/After Previous.
+    /// `ShowState` already starts such a step when it enters the slide (#631: asking it for the
+    /// next step again finished the step at once, so the slide appeared fully built), so only
+    /// its clock starts here. Autoplay previews start an On Click first step themselves.
     fn after_enter(&mut self, doc: &Presentation, now: f64) {
-        // A slide the show comes back to is not started again: only a first visit has an automatic
-        // first step.
-        let auto = self.timeline(doc).step_is_auto(0) && self.state.step == 0;
-        if auto || self.autoplay {
-            let a = self.state.next(doc);
-            if let ShowAction::PlayStep(k) = a {
-                self.step_start = now;
-                self.media_clock = Some((k, f64::NEG_INFINITY));
+        let started = if self.state.playing {
+            Some(self.state.step)
+        } else if self.autoplay {
+            match self.state.next(doc) {
+                ShowAction::PlayStep(k) => Some(k),
+                _ => None,
             }
+        } else {
+            None
+        };
+        if let Some(k) = started {
+            self.step_start = now;
+            self.media_clock = Some((k, f64::NEG_INFINITY));
         }
     }
 
@@ -1355,5 +1362,42 @@ mod tests {
         assert!(!show.laser && !show.pen);
         show.set_laser(false);
         assert!(!show.laser);
+    }
+
+    fn deck_with_first_animation(start: deckcraft_model::anim::AnimStart) -> Presentation {
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        let mut doc = Presentation::clone(&s.active().unwrap().doc);
+        let slide = std::sync::Arc::make_mut(&mut doc.slides[1]);
+        let shape = slide.shapes[0].id;
+        slide.animations = vec![deckcraft_model::anim::Animation { shape, start, duration_ms: 3000, ..Default::default() }];
+        doc
+    }
+
+    #[test]
+    fn a_first_animation_after_or_with_previous_plays_when_the_slide_appears() {
+        // #631: it was started twice and the second start finished it, so the slide appeared
+        // fully built.
+        use deckcraft_model::anim::AnimStart;
+        for start in [AnimStart::AfterPrevious, AnimStart::WithPrevious] {
+            let doc = deck_with_first_animation(start);
+            // Starting the show on the slide.
+            let mut show = Show::new(&doc, 1, false, false);
+            show.after_enter(&doc, 5.0);
+            assert_eq!((show.state.step, show.state.playing), (0, true), "{start:?} from the start");
+            assert_eq!(show.step_start, 5.0);
+            // Arriving from the slide before.
+            let mut show = Show::new(&doc, 0, false, false);
+            let a = show.state.next(&doc);
+            assert!(matches!(a, ShowAction::Slide(1)));
+            assert!(show.apply(a, &doc, 7.0));
+            assert_eq!((show.state.step, show.state.playing), (0, true), "{start:?} on arrival");
+        }
+        // On Click still waits for the click.
+        let doc = deck_with_first_animation(AnimStart::OnClick);
+        let mut show = Show::new(&doc, 1, false, false);
+        show.after_enter(&doc, 5.0);
+        assert_eq!((show.state.step, show.state.playing), (0, false));
+        assert!(matches!(show.state.next(&doc), ShowAction::PlayStep(0)));
     }
 }
