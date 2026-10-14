@@ -1622,12 +1622,14 @@ fn transitions(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
-        let opts: &[&str] = deckcraft_model::anim::TRANSITIONS.iter().find(|x| x.0 == kind).map(|x| x.4).unwrap_or(&[]);
-        let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !opts.is_empty());
+        let selected = cur.as_ref().map(|t| t.option.as_str());
+        let rows = transition_effect_rows(&kind, selected);
+        let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !rows.is_empty());
         egui::Popup::menu(&r).show(|ui| {
-            for o in opts {
-                if ui.button(deckcraft_model::anim::transition_option_label(&kind, o)).clicked() {
+            for &(o, on) in &rows {
+                if ui.selectable_label(on, deckcraft_model::anim::transition_option_label(&kind, o)).clicked() {
                     run(app, "transition.options", json!({"option": o}));
+                    ui.close();
                 }
             }
         });
@@ -1873,18 +1875,23 @@ fn animations(app: &mut SlideApp, ui: &mut Ui) {
                 });
             }
         });
-        let opts: &[&str] = cur.as_ref().and_then(|c| deckcraft_model::anim::animation_info(&c.effect, c.class)).map(|x| x.5).unwrap_or(&[]);
-        let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !opts.is_empty());
+        let effect_rows = cur.as_ref().map(|c| animation_effect_rows(&c.effect, c.class, Some(c.option.as_str()))).unwrap_or_default();
+        let build = cur.as_ref().map(|c| text_build_id(c.text_build));
+        let build_rows = marked_options(&["asOne", "byParagraph"], build);
+        let r = big_button(ui, Icon::EffectOptions, "Effect\nOptions", !effect_rows.is_empty());
         egui::Popup::menu(&r).show(|ui| {
-            for o in opts {
-                if ui.button(option_label(o)).clicked() {
+            for &(o, on) in &effect_rows {
+                if ui.selectable_label(on, option_label(o)).clicked() {
                     run(app, "animation.options", json!({"option": o}));
+                    ui.close();
                 }
             }
             ui.separator();
-            for (l, b) in [("As One Object", "asOne"), ("By Paragraph", "byParagraph")] {
-                if ui.button(l).clicked() {
-                    run(app, "animation.options", json!({"textBuild": b}));
+            for &(id, on) in &build_rows {
+                let label = if id == "byParagraph" { "By Paragraph" } else { "As One Object" };
+                if ui.selectable_label(on, label).clicked() {
+                    run(app, "animation.options", json!({"textBuild": id}));
+                    ui.close();
                 }
             }
         });
@@ -3250,6 +3257,32 @@ fn handout_master(app: &mut SlideApp, ui: &mut Ui) {
     });
 }
 
+/// The stored id is the one marked row. Every other id stays unmarked.
+fn marked_options<'a>(options: &'a [&'a str], current: Option<&str>) -> Vec<(&'a str, bool)> {
+    options.iter().copied().map(|o| (o, current == Some(o))).collect()
+}
+
+/// One row of Transitions ▸ Effect Options: the stored option and whether it is the current one.
+fn transition_effect_rows(kind: &str, current: Option<&str>) -> Vec<(&'static str, bool)> {
+    let opts = deckcraft_model::anim::TRANSITIONS.iter().find(|x| x.0 == kind).map(|x| x.4).unwrap_or(&[]);
+    marked_options(opts, current)
+}
+
+/// One row of Animations ▸ Effect Options for the selected effect.
+fn animation_effect_rows(effect: &str, class: AnimClass, current: Option<&str>) -> Vec<(&'static str, bool)> {
+    let opts = deckcraft_model::anim::animation_info(effect, class).map(|x| x.5).unwrap_or(&[]);
+    marked_options(opts, current)
+}
+
+fn text_build_id(build: deckcraft_model::anim::TextBuild) -> &'static str {
+    match build {
+        deckcraft_model::anim::TextBuild::ByParagraph => "byParagraph",
+        deckcraft_model::anim::TextBuild::ByWord => "byWord",
+        deckcraft_model::anim::TextBuild::ByLetter => "byLetter",
+        deckcraft_model::anim::TextBuild::AsOne => "asOne",
+    }
+}
+
 /// Gallery glyphs for the freeform tools: a wave (curve), a polygon (freeform), a squiggle (scribble).
 fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
     let at = |x: f32, y: f32| egui::pos2(r.min.x + x * r.width(), r.min.y + y * r.height());
@@ -3276,6 +3309,7 @@ fn chart_menu_types() -> Vec<Option<deckcraft_model::chart::ChartType>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deckcraft_model::anim::TextBuild;
 
     /// Paints one transition tile and one animation tile and returns the colour of every label.
     fn tile_label_colours(dark: bool) -> Vec<Color32> {
@@ -3304,6 +3338,26 @@ mod tests {
         assert_eq!(dark, vec![Tokens::dark().text; 2]);
         let light = tile_label_colours(false);
         assert_eq!(light, vec![Tokens::light().text; 2]);
+    }
+
+    fn marked(rows: Vec<(&str, bool)>) -> Vec<&str> {
+        rows.into_iter().filter(|(_, on)| *on).map(|(id, _)| id).collect()
+    }
+
+    #[test]
+    fn effect_options_mark_only_the_stored_choice() {
+        assert_eq!(marked(transition_effect_rows("push", Some("l"))), vec!["l"]);
+        assert_eq!(transition_effect_rows("push", Some("l")).into_iter().map(|(_, on)| on).collect::<Vec<_>>(), vec![false, false, true, false]);
+        assert_eq!(marked(transition_effect_rows("fade", Some("throughBlack"))), vec!["throughBlack"]);
+        assert!(marked(transition_effect_rows("push", Some("missing"))).is_empty());
+        assert!(transition_effect_rows("none", None).is_empty());
+        assert_eq!(marked(transition_effect_rows("cut", Some(""))), vec![""]);
+        assert_eq!(marked(animation_effect_rows("fly", AnimClass::Entrance, Some("l"))), vec!["l"]);
+        assert!(marked(animation_effect_rows("fly", AnimClass::Entrance, Some("nope"))).is_empty());
+        assert!(animation_effect_rows("appear", AnimClass::Entrance, Some("l")).is_empty());
+        assert_eq!(marked(marked_options(&["asOne", "byParagraph"], Some(text_build_id(TextBuild::ByParagraph)))), vec!["byParagraph"]);
+        assert_eq!(marked(marked_options(&["asOne", "byParagraph"], Some(text_build_id(TextBuild::AsOne)))), vec!["asOne"]);
+        assert!(marked(marked_options(&["asOne", "byParagraph"], Some(text_build_id(TextBuild::ByWord)))).is_empty());
     }
 }
 
