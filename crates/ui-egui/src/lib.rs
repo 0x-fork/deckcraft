@@ -1018,7 +1018,11 @@ impl SlideApp {
         for e in &events {
             match e {
                 egui::Event::Paste(_) | egui::Event::Key { key: egui::Key::V, pressed: true, .. } => self.v_seen = true,
-                egui::Event::Key { key: egui::Key::V, pressed: false, .. } => image_paste = !std::mem::take(&mut self.v_seen),
+                egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. } => {
+                    // Only a release with Command/Ctrl held is a paste: a bare V release is not.
+                    let seen = std::mem::take(&mut self.v_seen);
+                    image_paste = !seen && (modifiers.command || modifiers.ctrl);
+                }
                 _ => {}
             }
         }
@@ -1631,6 +1635,10 @@ mod tests {
         harness.event(egui::Event::Paste("hello".into()));
         harness.run_steps(2);
         harness.event(v(false));
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 0);
+        // A V release without Command/Ctrl is not a paste.
+        harness.event(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE });
         harness.run_steps(2);
         assert_eq!(pictures(harness.state()), 0);
         // What egui-winit sends for Ctrl+V with only an image on the clipboard: the release alone.
