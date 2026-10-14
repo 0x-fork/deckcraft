@@ -228,15 +228,20 @@ fn supported_unicode_is_shaped_and_recovered_from_the_page_text_layer() {
             let parts: Vec<_> = line.split_whitespace().collect();
             let cid = u16::from_str_radix(parts[0].trim_matches(['<', '>']), 16).unwrap();
             let value = parts[1].trim_matches(['<', '>']);
-            let units: Vec<_> =
-                value.as_bytes().chunks_exact(4).map(|chunk| u16::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap()).collect();
+            let units: Vec<_> = value
+                .as_bytes()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| u16::from_str_radix(std::str::from_utf8(chunk).unwrap(), 16).unwrap())
+                .collect();
             mapping.insert(cid, String::from_utf16(&units).unwrap());
         }
     }
     let mut extracted = String::new();
     let mut append = |bytes: &[u8]| {
         assert!(bytes.len().is_multiple_of(2));
-        for pair in bytes.chunks_exact(2) {
+        for pair in bytes.as_chunks::<2>().0 {
             extracted.push_str(mapping.get(&u16::from_be_bytes([pair[0], pair[1]])).unwrap());
         }
     };
