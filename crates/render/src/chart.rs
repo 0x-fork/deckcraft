@@ -860,7 +860,7 @@ fn draw_trendlines(
             let lines = caption.chars().filter(|ch| *ch == '\n').count() + 1;
             let box_h = base * 1.3 * lines as f64 + 2.0;
             let widest = caption.lines().map(|l| l.chars().count()).max().unwrap_or(1) as f64;
-            let box_w = (widest * base * 0.62).clamp(48.0, plot.width() * 0.72);
+            let box_w = clamp_soft(widest * base * 0.62, 48.0, plot.width() * 0.72);
             let (x, y) = caption_at(plot, box_w, box_h, &ink_pts, label_n);
             ctx.set_transform(m);
             ctx.set_paint(color(Rgba::WHITE, 1.0));
