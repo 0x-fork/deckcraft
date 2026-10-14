@@ -264,9 +264,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     } else if c.y_hidden {
         base * 0.5
     } else {
-        label_w(false, (min, max, step)).clamp(base * 1.5, area.width() * 0.3)
+        label_w(false, (min, max, step)).min(area.width() * 0.3).max(base * 1.5)
     };
-    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| label_w(true, sc).clamp(base * 1.5, area.width() * 0.3)).unwrap_or(0.0);
+    let gutter_r = second.filter(|_| !c.y2_hidden).map(|sc| label_w(true, sc).min(area.width() * 0.3).max(base * 1.5)).unwrap_or(0.0);
     let plot = if horiz {
         Rect::new(area.x0 + gutter, area.y0, area.x1, area.y1 - base * 1.6)
     } else {
@@ -378,7 +378,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
             );
         }
     }
-    let zero = to_v(0.0f64.clamp(min, max));
+    let zero = to_v(0.0f64.max(min).min(max));
     if let Some(bk) = bar_kind {
         let bars: Vec<(usize, &deckcraft_model::chart::Series)> =
             c.series.iter().enumerate().filter(|(_, s)| c.series_kind(s).is_bar_like()).collect();

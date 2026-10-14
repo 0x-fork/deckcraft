@@ -1711,3 +1711,51 @@ fn east_asian_vertical_text_stands_ideographs_upright() {
     let (w, h) = ink(deckcraft_model::text::TextDir::Vertical);
     assert!(h > w * 3, "vert: stroke on its side {w}x{h}");
 }
+
+#[test]
+fn charts_in_degenerate_frames_draw_without_panicking() {
+    // A chart frame squashed to no width (cx="0" in a generated file) made the value labels'
+    // gutter clamp panic (its upper bound, a share of the width, fell below its lower bound).
+    // Every chart type and legend position must survive any frame size.
+    let p = Presentation::default();
+    let rctx = Ctx::for_slide(&p, &p.slides[0]).unwrap();
+    let kinds = [
+        ChartType::Column,
+        ChartType::StackedColumn,
+        ChartType::PercentColumn,
+        ChartType::Bar,
+        ChartType::StackedBar,
+        ChartType::PercentBar,
+        ChartType::Line,
+        ChartType::LineMarkers,
+        ChartType::StackedLine,
+        ChartType::Area,
+        ChartType::StackedArea,
+        ChartType::Pie,
+        ChartType::Doughnut,
+        ChartType::Scatter,
+        ChartType::Bubble,
+        ChartType::Radar,
+        ChartType::FilledRadar,
+        ChartType::Stock,
+        ChartType::Surface,
+        ChartType::Histogram,
+        ChartType::Pareto,
+        ChartType::BoxWhisker,
+        ChartType::Waterfall,
+        ChartType::Funnel,
+        ChartType::Treemap,
+        ChartType::Sunburst,
+        ChartType::Combo,
+    ];
+    let mut ctx = vello_cpu::RenderContext::new(64, 64);
+    for k in kinds {
+        for (w, h) in [(0.0, 403.0), (403.0, 0.0), (0.0, 0.0), (2.0, 400.0), (400.0, 2.0), (12.0, 12.0)] {
+            for legend in [None, Some("b"), Some("t"), Some("r"), Some("l"), Some("tr")] {
+                let mut c = Chart::sample(k);
+                c.legend = legend.map(String::from);
+                crate::chart::draw(&mut ctx, &rctx, &c, kurbo::Affine::IDENTITY, w, h);
+            }
+        }
+    }
+}
