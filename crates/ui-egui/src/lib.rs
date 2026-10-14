@@ -32,6 +32,7 @@ pub mod toast;
 pub mod uifonts;
 pub mod widgets;
 
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender};
 
 use deckcraft_engine::{Mods, Session, UiRequest};
@@ -47,6 +48,9 @@ pub type OpenAsyncFn = Box<dyn FnMut(&str)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
 /// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+/// How long a transient status message stays visible.
+const STATUS_LINGER_MS: f64 = 6000.0;
 
 /// Platform services injected by the host (desktop or web).
 #[derive(Default)]
@@ -288,6 +292,9 @@ pub struct SlideApp {
     pub(crate) slides_focused: bool,
     /// The web picker's next picture replaces the selected one (`app.changePictureDialog`).
     change_picture: bool,
+    /// Which recent paths exist on disk, probed once per path per session (a dead network share
+    /// must not stall every frame). Not persisted.
+    recent_checked: HashMap<String, bool>,
 }
 
 impl SlideApp {
@@ -335,6 +342,7 @@ impl SlideApp {
             sorter: sorter::State::default(),
             slides_focused: false,
             change_picture: false,
+            recent_checked: HashMap::new(),
         }
     }
 
@@ -351,6 +359,56 @@ impl SlideApp {
     /// screen and the File tab, where there is no status bar.
     pub fn notify(&mut self, msg: impl Into<String>) {
         self.toast = Some(toast::Toast { text: msg.into(), at: now_ms() });
+    }
+
+    /// The transient status message while it is fresh; clears it once stale. Both the status bar
+    /// and the start screen draw it — the start screen has no status bar, and errors raised there
+    /// (a missing recent file, a failed sample) used to vanish (issue #172).
+    pub fn fresh_status(&mut self) -> Option<String> {
+        let (msg, at) = self.status.clone()?;
+        if now_ms() - at < STATUS_LINGER_MS {
+            Some(msg)
+        } else {
+            self.status = None;
+            None
+        }
+    }
+
+    /// Does this recent path exist on disk? Probed once per path per session and only on
+    /// desktop (the web build has no file system to ask): a stat on a dead network share can
+    /// block for seconds, so it must not repeat on every frame. A stale answer is harmless —
+    /// opening still tries and reports, and a successful open re-probes.
+    pub fn recent_exists(&mut self, path: &str) -> bool {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = path;
+            true
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(ok) = self.recent_checked.get(path) {
+                return *ok;
+            }
+            // A stat on a dead network location (UNC share, URL) can block for the OS timeout,
+            // so remote-looking paths are never probed: they stay unmarked and are judged when
+            // opened. A disconnected mapped drive would still stall once — accepted.
+            if path.starts_with("\\\\") || path.contains("://") {
+                return true;
+            }
+            let ok = std::path::Path::new(path).is_file();
+            if self.recent_checked.len() > 64 {
+                let live: std::collections::HashSet<&String> = self.ui.recent.iter().collect();
+                self.recent_checked.retain(|p, _| live.contains(p));
+            }
+            self.recent_checked.insert(path.to_string(), ok);
+            ok
+        }
+    }
+
+    /// Drop a path from the Recent list (its file is gone or the user asked for it).
+    pub fn forget_recent(&mut self, path: &str) {
+        self.ui.recent.retain(|p| p != path);
+        self.recent_checked.remove(path);
     }
 
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
@@ -709,6 +767,8 @@ impl SlideApp {
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
+        self.status = None; // an older error (a missing file just before this one) must not linger
+        self.recent_checked.remove(path);
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
         self.ui.recent.truncate(12);
@@ -1332,6 +1392,7 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+    use egui_kittest::kittest::Queryable;
 
     fn title_text(app: &SlideApp) -> String {
         let d = app.session.active().unwrap();
@@ -1853,5 +1914,64 @@ mod tests {
         harness.run_steps(2);
         let st = harness.state().session.active().unwrap();
         assert!(!st.selection.shapes.is_empty(), "canvas select all picks the shapes");
+    }
+
+    fn harness() -> egui_kittest::Harness<'static, SlideApp> {
+        egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::new(), Services::default()),
+        )
+    }
+
+    /// #172: a recent file that no longer exists is marked on File › Home, and clicking it draws
+    /// the open error right there (the status bar is hidden while the backstage is open, so the
+    /// message used to vanish).
+    #[test]
+    fn missing_recent_is_marked_and_its_error_shows() {
+        let mut harness = harness();
+        let missing = "/deckcraft-tests/172/missing.deckcraft";
+        harness.state_mut().ui.recent = vec![missing.to_string()];
+        harness.run_steps(2);
+        // The row is labelled with the file's name. Clicking it raises the open error, and the
+        // drawn message is a second node that mentions the name (the OS text after it varies).
+        harness.get_by_label("missing.deckcraft").click();
+        harness.run_steps(2);
+        assert!(harness.state().status.is_some(), "the open error was raised");
+        assert!(
+            harness.get_all_by_label_contains("missing.deckcraft").count() >= 2,
+            "the open error is drawn on the page, next to the entry"
+        );
+    }
+
+    /// #172: a Recent entry can be removed from the list.
+    #[test]
+    fn recent_entry_can_be_removed() {
+        let mut harness = harness();
+        harness.state_mut().ui.recent = vec!["/deckcraft-tests/172/a.deckcraft".into(), "/deckcraft-tests/172/b.deckcraft".into()];
+        harness.run_steps(2);
+        let removes = harness.get_all_by_label("Remove from Recent").collect::<Vec<_>>();
+        assert_eq!(removes.len(), 2);
+        // The remove button must sit inside the visible part of the row even when the page's
+        // content is wider than the window.
+        assert!(removes[1].rect().right() < 1200.0, "reachable in the 1200-wide window: {:?}", removes[1].rect());
+        removes[1].click();
+        harness.run_steps(1);
+        assert_eq!(harness.state().ui.recent, vec!["/deckcraft-tests/172/a.deckcraft"]);
+    }
+
+    /// The existence probe tells present files from missing ones and never touches remote paths.
+    #[test]
+    fn recent_exists_tells_missing_from_present() {
+        let mut app = SlideApp::new(Session::new(), Services::default());
+        let mut path = std::env::temp_dir();
+        path.push(format!("deckcraft-test-172-{}.deckcraft", std::process::id()));
+        std::fs::write(&path, b"").unwrap();
+        assert!(app.recent_exists(&path.to_string_lossy()), "the file exists");
+        assert!(!app.recent_exists("/deckcraft-tests/172/missing.deckcraft"));
+        assert!(app.recent_exists("\\\\server/share/deck.deckcraft"), "UNC paths are never probed");
+        std::fs::remove_file(&path).ok();
     }
 }
