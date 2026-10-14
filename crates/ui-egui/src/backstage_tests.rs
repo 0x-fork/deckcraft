@@ -406,6 +406,25 @@ fn the_start_screen_is_file_home() {
     assert!(h.state().backstage.is_none());
 }
 
+/// #346: a file picked in Open that can't be read used to drop back to the start screen without
+/// a word. The reason now shows over the start screen.
+#[test]
+fn a_file_that_cant_be_opened_says_why() {
+    let dir = temp_dir("unreadable");
+    let path = dir.join("Notes.pptx");
+    std::fs::write(&path, b"not a presentation").unwrap();
+    let picked = path.to_string_lossy().to_string();
+    let services = Services { pick_open: Some(Box::new(move |_: &str| Some(picked.clone()))), ..Default::default() };
+    let mut h = harness(SlideApp::new(Session::new(), services));
+    h.state_mut().run("app.backstage", json!({"page": "open"})).unwrap();
+    h.run_steps(2);
+    h.get_by_label("Browse").click();
+    h.run_steps(3);
+    assert!(h.state().session.documents().is_empty());
+    assert!(h.query_by_label_contains("not a presentation DeckCraft can read").is_some(), "the error is on screen");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Print previews the pages its settings make and prints through a PDF opened in the system
 /// viewer.
 #[test]

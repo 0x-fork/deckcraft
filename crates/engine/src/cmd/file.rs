@@ -82,6 +82,9 @@ pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
         deckcraft_format::repair(&mut p);
         return Ok(p);
     }
+    if deckcraft_pptx::is_encrypted(bytes) {
+        return Err(EngineError::Other(format!("{name} is password-protected. DeckCraft can't open password-protected presentations yet.")));
+    }
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".txt") || lower.ends_with(".md") {
         let text = String::from_utf8_lossy(bytes);

@@ -573,7 +573,7 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         if resp.on_hover_text(&path).clicked()
             && let Err(e) = app.open_path(&path)
         {
-            app.set_status(e);
+            app.notify(e);
         }
     }
 }
