@@ -1120,57 +1120,22 @@ impl SlideApp {
 
     /// Offer the copy or cut on the system clipboard.
     ///
-    /// Slides go out as plain text. A textless shape goes out as a picture (Keynote and Pages
-    /// paste that). Text goes out as HTML plus the same plain words, so a paste back into
-    /// DeckCraft still uses the internal clipboard.
+    /// Slides go out as plain text. Text goes out as HTML plus the same plain words, so a paste
+    /// back into DeckCraft still uses the internal clipboard. A textless shape leaves the
+    /// invisible [`OBJECTS_MARKER`] rather than a picture: with only an image on the clipboard
+    /// egui-winit drops Ctrl+V, and the shortcut could no longer paste the shape here (#182).
     fn publish_clipboard(&mut self, ctx: &egui::Context, cut: bool) {
-        // Cut deletes the shapes, so the picture is taken first.
-        let picture = self.textless_selection_image();
         let cmd = if cut { "edit.cut" } else { "edit.copy" };
         let Ok(v) = self.session.execute(cmd, &json!({})) else { return };
         let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
         let html = v.get("html").and_then(Value::as_str).unwrap_or("").to_string();
-        if !self.session.clipboard.slides.is_empty() {
-            ctx.copy_text(system_clipboard_text(&text));
-            return;
-        }
-        if let Some(img) = picture {
-            ctx.copy_image(img);
-            return;
-        }
-        if !html.is_empty() && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text)) {
+        if self.session.clipboard.slides.is_empty()
+            && !html.is_empty()
+            && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text))
+        {
             return;
         }
         ctx.copy_text(system_clipboard_text(&text));
-    }
-
-    /// A picture of the selected shapes when none of them has text, on the slide (not a master).
-    fn textless_selection_image(&self) -> Option<egui::ColorImage> {
-        let st = self.session.active()?;
-        if st.selection.target != deckcraft_engine::Target::Slides || st.selection.text.is_some() || st.selection.shapes.is_empty() {
-            return None;
-        }
-        let mut plain = String::new();
-        let mut any = false;
-        for id in &st.selection.shapes {
-            let Some(sh) = st.shape(*id) else { continue };
-            any = true;
-            if let Some(t) = &sh.text {
-                if !plain.is_empty() {
-                    plain.push('\n');
-                }
-                plain.push_str(&t.text());
-            }
-        }
-        if !any || !plain.is_empty() {
-            return None;
-        }
-        let slide = st.current_slide()?;
-        let img = deckcraft_render::render_shapes(&st.doc, slide, &st.selection.shapes, 2.0)?;
-        if img.width == 0 || img.height == 0 {
-            return None;
-        }
-        Some(textures::to_color_image(&img, false))
     }
 
     /// Lay out the whole window.
@@ -1943,14 +1908,15 @@ mod tests {
         assert_eq!(body.paragraphs[0].runs[0].props.bold, Some(true), "{body:?}");
     }
 
-    /// A shape with no text copies out as a picture.
+    /// A shape with no text copies out as the objects marker (not a picture), so Ctrl+V can
+    /// still paste it here (#182).
     #[test]
-    fn a_textless_shape_copies_as_a_picture() {
+    fn a_textless_shape_copies_as_the_objects_marker() {
         let mut h = step_app(Services::default());
         h.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 120.0, 80.0]})).unwrap();
         h.event(egui::Event::Copy);
         h.run_steps(1);
         let cmds = &h.output().platform_output.commands;
-        assert!(cmds.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyImage(img) if img.size[0] > 0 && img.size[1] > 0)), "{cmds:?}");
+        assert!(cmds.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyText(t) if t == OBJECTS_MARKER)), "{cmds:?}");
     }
 }

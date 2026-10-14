@@ -133,7 +133,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Drag and drop of files and between thumbnails | yes | yes |
 | Slide Sorter sections: a bar per section, add, rename in place, collapse, drag the whole section (its slides move with it) | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
-| Image paste from the clipboard | yes | macOS pastes a picture when the paste carries no text (TIFF), a textless shape copies out as a picture, and rich text copies and pastes as HTML (bold, italic, underline). Windows and Linux image paste stays #53 |
+| Image paste from the clipboard | yes | macOS pastes a picture when the paste carries no text (TIFF), and rich text copies and pastes as HTML (bold, italic, underline). Windows and Linux image paste stays #53 |
 | Font menu: every installed family with its faces | yes | families yes; only Regular/Bold/Italic faces (#69) |
 
 ## Keyboard shortcuts
@@ -223,7 +223,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme (fills, lines and effects). Not a new dialog; dialogs stay 27 |
 | 2026-10-14 | minor | Slide Master: Preserve, and Title and Footers placeholders, on the open master or layout |
 | 2026-10-14 | trivial | Trim Media dialog: start, end and fades follow the selected clip |
-| 2026-10-14 | minor | Copy and paste rich text (HTML: bold, italic, underline) and a picture of a textless shape with other apps |
+| 2026-10-14 | minor | Copy and paste rich text (HTML: bold, italic, underline) with other apps |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
