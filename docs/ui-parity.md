@@ -122,7 +122,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Connector glue and rerouting | yes | yes |
 | Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices and their Bézier handles, Ctrl/Cmd-click to add or delete, right-click for Smooth/Straight/Corner Point and Delete Point; no Straight/Curved Segment or Open/Close Path yet |
 | Crop handles, crop to shape, aspect ratio | yes | partial |
-| Text caret, selection, double/triple click, drag-select | yes | yes; Tab in text boxes ends editing (#78) |
+| Text caret, selection, double/triple click, drag-select | yes | yes |
 | Exact size/position, lock aspect | yes | yes — Size and Position dialog (height, width, rotation, scale %, lock aspect, position from the top-left), one undo step; ribbon spinners still resize one side at a time |
 | Rulers with indent markers and tab stops | yes | rulers yes; tab stops partial |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter; a right click selects the shape under the pointer first |
@@ -224,4 +224,5 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
 | 2026-10-12 | minor | Text editing keys: Ctrl+arrows, Ctrl+Backspace/Delete, Ctrl+Up/Down, Home/End on wrapped lines, Shift+F3, font size keys, as observed in PowerPoint for Windows (#268) |
+| 2026-10-11 | minor | Tab in text boxes keeps editing (#78) |
 | 2026-10-10 | major | Created: shell, panes and dialogs, direct manipulation, shortcuts and visual fidelity against PowerPoint 16.113 |

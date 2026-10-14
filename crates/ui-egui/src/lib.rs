@@ -1098,6 +1098,12 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    if key == egui::Key::Tab {
+                        // The slide has the keyboard, so Tab is ours (indent, tab character, next
+                        // shape). Left to egui it would also focus the first ribbon widget, and
+                        // every key after it would go there instead of the slide (#78).
+                        ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+                    }
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
                     if !self.session.tool.drawing_freeform() && menus::ui_shortcut(self, key, mods) {
                         continue;
@@ -1645,6 +1651,44 @@ mod tests {
         harness.event(v(false));
         harness.run_steps(2);
         assert_eq!(pictures(harness.state()), 1);
+    }
+
+    /// #78: after Tab in a text box, typing and deleting no longer reached the text.
+    #[test]
+    fn typing_goes_on_after_tab_in_a_text_box() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.event(egui::Event::Text("ab".into()));
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("c".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\tc");
+        harness.key_press(egui::Key::Backspace);
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\t");
+        assert!(harness.state().session.active().unwrap().selection.text.is_some(), "still editing");
+        // Tab at the start of a paragraph indents it, and typing goes on there too (#93).
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("d".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\t\nd");
+        let level = |h: &egui_kittest::Harness<SlideApp>| {
+            h.state().session.active().unwrap().doc.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[1].level
+        };
+        assert_eq!(level(&harness), 1);
     }
 
     #[test]
