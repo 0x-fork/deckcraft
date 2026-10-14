@@ -27,6 +27,7 @@ pub mod slide;
 pub mod smartart;
 pub mod table;
 pub mod text;
+pub mod three_d;
 pub mod transition;
 
 use deckcraft_geom::Xfrm;
