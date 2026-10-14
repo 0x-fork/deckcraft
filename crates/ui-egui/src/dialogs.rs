@@ -56,6 +56,7 @@ fn title(id: &str) -> &'static str {
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
         "quit" => "DeckCraft",
+        "themeFonts" => "Create New Theme Fonts",
         _ => "DeckCraft",
     }
 }
@@ -64,16 +65,24 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     let mut open = true;
     let mut close = false;
-    egui::Window::new(title(&d.id))
+    let mut window = egui::Window::new(title(&d.id))
         .id(egui::Id::new(("dialog", d.id.clone())))
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -40.0))
-        .open(&mut open)
-        .show(ctx, |ui| {
-            ui.set_min_width(340.0);
-            close = body(app, ui, &mut d);
-        });
+        .open(&mut open);
+    // Save must fit the first frame. A non-resizable window keeps that size, so a later
+    // content growth clips the buttons and clicks miss them.
+    if d.id == "themeFonts" {
+        window = window.default_size(vec2(460.0, 320.0)).min_width(420.0).min_height(300.0);
+    }
+    window.show(ctx, |ui| {
+        ui.set_min_width(if d.id == "themeFonts" { 400.0 } else { 340.0 });
+        if d.id == "themeFonts" {
+            ui.set_min_height(280.0);
+        }
+        close = body(app, ui, &mut d);
+    });
     if open && !close && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.dialog = Some(d);
     }
@@ -115,6 +124,117 @@ fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> 
 
 fn num(d: &mut Dialog, key: &str, default: f64) -> f64 {
     d.get(key, "").trim().trim_end_matches(['"', '%', ' ']).parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(default)
+}
+
+fn seed_theme_fonts(d: &mut Dialog) {
+    if d.fields.contains_key("seeded") {
+        return;
+    }
+    let name = d.params.get("name").and_then(Value::as_str).unwrap_or("Custom");
+    let major = d.params.get("major").and_then(Value::as_str).unwrap_or("Inter");
+    let minor = d.params.get("minor").and_then(Value::as_str).unwrap_or(major);
+    d.fields.insert("schemeName".into(), name.to_string());
+    d.fields.insert("major".into(), major.to_string());
+    d.fields.insert("minor".into(), minor.to_string());
+    d.fields.insert("seeded".into(), "1".into());
+}
+
+fn theme_font_choices(app: &SlideApp, selected: &str) -> Vec<String> {
+    let mut v = crate::ribbon::font_families(app);
+    for scheme in deckcraft_model::theme::builtin_font_schemes() {
+        v.push(scheme.major.latin);
+        v.push(scheme.minor.latin);
+    }
+    if !selected.is_empty() {
+        v.push(selected.to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    v.retain(|face| !face.is_empty() && seen.insert(face.clone()));
+    v
+}
+
+fn font_combo(ui: &mut Ui, label: &str, choices: &[String], selected: &mut String) {
+    let resp = egui::ComboBox::from_id_salt(label).selected_text(selected.as_str()).width(240.0).show_ui(ui, |ui| {
+        for face in choices {
+            if ui.selectable_label(selected == face, face).clicked() {
+                *selected = face.clone();
+            }
+        }
+    });
+    let shown = selected.clone();
+    let access = label.to_string();
+    resp.response.widget_info(move || {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, access.clone());
+        info.current_text_value = Some(shown.clone());
+        info
+    });
+}
+
+fn theme_font_payload(d: &mut Dialog) -> Result<Value, String> {
+    let name = d.get("schemeName", "").trim().to_string();
+    if name.is_empty() {
+        return Err("Enter a scheme name.".into());
+    }
+    let major = d.get("major", "").trim().to_string();
+    if major.is_empty() {
+        return Err("Choose a heading font.".into());
+    }
+    let minor = d.get("minor", "").trim().to_string();
+    if minor.is_empty() {
+        return Err("Choose a body font.".into());
+    }
+    Ok(json!({"name": name, "major": major, "minor": minor}))
+}
+
+/// Create New Theme Fonts. Returns true when the dialog should close.
+fn theme_fonts_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    seed_theme_fonts(d);
+    let major = d.get("major", "Inter");
+    let minor = d.get("minor", "Inter");
+    let headings = theme_font_choices(app, &major);
+    let bodies = theme_font_choices(app, &minor);
+    let mut major = major;
+    let mut minor = minor;
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 18.0), egui::Label::new("Heading:"));
+        font_combo(ui, "Heading font", &headings, &mut major);
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 18.0), egui::Label::new("Body:"));
+        font_combo(ui, "Body font", &bodies, &mut minor);
+    });
+    d.fields.insert("major".into(), major.clone());
+    d.fields.insert("minor".into(), minor.clone());
+    ui.add_space(4.0);
+    // Theme faces are not egui families; naming an unbound family panics. The lines show the
+    // chosen names at heading and body sizes.
+    ui.label(egui::RichText::new(format!("Heading sample  {major}")).size(20.0));
+    ui.label(egui::RichText::new(format!("Body sample  {minor}")).size(14.0));
+    ui.add_space(4.0);
+    let mut name = d.get("schemeName", "");
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 18.0), egui::Label::new("Name:"));
+        let resp = ui.add(egui::TextEdit::singleline(&mut name).desired_width(240.0).id_salt("schemeName"));
+        let shown = name.clone();
+        resp.widget_info(move || {
+            let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Scheme name");
+            info.current_text_value = Some(shown.clone());
+            info
+        });
+    });
+    d.fields.insert("schemeName".into(), name);
+    ui.label(egui::RichText::new("Heading and body fonts for this presentation.").size(11.0).color(Tokens::get(ui.ctx()).text_dim));
+    let (ok, cancel) = buttons(ui, "Save");
+    if ok {
+        match theme_font_payload(d) {
+            Ok(payload) => return app.run("design.fonts", payload).is_ok(),
+            Err(msg) => {
+                app.set_status(msg);
+                return false;
+            }
+        }
+    }
+    cancel
 }
 
 /// Returns true when the dialog should close.
@@ -730,6 +850,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, _) = buttons(ui, "Done");
             ok
         }
+        "themeFonts" => theme_fonts_dialog(app, ui, d),
         _ => {
             ui.label(format!("“{}” is not available yet.", d.id));
             let (ok, cancel) = buttons(ui, "OK");
@@ -829,3 +950,7 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
         Stroke::NONE,
     ));
 }
+
+#[cfg(test)]
+#[path = "theme_fonts_tests.rs"]
+mod theme_fonts_tests;
