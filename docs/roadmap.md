@@ -5,6 +5,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus check started; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers comments, links, custom shows, groups and inherited placeholders; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (`corpus_media.rs` keeps 3-D models and animation bounce end; real-deck corpus still open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -43,6 +44,10 @@ points and lead the beta plan.
    bevels and connectors, and keeps a run's inner shadow, reflection and soft edge plus a bevel
    preset that had no 3-D XML. Still open: a larger corpus, embedded fonts, comment threads, media
    options and rewind (#70, #74, #77), EMF/WMF and SVG. 31–55 h.
+2. **PPTX on real decks:** build an owned corpus, round-trip checks in CI, fix what breaks.
+   `corpus_media.rs` keeps SmartArt and OLE XML, media bookmarks and trims, sections, fields, ink,
+   3-D models and animation bounce end. Comment threads, media options and rewind on save
+   (#70, #74, #77), relationship-bearing SmartArt and OLE (#203), and EMF/WMF and SVG are still open. 31–55 h.
 3. **Review the open PRs:** equations (#55), browser print (#66), Morph alignment (#67), macOS
    open-with (#68), font lookup (#80), Ukrainian (#34, after the catalog exists). 4–8 h.
 
@@ -131,5 +136,6 @@ plan above.
 | 2026-10-13 | trivial | Owned PPTX corpus check started; notes-master header and footer kept. Beta item 2 stays open for a larger corpus |
 | 2026-10-13 | trivial | Owned PPTX corpus covers comments, links and actions, custom shows, rotated groups and inherited placeholders. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
 | 2026-10-13 | trivial | Owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
+| 2026-10-14 | trivial | Current focus: `corpus_media.rs` keeps 3-D models and animation bounce end; the real-deck corpus stays open |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

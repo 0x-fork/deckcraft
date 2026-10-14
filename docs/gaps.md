@@ -8,6 +8,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus round-trip; notes-master header and footer kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for comments, links, custom shows, groups and inherited placeholders; paragraph defaults and action sounds kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors; run effect lists and bevel presets kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end round-trip; the real-deck corpus and #70/#74/#77 stay open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -100,6 +101,13 @@ Detail in [file-format-parity.md](file-format-parity.md).
   with no kept `sp3d` was not written back; both are kept now. Comment threads (#70), media options
   (#74), animation rewind (#77) and embedded fonts are still open, and there is no corpus of decks
   from outside this repo. No reference renders from PowerPoint exist to compare against.
+- **Evidence:** every PPTX test (`crates/pptx/tests`, 30 tests, plus `corpus_media.rs`) uses decks
+  DeckCraft generates; the 2026-10-07 alpha checklist already listed this as open. No reference
+  renders from PowerPoint exist to compare against. `corpus_media.rs` opens, saves and reopens
+  SmartArt and OLE kept as XML (no diagram or embedding parts; those stay with #203), audio and
+  video bookmarks and trims, a section holding a hidden slide, slide-number and date fields, ink
+  (saved as freeform lines), `.glb` 3-D models, and animation repeat, bounce end and triggers.
+  Playback options (#74) and rewind (#77) are still lost.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -327,6 +335,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Owned PPTX corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders. Paragraph `defRPr` and action sounds kept. Embedded fonts and #70/#74/#77 stay open |
 | 2026-10-13 | minor | Owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors. A run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, are kept. #70, #74, #77 and embedded fonts stay open |
 | 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
+| 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

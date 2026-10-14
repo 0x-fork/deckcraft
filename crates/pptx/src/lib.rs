@@ -98,6 +98,7 @@ pub(crate) fn mime_for(name: &str) -> &'static str {
         "wma" => "audio/x-ms-wma",
         "ogg" => "audio/ogg",
         "flac" => "audio/flac",
+        "glb" => "model/gltf-binary",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "fntdata" => "application/x-fontdata",
         _ => "application/octet-stream",

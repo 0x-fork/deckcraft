@@ -282,6 +282,13 @@ pub enum ShapeKind {
     Ink {
         strokes: Vec<InkStroke>,
     },
+    /// A 3-D model (`p:contentPart` with a `model3d` relationship, usually a `.glb`).
+    /// `poster` is the fallback picture an `mc:AlternateContent` choice carried for older readers.
+    Model3d {
+        media: MediaId,
+        #[serde(default)]
+        poster: Option<MediaId>,
+    },
     /// Something we read but don't model (SmartArt without fallback, OLE…): its XML is kept and its
     /// fallback picture, if any, is shown.
     Opaque {
@@ -388,6 +395,7 @@ impl Shape {
             ShapeKind::Media(m) if m.video => "video",
             ShapeKind::Media(_) => "audio",
             ShapeKind::Ink { .. } => "ink",
+            ShapeKind::Model3d { .. } => "model",
             ShapeKind::Opaque { .. } => "object",
         }
     }

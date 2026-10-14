@@ -68,6 +68,12 @@ fn media_of_shapes(shapes: &[Shape], out: &mut Vec<MediaId>) {
                     out.push(p);
                 }
             }
+            deckcraft_model::ShapeKind::Model3d { media, poster } => {
+                out.push(*media);
+                if let Some(p) = poster {
+                    out.push(*p);
+                }
+            }
             _ => {}
         }
         if let Some(deckcraft_model::Fill::Picture(pf)) = &s.fill {

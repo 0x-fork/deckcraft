@@ -157,8 +157,36 @@ pub fn keep_xml(el: &El, ns: &[(String, String)]) -> String {
 /// Namespace prefixes whose `mc:Choice` content we understand.
 const SUPPORTED_MC: [&str; 9] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188"];
 
+/// A relationship to an embedded 3-D model (`.glb`).
+pub(crate) fn is_model3d(rel: &opc::Rel) -> bool {
+    !rel.external && (rel.kind == "model3d" || rel.target.to_ascii_lowercase().ends_with(".glb"))
+}
+
+fn choice_has_model3d(el: &El, rels: &Rels) -> bool {
+    fn rec(el: &El, rels: &Rels, depth: usize) -> bool {
+        if depth > 16 {
+            return false;
+        }
+        if el.is("contentPart")
+            && let Some(id) = el.attr("r:id").filter(|s| !s.is_empty())
+            && rels.get(id).is_some_and(is_model3d)
+        {
+            return true;
+        }
+        el.elements().any(|c| rec(c, rels, depth + 1))
+    }
+    rec(el, rels, 0)
+}
+
 /// Replace every `mc:AlternateContent` by the children of the branch we can read best.
+/// A 3-D model choice is left in place (even when its `Requires` prefix is not one we otherwise
+/// understand) so the shape reader can keep the model and its fallback picture. Ink content parts
+/// still fall through to the fallback picture.
 pub fn resolve_mc(el: &mut El, depth: usize) {
+    resolve_mc_rels(el, depth, None);
+}
+
+fn resolve_mc_rels(el: &mut El, depth: usize, rels: Option<&Rels>) {
     if depth > crate::xml::MAX_DEPTH {
         return;
     }
@@ -167,6 +195,10 @@ pub fn resolve_mc(el: &mut El, depth: usize) {
         for c in std::mem::take(&mut el.children) {
             match c {
                 Node::El(ac) if ac.is("AlternateContent") => {
+                    if rels.is_some_and(|rels| ac.children_named("Choice").any(|ch| choice_has_model3d(ch, rels))) {
+                        out.push(Node::El(ac));
+                        continue;
+                    }
                     let choice = ac.children_named("Choice").find(|ch| {
                         let req_ok = ch.attr("Requires").unwrap_or("").split_whitespace().all(|r| SUPPORTED_MC.contains(&r));
                         // Ink content parts are not modelled; prefer their fallback picture.
@@ -195,13 +227,14 @@ pub fn resolve_mc(el: &mut El, depth: usize) {
         el.children = out;
     }
     for c in el.elements_mut() {
-        resolve_mc(c, depth + 1);
+        resolve_mc_rels(c, depth + 1, rels);
     }
 }
 
 fn load(pkg: &Package, name: &str) -> Option<Doc> {
     let mut d = pkg.xml(name)?;
-    resolve_mc(&mut d.root, 0);
+    let rels = pkg.rels(name);
+    resolve_mc_rels(&mut d.root, 0, Some(&rels));
     Some(d)
 }
 

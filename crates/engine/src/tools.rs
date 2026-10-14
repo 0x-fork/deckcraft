@@ -1456,7 +1456,12 @@ fn hit_shape(st: &crate::DocState, sh: &Shape, p: Point, tol: f64) -> Option<Hit
                 || sh.ph.is_some()
                 || matches!(
                     sh.kind,
-                    ShapeKind::Picture { .. } | ShapeKind::Table(_) | ShapeKind::Chart(_) | ShapeKind::Media(_) | ShapeKind::Opaque { .. }
+                    ShapeKind::Picture { .. }
+                        | ShapeKind::Table(_)
+                        | ShapeKind::Chart(_)
+                        | ShapeKind::Media(_)
+                        | ShapeKind::Model3d { .. }
+                        | ShapeKind::Opaque { .. }
                 )
                 || (filled && in_geo)
                 || deckcraft_geom::near_path(&geo.outline(), local, tol)

@@ -114,6 +114,7 @@ pub(crate) fn add_shape(s: &mut Session, mut shape: Shape, select: bool) -> Resu
                 ShapeKind::Chart(_) => "Chart".to_string(),
                 ShapeKind::Media(m) if m.video => "Video".to_string(),
                 ShapeKind::Media(_) => "Audio".to_string(),
+                ShapeKind::Model3d { .. } => "3D Model".to_string(),
                 _ if shape.text_box => "TextBox".to_string(),
                 _ => shape
                     .geom
