@@ -32,6 +32,20 @@ slide. Prints each image's path and size.
   deckcraft-cli render deck.deckcraft --slide 2 slide-3.png",
     },
     Subcommand {
+        name: "render-transition",
+        usage: "render-transition FILE --slide N --t T[,T...] [--width PX] OUT.png",
+        summary: "draw frames of the transition into a slide as PNG images",
+        details: "Draws the transition into slide N of FILE at each time T, from 0 (the slide before) to 1 (slide N),
+as PNG images. With one T, OUT.png is the image; with several, each frame is written next to it as
+OUT-t0.250.png and so on. Prints each image's path, size, transition and time.
+
+  --slide N    the slide the transition leads into; indices start at 0
+  --t T,T...   the times to draw, comma-separated
+  --width PX   the image width in pixels, twice the slide width in points by default
+
+  deckcraft-cli render-transition deck.deckcraft --slide 1 --t 0.25,0.5,0.75 fade.png",
+    },
+    Subcommand {
         name: "convert",
         usage: "convert IN OUT",
         summary: "save a presentation in the format OUT's extension names",
@@ -114,6 +128,16 @@ and prints its answer as JSON. COMMAND [PARAMS] runs a command, as run --cmd doe
         details: "Runs a Model Context Protocol server on stdin and stdout. It works on its own presentation without a
 window, or with --connect PORT (or host:port) on the DeckCraft app started with --control PORT.
 --sample opens the sample presentation.",
+    },
+    Subcommand {
+        name: "bench",
+        usage: "bench (FILE | --sample) [--runs N] [--json]",
+        summary: "time opening, drawing, saving and exporting a presentation",
+        details: "Times how long FILE, or the sample presentation with --sample, takes to open, to draw each slide, to
+save as .deckcraft and .pptx, to reopen as .pptx and to export as .pdf, and the peak memory. Prints the
+median and slowest of N runs (5 by default, 1 to 1000) as a table, or as JSON with --json.
+
+  deckcraft-cli bench deck.pptx --runs 10",
     },
     Subcommand {
         name: "links",

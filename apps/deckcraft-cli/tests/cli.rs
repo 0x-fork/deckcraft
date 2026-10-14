@@ -14,7 +14,7 @@ fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).into_owned()
 }
 
-const SUBCOMMANDS: [&str; 9] = ["info", "render", "convert", "run", "commands", "describe", "app", "mcp", "links"];
+const SUBCOMMANDS: [&str; 11] = ["info", "render", "render-transition", "convert", "run", "commands", "describe", "app", "mcp", "bench", "links"];
 
 fn words(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
