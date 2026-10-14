@@ -1238,6 +1238,10 @@ mod ime_tests;
 mod ui_soak_tests;
 
 #[cfg(test)]
+#[path = "datetime_tests.rs"]
+mod datetime_tests;
+
+#[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
