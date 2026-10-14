@@ -536,7 +536,7 @@ impl Canvas {
         let dev: Vec<Op> = ops.iter().map(|o| self.map_op(*o)).collect();
         if dev.len() >= 2 {
             let even_odd = self.even_odd;
-            self.push(Raw::Pattern { ops: dev, even_odd, tile });
+            self.push(Raw::Pattern { ops: dev, even_odd, tile, region: None });
         }
     }
 
@@ -564,7 +564,7 @@ impl Canvas {
             }
         }
         let even_odd = self.even_odd;
-        self.push(Raw::Pattern { ops: dev, even_odd, tile: Arc::new(RawTile { w, h, px, cell }) });
+        self.push(Raw::Pattern { ops: dev, even_odd, tile: Arc::new(RawTile { w, h, px, cell }), region: None });
     }
 
     /// Pushes the drawing state. Past [`MAX_STACK`] levels the parse stops, since later restores

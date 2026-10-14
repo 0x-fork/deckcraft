@@ -48,10 +48,10 @@ fn disjoint(b: [f64; 4], c: [f64; 4]) -> bool {
 /// Clips one drawn item; a shape that is both filled and stroked comes back as two items.
 pub(crate) fn clip_raw(raw: Raw, c: [f64; 4]) -> Vec<Raw> {
     match raw {
-        Raw::Path { ops, fill, stroke, even_odd } => {
+        Raw::Path { ops, fill, stroke, even_odd, region } => {
             let Some(b) = ops_bbox(&ops) else { return Vec::new() };
             if inside(b, c) {
-                return vec![Raw::Path { ops, fill, stroke, even_odd }];
+                return vec![Raw::Path { ops, fill, stroke, even_odd, region }];
             }
             if disjoint(b, c) {
                 return Vec::new();
@@ -61,33 +61,33 @@ pub(crate) fn clip_raw(raw: Raw, c: [f64; 4]) -> Vec<Raw> {
             if fill.is_some() {
                 let f = clip_fill(&subs, c);
                 if !f.is_empty() {
-                    out.push(Raw::Path { ops: f, fill, stroke: None, even_odd });
+                    out.push(Raw::Path { ops: f, fill, stroke: None, even_odd, region: region.clone() });
                 }
             }
             if stroke.is_some() {
                 let s = clip_stroke(&subs, c);
                 if !s.is_empty() {
-                    out.push(Raw::Path { ops: s, fill: None, stroke, even_odd });
+                    out.push(Raw::Path { ops: s, fill: None, stroke, even_odd, region });
                 }
             }
             out
         }
-        Raw::Pattern { ops, even_odd, tile } => {
+        Raw::Pattern { ops, even_odd, tile, region } => {
             let Some(b) = ops_bbox(&ops) else { return Vec::new() };
             if inside(b, c) {
-                return vec![Raw::Pattern { ops, even_odd, tile }];
+                return vec![Raw::Pattern { ops, even_odd, tile, region }];
             }
             if disjoint(b, c) {
                 return Vec::new();
             }
             let f = clip_fill(&flatten(&ops), c);
-            if f.is_empty() { Vec::new() } else { vec![Raw::Pattern { ops: f, even_odd, tile }] }
+            if f.is_empty() { Vec::new() } else { vec![Raw::Pattern { ops: f, even_odd, tile, region }] }
         }
-        Raw::Bitmap { rect, img } => crop(rect, img, c).map(|(rect, img)| vec![Raw::Bitmap { rect, img }]).unwrap_or_default(),
-        Raw::Text(mut t) => {
+        Raw::Bitmap { rect, img, region } => crop(rect, img, c).map(|(rect, img)| vec![Raw::Bitmap { rect, img, region }]).unwrap_or_default(),
+        Raw::Text { text: mut t, region } => {
             let cur = t.clip.map_or(c, |[a, b, d, e]| intersect(c, [f64::from(a), f64::from(b), f64::from(d), f64::from(e)]));
             t.clip = Some(cur.map(|v| v as f32));
-            vec![Raw::Text(t)]
+            vec![Raw::Text { text: t, region }]
         }
     }
 }

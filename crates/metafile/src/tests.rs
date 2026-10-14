@@ -1733,7 +1733,7 @@ fn draw_image(id: u16, dst: [f32; 4]) -> Vec<u8> {
 fn emfplus_draw_image_places_the_bitmap() {
     let p = plus_pic(vec![prec(0x4008, 0x0500 | 4, &bitmap_2x2()), draw_image(4, [10.0, 10.0, 20.0, 40.0])]);
     match &p.items[0] {
-        Item::Bitmap { rect, width, height, rgba } => {
+        Item::Bitmap { rect, width, height, rgba, .. } => {
             assert_eq!((*width, *height), (2, 2));
             assert_eq!(rect, &[0.0, 0.0, 20.0, 40.0]);
             assert_eq!(&rgba[..8], &[255, 0, 0, 255, 0, 255, 0, 255]);
