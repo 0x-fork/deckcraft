@@ -1755,9 +1755,44 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                                 let r = ui.small_button(to.as_str()).on_hover_text("Click to change this one; Shift-click to change all");
                                 if r.clicked() {
                                     let all = ui.input(|i| i.modifiers.shift);
-                                    let p =
-                                        if all { json!({"word": w, "to": to, "all": true}) } else { json!({"shape": shape, "word": w, "to": to}) };
-                                    run(app, "review.spellingChange", p);
+                                    if item.get("notes").and_then(Value::as_bool).unwrap_or(false) {
+                                        // A word in the notes: change that line of the slide's notes.
+                                        let si = slide.as_u64().unwrap_or(0) as usize;
+                                        let notes =
+                                            app.session.active().and_then(|d| d.doc.slides.get(si)).map(|s| s.notes_text()).unwrap_or_default();
+                                        let (pi, st) = (
+                                            item.get("para").and_then(Value::as_u64).unwrap_or(0) as usize,
+                                            item.get("start").and_then(Value::as_u64).unwrap_or(0) as usize,
+                                        );
+                                        let lines: Vec<String> = notes
+                                            .split('\n')
+                                            .enumerate()
+                                            .map(|(i, l)| {
+                                                if i != pi {
+                                                    return l.to_string();
+                                                }
+                                                let c: Vec<char> = l.chars().collect();
+                                                let n = w.chars().count();
+                                                if c.get(st..st + n).is_some_and(|x| x.iter().collect::<String>() == w) {
+                                                    c[..st].iter().chain(to.chars().collect::<Vec<_>>().iter()).chain(c[st + n..].iter()).collect()
+                                                } else {
+                                                    l.to_string()
+                                                }
+                                            })
+                                            .collect();
+                                        run(app, "slide.notes", json!({"text": lines.join("\n"), "index": si}));
+                                    } else {
+                                        let mut p = if all {
+                                            json!({"word": w, "to": to, "all": true})
+                                        } else {
+                                            json!({"shape": shape, "word": w, "to": to, "para": item.get("para"), "start": item.get("start")})
+                                        };
+                                        if !all && let (Some(o), Some(r), Some(c)) = (p.as_object_mut(), item.get("row"), item.get("col")) {
+                                            o.insert("row".into(), r.clone());
+                                            o.insert("col".into(), c.clone());
+                                        }
+                                        run(app, "review.spellingChange", p);
+                                    }
                                 }
                             }
                         });

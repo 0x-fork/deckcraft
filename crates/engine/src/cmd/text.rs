@@ -733,6 +733,40 @@ pub fn range_underlines(
     out
 }
 
+/// Like [`range_underlines`], for the text of table `id`'s cell at `row`, `col`.
+pub fn cell_range_underlines(
+    st: &DocState,
+    id: deckcraft_model::ShapeId,
+    row: usize,
+    col: usize,
+    ranges: &[(usize, usize, usize)],
+) -> Vec<(deckcraft_geom::Point, deckcraft_geom::Point)> {
+    let Some(sh) = st.shape(id) else { return vec![] };
+    let deckcraft_model::ShapeKind::Table(tb) = &sh.kind else { return vec![] };
+    let (Some(cell), Some(ctx)) = (tb.cell(row, col), ctx_for(&st.doc, &st.selection)) else { return vec![] };
+    let heights = crate::cmd::table_drawn_heights(&st.doc, &st.selection, tb);
+    let Some(rect) = deckcraft_render::table_cell_rects(tb, &heights).into_iter().find(|(r, c, _)| *r == row && *c == col).map(|(_, _, r)| r) else {
+        return vec![];
+    };
+    let body = deckcraft_render::table_cell_body(&ctx, tb, row, col, cell);
+    let tmp = deckcraft_model::Shape { text: Some(body.clone()), ..Default::default() };
+    let l = deckcraft_text::layout(
+        &ctx,
+        &tmp,
+        &body,
+        &deckcraft_text::Opts { rect, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false },
+    );
+    let x = xfrm_of(&st.doc, &st.selection, sh);
+    let m = deckcraft_render::text_transform(x.affine(), rect, l.rotation);
+    let mut out = vec![];
+    for &(para, a, b) in ranges {
+        for (x0, x1, y) in l.composition_underlines(deckcraft_text::Pos { para, ch: a }, deckcraft_text::Pos { para, ch: b }) {
+            out.push((m * deckcraft_geom::Point::new(x0, y), m * deckcraft_geom::Point::new(x1, y)));
+        }
+    }
+    out
+}
+
 /// Underlines under an input method's composition (#101), in slide coordinates: `(from, to,
 /// thick)` per line, thick under the part being converted. Empty without a composition, or for
 /// notes (an egui text field draws its own composition).

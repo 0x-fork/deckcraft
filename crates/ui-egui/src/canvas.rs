@@ -790,7 +790,14 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
             }
             for to in &w.suggestions {
                 if ui.button(egui::RichText::new(to).strong()).clicked() {
-                    let _ = app.run("review.spellingChange", json!({"shape": w.shape, "para": w.para, "start": w.start, "word": w.word, "to": to}));
+                    let p = match w.tag {
+                        crate::squiggles::Tag::Shape { id, para } => json!({"shape": id, "para": para, "start": w.start, "word": w.word, "to": to}),
+                        crate::squiggles::Tag::Cell { id, row, col, para } => {
+                            json!({"shape": id, "row": row, "col": col, "para": para, "start": w.start, "word": w.word, "to": to})
+                        }
+                        crate::squiggles::Tag::Notes { .. } => json!({}),
+                    };
+                    let _ = app.run("review.spellingChange", p);
                     app.squiggles.menu_word = None;
                     ui.close();
                 }
