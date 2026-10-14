@@ -1,6 +1,7 @@
 //! DeckCraft desktop app.
 //!
 //! Usage: `deckcraft [--control <port>] [--sample] [--show] [files…]`
+//! `deckcraft --help` prints the flags and exits. `deckcraft --version` prints the version and exits.
 //!
 //! `--control <port>` (or `DECKCRAFT_CONTROL_PORT`) starts a localhost JSON-lines control server:
 //! `{"id":1,"method":"ui.inspect","params":{}}` → `{"id":1,"ok":true,"result":…}`.
@@ -19,6 +20,8 @@ mod display;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
+#[cfg(not(target_arch = "wasm32"))]
+mod pasteboard;
 
 use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Services, SlideApp};
@@ -64,24 +67,16 @@ fn config_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-fn prefs_path() -> Option<std::path::PathBuf> {
-    config_dir().map(|b| b.join("ui.json"))
-}
-
 fn load_prefs(app: &mut SlideApp) {
     if std::env::var_os("DECKCRAFT_NO_PREFS").is_some() {
         return;
     }
-    if let Some(p) = prefs_path()
-        && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(ui) = serde_json::from_slice::<deckcraft_ui_egui::UiState>(&bytes)
-    {
+    let Some(dir) = config_dir() else { return };
+    let (ui, prefs) = deckcraft_ui_egui::settings::load(&dir);
+    if let Some(ui) = ui {
         app.ui = ui;
     }
-    if let Some(p) = prefs_path().map(|p| p.with_file_name("prefs.json"))
-        && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(prefs) = serde_json::from_slice::<deckcraft_engine::Prefs>(&bytes)
-    {
+    if let Some(prefs) = prefs {
         app.session.prefs = prefs;
     }
 }
@@ -90,14 +85,8 @@ fn save_prefs(app: &SlideApp) {
     if std::env::var_os("DECKCRAFT_NO_PREFS").is_some() {
         return;
     }
-    if let Some(p) = prefs_path() {
-        let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
-        if let Ok(bytes) = serde_json::to_vec_pretty(&app.ui) {
-            let _ = std::fs::write(&p, bytes);
-        }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&app.session.prefs) {
-            let _ = std::fs::write(p.with_file_name("prefs.json"), bytes);
-        }
+    if let Some(dir) = config_dir() {
+        deckcraft_ui_egui::settings::save(&dir, &app.ui, &app.session.prefs);
     }
 }
 
@@ -124,14 +113,9 @@ fn services() -> Services {
         pick_save: Some(Box::new(|name: &str| rfd::FileDialog::new().set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string()))),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
-        clipboard_image: Some(Box::new(|| {
-            let mut cb = arboard::Clipboard::new().ok()?;
-            let img = cb.get_image().ok()?;
-            let rgba = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned())?;
-            let mut out = Vec::new();
-            rgba.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png).ok()?;
-            Some(out)
-        })),
+        clipboard_image: Some(Box::new(pasteboard::image_png)),
+        clipboard_html: Some(Box::new(pasteboard::html)),
+        clipboard_set_html: Some(Box::new(pasteboard::set_html)),
         // Media is mixed and clocked by the output device; `DECKCRAFT_NO_AUDIO` plays silently.
         audio_out: std::env::var_os("DECKCRAFT_NO_AUDIO")
             .is_none()
@@ -142,6 +126,41 @@ fn services() -> Services {
 
 const APP_ID: &str = "ai.storyteller.deckcraft";
 
+const USAGE: &str = "\
+Usage: deckcraft [--control PORT] [--sample] [--show] [FILE...]
+
+  --control PORT  JSON control server on 127.0.0.1:PORT
+  --sample        open the sample presentation
+  --show          start the slide show
+  --help, -h      print this help and exit
+  --version, -V   print the version and exit
+";
+
+enum Startup {
+    Help,
+    Version,
+    Run { control_port: Option<u16>, files: Vec<String>, sample: bool, show: bool },
+}
+
+/// `--help` and `--version` leave before the window and the log file.
+fn startup(mut control_port: Option<u16>, args: impl IntoIterator<Item = String>) -> Startup {
+    let mut files = Vec::new();
+    let mut sample = false;
+    let mut show = false;
+    let mut args = args.into_iter();
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
+            "--sample" => sample = true,
+            "--show" => show = true,
+            "--version" | "-V" => return Startup::Version,
+            "--help" | "-h" => return Startup::Help,
+            _ => files.push(a),
+        }
+    }
+    Startup::Run { control_port, files, sample, show }
+}
+
 fn app_icon() -> Option<egui::IconData> {
     let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.deckcraft.png");
     eframe::icon_data::from_png_bytes(png).map_err(|e| log::warn!("app icon: {e}")).ok()
@@ -151,26 +170,21 @@ fn main() -> eframe::Result {
     // First, so every start-up record (and the engine's panic hook, installed with the first
     // Session) is captured; see `logging`.
     let logger = logging::install();
-    let mut control_port: Option<u16> = std::env::var("DECKCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok());
-    let mut files = Vec::new();
-    let mut sample = false;
-    let mut show = false;
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--control" => control_port = args.next().and_then(|p| p.parse().ok()),
-            "--sample" => sample = true,
-            "--show" => show = true,
-            "--version" => {
+    let (control_port, files, sample, show) =
+        match startup(std::env::var("DECKCRAFT_CONTROL_PORT").ok().and_then(|p| p.parse().ok()), std::env::args().skip(1)) {
+            Startup::Help => {
+                print!("{USAGE}");
+                return Ok(());
+            }
+            Startup::Version => {
                 println!("deckcraft {}", env!("CARGO_PKG_VERSION"));
                 return Ok(());
             }
-            _ => files.push(a),
-        }
-    }
+            Startup::Run { control_port, files, sample, show } => (control_port, files, sample, show),
+        };
     log::info!("DeckCraft {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
-    // The log file lives under the settings directory; opened after the arguments, so `--version`
-    // leaves no file behind. Records logged until now are written to it first.
+    // The log file lives under the settings directory; opened after the arguments, so `--help` and
+    // `--version` leave no file behind. Records logged until now are written to it first.
     if let Some(logger) = logger {
         match config_dir().map(|d| logger.attach_dir(&d.join(logging::LOG_DIR))) {
             Some(Ok(path)) => log::info!("log file {}", path.display()),
@@ -278,5 +292,21 @@ mod tests {
         assert!(out.status.success(), "{stdout}");
         assert!(stdout.contains("calling on_exit"), "the child didn't run the test: {stdout}");
         assert_eq!(stdout.contains("on_exit returned"), !cfg!(target_os = "macos"), "{stdout}");
+    }
+
+    #[test]
+    fn help_exits_instead_of_opening_a_file() {
+        assert!(matches!(startup(None, ["--help".to_string()]), Startup::Help));
+        assert!(matches!(startup(None, ["-h".to_string()]), Startup::Help));
+        assert!(matches!(startup(None, ["talk.pptx".to_string(), "--help".to_string()]), Startup::Help));
+        assert!(matches!(startup(None, ["--version".to_string()]), Startup::Version));
+        let launch = startup(Some(9), ["--sample".to_string(), "--control".to_string(), "4242".to_string(), "talk.pptx".to_string()]);
+        assert!(matches!(launch, Startup::Run { .. }));
+        if let Startup::Run { control_port, files, sample, show } = launch {
+            assert_eq!(control_port, Some(4242));
+            assert_eq!(files, ["talk.pptx".to_string()]);
+            assert!(sample);
+            assert!(!show);
+        }
     }
 }

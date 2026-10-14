@@ -369,7 +369,7 @@ impl Session {
         }
     }
 
-    fn begin(&mut self, label: &str) {
+    pub(crate) fn begin(&mut self, label: &str) {
         if let Some(st) = self.active_mut()
             && st.interaction.is_none()
         {
@@ -383,6 +383,14 @@ impl Session {
             && !Arc::ptr_eq(&i.doc, &st.doc)
         {
             crate::push_undo(st, HistoryEntry { label: i.label, doc: i.doc, selection: i.selection });
+        }
+    }
+
+    /// End the interaction only when it is the one `label` started. A twist must not commit a drag.
+    pub(crate) fn commit_named(&mut self, label: &str) {
+        let ours = self.active().and_then(|st| st.interaction.as_ref()).is_some_and(|i| i.label == label);
+        if ours {
+            self.commit();
         }
     }
 

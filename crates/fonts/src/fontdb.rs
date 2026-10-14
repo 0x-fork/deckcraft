@@ -459,6 +459,22 @@ fn file_face_names(path: &std::path::Path) -> Vec<(String, String)> {
         .collect()
 }
 
+/// Folder depth below a font folder that the system scan descends.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_SCAN_DEPTH: usize = 12;
+/// Directory entries the system scan looks at in all.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_SCAN_ENTRIES: usize = 200_000;
+/// The largest font file read (the biggest CJK collections are a few hundred MB).
+#[cfg(not(target_arch = "wasm32"))]
+pub const MAX_FONT_FILE: u64 = 512 << 20;
+
+/// A regular file of a size a font can have.
+#[cfg(not(target_arch = "wasm32"))]
+fn font_file_ok(meta: &std::fs::Metadata) -> bool {
+    meta.is_file() && meta.len() > 12 && meta.len() <= MAX_FONT_FILE
+}
+
 /// The platform's font folders (the system's and the user's), scanned by [`FontDb::global`].
 /// Empty on wasm.
 pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
@@ -917,22 +933,39 @@ impl FontDb {
     #[cfg(not(target_arch = "wasm32"))]
     fn scan_font_dirs(&self) -> usize {
         let mut found = Vec::new();
-        let mut stack = self.font_dirs.clone();
+        let mut stack: Vec<(std::path::PathBuf, usize)> = self.font_dirs.iter().map(|d| (d.clone(), 0)).collect();
         // Each folder once, however links lead back to it.
         let mut visited = std::collections::HashSet::new();
-        while let Some(d) = stack.pop() {
+        let mut entries = 0usize;
+        while let Some((d, depth)) = stack.pop() {
             if !visited.insert(std::fs::canonicalize(&d).unwrap_or_else(|_| d.clone())) {
                 continue;
             }
             let Ok(rd) = std::fs::read_dir(&d) else { continue };
             for e in rd.flatten() {
+                // A link to `/` or a vast tree mustn't turn start-up into a disk crawl.
+                entries += 1;
+                if entries > MAX_SCAN_ENTRIES {
+                    log::warn!("font scan stopped after {MAX_SCAN_ENTRIES} entries");
+                    stack.clear();
+                    break;
+                }
                 let p = e.path();
-                if p.is_dir() {
-                    stack.push(p);
+                // Follows links: what matters is what the entry leads to.
+                let Ok(meta) = std::fs::metadata(&p) else { continue };
+                if meta.is_dir() {
+                    if depth < MAX_SCAN_DEPTH {
+                        stack.push((p, depth + 1));
+                    }
                     continue;
                 }
                 let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
                 if !matches!(ext.as_deref(), Some("ttf" | "otf" | "ttc" | "otc")) {
+                    continue;
+                }
+                // Only regular files: opening a FIFO named like a font blocks until something
+                // writes to it (start-up hung), and a device never ends.
+                if !font_file_ok(&meta) {
                     continue;
                 }
                 for (family, style) in file_face_names(&p) {
@@ -966,7 +999,7 @@ impl FontDb {
             p.dedup();
             p
         };
-        self.add_fonts(paths.iter().filter_map(|p| std::fs::read(p).ok()).collect());
+        self.add_fonts(paths.iter().filter(|p| std::fs::metadata(p).is_ok_and(|m| font_file_ok(&m))).filter_map(|p| std::fs::read(p).ok()).collect());
         self.is_loaded(family)
     }
 

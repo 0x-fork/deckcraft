@@ -287,8 +287,8 @@ impl MediaHost {
             {
                 let img = egui::ColorImage::from_rgba_unmultiplied([f.width as usize, f.height as usize], &f.rgba);
                 match v.tex.as_mut() {
-                    Some(t) => t.set(img, egui::TextureOptions::LINEAR),
-                    None => v.tex = Some(ctx.load_texture(format!("media-{id}"), img, egui::TextureOptions::LINEAR)),
+                    Some(t) => crate::textures::replace(ctx, t, img),
+                    None => v.tex = Some(crate::textures::upload(ctx, format!("media-{id}"), img)),
                 }
                 v.frame = Some(f);
             }

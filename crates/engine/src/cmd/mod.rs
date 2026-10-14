@@ -17,6 +17,7 @@ pub mod picture_style;
 pub mod points;
 pub mod recolor;
 pub mod review;
+mod richclip;
 pub mod selection;
 pub mod shape;
 pub mod slide;

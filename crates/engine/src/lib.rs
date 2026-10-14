@@ -13,6 +13,7 @@ pub mod drawtable;
 pub mod fonts;
 pub mod guard;
 pub mod icons;
+pub mod inkshape;
 pub mod keys;
 pub mod links;
 pub mod recovery;
@@ -352,6 +353,29 @@ impl Default for Prefs {
         }
     }
 }
+
+impl Prefs {
+    /// The preferences with every value in a range the editor can use: `prefs.json` is a file
+    /// on disk, and a hand-edited or damaged one (a zero grid, a huge paste offset or undo
+    /// limit) must not break editing or exhaust memory. Out-of-range numbers take their
+    /// defaults or the nearest usable value.
+    pub fn sanitized(mut self) -> Prefs {
+        let d = Prefs::default();
+        let within = |v: f64, lo: f64, hi: f64, default: f64| if v.is_finite() { v.clamp(lo, hi) } else { default };
+        self.grid_spacing =
+            if self.grid_spacing.is_finite() && self.grid_spacing > 0.0 { self.grid_spacing.clamp(0.5, 1000.0) } else { d.grid_spacing };
+        self.duplicate_offset = within(self.duplicate_offset, -1000.0, 1000.0, d.duplicate_offset);
+        self.undo_limit = self.undo_limit.min(MAX_UNDO_LIMIT);
+        self.recovery_minutes = within(self.recovery_minutes, 0.1, 24.0 * 60.0, d.recovery_minutes);
+        if self.author.chars().count() > 256 {
+            self.author = self.author.chars().take(256).collect();
+        }
+        self
+    }
+}
+
+/// The most undo steps [`Prefs::undo_limit`] can keep.
+pub const MAX_UNDO_LIMIT: usize = 10_000;
 
 /// Things a command or tool asks the UI to do (open a dialog, show a pane, start the show…).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

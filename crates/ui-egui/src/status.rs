@@ -45,7 +45,7 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         if small_icon(&mut right, Icon::FitSmall, "Fit slide to current window", false).clicked() {
             app.ui.zoom = None;
         }
-        let pct = (app.ui.zoom.unwrap_or(app.canvas_scale) * 100.0).round();
+        let pct = (app.canvas_scale * 100.0).round();
         let lbl = right.add(egui::Label::new(egui::RichText::new(format!("{pct}%")).size(12.0).color(t.text_dim)).sense(Sense::click()));
         if lbl.clicked() {
             let _ = app.run("view.zoomDialog", json!({}));

@@ -142,6 +142,62 @@ fn clipboard_copy_paste_shapes_and_slides() {
 }
 
 #[test]
+fn bold_copy_is_html_and_pages_html_pastes_bold() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hello"})).unwrap();
+    s.execute("text.selectAll", &json!({})).unwrap();
+    s.execute("format.bold", &json!({"on": true})).unwrap();
+    let v = s.execute("edit.copy", &json!({})).unwrap();
+    let html = v["html"].as_str().unwrap();
+    assert!(html.contains("<b>"), "{html}");
+    assert_eq!(v["text"], "Hello");
+    // The same plain words are our own clipboard, so a plainer HTML fragment is not reparsed.
+    s.execute("text.select", &json!({"anchor": [0, 5], "caret": [0, 5]})).unwrap();
+    s.execute("edit.paste", &json!({"text": "Hello", "html": "<p>Hello</p>"})).unwrap();
+    let body = s.doc().unwrap().shape(deckcraft_model::ShapeId(title)).unwrap().text.clone().unwrap();
+    assert_eq!(body.text(), "HelloHello");
+    assert!(body.paragraphs.iter().flat_map(|p| p.runs.iter()).all(|r| r.props.bold == Some(true)), "{body:?}");
+    s.execute("text.select", &json!({"anchor": [0, 10], "caret": [0, 10]})).unwrap();
+    let caret = s.execute("edit.copy", &json!({})).unwrap();
+    assert_eq!(caret["text"], "");
+    assert_eq!(caret["html"], "");
+
+    let mut ext = session();
+    ext.execute("edit.paste", &json!({"text": "Hello", "html": "<p style=\"font-weight: bold\">Hello</p>"})).unwrap();
+    let pasted = ext
+        .doc()
+        .unwrap()
+        .current_slide()
+        .unwrap()
+        .shapes
+        .iter()
+        .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hello"))
+        .unwrap()
+        .text
+        .clone()
+        .unwrap();
+    assert_eq!(pasted.paragraphs[0].runs[0].props.bold, Some(true), "{pasted:?}");
+
+    let mut mismatched = session();
+    mismatched.execute("edit.paste", &json!({"text": "Hi", "html": "<b>Nope</b>"})).unwrap();
+    let plain = mismatched
+        .doc()
+        .unwrap()
+        .current_slide()
+        .unwrap()
+        .shapes
+        .iter()
+        .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hi"))
+        .unwrap()
+        .text
+        .clone()
+        .unwrap();
+    assert_ne!(plain.paragraphs[0].runs[0].props.bold, Some(true));
+}
+
+#[test]
 fn group_ungroup_roundtrip_positions() {
     let mut s = session();
     let a = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 50, 50]})).unwrap()["id"].as_u64().unwrap();
@@ -285,6 +341,34 @@ fn base64_roundtrip() {
         assert_eq!(cmd::base64_decode(&cmd::base64_encode(&data)).unwrap(), data);
     }
     assert!(cmd::base64_decode("!!").is_none());
+}
+
+#[test]
+fn new_slide_body_tabs_match_text_set() {
+    let body = "Install from DMG\nLaunch app\n\tCheck signing\n\t\tDeep\nBuild a deck";
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "Test Plan", "body": body})).unwrap();
+    let levels = |s: &Session| {
+        let slide = s.doc().unwrap().current_slide().unwrap();
+        let sh = slide.shapes.iter().find(|x| x.ph_type() == Some(deckcraft_model::PhType::Obj)).unwrap();
+        let rows: Vec<(u8, String)> = sh.text.as_ref().unwrap().paragraphs.iter().map(|p| (p.level, p.text())).collect();
+        (sh.id.0, rows)
+    };
+    let (id, from_new) = levels(&s);
+    assert_eq!(
+        from_new,
+        vec![
+            (0, "Install from DMG".to_string()),
+            (0, "Launch app".to_string()),
+            (1, "Check signing".to_string()),
+            (2, "Deep".to_string()),
+            (0, "Build a deck".to_string()),
+        ]
+    );
+    s.execute("text.set", &json!({"id": id, "text": body})).unwrap();
+    assert_eq!(levels(&s).1, from_new);
+    s.execute("text.set", &json!({"id": id, "text": "\t\t\t\t\t\t\t\t\tCapped"})).unwrap();
+    assert_eq!(levels(&s).1, vec![(8, "Capped".to_string())]);
 }
 
 #[test]

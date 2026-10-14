@@ -35,6 +35,33 @@ fn mods(ui: &Ui) -> Mods {
     ui.input(|i| Mods { shift: i.modifiers.shift, alt: i.modifiers.alt, cmd: i.modifiers.command || i.modifiers.ctrl })
 }
 
+/// A two-finger twist on the trackpad. macOS delivers it as [`egui::Event::Rotate`];
+/// other platforms leave the delta at zero.
+///
+/// The selected shapes turn with the fingers. The whole twist is one undo step. Pinch-zoom
+/// and two-finger scrolling are left as they are.
+pub(crate) fn trackpad_twist(app: &mut SlideApp, ctx: &egui::Context) {
+    let delta = ctx.input(|i| i.rotation_delta());
+    let delta = if delta.is_finite() { delta.clamp(-std::f32::consts::PI, std::f32::consts::PI) } else { 0.0 };
+    let turning = delta.abs() > 1e-4;
+    let blocked = app.show.is_some()
+        || app.backstage_open()
+        || app.dialog.as_ref().is_some_and(|d| d.modal())
+        || app.palette.is_some()
+        || app.session.tool.dragging();
+    let over = app.canvas_rect.is_some_and(|r| ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p)));
+    let rotatable = app.session.active().is_some_and(|d| {
+        d.selection.text.is_none() && d.selection.shapes.iter().any(|id| d.shape(*id).is_some_and(|sh| !sh.locked && sh.xfrm.is_some()))
+    });
+    if !blocked && turning && rotatable && (app.twisting || over) {
+        let _ = app.run("shape.rotate", json!({"by": f64::from(delta.to_degrees()), "gesture": "move"}));
+        app.twisting = true;
+    } else if app.twisting {
+        let _ = app.run("shape.rotate", json!({"gesture": "end", "ids": []}));
+        app.twisting = false;
+    }
+}
+
 /// The slide's rect on screen for the current zoom.
 pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let Some(d) = app.session.active() else { return (avail, 1.0) };
@@ -44,7 +71,8 @@ pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let (sw, sh) = (side(page.width), side(page.height));
     let margin = 28.0;
     let fit = ((avail.width() - margin * 2.0) / sw).min((avail.height() - margin * 2.0) / sh).max(0.05);
-    let scale = app.ui.zoom.unwrap_or(fit);
+    // A zoom from outside the editor's own controls (settings, the control protocol) is kept in range.
+    let scale = app.ui.zoom.filter(|z| z.is_finite() && *z > 0.0).map_or(fit, |z| z.clamp(*crate::ZOOM_RANGE.start(), *crate::ZOOM_RANGE.end()));
     let size = vec2(sw * scale, sh * scale);
     let mut r = Rect::from_center_size(avail.center(), size);
     if size.x > avail.width() {
@@ -54,6 +82,17 @@ pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
         r = Rect::from_min_size(pos2(r.min.x, avail.min.y + margin), size);
     }
     (r, scale)
+}
+
+/// A trackpad flick or mouse-wheel notch that should turn the page.
+///
+/// The stronger axis wins, so a sideways swipe is not read as a vertical scroll. Negative
+/// movement — the content moves left or up, which is a swipe left or up with natural scrolling —
+/// is the next slide. A nudge under 18 points is ignored so a resting finger does not change slides.
+pub(crate) fn page_flick(wheel: egui::Vec2) -> Option<bool> {
+    const MIN_FLICK: f32 = 18.0;
+    let along = if wheel.x.abs() > wheel.y.abs() { wheel.x } else { wheel.y };
+    (along.abs() > MIN_FLICK).then_some(along < 0.0)
 }
 
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
@@ -95,15 +134,20 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     if resp.hovered() && !zooming {
         if overflow != egui::Vec2::ZERO {
             offset -= wheel;
-        } else if wheel.y.abs() > 18.0 && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
-            // Wheel over a fitted slide pages through slides (like PowerPoint).
-            let id = if wheel.y < 0.0 { "slide.next" } else { "slide.previous" };
+        } else if !app.anim_preview_active()
+            && app.session.tool.marquee.is_none()
+            && !app.session.tool.dragging()
+            && let Some(next) = page_flick(wheel)
+        {
+            // A fitted slide: the mouse wheel and a trackpad swipe turn the page. Pinch zoom is
+            // the branch above and is left alone.
             let gate = ui.id().with("wheel_gate");
-            let last: f64 = ui.data_mut(|d| d.get_temp(gate).unwrap_or(0.0));
+            // No previous flick yet: the first one must turn the page, not wait out the gap.
+            let last: f64 = ui.data_mut(|d| d.get_temp(gate).unwrap_or(f64::NEG_INFINITY));
             let now = ui.input(|i| i.time);
             if now - last > 0.35 {
                 ui.data_mut(|d| d.insert_temp(gate, now));
-                let _ = app.run(id, json!({}));
+                let _ = app.run(if next { "slide.next" } else { "slide.previous" }, json!({}));
             }
         }
     }
@@ -129,6 +173,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     };
     crate::media::gif_repaint(ui.ctx(), &gifs);
     let times: Vec<_> = gifs.iter().map(|g| (g.id, g.t)).collect();
+    let anim = app.anim_preview_draw();
     let st = app.session.active();
     // One texture pixel in screen points, and the canvas in pixels from the slide's corner.
     let pixel = vec2(slide_rect.width() / px.0 as f32, slide_rect.height() / px.1 as f32);
@@ -137,7 +182,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         Some((Target::Slides, d)) => {
             let idx = d.selection.slide;
             let doc = d.doc.clone();
-            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times)
+            let frame = anim.as_ref().map(|(tl, t)| (tl, *t));
+            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times, frame)
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
@@ -223,17 +269,19 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         ruler(&painter, avail, slide_rect, scale, &t);
     }
     pointer(app, ui, &resp, xf);
-    overlays(app, ui, &painter, xf, &t);
-    ime_output(app, ui, xf);
-    media_bar(app, ui, xf);
-    gif_buttons(app, ui, xf, &gifs);
-    if resp.secondary_clicked()
-        && let Some(p) = resp.interact_pointer_pos()
-    {
-        let word = app.session.active().and_then(|st| app.squiggles.word_at(st, xf.to_slide(p), 4.0 / xf.scale.max(0.01) as f64));
-        app.squiggles.menu_word = word;
+    if !app.anim_preview_active() {
+        overlays(app, ui, &painter, xf, &t);
+        ime_output(app, ui, xf);
+        media_bar(app, ui, xf);
+        gif_buttons(app, ui, xf, &gifs);
+        if resp.secondary_clicked()
+            && let Some(p) = resp.interact_pointer_pos()
+        {
+            let word = app.session.active().and_then(|st| app.squiggles.word_at(st, xf.to_slide(p), 4.0 / xf.scale.max(0.01) as f64));
+            app.squiggles.menu_word = word;
+        }
+        context_menu(app, &resp);
     }
-    context_menu(app, &resp);
 }
 
 /// The canvas `avail` in texture pixels (`pixel`: one pixel's size in points) from the slide's
@@ -380,14 +428,18 @@ fn master_tex(
     visible: deckcraft_render::Region,
 ) -> Option<(egui::TextureHandle, deckcraft_render::Region)> {
     let scale = px.0 as f64 / doc.slide_size.width.max(1.0);
-    let region = deckcraft_render::pasteboard_region(px, scale, deckcraft_render::layout_extent(doc, master, layout), visible);
+    let region = crate::textures::fit_texture(
+        deckcraft_render::pasteboard_region(px, scale, deckcraft_render::layout_extent(doc, master, layout), visible),
+        visible,
+        crate::textures::max_side(ctx),
+    );
     let img = deckcraft_render::render_layout(
         doc,
         master,
         layout,
         &deckcraft_render::RenderOpts { scale, edit: true, offset: region.offset(), size: Some(region.size()), ..Default::default() },
     );
-    Some((ctx.load_texture("master-canvas", crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR), region))
+    Some((crate::textures::upload(ctx, "master-canvas", crate::textures::to_color_image(&img, false)), region))
 }
 
 fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
@@ -436,6 +488,14 @@ fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
 fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     if crate::eyedropper::canvas(app, ui, resp, xf) {
         return;
+    }
+    if app.anim_preview_active() {
+        // A click on the slide ends the preview, then selects as usual.
+        if resp.hovered() && ui.input(|i| i.pointer.primary_pressed()) {
+            app.stop_anim_preview();
+        } else {
+            return;
+        }
     }
     let tol = (4.0 / xf.scale) as f64;
     let m = mods(ui);

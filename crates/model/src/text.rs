@@ -504,6 +504,21 @@ impl Paragraph {
     pub fn new(text: &str) -> Self {
         Paragraph { runs: if text.is_empty() { vec![] } else { vec![Run::new(text)] }, ..Default::default() }
     }
+    /// Leading tabs are the outline level (at most 8), the same rule as a typed indent.
+    /// Returns whether any tab was consumed.
+    pub fn promote_leading_tabs(&mut self) -> bool {
+        let Some(r) = self.runs.first_mut() else { return false };
+        if r.kind != RunKind::Text {
+            return false;
+        }
+        let tabs = r.text.chars().take_while(|c| *c == '\t').count();
+        if tabs == 0 {
+            return false;
+        }
+        r.text = r.text.trim_start_matches('\t').to_string();
+        self.level = tabs.min(8) as u8;
+        true
+    }
     pub fn text(&self) -> String {
         self.runs.iter().map(|r| r.content()).collect()
     }

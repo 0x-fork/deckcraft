@@ -164,7 +164,7 @@ fn ensure_texture(
         slide,
         &RenderOpts { scale: w as f64 / doc.slide_size.width.max(1.0), size: Some((w, h)), edit: true, threads: 0, ..Default::default() },
     );
-    let tex = ctx.load_texture("doc-window-slide", crate::textures::to_color_image(&img, grayscale), egui::TextureOptions::LINEAR);
+    let tex = crate::textures::upload(ctx, "doc-window-slide", crate::textures::to_color_image(&img, grayscale));
     if let Some(win) = app.doc_window.as_mut() {
         win.key = Some(key);
         win.tex = Some(tex.clone());

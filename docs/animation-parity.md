@@ -2,6 +2,7 @@
 
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (interactive-deck clicks in the slide show; previous: major (transitions measured frame by frame against PowerPoint for Windows' video export and retuned; previous: created)) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (animation bounce end and repeat round-trip; rewind still #77) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Animations ▸ Preview plays the current slide on the editor canvas; previous: major, transitions measured frame by frame) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Transitions and animations are what make a deck a presentation, and the part of PowerPoint people
 notice first when it's missing. Scores roll up into [target-app-parity.md](target-app-parity.md)
@@ -74,6 +75,9 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Animation Pane: list, reorder, remove | yes | yes |
 | Animation Pane: advanced timeline (bars you drag) | yes | yes: bars from the show schedule, drag the body for delay, the right edge for duration, seconds ruler (`animpane_tests`) |
 | Preview in the editor (current effect, from selected) | yes | partly |
+| Animation Pane: advanced timeline (bars you drag) | yes | **no** |
+| Preview on the editor canvas (the current slide) | yes | yes |
+| Preview from the selected effect | yes | no |
 | Motion path editing (edit points, reverse, lock) | yes | partly (no edit points) |
 | Multiple animations on one object | yes | yes |
 | Round trip of the timing tree | yes | flattened to the pane list on read, rebuilt on write (`every_animation_effect_survives`) |
@@ -83,6 +87,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Work | Hours |
 |---|---|
 | Preview from selected, effect dialog depth | 4–6 |
+| Animation Pane timeline, preview from the selected effect, effect dialog depth | 4–7 |
 | The remaining ~126 effects (most are parameter variations of existing ones) | 3–6 |
 | Rewind and other effect options on round trip (#77) | 1–2 |
 | Transition sounds: the rest of PowerPoint's built-in list (Applause, Arrow, Bomb…) | 1 |
@@ -97,6 +102,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-14 | trivial | Repeat and bounce end round-trip through PPTX; rewind is still lost (#77) |
+| 2026-10-13 | minor | Animations ▸ Preview and Animation Pane ▸ Play All play the current slide's animations on the editor canvas; preview from the selected effect is still open |
 | 2026-10-13 | major | Transitions measured frame by frame against PowerPoint's video export and retuned (mean diff 35.7 → 15.0); PowerPoint's XML defaults and option meanings; new options |
 | 2026-10-13 | minor | Triggers now play in the slide show (they were read and written but never started), effects of different triggers apply in the order they were clicked |
 | 2026-10-10 | major | Created: 48/48 transitions, 64 of ~190 animation effects, pane and option depth, estimates |

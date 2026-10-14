@@ -278,20 +278,22 @@ fn master_list(app: &mut SlideApp, ui: &mut Ui) {
                 let (row, resp) = ui.allocate_exact_size(vec2(width, th + 12.0), Sense::click());
                 let img = Rect::from_min_size(pos2(row.min.x + indent, row.min.y + 4.0), vec2(tw, th));
                 let ppp = ui.ctx().pixels_per_point();
-                let px = ((tw * ppp) as u32).max(1);
+                let px = crate::textures::fit_size(
+                    (((tw * ppp) as u32).max(1), ((tw * ppp) as f64 * doc.slide_size.height / doc.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+                    crate::textures::max_side(ui.ctx()),
+                );
                 let pic = deckcraft_render::render_layout(
                     &doc,
                     mi,
                     li,
                     &deckcraft_render::RenderOpts {
-                        scale: px as f64 / doc.slide_size.width.max(1.0),
+                        scale: px.0 as f64 / doc.slide_size.width.max(1.0),
                         edit: true,
-                        size: Some((px, (px as f64 * doc.slide_size.height / doc.slide_size.width.max(1.0)) as u32)),
+                        size: Some(px),
                         ..Default::default()
                     },
                 );
-                let tex =
-                    ui.ctx().load_texture(format!("ml-{mi}-{li:?}"), crate::textures::to_color_image(&pic, false), egui::TextureOptions::LINEAR);
+                let tex = crate::textures::upload(ui.ctx(), format!("ml-{mi}-{li:?}"), crate::textures::to_color_image(&pic, false));
                 ui.painter().image(tex.id(), img, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                 let selected = match (target, li) {
                     (Target::Master { master }, None) => master == mi,

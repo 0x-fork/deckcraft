@@ -19,9 +19,11 @@ pub mod icons;
 pub mod media;
 pub mod menus;
 pub mod panes;
+mod preview;
 pub mod qat;
 pub mod ribbon;
 pub mod selpane;
+pub mod settings;
 pub mod show;
 pub mod sorter;
 pub mod squiggles;
@@ -35,7 +37,8 @@ pub mod widgets;
 
 use std::sync::mpsc::{Receiver, Sender};
 
-use deckcraft_engine::{Mods, Session, UiRequest};
+use deckcraft_engine::{Mods, Session, Target, UiRequest};
+use deckcraft_model::{LayoutId, MasterId, SlideId};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -44,10 +47,146 @@ pub use control::{ControlRequest, ControlResponse};
 pub type ReadFn = Box<dyn Fn(&str) -> Result<Vec<u8>, String>>;
 pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 pub type PickFn = Box<dyn FnMut(&str) -> Option<String>>;
-pub type OpenAsyncFn = Box<dyn FnMut(&str)>;
+/// `(purpose, request id)`. The host shows a picker and later pushes an [`InboxEvent`]
+/// carrying that same id. Completing a cancelled or unknown id does nothing: the file is
+/// not applied to whichever document happens to be active.
+pub type OpenAsyncFn = Box<dyn FnMut(&str, u64)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
-/// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
-pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
+
+/// A file the host finished reading for the request `id` from [`SlideApp::begin_external_file`].
+#[derive(Clone, Debug)]
+pub struct InboxFile {
+    /// Cancellation identity. A file whose id was cancelled, or never started, is ignored.
+    pub id: u64,
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
+/// What the host delivers through [`Inbox`] after an asynchronous read.
+#[derive(Clone, Debug)]
+pub enum InboxEvent {
+    File(InboxFile),
+    /// The picker was dismissed or the file could not be read. `id` will not be applied.
+    Cancelled {
+        id: u64,
+    },
+}
+
+/// Files delivered asynchronously by the host (web file picker, dropped files).
+pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<InboxEvent>>>;
+
+/// The operation the user asked for. Kept with the request so a late completion does not
+/// guess a command from the file name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilePurpose {
+    Open,
+    Picture,
+    Audio,
+    Video,
+    /// A drop, or any other purpose: decide from the name and bytes.
+    Infer,
+}
+
+/// Where in a presentation a file should land. Ids, not indices: slides can move while
+/// the browser is still reading.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FilePlace {
+    Slide(SlideId),
+    Master(MasterId),
+    Layout {
+        master: MasterId,
+        layout: LayoutId,
+    },
+    /// The handout or notes master (one per presentation, so no id is needed).
+    NotesPage(Target),
+    /// The document was open but had no current slide, master or layout.
+    Unspecified,
+}
+
+/// The presentation (and place in it) captured when the request started.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileTarget {
+    /// Nothing was open. An insert makes its own document rather than using one opened
+    /// while the file was being read.
+    Absent,
+    Document {
+        doc: u64,
+        place: FilePlace,
+    },
+}
+
+struct PendingFile {
+    id: u64,
+    purpose: FilePurpose,
+    target: FileTarget,
+}
+
+struct LocatedPlace {
+    target: Target,
+    slide: Option<usize>,
+}
+
+fn purpose_of(purpose: &str) -> FilePurpose {
+    match purpose {
+        "open" => FilePurpose::Open,
+        "picture" => FilePurpose::Picture,
+        "audio" => FilePurpose::Audio,
+        "video" => FilePurpose::Video,
+        _ => FilePurpose::Infer,
+    }
+}
+
+fn is_presentation_name(lower: &str) -> bool {
+    lower.ends_with(".deckcraft")
+        || lower.ends_with(".slidecraft")
+        || lower.ends_with(".pptx")
+        || lower.ends_with(".potx")
+        || lower.ends_with(".ppsx")
+}
+
+/// File → Open keeps the requested operation: a presentation opens, an outline becomes slides.
+fn open_command(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    if is_presentation_name(&lower) {
+        Some("file.openBytes")
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+        Some("slide.fromOutline")
+    } else {
+        None
+    }
+}
+
+/// A drop has no requested operation, so the name and bytes decide: a presentation opens,
+/// then a recognised picture, sound or video is inserted, then an outline becomes slides.
+fn infer_command(name: &str, bytes: &[u8]) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    if is_presentation_name(&lower) {
+        return Some("file.openBytes");
+    }
+    let ct = deckcraft_engine::cmd::insert::content_type(name, bytes);
+    if ct.starts_with("image/") {
+        Some("insert.picture")
+    } else if ct.starts_with("audio/") {
+        Some("insert.audio")
+    } else if ct.starts_with("video/") {
+        Some("insert.video")
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+        Some("slide.fromOutline")
+    } else {
+        None
+    }
+}
+
+fn command_for(purpose: FilePurpose, name: &str, bytes: &[u8]) -> Result<&'static str, String> {
+    let cmd = match purpose {
+        FilePurpose::Picture => Some("insert.picture"),
+        FilePurpose::Audio => Some("insert.audio"),
+        FilePurpose::Video => Some("insert.video"),
+        FilePurpose::Open => open_command(name),
+        FilePurpose::Infer => infer_command(name, bytes),
+    };
+    cmd.ok_or_else(|| format!("{name}: DeckCraft can't open this kind of file"))
+}
 
 /// Platform services injected by the host (desktop or web).
 #[derive(Default)]
@@ -58,13 +197,18 @@ pub struct Services {
     pub pick_save: Option<PickFn>,
     pub read: Option<ReadFn>,
     pub write: Option<WriteFn>,
-    /// Asynchronous open dialog (web): the chosen file arrives through `inbox`.
+    /// Asynchronous open dialog (web). The callback receives the purpose and the request id
+    /// from [`SlideApp::begin_external_file`]; the chosen file arrives through `inbox`.
     pub open_async: Option<OpenAsyncFn>,
     /// Hand bytes to the user as a named file (browser download).
     pub download: Option<DownloadFn>,
     pub inbox: Option<Inbox>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
+    /// HTML on the system clipboard (Pages, Keynote, and other apps that write `public.html`).
+    pub clipboard_html: Option<Box<dyn FnMut() -> Option<String>>>,
+    /// Put HTML and its plain-text alternative on the system clipboard. `true` when it landed.
+    pub clipboard_set_html: Option<Box<dyn FnMut(&str, &str) -> bool>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
 }
@@ -167,6 +311,41 @@ fn system_clipboard_text(t: &str) -> String {
     if t.is_empty() { OBJECTS_MARKER.to_string() } else { t.to_string() }
 }
 
+/// The editor's zoom range (1 = 100 %).
+pub const ZOOM_RANGE: std::ops::RangeInclusive<f32> = 0.1..=4.0;
+
+impl UiState {
+    /// The state with every value usable: `ui.json` is a file on disk, and a damaged or
+    /// hand-edited one must not stop the window from opening. A zoom of 10,000 % asked the
+    /// renderer for a texture larger than memory at start-up; panel sizes, scales and names are
+    /// brought into range the same way, and the recent list is cut to its usual length.
+    pub fn sanitized(mut self) -> UiState {
+        let d = UiState::default();
+        let within = |v: f32, lo: f32, hi: f32, default: f32| if v.is_finite() { v.clamp(lo, hi) } else { default };
+        self.zoom = self.zoom.filter(|z| z.is_finite() && *z > 0.0).map(|z| z.clamp(*ZOOM_RANGE.start(), *ZOOM_RANGE.end()));
+        self.sorter_zoom = within(self.sorter_zoom, 0.5, 3.0, d.sorter_zoom);
+        self.ui_scale = within(self.ui_scale, 0.5, 3.0, d.ui_scale);
+        self.notes_height = within(self.notes_height, 0.0, 2000.0, d.notes_height);
+        self.thumbs_width = within(self.thumbs_width, 60.0, 1000.0, d.thumbs_width);
+        self.pane_width = within(self.pane_width, 240.0, 520.0, d.pane_width);
+        let short = |s: &String| s.len() <= 64;
+        if !short(&self.tab) {
+            self.tab = d.tab;
+        }
+        if !short(&self.format_tab) {
+            self.format_tab = d.format_tab;
+        }
+        self.pane = self.pane.filter(short);
+        self.recent.retain(|p| !p.is_empty() && p.len() <= 4096 && !p.contains('\0'));
+        self.recent.dedup();
+        self.recent.truncate(RECENT_MAX);
+        self
+    }
+}
+
+/// How many recent files File › Open and Home list.
+pub const RECENT_MAX: usize = 12;
+
 /// UI-only commands (id, label, shortcut, params).
 pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.normal", "Normal", None, "{}"),
@@ -192,6 +371,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("show.start", "Slide Show", Some("F5"), "{from?: index, custom?: name}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
+    ("animation.preview", "Preview Animations", None, "{on?: bool}"),
     ("app.home", "Home", None, "{on?}"),
     ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
@@ -224,6 +404,18 @@ pub struct Perf {
     pub fps: f64,
 }
 
+/// Playhead for the in-canvas animation preview.
+struct AnimPreview {
+    uid: u64,
+    slide: usize,
+    /// `Arc` address of the slide when preview started. An edit replaces the slide and stops playback.
+    slide_ptr: usize,
+    /// egui time when the first frame latched the clock (`None` until then).
+    started: Option<f64>,
+    elapsed: f64,
+    timeline: deckcraft_anim::Timeline,
+}
+
 pub struct SlideApp {
     /// Table Design's border pen (`color`, `width`, `dash` for `table.borders`).
     pub table_pen: serde_json::Value,
@@ -236,6 +428,8 @@ pub struct SlideApp {
     pub squiggles: squiggles::Squiggles,
     pub dialog: Option<dialogs::Dialog>,
     pub show: Option<show::Show>,
+    /// Current slide's animations playing on the editor canvas (not the full-screen show).
+    anim_preview: Option<AnimPreview>,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
@@ -288,6 +482,12 @@ pub struct SlideApp {
     pub sorter: sorter::State,
     /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
     pub(crate) slides_focused: bool,
+    /// A trackpad twist is in progress (one undo step when it ends).
+    twisting: bool,
+    /// Next cancellation identity for a browser pick or a dropped file.
+    next_file_id: u64,
+    /// Picks and drops whose bytes have not arrived yet.
+    pending_files: Vec<PendingFile>,
 }
 
 impl SlideApp {
@@ -303,6 +503,7 @@ impl SlideApp {
             squiggles: Default::default(),
             dialog: None,
             show: None,
+            anim_preview: None,
             media: media::MediaHost::new(audio_out),
             status: None,
             toast: None,
@@ -335,6 +536,9 @@ impl SlideApp {
             doc_window: None,
             sorter: sorter::State::default(),
             slides_focused: false,
+            twisting: false,
+            next_file_id: 1,
+            pending_files: Vec::new(),
         }
     }
 
@@ -594,6 +798,13 @@ impl SlideApp {
                 self.show = None;
                 self.media.stop_owned(media::Owner::Show);
             }
+            "animation.preview" => {
+                if p.get("on").and_then(Value::as_bool) == Some(false) {
+                    self.anim_preview = None;
+                    return Ok(json!({"playing": false}));
+                }
+                return self.start_anim_preview();
+            }
             "app.home" => {
                 let on = self.flag(p, self.backstage_open());
                 if on {
@@ -677,6 +888,7 @@ impl SlideApp {
     }
 
     pub fn start_show(&mut self, from: usize, reading: bool) {
+        self.anim_preview = None;
         self.media.stop_owned(media::Owner::Editor);
         if let Some(d) = self.session.active() {
             self.show = Some(show::Show::new(&d.doc, from, reading, self.ui.presenter_view && !reading));
@@ -694,6 +906,84 @@ impl SlideApp {
         }
     }
 
+    /// The current slide's animations are playing on the editor canvas.
+    pub fn anim_preview_active(&self) -> bool {
+        self.anim_preview.is_some()
+    }
+
+    /// `(slide, seconds played, sequence length)` while a preview is running.
+    pub fn anim_preview_report(&self) -> Option<(usize, f64, f64)> {
+        self.anim_preview.as_ref().map(|p| (p.slide, p.elapsed, p.timeline.total_duration()))
+    }
+
+    pub fn stop_anim_preview(&mut self) {
+        self.anim_preview = None;
+    }
+
+    /// Timeline and playhead for this frame's canvas raster. `None` when the editor should draw the slide at rest.
+    pub fn anim_preview_draw(&self) -> Option<(deckcraft_anim::Timeline, f64)> {
+        self.anim_preview.as_ref().map(|p| (p.timeline.clone(), p.elapsed))
+    }
+
+    /// Advance the preview clock. Stops when the slide changes, the slide is edited, or the sequence
+    /// (plus a short hold) has finished.
+    pub fn tick_anim_preview(&mut self, now: f64) -> bool {
+        let Some(p) = self.anim_preview.as_ref() else { return false };
+        let (uid, slide, ptr) = (p.uid, p.slide, p.slide_ptr);
+        let alive = self.show.is_none()
+            && self.session.active().is_some_and(|d| {
+                d.uid == uid
+                    && d.selection.target == deckcraft_engine::Target::Slides
+                    && d.selection.slide == slide
+                    && d.doc.slides.get(slide).is_some_and(|s| std::sync::Arc::as_ptr(s) as usize == ptr)
+            });
+        if !alive {
+            self.anim_preview = None;
+            return false;
+        }
+        let Some(p) = self.anim_preview.as_mut() else { return false };
+        let now = if now.is_finite() { now } else { p.started.unwrap_or(0.0) };
+        let start = *p.started.get_or_insert(now);
+        let elapsed = (now - start).max(0.0);
+        if !elapsed.is_finite() || elapsed > p.timeline.total_duration() + preview::HOLD_SECS {
+            self.anim_preview = None;
+            return false;
+        }
+        p.elapsed = elapsed;
+        true
+    }
+
+    fn start_anim_preview(&mut self) -> Result<Value, String> {
+        let (uid, slide, ptr, timeline) = {
+            let Some(d) = self.session.active() else {
+                return Err("no presentation is open".into());
+            };
+            if d.selection.target != deckcraft_engine::Target::Slides {
+                return Err("animation preview plays the current slide".into());
+            }
+            let slide = d.selection.slide;
+            let Some(slide_arc) = d.doc.slides.get(slide) else {
+                return Err("no slide to preview".into());
+            };
+            let ptr = std::sync::Arc::as_ptr(slide_arc) as usize;
+            let timeline = deckcraft_anim::ShowState::timeline(&d.doc, slide);
+            (d.uid, slide, ptr, timeline)
+        };
+        if timeline.is_empty() {
+            self.anim_preview = None;
+            self.set_status("This slide has no animations");
+            return Ok(json!({"playing": false}));
+        }
+        if matches!(self.ui.view, ViewMode::Sorter | ViewMode::NotesPage) {
+            self.ui.view = ViewMode::Normal;
+        }
+        self.close_backstage();
+        let duration = timeline.total_duration();
+        self.anim_preview = Some(AnimPreview { uid, slide, slide_ptr: ptr, started: None, elapsed: 0.0, timeline });
+        self.set_status("Previewing animations");
+        Ok(json!({"playing": true, "slide": slide, "duration": duration}))
+    }
+
     fn pick_and_open(&mut self) {
         if let Some(pick) = self.services.pick_open.as_mut() {
             if let Some(path) = pick("open")
@@ -701,8 +991,11 @@ impl SlideApp {
             {
                 self.notify(e);
             }
-        } else if let Some(f) = self.services.open_async.as_mut() {
-            f("open");
+        } else if self.services.open_async.is_some() {
+            let id = self.begin_external_file("open");
+            if let Some(f) = self.services.open_async.as_mut() {
+                f("open", id);
+            }
         }
     }
 
@@ -710,7 +1003,7 @@ impl SlideApp {
         self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
-        self.ui.recent.truncate(12);
+        self.ui.recent.truncate(RECENT_MAX);
         self.ui.view = ViewMode::Normal;
         Ok(())
     }
@@ -747,8 +1040,11 @@ impl SlideApp {
                     self.set_status(e.to_string());
                 }
             }
-        } else if let Some(f) = self.services.open_async.as_mut() {
-            f(purpose);
+        } else if self.services.open_async.is_some() {
+            let id = self.begin_external_file(purpose);
+            if let Some(f) = self.services.open_async.as_mut() {
+                f(purpose, id);
+            }
         }
     }
 
@@ -831,48 +1127,182 @@ impl SlideApp {
 
     fn drain_inbox(&mut self) {
         let Some(inbox) = self.services.inbox.clone() else { return };
-        let files: Vec<(String, Vec<u8>)> = inbox.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
-        for (name, bytes) in files {
-            self.open_or_insert_bytes(&name, &bytes);
+        let events = match inbox.lock() {
+            Ok(mut v) => std::mem::take(&mut *v),
+            Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
+        };
+        for event in events {
+            match event {
+                InboxEvent::Cancelled { id } => self.pending_files.retain(|r| r.id != id),
+                InboxEvent::File(file) => self.apply_external_file(file.id, &file.name, &file.bytes),
+            }
         }
     }
 
-    /// A dropped or picked file: presentations open, media is inserted.
+    /// Remember the open presentation, the slide (or master/layout) and the operation for a
+    /// file the host will read asynchronously. Returns the cancellation identity the host must
+    /// echo on the [`InboxEvent`]. Call this when the pick or the drop starts, not when the
+    /// bytes arrive.
+    pub fn begin_external_file(&mut self, purpose: &str) -> u64 {
+        let id = self.next_file_id;
+        self.next_file_id = self.next_file_id.wrapping_add(1).max(1);
+        self.pending_files.push(PendingFile { id, purpose: purpose_of(purpose), target: self.capture_file_target() });
+        id
+    }
+
+    /// A dropped or picked file read synchronously: presentations open, media is inserted on
+    /// the slide that is current now.
     pub fn open_or_insert_bytes(&mut self, name: &str, bytes: &[u8]) {
-        let lower = name.to_ascii_lowercase();
-        let data = deckcraft_engine::cmd::base64_encode(bytes);
-        let ct = deckcraft_engine::cmd::insert::content_type(name, bytes);
-        let cmd = if lower.ends_with(".deckcraft")
-            || lower.ends_with(".slidecraft")
-            || lower.ends_with(".pptx")
-            || lower.ends_with(".potx")
-            || lower.ends_with(".ppsx")
-        {
-            "file.openBytes"
-        } else if ct.starts_with("image/") {
-            "insert.picture"
-        } else if ct.starts_with("audio/") {
-            "insert.audio"
-        } else if ct.starts_with("video/") {
-            "insert.video"
-        } else if lower.ends_with(".txt") || lower.ends_with(".md") {
-            "slide.fromOutline"
-        } else {
-            self.set_status(format!("{name}: DeckCraft can't open this kind of file"));
-            return;
+        let id = self.begin_external_file("drop");
+        self.apply_external_file(id, name, bytes);
+    }
+
+    fn capture_file_target(&self) -> FileTarget {
+        let Some(d) = self.session.active() else { return FileTarget::Absent };
+        let place = match d.selection.target {
+            Target::Slides => match d.current_slide() {
+                Some(s) => FilePlace::Slide(s.id),
+                None => FilePlace::Unspecified,
+            },
+            Target::Master { master } => match d.doc.masters.get(master) {
+                Some(m) => FilePlace::Master(m.id),
+                None => FilePlace::Unspecified,
+            },
+            Target::Layout { master, layout } => match d.doc.masters.get(master) {
+                Some(m) => match m.layouts.get(layout) {
+                    Some(l) => FilePlace::Layout { master: m.id, layout: l.id },
+                    None => FilePlace::Unspecified,
+                },
+                None => FilePlace::Unspecified,
+            },
+            t @ (Target::Handout | Target::NotesMaster) => FilePlace::NotesPage(t),
         };
-        let p = if cmd == "slide.fromOutline" {
-            json!({"text": String::from_utf8_lossy(bytes), "markdown": lower.ends_with(".md")})
-        } else {
-            json!({"name": name, "data": data})
-        };
-        if self.session.active().is_none() && cmd != "file.openBytes" {
-            let _ = self.session.execute("file.new", &json!({}));
+        FileTarget::Document { doc: d.uid, place }
+    }
+
+    /// True when the user is still looking at the place this request captured.
+    fn viewing_target(&self, target: &FileTarget) -> bool {
+        let FileTarget::Document { doc, place } = target else { return false };
+        let Some(d) = self.session.active() else { return false };
+        if d.uid != *doc {
+            return false;
         }
-        match self.session.execute(cmd, &p) {
-            Err(e) if cmd == "file.openBytes" => self.notify(e.to_string()),
-            Err(e) => self.set_status(e.to_string()),
-            Ok(_) => {}
+        match place {
+            FilePlace::Slide(id) => d.selection.target == Target::Slides && d.current_slide().is_some_and(|s| s.id == *id),
+            FilePlace::Master(id) => {
+                matches!(d.selection.target, Target::Master { master } if d.doc.masters.get(master).is_some_and(|m| m.id == *id))
+            }
+            FilePlace::Layout { master, layout } => {
+                matches!(d.selection.target, Target::Layout { master: mi, layout: li }
+                    if d.doc.masters.get(mi).is_some_and(|m| m.id == *master && m.layouts.get(li).is_some_and(|l| l.id == *layout)))
+            }
+            FilePlace::NotesPage(t) => d.selection.target == *t,
+            FilePlace::Unspecified => false,
+        }
+    }
+
+    fn apply_external_file(&mut self, id: u64, name: &str, bytes: &[u8]) {
+        let Some(pos) = self.pending_files.iter().position(|r| r.id == id) else { return };
+        let req = self.pending_files.remove(pos);
+        let cmd = match command_for(req.purpose, name, bytes) {
+            Ok(cmd) => cmd,
+            Err(e) => {
+                self.set_status(e);
+                return;
+            }
+        };
+        let params = if cmd == "slide.fromOutline" {
+            json!({"text": String::from_utf8_lossy(bytes), "markdown": name.to_ascii_lowercase().ends_with(".md")})
+        } else {
+            json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(bytes)})
+        };
+        let result = if cmd == "file.openBytes" || self.viewing_target(&req.target) {
+            self.session.execute(cmd, &params).map(|_| ()).map_err(|e| e.to_string())
+        } else {
+            self.execute_on_target(&req.target, name, cmd, &params)
+        };
+        match result {
+            Err(e) if cmd == "file.openBytes" => self.notify(e),
+            Err(e) => self.set_status(e),
+            Ok(()) => {}
+        }
+        self.drain_requests();
+    }
+
+    /// Run `cmd` on the document and slide captured for the request, then put the view back
+    /// if the user has since moved. A missing document or slide cancels the file.
+    fn execute_on_target(&mut self, target: &FileTarget, name: &str, cmd: &str, params: &Value) -> Result<(), String> {
+        let FileTarget::Document { doc, place } = target else {
+            self.session.execute("file.new", &json!({})).map_err(|e| e.to_string())?;
+            return self.session.execute(cmd, params).map(|_| ()).map_err(|e| e.to_string());
+        };
+        let Some(idx) = self.session.documents().iter().position(|d| d.uid == *doc) else {
+            return Err(format!("{name} was not applied: the presentation it was chosen for is closed"));
+        };
+        let view = self.session.active_index();
+        let saved = self.session.documents().get(idx).map(|d| d.selection.clone());
+        self.session.set_active(idx);
+        let located = match self.locate_place(place) {
+            Ok(located) => located,
+            Err(e) => {
+                self.restore_file_view(view);
+                return Err(format!("{name} was not applied: {e}"));
+            }
+        };
+        if let Some(st) = self.session.active_mut() {
+            st.selection.target = located.target;
+            if let Some(slide) = located.slide {
+                st.selection.slide = slide;
+                st.selection.slides.clear();
+            }
+            st.selection.shapes.clear();
+            st.selection.text = None;
+            st.selection.cells = None;
+        }
+        let result = self.session.execute(cmd, params).map(|_| ()).map_err(|e| e.to_string());
+        if view == Some(idx) {
+            if let (Some(sel), Some(st)) = (saved, self.session.active_mut()) {
+                st.selection = sel;
+            }
+        } else {
+            self.restore_file_view(view);
+        }
+        result
+    }
+
+    fn restore_file_view(&mut self, view: Option<usize>) {
+        if let Some(i) = view
+            && i < self.session.documents().len()
+        {
+            self.session.set_active(i);
+        }
+    }
+
+    fn locate_place(&self, place: &FilePlace) -> Result<LocatedPlace, String> {
+        let d = self.session.doc().map_err(|e| e.to_string())?;
+        match place {
+            FilePlace::Slide(id) => {
+                let slide = d.doc.slide_index(*id).ok_or_else(|| "the slide it was chosen for was deleted".to_string())?;
+                Ok(LocatedPlace { target: Target::Slides, slide: Some(slide) })
+            }
+            FilePlace::Master(id) => {
+                let master =
+                    d.doc.masters.iter().position(|m| m.id == *id).ok_or_else(|| "the slide master it was chosen for was deleted".to_string())?;
+                Ok(LocatedPlace { target: Target::Master { master }, slide: None })
+            }
+            FilePlace::Layout { master, layout } => {
+                let mi =
+                    d.doc.masters.iter().position(|m| m.id == *master).ok_or_else(|| "the slide master it was chosen for was deleted".to_string())?;
+                let li = d
+                    .doc
+                    .masters
+                    .get(mi)
+                    .and_then(|m| m.layouts.iter().position(|l| l.id == *layout))
+                    .ok_or_else(|| "the layout it was chosen for was deleted".to_string())?;
+                Ok(LocatedPlace { target: Target::Layout { master: mi, layout: li }, slide: None })
+            }
+            FilePlace::NotesPage(t) => Ok(LocatedPlace { target: *t, slide: None }),
+            FilePlace::Unspecified => Err("there was no slide to put it on".into()),
         }
     }
 
@@ -929,7 +1359,7 @@ impl SlideApp {
             }
         }
         // On the web, dropped files can only be read asynchronously: the host reads them and
-        // delivers them through `Services::inbox`.
+        // delivers them through `Services::inbox`, tagged with the request captured at the drop.
         #[cfg(not(target_arch = "wasm32"))]
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped file".into());
@@ -938,6 +1368,7 @@ impl SlideApp {
                 Err(e) => self.set_status(e),
             }
         }
+        canvas::trackpad_twist(self, ctx);
     }
 
     /// Borrow faces for interface text in scripts the interface fonts lack (#101): the open
@@ -1040,36 +1471,36 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Ime(ime) => self.ime_event(&ime),
-                egui::Event::Copy => {
-                    if let Ok(v) = self.session.execute("edit.copy", &json!({}))
-                        && let Some(t) = v.get("text").and_then(Value::as_str)
-                    {
-                        ctx.copy_text(system_clipboard_text(t));
-                    }
-                }
-                egui::Event::Cut => {
-                    if let Ok(v) = self.session.execute("edit.cut", &json!({}))
-                        && let Some(t) = v.get("text").and_then(Value::as_str)
-                    {
-                        ctx.copy_text(system_clipboard_text(t));
-                    }
-                }
+                egui::Event::Copy => self.publish_clipboard(ctx, false),
+                egui::Event::Cut => self.publish_clipboard(ctx, true),
                 egui::Event::Paste(text) => {
                     // Our own marker for objects without text: paste what the session copied.
                     let text = if text == OBJECTS_MARKER { String::new() } else { text };
-                    // An image on the clipboard (screenshots, copied pictures) becomes a picture.
+                    // A picture (TIFF from Keynote, a screenshot) lands when the paste has no text.
+                    // Text keeps its HTML (bold, italic, underline) when the host can read it.
+                    let html = self.services.clipboard_html.as_mut().and_then(|f| f()).filter(|h| !h.is_empty());
                     let img = if text.is_empty() { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
                     let r = match img {
                         Some(png) => self
                             .session
                             .execute("insert.picture", &json!({"name": "Pasted image.png", "data": deckcraft_engine::cmd::base64_encode(&png)})),
-                        None => self.session.execute("edit.paste", &json!({"text": text})),
+                        None => {
+                            let mut params = json!({"text": text});
+                            if let Some(h) = html {
+                                params["html"] = Value::String(h);
+                            }
+                            self.session.execute("edit.paste", &params)
+                        }
                     };
                     if let Err(e) = r {
                         self.set_status(e.to_string());
                     }
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    if key == egui::Key::Escape && self.anim_preview.is_some() && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
+                        self.anim_preview = None;
+                        continue;
+                    }
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
                     if !self.session.tool.drawing_freeform() && menus::ui_shortcut(self, key, mods) {
                         continue;
@@ -1086,6 +1517,24 @@ impl SlideApp {
         self.drain_requests();
     }
 
+    /// Offer the copy or cut on the system clipboard.
+    ///
+    /// Slides go out as plain text. Text goes out as HTML plus the same plain words, so a paste
+    /// back into DeckCraft still uses the internal clipboard. A textless shape leaves the
+    /// invisible [`OBJECTS_MARKER`] rather than a picture: with only an image on the clipboard
+    /// egui-winit drops Ctrl+V, and the shortcut could no longer paste the shape here (#182).
+    fn publish_clipboard(&mut self, ctx: &egui::Context, cut: bool) {
+        let cmd = if cut { "edit.cut" } else { "edit.copy" };
+        let Ok(v) = self.session.execute(cmd, &json!({})) else { return };
+        let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+        let html = v.get("html").and_then(Value::as_str).unwrap_or("").to_string();
+        if self.session.clipboard.slides.is_empty() && !html.is_empty() && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text))
+        {
+            return;
+        }
+        ctx.copy_text(system_clipboard_text(&text));
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -1098,6 +1547,7 @@ impl SlideApp {
         self.tick_media(&ctx);
         eyedropper::tick(self, &ctx);
         if self.show.is_some() {
+            self.anim_preview = None;
             show::ui(self, ui);
             doc_window::show(self, &ctx);
             self.perf.frame_ms = now_ms() - t0;
@@ -1110,6 +1560,10 @@ impl SlideApp {
         if self.backstage.is_none() && self.session.active().is_some() {
             ribbon::show(self, ui);
             status::status_bar(self, ui);
+        }
+        let now = ui.input(|i| i.time);
+        if self.tick_anim_preview(now) {
+            ctx.request_repaint();
         }
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
             if self.backstage.is_some() {
@@ -1312,6 +1766,8 @@ mod replacefonts_tests;
 #[cfg(test)]
 mod slide_size_tests;
 #[cfg(test)]
+mod texture_limit_tests;
+#[cfg(test)]
 mod ui_soak_tests;
 
 #[cfg(test)]
@@ -1319,10 +1775,57 @@ mod ui_soak_tests;
 mod datetime_tests;
 
 #[cfg(test)]
+mod inbox_tests;
+
+#[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    fn shape_rot(app: &SlideApp) -> f64 {
+        let d = app.session.active().unwrap();
+        let id = d.selection.shapes[0];
+        d.shape(id).unwrap().xfrm.unwrap().rot
+    }
+
+    /// A two-finger twist is egui's Rotate event. Over the canvas it turns the selection;
+    /// letting go is one undo step. Off the canvas it does nothing.
+    #[test]
+    fn a_trackpad_twist_rotates_the_shape_under_the_canvas() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let id = harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 100.0, 60.0]})).unwrap();
+        let id = id.get("id").and_then(|v| v.as_u64()).unwrap();
+        harness.state_mut().session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        harness.run_steps(1);
+        let canvas = harness.state().canvas_rect.expect("canvas");
+        let outside = egui::pos2(1.0, 1.0);
+        assert!(!canvas.contains(outside), "the ribbon corner is not the canvas: {canvas:?}");
+
+        harness.input_mut().events.push(egui::Event::PointerMoved(outside));
+        harness.input_mut().events.push(egui::Event::Rotate(20.0_f32.to_radians()));
+        harness.run_steps(1);
+        assert!((shape_rot(harness.state()) - 0.0).abs() < 0.01, "off the canvas, still {}", shape_rot(harness.state()));
+
+        harness.input_mut().events.push(egui::Event::PointerMoved(canvas.center()));
+        harness.input_mut().events.push(egui::Event::Rotate(20.0_f32.to_radians()));
+        harness.run_steps(1);
+        harness.input_mut().events.push(egui::Event::PointerMoved(canvas.center()));
+        harness.input_mut().events.push(egui::Event::Rotate(10.0_f32.to_radians()));
+        harness.run_steps(1);
+        assert!((shape_rot(harness.state()) - 30.0).abs() < 0.05, "twist landed on {}", shape_rot(harness.state()));
+        harness.run_steps(1);
+        assert!(harness.state().session.active().unwrap().interaction.is_none());
+        harness.state_mut().session.execute("edit.undo", &json!({})).unwrap();
+        assert!((shape_rot(harness.state()) - 0.0).abs() < 0.01, "one undo, got {}", shape_rot(harness.state()));
+    }
 
     fn title_text(app: &SlideApp) -> String {
         let d = app.session.active().unwrap();
@@ -1796,5 +2299,293 @@ mod tests {
         harness.run_steps(2);
         let st = harness.state().session.active().unwrap();
         assert!(!st.selection.shapes.is_empty(), "canvas select all picks the shapes");
+    }
+
+    fn step_app(services: Services) -> egui_kittest::Harness<'static, SlideApp> {
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), services),
+        );
+        h.run_steps(2);
+        h
+    }
+
+    /// Copy of a bold selection offers HTML; paste of Pages-like HTML keeps the bold.
+    #[test]
+    fn copy_offers_html_and_paste_keeps_bold() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let seen = Rc::new(RefCell::new(None));
+        let record = seen.clone();
+        let services = Services {
+            clipboard_set_html: Some(Box::new(move |html, plain| {
+                *record.borrow_mut() = Some((html.to_string(), plain.to_string()));
+                true
+            })),
+            ..Default::default()
+        };
+        let mut h = step_app(services);
+        let title = h.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        h.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        h.event(egui::Event::Text("Hi".into()));
+        h.run_steps(1);
+        h.state_mut().session.execute("text.selectAll", &json!({})).unwrap();
+        h.state_mut().session.execute("format.bold", &json!({"on": true})).unwrap();
+        h.event(egui::Event::Copy);
+        h.run_steps(1);
+        let (html, plain) = seen.borrow().clone().expect("html offered");
+        assert!(html.contains("<b>"), "{html}");
+        assert_eq!(plain, "Hi");
+        assert!(!h.output().platform_output.commands.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyText(_))));
+
+        let services = Services { clipboard_html: Some(Box::new(|| Some("<p><b>Hi</b></p>".into()))), ..Default::default() };
+        let mut h = step_app(services);
+        h.event(egui::Event::Paste("Hi".into()));
+        h.run_steps(1);
+        let st = h.state().session.active().unwrap();
+        let body = st
+            .current_slide()
+            .unwrap()
+            .shapes
+            .iter()
+            .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hi"))
+            .and_then(|sh| sh.text.clone())
+            .expect("pasted text");
+        assert_eq!(body.paragraphs[0].runs[0].props.bold, Some(true), "{body:?}");
+    }
+
+    /// A shape with no text copies out as the objects marker (not a picture), so Ctrl+V can
+    /// still paste it here (#182).
+    #[test]
+    fn a_textless_shape_copies_as_the_objects_marker() {
+        let mut h = step_app(Services::default());
+        h.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 120.0, 80.0]})).unwrap();
+        h.event(egui::Event::Copy);
+        h.run_steps(1);
+        let cmds = &h.output().platform_output.commands;
+        assert!(cmds.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyText(t) if t == OBJECTS_MARKER)), "{cmds:?}");
+    }
+
+    fn redder(px: [u8; 4]) -> i32 {
+        px[0] as i32 - px[1].max(px[2]) as i32
+    }
+
+    /// A fade entrance is hidden at the start of the preview clock and opaque once it has played.
+    #[test]
+    fn preview_hides_an_entrance_until_it_plays() {
+        let mut session = Session::with_new();
+        let text = session.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 220.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+        session.execute("text.set", &json!({"id": text, "text": "Alpha\nBeta"})).unwrap();
+        session.execute("animation.set", &json!({"effect": "fade", "duration": 1000})).unwrap();
+        session.execute("animation.options", &json!({"textBuild": "byParagraph"})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        let tl = deckcraft_anim::ShowState::timeline(&doc, 0);
+        let shape = deckcraft_model::ShapeId(text as u32);
+        let para = |time: f64, i: usize| preview::shape_state_at(&tl, shape, time).paras.into_iter().find(|(p, _)| *p == i).map(|(_, s)| s).unwrap();
+        assert!(!para(0.0, 0).visible && !para(0.0, 1).visible, "entrances have not started");
+        let mid = para(0.25, 0);
+        assert!(mid.visible && mid.opacity > 0.05 && mid.opacity < 0.95, "{mid:?}");
+        assert!(!para(0.25, 1).visible, "the next paragraph waits for its step");
+
+        session.execute("animation.clear", &json!({})).unwrap();
+        let id = session.execute("shape.insert", &json!({"preset": "rect", "rect": [400.0, 300.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap();
+        session.execute("shape.fill", &json!({"id": id, "color": "#CC2200"})).unwrap();
+        session.execute("animation.set", &json!({"effect": "fade", "duration": 1000})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        let tl = deckcraft_anim::ShowState::timeline(&doc, 0);
+        let (w, h) = (doc.slide_size.width.round().max(1.0) as u32, doc.slide_size.height.round().max(1.0) as u32);
+        let paint = |time: Option<f64>| {
+            let f = |sid: deckcraft_model::ShapeId| preview::shape_state_at(&tl, sid, time.unwrap_or(0.0));
+            let state: Option<&dyn Fn(deckcraft_model::ShapeId) -> deckcraft_render::ShapeState> = if time.is_some() { Some(&f) } else { None };
+            let opts = deckcraft_render::RenderOpts { scale: 1.0, size: Some((w, h)), state, ..Default::default() };
+            deckcraft_render::render_slide(&doc, 0, &opts).pixel(460, 340)
+        };
+        let rest = paint(None);
+        let start = paint(Some(0.0));
+        let end = paint(Some(tl.total_duration() + 0.05));
+        assert!(redder(rest) > 40, "the shape is filled at rest {rest:?}");
+        assert!(redder(start) < redder(rest) / 2, "hidden at the first preview frame {start:?} vs {rest:?}");
+        assert!(redder(end) > 40, "visible again once the sequence has played {end:?}");
+    }
+
+    #[test]
+    fn animation_preview_plays_on_the_canvas_then_stops() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(0.05).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let none = harness.state_mut().run("animation.preview", json!({})).unwrap();
+        assert_eq!(none["playing"], false);
+        assert!(harness.state().status.as_ref().is_some_and(|s| s.0.contains("no animations")));
+        assert!(harness.state().show.is_none());
+
+        let id = harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [200.0, 280.0, 180.0, 80.0]})).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        harness.state_mut().session.execute("animation.set", &json!({"effect": "fade", "duration": 400})).unwrap();
+        let started = harness.state_mut().run("animation.preview", json!({})).unwrap();
+        assert_eq!(started["playing"], true);
+        assert!(harness.state().show.is_none(), "preview stays on the editor canvas");
+        harness.run_steps(1);
+        let elapsed = harness.state().anim_preview.as_ref().map(|p| p.elapsed).unwrap();
+        assert!(elapsed < 0.02, "the clock latches on the first frame, got {elapsed}");
+        let renders = harness.state().textures.canvas_renders;
+        harness.run_steps(6);
+        let elapsed = harness.state().anim_preview.as_ref().map(|p| p.elapsed).unwrap();
+        assert!((0.2..0.5).contains(&elapsed), "{elapsed}");
+        assert!(harness.state().textures.canvas_renders > renders, "each preview frame redraws the slide");
+        assert!(harness.state().show.is_none());
+
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_none(), "Escape stops the preview");
+
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_some());
+        harness.state_mut().run("animation.preview", json!({"on": false})).unwrap();
+        assert!(harness.state().anim_preview.is_none());
+
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        let centre = harness.state().slide_rect.unwrap().center();
+        harness.hover_at(centre);
+        harness.run_steps(1);
+        harness.drag_at(centre);
+        harness.run_steps(2);
+        assert!(harness.state().anim_preview.is_none(), "a click on the slide stops the preview");
+
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_none(), "leaving the slide stops the preview");
+
+        harness.state_mut().session.execute("slide.previous", &json!({})).unwrap();
+        harness.state_mut().session.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        harness.state_mut().run("animation.preview", json!({})).unwrap();
+        harness.run_steps(1);
+        assert!(harness.state().anim_preview.is_some());
+        // 400 ms effect plus the hold.
+        harness.run_steps(30);
+        assert!(harness.state().anim_preview.is_none(), "the preview ends after the sequence");
+        assert!(harness.state().show.is_none());
+    }
+
+    fn flick_harness() -> egui_kittest::Harness<'static, SlideApp> {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        // Fitted: the slide is smaller than the window, so a flick turns the page instead of panning.
+        harness.state_mut().ui.zoom = Some(0.4);
+        harness
+    }
+
+    fn slide_at(app: &SlideApp) -> usize {
+        app.session.active().unwrap().selection.slide
+    }
+
+    /// One frame of a trackpad flick: four short samples, each under egui's cutoff for smoothing a
+    /// mouse notch. The harness runs one frame per queued event, so they have to share a frame or
+    /// none of them reaches the page threshold.
+    fn flick(harness: &mut egui_kittest::Harness<'static, SlideApp>, delta: egui::Vec2) {
+        let centre = harness.state().canvas_rect.unwrap_or(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))).center();
+        let input = harness.input_mut();
+        input.events.push(egui::Event::PointerMoved(centre));
+        let step = delta / 4.0;
+        for _ in 0..4 {
+            input.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: step,
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        harness.run_steps(1);
+    }
+
+    #[test]
+    fn page_flick_uses_the_stronger_axis() {
+        assert_eq!(crate::canvas::page_flick(egui::vec2(-24.0, -4.0)), Some(true));
+        assert_eq!(crate::canvas::page_flick(egui::vec2(24.0, 4.0)), Some(false));
+        assert_eq!(crate::canvas::page_flick(egui::vec2(-4.0, -24.0)), Some(true));
+        assert_eq!(crate::canvas::page_flick(egui::vec2(4.0, 10.0)), None);
+    }
+
+    /// A sideways swipe on a fitted slide turns the page, like PowerPoint on a Mac trackpad.
+    /// The frames of one gesture do not skip ahead.
+    #[test]
+    fn a_sideways_trackpad_swipe_turns_the_page_and_a_second_flick_waits() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.run_steps(1);
+        assert_eq!(slide_at(harness.state()), 0);
+
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 1, "swipe left goes to the next slide");
+
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 1, "the next frame of the same gesture does not skip a slide");
+
+        harness.run_steps(30);
+        flick(&mut harness, egui::vec2(24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 0, "swipe right goes back");
+    }
+
+    #[test]
+    fn a_vertical_wheel_still_turns_the_page_and_a_zoomed_slide_pans_instead() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.run_steps(1);
+        flick(&mut harness, egui::vec2(-2.0, -24.0));
+        assert_eq!(slide_at(harness.state()), 1, "a vertical wheel still goes to the next slide");
+
+        harness.state_mut().ui.zoom = Some(3.0);
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.run_steps(2);
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 0, "zoomed in, a sideways swipe pans instead of turning the page");
+    }
+
+    #[test]
+    fn a_swipe_during_the_show_turns_the_page() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.state_mut().start_show(0, true);
+        harness.run_steps(2);
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(1));
+        harness.run_steps(30);
+        flick(&mut harness, egui::vec2(24.0, 0.0));
+        assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(0));
+    }
+
+    /// The pen is drawing. A flick must not turn the page out from under the stroke.
+    #[test]
+    fn the_pen_ignores_a_swipe_during_the_show() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().start_show(0, true);
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
+        harness.run_steps(1);
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(0));
     }
 }

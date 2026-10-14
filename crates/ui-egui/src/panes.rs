@@ -151,6 +151,29 @@ fn run(app: &mut SlideApp, id: &str, p: Value) {
     let _ = app.run(id, p);
 }
 
+/// Percent transparency (0 = opaque) of a solid fill, the same number `shape.fill`'s
+/// `transparency` parameter writes as an alpha transform. Anything else — no fill, a
+/// gradient, a picture, a pattern — is 0, because that command only changes a solid.
+fn solid_fill_transparency_percent(fill: Option<&Fill>) -> f32 {
+    let Some(Fill::Solid { color }) = fill else {
+        return 0.0;
+    };
+    ((1.0 - color.alpha()) * 100.0) as f32
+}
+
+/// Fraction to pass to `shape.fill` when the slider moved. An unchanged value (a focus
+/// loss, or switching to another shape) is `None`, so the pane does not rewrite the fill.
+fn fill_transparency_to_apply(shown_percent: f32, seed_percent: f32) -> Option<f64> {
+    if !shown_percent.is_finite() {
+        return None;
+    }
+    let shown = shown_percent.clamp(0.0, 100.0);
+    if (shown - seed_percent).abs() <= 0.01 {
+        return None;
+    }
+    Some(f64::from(shown) / 100.0)
+}
+
 fn scheme(app: &SlideApp) -> deckcraft_color::ColorScheme {
     app.session.active().and_then(|d| d.doc.masters.first().map(|m| m.scheme())).unwrap_or_else(|| deckcraft_model::Theme::default().colors)
 }
@@ -446,12 +469,19 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             });
             ui.horizontal(|ui| {
                 ui.label("Transparency");
-                let id = ui.id().with("ftr");
-                let mut v: f32 = ui.data_mut(|d| d.get_temp(id).unwrap_or(0.0));
+                // Seed from this shape. A shared temp defaulted to 0, so a shape that was
+                // already 40% transparent showed as opaque, and leaving the slider wrote 0.
+                let seed = solid_fill_transparency_percent(sh.fill.as_ref());
+                let id = ui.id().with(("ftr", sh.id.0));
+                let mut v: f32 = ui.data_mut(|d| d.get_temp(id).unwrap_or(seed));
                 let r = ui.add(egui::Slider::new(&mut v, 0.0..=100.0).suffix("%"));
-                ui.data_mut(|d| d.insert_temp(id, v));
                 if r.drag_stopped() || r.lost_focus() {
-                    let _ = app.run("shape.fill", json!({"transparency": v as f64 / 100.0}));
+                    if let Some(t) = fill_transparency_to_apply(v, seed) {
+                        let _ = app.run("shape.fill", json!({"transparency": t}));
+                    }
+                    ui.data_mut(|d| d.remove::<f32>(id));
+                } else if r.dragged() || r.changed() {
+                    ui.data_mut(|d| d.insert_temp(id, v));
                 }
             });
             if let Some(Fill::Gradient(g)) = &sh.fill {
@@ -722,13 +752,9 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
     let names: Vec<(u32, String)> = st.shapes().iter().map(|s| (s.id.0, s.name.clone())).collect();
     let selected: Vec<u32> = st.selection.shapes.iter().map(|i| i.0).collect();
     ui.horizontal(|ui| {
-        if ui.button("▶ Play All").clicked() {
-            let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(from, true);
-            if let Some(s) = app.show.as_mut() {
-                s.preview_only = true;
-                s.autoplay = true;
-            }
+        let playing = app.anim_preview_active();
+        if ui.button(if playing { "■ Stop" } else { "▶ Play All" }).clicked() {
+            run(app, "animation.preview", json!({"on": !playing}));
         }
     });
     ui.separator();
@@ -1002,13 +1028,16 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     if cache.key != key || cache.tex.is_empty() {
         cache = IdeaThumbs { key, tex: vec![] };
         let mut render = |name: String, d: &deckcraft_model::Presentation| {
-            let h = (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)) as u32;
+            let (px, h) = crate::textures::fit_size(
+                (px, (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+                crate::textures::max_side(ui.ctx()),
+            );
             let img = deckcraft_render::render_slide(
                 d,
                 idx,
                 &deckcraft_render::RenderOpts { scale: px as f64 / d.slide_size.width.max(1.0), size: Some((px, h)), ..Default::default() },
             );
-            let tex = ui.ctx().load_texture(format!("idea-{name}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+            let tex = crate::textures::upload(ui.ctx(), format!("idea-{name}"), crate::textures::to_color_image(&img, false));
             cache.tex.push((name, tex, px, h));
         };
         for (id, _) in &ideas {
@@ -1088,3 +1117,92 @@ pub(crate) fn text_transparency_slider(app: &mut SlideApp, ui: &mut Ui, sh: &dec
 #[cfg(test)]
 #[path = "smartart_tests.rs"]
 mod smartart_tests;
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use deckcraft_color::{ColorTransform, SchemeSlot};
+    use deckcraft_engine::Session;
+    use deckcraft_model::{ColorRef, Fill, ShapeId};
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    use serde_json::json;
+
+    use super::{fill_transparency_to_apply, solid_fill_transparency_percent};
+    use crate::{Services, SlideApp};
+
+    #[test]
+    fn solid_fill_transparency_reads_the_alpha_shape_fill_writes() {
+        assert_eq!(solid_fill_transparency_percent(None), 0.0);
+        assert_eq!(solid_fill_transparency_percent(Some(&Fill::None)), 0.0);
+        assert_eq!(solid_fill_transparency_percent(Some(&Fill::Group)), 0.0);
+        let plain = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1));
+        assert_eq!(solid_fill_transparency_percent(Some(&plain)), 0.0);
+        // `shape.fill` transparency 0.4 stores Alpha((1 - 0.4) * 100_000).
+        let forty = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(60_000)));
+        let p = solid_fill_transparency_percent(Some(&forty));
+        assert!((p - 40.0).abs() < 0.01, "{p}");
+        let clear = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(0)));
+        assert!((solid_fill_transparency_percent(Some(&clear)) - 100.0).abs() < 0.01);
+        // A later alpha wins, matching ColorRef::alpha.
+        let layered = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(0)).with(ColorTransform::Alpha(60_000)));
+        assert!((solid_fill_transparency_percent(Some(&layered)) - 40.0).abs() < 0.01);
+
+        assert_eq!(fill_transparency_to_apply(40.0, 40.0), None);
+        assert_eq!(fill_transparency_to_apply(40.005, 40.0), None);
+        assert_eq!(fill_transparency_to_apply(f32::NAN, 40.0), None);
+        assert_eq!(fill_transparency_to_apply(55.0, 40.0), Some(0.55));
+        assert_eq!(fill_transparency_to_apply(0.0, 40.0), Some(0.0));
+    }
+
+    fn solid_alpha(app: &SlideApp, id: u32) -> Option<i32> {
+        let sh = app.session.active()?.shape(ShapeId(id))?;
+        let Fill::Solid { color } = sh.fill.as_ref()? else { return None };
+        color.mods.iter().find_map(|m| match m {
+            ColorTransform::Alpha(v) => Some(*v),
+            _ => None,
+        })
+    }
+
+    fn slider_values(h: &Harness<'_, SlideApp>) -> Vec<f64> {
+        h.query_all_by_role(egui::accesskit::Role::Slider).filter_map(|n| n.accesskit_node().numeric_value()).collect()
+    }
+
+    /// The Fill slider shows the selected solid's transparency, and opening the pane
+    /// (or looking at another shape first) does not write 0% over it.
+    #[test]
+    fn fill_transparency_slider_follows_the_selection() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        let a = s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap() as u32;
+        let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [200.0, 40.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap() as u32;
+        s.execute("shape.fill", &json!({"id": a, "color": "accent1", "transparency": 0.0})).unwrap();
+        s.execute("shape.fill", &json!({"id": b, "color": "accent1", "transparency": 0.4})).unwrap();
+        s.execute("edit.select", &json!({"ids": [a]})).unwrap();
+        let mut app = SlideApp::new(s, Services::default());
+        app.ui.pane = Some("format".into());
+        app.ui.format_tab = "fill".into();
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        let opaque: Vec<f64> = slider_values(&h);
+        assert!(opaque.iter().any(|v| (*v - 0.0).abs() < 0.5), "opaque shape should show 0%, got {opaque:?}");
+        assert!(opaque.iter().all(|v| (*v - 40.0).abs() > 0.5), "opaque shape should not show 40%, got {opaque:?}");
+
+        h.state_mut().session.execute("edit.select", &json!({"ids": [b]})).unwrap();
+        h.run_steps(3);
+        let clear: Vec<f64> = slider_values(&h);
+        assert!(clear.iter().any(|v| (*v - 40.0).abs() < 0.5), "40% fill should show 40%, got {clear:?}");
+        assert_eq!(solid_alpha(h.state(), b), Some(60_000));
+
+        h.get_by_label("Transparency").click();
+        h.run_steps(2);
+        assert_eq!(solid_alpha(h.state(), b), Some(60_000));
+    }
+}
