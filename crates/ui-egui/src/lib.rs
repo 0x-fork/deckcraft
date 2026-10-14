@@ -177,6 +177,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.ruler", "Ruler", None, "{on?: bool}"),
     ("view.gridlines", "Gridlines", Some("Shift+F9"), "{on?: bool}"),
     ("view.guides", "Guides", Some("Alt+F9"), "{on?: bool}"),
+    ("view.gridOptions", "Grid Options…", None, "{spacing?: pt, snap?: bool, smartGuides?: bool, gridlines?: bool, guides?: bool}"),
     ("view.zoomIn", "Zoom In", Some("Cmd+="), "{}"),
     ("view.zoomOut", "Zoom Out", Some("Cmd+-"), "{}"),
     ("view.zoom", "Set Zoom", None, "{percent}"),
@@ -285,6 +286,18 @@ pub struct SlideApp {
     pub sorter: sorter::State,
     /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
     pub(crate) slides_focused: bool,
+}
+
+fn grid_options_touched(p: &Value) -> bool {
+    ["spacing", "snap", "smartGuides", "gridlines", "guides"].iter().any(|k| p.get(*k).is_some())
+}
+
+fn grid_flag(p: &Value, key: &str) -> Result<Option<bool>, String> {
+    match p.get(key) {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => Err(format!("`{key}` must be true or false")),
+    }
 }
 
 impl SlideApp {
@@ -538,6 +551,49 @@ impl SlideApp {
             "view.ruler" => self.ui.ruler = self.flag(p, self.ui.ruler),
             "view.gridlines" => self.ui.gridlines = self.flag(p, self.ui.gridlines),
             "view.guides" => self.ui.guides = self.flag(p, self.ui.guides),
+            "view.gridOptions" => {
+                if grid_options_touched(p) {
+                    let spacing = match p.get("spacing") {
+                        None => None,
+                        Some(raw) => {
+                            let n = raw.as_f64().filter(|v| v.is_finite()).ok_or("`spacing` must be a finite number of points")?;
+                            if !(1.0..=288.0).contains(&n) {
+                                return Err("`spacing` must be from 1 to 288 points".into());
+                            }
+                            Some(n)
+                        }
+                    };
+                    let snap = grid_flag(p, "snap")?;
+                    let smart = grid_flag(p, "smartGuides")?;
+                    let gridlines = grid_flag(p, "gridlines")?;
+                    let guides = grid_flag(p, "guides")?;
+                    if let Some(n) = spacing {
+                        self.session.prefs.grid_spacing = n;
+                    }
+                    if let Some(b) = snap {
+                        self.session.prefs.snap_to_grid = b;
+                    }
+                    if let Some(b) = smart {
+                        self.session.prefs.smart_guides = b;
+                        self.ui.smart_guides = b;
+                    }
+                    if let Some(b) = gridlines {
+                        self.ui.gridlines = b;
+                    }
+                    if let Some(b) = guides {
+                        self.ui.guides = b;
+                    }
+                } else {
+                    self.dialog = Some(dialogs::Dialog::new("gridOptions"));
+                }
+                return Ok(json!({
+                    "spacing": self.session.prefs.grid_spacing,
+                    "snap": self.session.prefs.snap_to_grid,
+                    "smartGuides": self.session.prefs.smart_guides,
+                    "gridlines": self.ui.gridlines,
+                    "guides": self.ui.guides,
+                }));
+            }
             "view.zoomIn" | "view.zoomOut" => {
                 let cur = self.ui.zoom.unwrap_or(self.canvas_scale);
                 let steps = [0.1, 0.25, 0.33, 0.5, 0.66, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
@@ -1581,6 +1637,79 @@ mod tests {
         assert!(app.doc_window.is_none(), "closing the presentation closes the extra window");
         assert!(app.session.active().is_none());
     }
+
+    #[test]
+    fn grid_options_sets_spacing_and_display_or_opens_the_dialog() {
+        let mut app = SlideApp::new(Session::with_new(), Services::default());
+        assert!((app.session.prefs.grid_spacing - 6.0).abs() < 1e-9);
+        let v =
+            app.run("view.gridOptions", json!({"spacing": 72.0, "snap": false, "smartGuides": false, "gridlines": true, "guides": true})).unwrap();
+        assert_eq!(v["spacing"], 72.0);
+        assert_eq!(v["snap"], false);
+        assert_eq!(v["smartGuides"], false);
+        assert_eq!(v["gridlines"], true);
+        assert_eq!(v["guides"], true);
+        assert!(app.dialog.is_none());
+        assert!(app.ui.gridlines && app.ui.guides);
+        assert!(!app.session.prefs.snap_to_grid && !app.ui.smart_guides);
+
+        app.run("view.gridOptions", json!({"snap": true})).unwrap();
+        assert!(app.session.prefs.snap_to_grid);
+        assert!((app.session.prefs.grid_spacing - 72.0).abs() < 1e-9);
+        assert!(app.dialog.is_none());
+
+        for bad in [json!({"spacing": 0}), json!({"spacing": 289}), json!({"spacing": "72"}), json!({"spacing": null}), json!({"snap": 1})] {
+            assert!(app.run("view.gridOptions", bad).is_err(), "rejected a bad grid option");
+        }
+        assert!((app.session.prefs.grid_spacing - 72.0).abs() < 1e-9);
+        assert!(app.session.prefs.snap_to_grid);
+
+        app.run("view.gridOptions", json!({})).unwrap();
+        assert_eq!(app.dialog.as_ref().map(|d| d.id.as_str()), Some("gridOptions"));
+        assert!((app.session.prefs.grid_spacing - 72.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn grid_options_dialog_lists_spacing_and_display() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        harness.state_mut().run("view.gridOptions", json!({})).unwrap();
+        harness.run_steps(2);
+        assert!(harness.query_by_label_contains("Display grid on screen").is_some());
+        assert!(harness.query_by_label_contains("Snap objects to grid").is_some());
+        assert!(harness.query_by_label_contains("Spacing").is_some());
+        let show_grid = harness
+            .query_all_by_role_and_label(egui::accesskit::Role::CheckBox, "Display grid on screen")
+            .next()
+            .unwrap_or_else(|| panic!("no grid checkbox"));
+        show_grid.click_accesskit();
+        harness.run_steps(2);
+        harness.query_all_by_role_and_label(egui::accesskit::Role::Button, "OK").next().unwrap_or_else(|| panic!("no OK button")).click_accesskit();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none(), "OK closes Grid Options");
+        assert!(harness.state().ui.gridlines, "OK applies the grid checkbox");
+        assert!((harness.state().session.prefs.grid_spacing - 6.0).abs() < 1e-9);
+
+        harness.state_mut().run("view.gridOptions", json!({})).unwrap();
+        harness.run_steps(2);
+        harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, "Cancel")
+            .next()
+            .unwrap_or_else(|| panic!("no Cancel button"))
+            .click_accesskit();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none(), "Cancel closes Grid Options");
+        assert!(harness.state().ui.gridlines, "Cancel leaves the grid on");
+        assert!((harness.state().session.prefs.grid_spacing - 6.0).abs() < 1e-9);
+    }
+
     fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
         let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
             |ui, app: &mut SlideApp| {

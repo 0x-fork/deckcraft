@@ -27,6 +27,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines are drawn; previous: minor, chart trendlines round-trip; 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options dialog; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -337,6 +338,7 @@ Detail in [ui-parity.md](ui-parity.md).
   2–4 h.
 - **Icon consistency across Craft apps** (#73, #56). 2–4 h; coordinate in craftrules.
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Find/Replace dialog,
+- **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
   Replace Fonts, Action Settings, Print, Insert Object…). 8–14 h.
 - **Dialogs**: 28 dialogs vs PowerPoint's ~60 (Font, Bullets and Numbering, Find/Replace dialog,
   Replace Fonts, Action Settings, Print, Insert Object…). Size and Position is one of the 28. 8–14 h.
@@ -458,6 +460,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Slide Master Preserve and Title/Footers placeholders. Checklist letters unchanged (breadth stays 79%); dialogs stay 27 |
 | 2026-10-14 | minor | Paragraph dialog sets alignment, indentation, spacing and line spacing in one step; its Tabs… button opens a standalone Tabs dialog |
 | 2026-10-14 | minor | Font dialog sets typeface, size, style, underline, colour, strikethrough, baseline, caps and character spacing in one step |
+| 2026-10-13 | minor | Grid Options dialog sets spacing, snap and whether gridlines and guides show; the on-screen grid follows that spacing |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

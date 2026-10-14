@@ -20,6 +20,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Trim Media dialog follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options dialog; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -111,6 +112,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media (start, end and fades follow the selection), SmartArt chooser, Quit, Notes Pages |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Font, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 29 (`crates/ui-egui/src/dialogs.rs`): Font, Paragraph, Tabs, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Grid Options, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 
 ## Direct manipulation
 
@@ -120,7 +122,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Marquee, Shift/Cmd multi-select, Tab to cycle | yes | yes |
 | Objects off the slide: drawn on the area around it in Normal view (full strength, master graphics too), selectable and movable there; clipped in the show, exports and thumbnails | yes | yes (#270) |
 | Smart guides (edges, centres, equal spacing) | yes | yes |
-| Snap to grid, grid options, drawing guides | yes | gridlines, guides and snap to grid (engine setting); no Grid Options dialog or menu toggle |
+| Snap to grid, grid options, drawing guides | yes | Grid Options (`view.gridOptions`): spacing, snap to grid, snap to other objects, display grid and guides; the on-screen grid uses that spacing |
 | Nudge (arrows), fine nudge (Option+arrows) | yes | yes |
 | Shift-constrained move, Option-drag to duplicate | yes | yes |
 | Connector glue and rerouting | yes | yes |
@@ -199,8 +201,10 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | Window chrome and system appearance (#41, #71) | 3–5 |
 | Grid Options, edit points UI, crop depth | 4–7 |
 | Arrange All (New Window is one extra window) | 2–3 |
+| Edit points UI, crop depth | 3–6 |
+| Multiple windows | 3–5 |
 | A screenshot comparison pass on the most-used tabs | 2–4 |
-| **Total** | **~30–52** |
+| **Total** | **~29–51** |
 
 ## Revision history
 
@@ -230,6 +234,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | trivial | Trim Media dialog: start, end and fades follow the selected clip |
 | 2026-10-14 | minor | Paragraph dialog from the Home › Paragraph launcher; Tabs… opens a standalone Tabs dialog |
 | 2026-10-14 | minor | Font dialog from Home › Font, the shape menu and Cmd+T |
+| 2026-10-13 | minor | Grid Options dialog: spacing, snap, and whether gridlines and guides are drawn; the on-screen grid uses that spacing |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

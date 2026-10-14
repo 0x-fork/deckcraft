@@ -2160,6 +2160,9 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
                 app.ui.guides = gd;
             }
         });
+        if big_button(ui, Icon::Gridlines, "Grid\nOptions", true).clicked() {
+            let _ = app.run("view.gridOptions", json!({}));
+        }
         let n = app.ui.notes;
         if big_button_ex(ui, Icon::Notes, "Notes", true, false, n).0.clicked() {
             app.ui.notes = !n;
