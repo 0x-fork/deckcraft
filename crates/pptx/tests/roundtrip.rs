@@ -82,6 +82,8 @@ pub fn rich_deck() -> Presentation {
                                 action: Action::Url { url: "https://example.org/a?b=1&c=2".into() },
                                 tooltip: "tip".into(),
                                 highlight_click: false,
+                                sound: None,
+                                stop_sound: false,
                             }),
                             ..Default::default()
                         },
@@ -153,7 +155,7 @@ pub fn rich_deck() -> Presentation {
         }],
         ..Default::default()
     });
-    b.click = Some(Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: true });
+    b.click = Some(Hyperlink { action: Action::NextSlide, tooltip: String::new(), highlight_click: true, sound: None, stop_sound: false });
     let mut c = shape(&mut p, "Freeform", 450.0, 120.0, 100.0, 100.0);
     c.geom = Geom::Custom {
         paths: vec![CustomPath {
@@ -336,7 +338,8 @@ pub fn rich_deck() -> Presentation {
     let target = p.slides[1].id;
     let mut link = shape(&mut p, "Go to shapes", 600.0, 450.0, 200.0, 40.0);
     link.text = Some(TextBody::from_text("Back to shapes"));
-    link.click = Some(Hyperlink { action: Action::Slide { slide: target }, tooltip: String::new(), highlight_click: false });
+    link.click =
+        Some(Hyperlink { action: Action::Slide { slide: target }, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false });
     let mut eq = shape(&mut p, "Equation", 100.0, 450.0, 300.0, 40.0);
     eq.text = Some(TextBody {
         paragraphs: vec![Paragraph {

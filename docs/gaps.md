@@ -6,6 +6,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (embedded fonts are read, written and drawn, except MicroType Express subsets; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt Transform gallery applies a text warp; previous: minor, 3-D bevel, camera and face lighting rendered; previous: minor, IME composition and CJK interface text landed, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus round-trip; notes-master header and footer kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for comments, links, custom shows, groups and inherited placeholders; paragraph defaults and action sounds kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -81,6 +82,15 @@ Detail in [file-format-parity.md](file-format-parity.md).
   notes master with a header and footer. Saving used to replace that notes master with an empty
   one, so "Acme review" and "Do not circulate" disappeared; they are kept now. There is still no
   larger corpus and no reference render from PowerPoint.
+### PPTX has never met a corpus of real decks
+- **Evidence:** PPTX tests use decks DeckCraft generates. An owned check
+  (`crates/pptx/tests/corpus_elements.rs`) now opens, saves and reopens comments, hyperlinks and
+  actions, custom shows, grouped rotated objects, and placeholders that inherit position, geometry
+  and text from the layout. That check found paragraph default run properties (`defRPr`, including
+  a link) and action sounds (the sound itself, stop-previous, and a custom show's "Show and
+  return") were dropped on save; they are kept now. Embedded fonts, comment threads (#70), media
+  options (#74) and animation rewind (#77) are still open, and there is no corpus of decks from
+  outside this repo. No reference renders from PowerPoint exist to compare against.
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -303,6 +313,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Edit Points: smooth/straight/corner point types, Bézier handle dragging, right-click point menu, no selection box while editing |
 | 2026-10-13 | minor | Edit Points: convert to freeform, drag, add and delete vertices (`shape.editPoints`, `shape.movePoint`, `shape.addPoint`, `shape.deletePoint`); left: point types and control handles |
 | 2026-10-13 | minor | Owned PPTX corpus round-trip (parts and text). Notes-master header and footer text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
+| 2026-10-13 | minor | Owned PPTX corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders. Paragraph `defRPr` and action sounds kept. Embedded fonts and #70/#74/#77 stay open |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

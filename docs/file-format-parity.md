@@ -5,6 +5,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (EMF/WMF rectangle clip regions; previous: trivial, groups with a small legacy child space, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** minor (embedded fonts read, written and drawn; MicroType Express subsets kept but not drawn; previously trivial: groups with a small legacy child coordinate space, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus round-trip; notes-master header and footer text kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders; paragraph `defRPr` and action sounds kept; previous: trivial, groups with a small legacy child coordinate space) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -21,6 +22,7 @@ PowerPoint opens and saves; Viewer = opens only).
 | Format | PowerPoint | DeckCraft read | DeckCraft write | Fidelity / notes | Tested by |
 |---|---|---|---|---|---|
 | `.pptx` presentation | Editor | yes | yes | Broad (see below); corpus is decks we author, not measured against PowerPoint renders | `crates/pptx/tests/corpus.rs`, `roundtrip.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
+| `.pptx` presentation | Editor | yes | yes | Broad (see below); an owned corpus covers comments, links and actions, custom shows, rotated groups and placeholders that inherit from the layout. Embedded fonts and a corpus of decks from outside this repo are still open | `crates/pptx/tests/roundtrip.rs`, `corpus_elements.rs`, `sample.rs`, `malformed.rs`, `sniff.rs`; opened in PowerPoint by hand 2026-10-06 |
 | `.potx` template | Editor | yes (as a presentation) | no: written with the `.pptx` content type | `file.saveTemplate` is Save As under another name | none |
 | `.ppsx` slide show | Editor | yes (as a presentation) | no: written as `.pptx` content | Doesn't start in show mode | none |
 | `.pptm` / `.potm` / `.ppsm` macro-enabled | Editor | no | no | Should open and keep `vbaProject.bin` without running it | none |
@@ -72,7 +74,7 @@ the round trip even though DeckCraft doesn't model it.
 | Lines: dash, compound, caps, joins, arrowheads | yes | yes | |
 | Effects: shadow, glow, soft edges, reflection | yes | yes | |
 | 3-D: `scene3d`, `sp3d` | kept | kept | Not rendered |
-| Text: runs, paragraphs, bullets, numbering, levels, autofit, columns, vertical, RTL, script fonts, fields, hyperlinks | yes | yes | Round-trip tests incl. `justLow` and date fields |
+| Text: runs, paragraphs, bullets, numbering, levels, autofit, columns, vertical, RTL, script fonts, fields, hyperlinks | yes | yes | Round-trip tests incl. `justLow`, date fields and paragraph `defRPr` (the defaults a placeholder's runs inherit, including a link). A click or hover action keeps its sound, `endSnd`, and a custom show's "Show and return" |
 | Text warp (`prstTxWarp`) | yes | yes | All 40 presets rendered (`crates/geom/src/warp.rs`); adjust values (`avLst`) round-trip |
 | Pictures with crop, recolour, duotone, alpha, luminance | yes | yes | |
 | Tables with styles | yes | yes | |
@@ -108,6 +110,7 @@ the round trip even though DeckCraft doesn't model it.
 | 2026-10-13 | minor | EMF/WMF rectangle clip regions limit later drawing; EMF+ records remain |
 | 2026-10-13 | minor | Embedded fonts read and written; TrueType, OpenType and Embedded OpenType faces drawn |
 | 2026-10-13 | minor | Owned corpus round-trip (parts and text). Notes-master header, footer, date and slide-number text is written back |
+| 2026-10-13 | minor | Owned corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders. Paragraph `defRPr` and action sounds (including custom-show return) survive a save |
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |

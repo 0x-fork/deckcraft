@@ -539,7 +539,13 @@ fn hyperlinks_draw_in_the_hyperlink_colour_underlined() {
     let o = RenderOpts { scale: 0.5, ..Default::default() };
     let px = |p: &Presentation| render_slide(p, 0, &o);
     let diff = |a: &Image, b: &Image| a.pixels.iter().zip(&b.pixels).filter(|(x, y)| x.abs_diff(**y) > 64).count();
-    let link = Some(Hyperlink { action: Action::Url { url: "https://example.org".into() }, tooltip: String::new(), highlight_click: false });
+    let link = Some(Hyperlink {
+        action: Action::Url { url: "https://example.org".into() },
+        tooltip: String::new(),
+        highlight_click: false,
+        sound: None,
+        stop_sound: false,
+    });
     let hlink = Some(Fill::solid(ColorRef::scheme(deckcraft_color::SchemeSlot::Hlink)));
     let red = Some(Fill::solid(ColorRef::rgb(Rgba::rgb(200, 0, 0))));
     let _ = px(&run_deck(RunProps::default())); // faces load lazily

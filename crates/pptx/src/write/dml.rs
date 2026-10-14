@@ -380,9 +380,10 @@ pub fn hyperlink(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, h: &Hyperlink) 
         Action::LastSlide => (String::new(), Some("ppaction://hlinkshowjump?jump=lastslide".into())),
         Action::EndShow => (String::new(), Some("ppaction://hlinkshowjump?jump=endshow".into())),
         Action::LastViewed => (String::new(), Some("ppaction://hlinkshowjump?jump=lastslideviewed".into())),
-        Action::CustomShow { name } => {
+        Action::CustomShow { name, returns } => {
             let id = x.p.custom_shows.iter().position(|c| c.name == *name).unwrap_or(0);
-            (String::new(), Some(format!("ppaction://customshow?id={id}&return=true")))
+            let ret = if *returns { "true" } else { "false" };
+            (String::new(), Some(format!("ppaction://customshow?id={id}&return={ret}")))
         }
         Action::Program { path } => {
             if path.is_empty() {
@@ -392,14 +393,28 @@ pub fn hyperlink(w: &mut W, x: &mut Exp, o: &mut Out, tag: &str, h: &Hyperlink) 
         }
         Action::PlayMedia => (String::new(), Some("ppaction://media".into())),
     };
-    w.empty(
-        tag,
-        A::new()
-            .a("r:id", rid)
-            .o("action", action)
-            .o("tooltip", (!h.tooltip.is_empty()).then_some(h.tooltip.as_str()))
-            .t("highlightClick", h.highlight_click),
-    );
+    let attrs = A::new()
+        .a("r:id", rid)
+        .o("action", action)
+        .o("tooltip", (!h.tooltip.is_empty()).then_some(h.tooltip.as_str()))
+        .t("highlightClick", h.highlight_click)
+        .t("endSnd", h.stop_sound);
+    let sound = h.sound.and_then(|id| x.media_rel(o, id, "audio").map(|rid| (rid, id)));
+    let Some((sound_rid, sound_id)) = sound else {
+        w.empty(tag, attrs);
+        return;
+    };
+    w.open(tag, attrs);
+    let name = x.p.media(sound_id).map(|m| sound_label(&m.name)).unwrap_or_else(|| "sound.wav".into());
+    w.empty("a:snd", A::new().a("r:embed", sound_rid).a("name", name));
+    w.close(tag);
+}
+
+/// Display name PowerPoint stores on `a:snd`.
+fn sound_label(name: &str) -> String {
+    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let label: String = file.chars().filter(|c| c.is_ascii() && !c.is_control() && *c != '"' && *c != '<' && *c != '>').take(80).collect();
+    if label.is_empty() { "sound.wav".into() } else { label }
 }
 
 pub fn body_pr(w: &mut W, b: &BodyProps) {
@@ -685,8 +700,9 @@ fn run_text(w: &mut W, x: &mut Exp, o: &mut Out, text: &str, props: &RunProps) {
 
 pub fn paragraph(w: &mut W, x: &mut Exp, o: &mut Out, p: &Paragraph, math: bool, index: usize) {
     w.open0("a:p");
-    if p.level > 0 || !is_default_ppr(&p.props) {
-        ppr(w, x, o, "a:pPr", Some(p.level), &p.props, None);
+    let def = (p.def_props != RunProps::default()).then_some(&p.def_props);
+    if p.level > 0 || !is_default_ppr(&p.props) || def.is_some() {
+        ppr(w, x, o, "a:pPr", Some(p.level), &p.props, def);
     }
     for (ri, r) in p.runs.iter().enumerate() {
         match &r.kind {
