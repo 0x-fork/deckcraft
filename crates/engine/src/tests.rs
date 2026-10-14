@@ -2496,20 +2496,6 @@ fn language_marks_text_and_no_proof_and_repeats_are_reported() {
 }
 
 #[test]
-fn an_empty_placeholder_has_a_caret() {
-    let mut s = session();
-    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
-    s.execute("text.edit", &json!({"id": title})).unwrap();
-    let st = s.doc().unwrap();
-    let sel = st.selection.text.clone().unwrap();
-    let layout = cmd::text::layout_for(st, &sel).unwrap();
-    let (x, top, bottom) = layout.caret(deckcraft_text::Pos { para: 0, ch: 0 }).expect("a caret in the empty title");
-    // A centred title: the caret stands in the middle of the text box, one line tall.
-    assert!((x - layout.inner.center().x).abs() < 1.0, "{x} in {:?}", layout.inner);
-    assert!(bottom - top > 20.0, "{top}..{bottom}");
-}
-
-#[test]
 fn the_caret_takes_the_colour_of_the_text() {
     let caret = |theme: &str| {
         let mut s = session();

@@ -188,15 +188,6 @@ pub fn layout_for(st: &DocState, t: &TextSel) -> Option<deckcraft_text::TextLayo
     }
     let sh = st.shape(t.shape)?;
     let body = sh.text.as_ref()?;
-    // A body nobody has typed into holds no paragraph. Lay it out as one empty paragraph, so
-    // the caret has a line to stand on.
-    let blank;
-    let body = if body.paragraphs.is_empty() {
-        blank = TextBody { paragraphs: vec![Paragraph::default()], ..body.clone() };
-        &blank
-    } else {
-        body
-    };
     let ctx = ctx_for(&st.doc, &st.selection)?;
     let x = xfrm_of(&st.doc, &st.selection, sh);
     let geo = deckcraft_render::shape_geometry(sh, x.w, x.h);
