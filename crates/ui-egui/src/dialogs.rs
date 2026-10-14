@@ -1,4 +1,4 @@
-//! Dialogs (Insert Table, Slide Size, Header & Footer, Hyperlink, Set Up Show, Zoom, …) and the
+//! Dialogs (Insert Table, Slide Size, Font, Paragraph, Tabs, Header & Footer, Hyperlink, Set Up Show, Zoom, …) and the
 //! About window. The start screen is File › Home (`backstage.rs`).
 
 use deckcraft_color::SchemeSlot;
@@ -45,9 +45,12 @@ fn title(id: &str) -> &'static str {
         "renameShape" => "Rename",
         "renameLayout" => "Rename Layout",
         "paragraph" => "Paragraph",
+        "tabs" => "Tabs",
+        "font" => "Font",
         "about" => "About DeckCraft",
         "preferences" => "Preferences",
         "autocorrect" => "AutoCorrect",
+        "gridOptions" => "Grid Options",
         "export" => "Export",
         "symbol" => "Symbol",
         "photoAlbum" => "Photo Album",
@@ -56,6 +59,7 @@ fn title(id: &str) -> &'static str {
         "dateTime" => "Date and Time",
         "spelling" => "Spelling",
         "pasteSpecial" => "Paste Special",
+        "find" => "Find and Replace",
         "accessibility" => "Accessibility Checker",
         "language" => "Language",
         "customShow" => "Custom Shows",
@@ -101,8 +105,17 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
         }
         close = body(app, ui, &mut d);
     });
-    if open && !close && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if open && !close && !escape {
         app.dialog = Some(d);
+    } else if app.dialog.is_none()
+        && let Some(ret) = d.params.get("returnParams").filter(|v| v.is_object()).cloned()
+    {
+        // Tabs… opened from Paragraph: closing it (OK, Cancel, Esc or the window) returns there.
+        let id = d.params.get("returnId").and_then(Value::as_str).unwrap_or("paragraph");
+        let mut back = Dialog::new(id);
+        back.params = ret;
+        app.dialog = Some(back);
     }
 }
 
@@ -1495,22 +1508,9 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             }
             ok || cancel
         }
-        "paragraph" => {
-            field(ui, d, "Before text (in):", "left", "0");
-            field(ui, d, "Special — hanging (in):", "hang", "0");
-            field(ui, d, "Spacing before (pt):", "before", "0");
-            field(ui, d, "Spacing after (pt):", "after", "0");
-            field(ui, d, "Line spacing (lines):", "lines", "1.0");
-            let (ok, cancel) = buttons(ui, "OK");
-            if ok {
-                run(
-                    app,
-                    "format.paragraph",
-                    json!({"indentLeft": num(d, "left", 0.0) * 72.0, "indentFirst": -num(d, "hang", 0.0) * 72.0, "spaceBefore": num(d, "before", 0.0), "spaceAfter": num(d, "after", 0.0), "lineSpacing": num(d, "lines", 1.0)}),
-                );
-            }
-            ok || cancel
-        }
+        "font" => font_dialog(app, ui, d),
+        "paragraph" => paragraph_dialog(app, ui, d),
+        "tabs" => tabs_dialog(app, ui, d),
         "export" => {
             ui.label("Export the presentation as:");
             let fmt = d.get("fmt", "pdf");
@@ -1521,6 +1521,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 ("JPEG image (current slide)", "jpeg"),
                 ("PowerPoint Presentation (.pptx)", "pptx"),
                 ("Outline (.txt)", "outline"),
+                ("Animated GIF (.gif)", "gif"),
             ] {
                 if ui.radio(fmt == f, l).clicked() {
                     d.fields.insert("fmt".into(), f.into());
@@ -1564,6 +1565,10 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                     d.fields.insert("pdfHidden".into(), hidden.to_string());
                 }
             }
+            let gif_params = if fmt == "gif" { gif_options(app, ui, d) } else { Ok(Value::Null) };
+            if let Err(e) = &gif_params {
+                ui.label(egui::RichText::new(e).color(Tokens::get(ui.ctx()).text_dim));
+            }
             let pdf_params = {
                 let (layout, per) = match pdf_layout.as_str() {
                     "notes" => ("notes", 0),
@@ -1574,7 +1579,19 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             };
             let (ok, cancel) = buttons(ui, "Export");
             if ok {
-                let extra = if fmt == "pdf" { pdf_params } else { json!({}) };
+                let gif_params = match gif_params {
+                    Ok(v) => v,
+                    // Keep the dialog open so the range or width can be corrected.
+                    Err(e) => {
+                        app.set_status(e);
+                        return false;
+                    }
+                };
+                let extra = match fmt.as_str() {
+                    "pdf" => pdf_params,
+                    "gif" => gif_params,
+                    _ => json!({}),
+                };
                 app.export_as(&fmt, extra);
             }
             ok || cancel
@@ -1689,6 +1706,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             }
             ok || cancel
         }
+        "find" => find_dialog(app, ui, d),
         "spelling" => {
             // Words skipped with Ignore All while the dialog is open, one per line.
             let ignored = d.get("ignore", "");
@@ -2084,6 +2102,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, cancel) = buttons(ui, "OK");
             ok || cancel
         }
+        "gridOptions" => grid_options(app, ui, d),
         "preferences" => {
             ui.label(egui::RichText::new("General").font(theme::bold(13.0)));
             let mut dark = app.ui.brightness == theme::Brightness::Dark;
@@ -2456,6 +2475,43 @@ fn date_time_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     cancel
 }
 
+fn format_spacing(v: f64) -> String {
+    if !v.is_finite() {
+        return "6".into();
+    }
+    if (v - v.round()).abs() < 1e-6 && v.abs() < 1.0e6 { format!("{}", v.round() as i64) } else { format!("{v:.2}") }
+}
+
+/// Grid Options: spacing, snap and whether the grid and guides are drawn. OK applies one
+/// `view.gridOptions` call; Cancel leaves the presentation as it was.
+fn grid_options(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.label(egui::RichText::new("Snap").font(theme::bold(13.0)));
+    let snap = check(ui, d, "Snap objects to grid", "snap", app.session.prefs.snap_to_grid);
+    let smart = check(ui, d, "Snap objects to other objects", "smart", app.session.prefs.smart_guides);
+    let spacing_default = format_spacing(app.session.prefs.grid_spacing);
+    field(ui, d, "Spacing (pt):", "spacing", &spacing_default);
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Display").font(theme::bold(13.0)));
+    let gridlines = check(ui, d, "Display grid on screen", "gridlines", app.ui.gridlines);
+    let guides = check(ui, d, "Display drawing guides on screen", "guides", app.ui.guides);
+    if let Some(err) = d.fields.get("error").cloned().filter(|s| !s.is_empty()) {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(err).color(Color32::from_rgb(0xB0, 0x30, 0x30)));
+    }
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        let spacing = num(d, "spacing", app.session.prefs.grid_spacing);
+        match app.run("view.gridOptions", json!({"spacing": spacing, "snap": snap, "smartGuides": smart, "gridlines": gridlines, "guides": guides})) {
+            Ok(_) => return true,
+            Err(e) => {
+                d.fields.insert("error".into(), e);
+                return false;
+            }
+        }
+    }
+    cancel
+}
+
 fn pretty_equation(s: &str) -> String {
     let sup = |c: char| match c {
         '0' => '⁰',
@@ -2575,6 +2631,589 @@ pub fn selected_language(app: &SlideApp) -> (String, bool) {
     (props.lang.unwrap_or_else(|| "en-US".into()), props.no_proof == Some(true))
 }
 
+fn seed_once(d: &mut Dialog, key: &str, val: String) {
+    d.fields.entry(key.to_string()).or_insert(val);
+}
+
+fn json_text(v: Option<&Value>, default: &str) -> String {
+    match v {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.as_f64().map(|x| crate::widgets::fmt_num(x, "")).unwrap_or_else(|| default.to_string()),
+        Some(Value::Bool(true)) => "1".into(),
+        Some(Value::Bool(false)) => "0".into(),
+        _ => default.to_string(),
+    }
+}
+
+fn color_label(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Object(o) => o.get("scheme").or_else(|| o.get("rgb")).and_then(Value::as_str).unwrap_or("").to_string(),
+        _ => String::new(),
+    }
+}
+
+fn seed_font_fields(d: &mut Dialog) {
+    seed_once(d, "family", json_text(d.params.get("family"), ""));
+    seed_once(d, "size", json_text(d.params.get("size"), "18"));
+    seed_once(d, "bold", json_text(d.params.get("bold"), "0"));
+    seed_once(d, "italic", json_text(d.params.get("italic"), "0"));
+    seed_once(d, "underline", json_text(d.params.get("underline"), "none"));
+    seed_once(d, "strike", json_text(d.params.get("strike"), "none"));
+    seed_once(d, "baseline", json_text(d.params.get("baseline"), "none"));
+    seed_once(d, "caps", json_text(d.params.get("caps"), "none"));
+    seed_once(d, "spacing", json_text(d.params.get("spacing"), "0"));
+    let shown = d.params.get("color").map(color_label).unwrap_or_default();
+    seed_once(d, "color", shown.clone());
+    seed_once(d, "colorSeed", shown);
+}
+
+fn choice(ui: &mut Ui, d: &mut Dialog, salt: &str, key: &str, choices: &[(&str, &str)]) {
+    let cur = d.get(key, "");
+    let label = choices.iter().find(|(v, _)| *v == cur).map(|(_, l)| *l).unwrap_or(cur.as_str());
+    egui::ComboBox::from_id_salt(salt).selected_text(label).width(140.0).show_ui(ui, |ui| {
+        for (v, l) in choices {
+            if ui.selectable_label(cur == *v, *l).clicked() {
+                d.fields.insert((*key).into(), (*v).into());
+            }
+        }
+    });
+}
+
+fn labeled_text(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, width: f32) -> String {
+    let mut v = d.get(key, "");
+    let l = ui.label(label);
+    ui.add(egui::TextEdit::singleline(&mut v).desired_width(width)).labelled_by(l.id);
+    d.fields.insert(key.into(), v.clone());
+    v
+}
+
+fn finite_pt(text: &str) -> Option<f64> {
+    text.trim().trim_end_matches("pt").trim().parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+/// Home › Font › Font…, the shape menu and Cmd+T. One OK applies every field together.
+fn font_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.set_min_width(460.0);
+    seed_font_fields(d);
+    let mut fams = crate::ribbon::font_families(app);
+    let family = d.get("family", "");
+    if !family.is_empty() && !fams.iter().any(|f| f == &family) {
+        fams.insert(0, family.clone());
+    }
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(88.0, 20.0), egui::Label::new("Font"));
+        egui::ComboBox::from_id_salt("font_dialog_family").selected_text(if family.is_empty() { " " } else { family.as_str() }).width(300.0).show_ui(
+            ui,
+            |ui| {
+                egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                    for f in &fams {
+                        if ui.selectable_label(family == *f, f).clicked() {
+                            d.fields.insert("family".into(), f.clone());
+                        }
+                    }
+                });
+            },
+        );
+    });
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Size", "size", 64.0);
+        ui.add_space(16.0);
+        check(ui, d, "Bold", "bold", false);
+        check(ui, d, "Italic", "italic", false);
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(88.0, 20.0), egui::Label::new("Underline"));
+        choice(
+            ui,
+            d,
+            "font_dialog_underline",
+            "underline",
+            &[("none", "None"), ("sng", "Single"), ("dbl", "Double"), ("heavy", "Heavy"), ("dotted", "Dotted"), ("dash", "Dash"), ("wavy", "Wavy")],
+        );
+        ui.add_space(8.0);
+        let _ = labeled_text(ui, d, "Color", "color", 110.0);
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(88.0, 20.0), egui::Label::new("Strikethrough"));
+        choice(ui, d, "font_dialog_strike", "strike", &[("none", "None"), ("sng", "Single"), ("dbl", "Double")]);
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(88.0, 20.0), egui::Label::new("Baseline"));
+        choice(ui, d, "font_dialog_baseline", "baseline", &[("none", "None"), ("super", "Superscript"), ("sub", "Subscript")]);
+        ui.add_space(8.0);
+        ui.label("Caps");
+        choice(ui, d, "font_dialog_caps", "caps", &[("none", "None"), ("small", "Small caps"), ("all", "All caps")]);
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(88.0, 20.0), egui::Label::new("Spacing"));
+        let mut spacing = d.get("spacing", "0");
+        let edited = ui.add(egui::TextEdit::singleline(&mut spacing).desired_width(64.0).hint_text("pt"));
+        let mut picked = None;
+        egui::ComboBox::from_id_salt("font_dialog_spacing")
+            .selected_text(match spacing.as_str() {
+                "-3" => "Very tight",
+                "-1.5" => "Tight",
+                "0" => "Normal",
+                "3" => "Loose",
+                "6" => "Very loose",
+                other => other,
+            })
+            .width(120.0)
+            .show_ui(ui, |ui| {
+                for (v, l) in [("-3", "Very tight"), ("-1.5", "Tight"), ("0", "Normal"), ("3", "Loose"), ("6", "Very loose")] {
+                    if ui.selectable_label(spacing == v, l).clicked() {
+                        picked = Some(v.to_string());
+                    }
+                }
+            });
+        let _ = edited;
+        if let Some(v) = picked {
+            d.fields.insert("spacing".into(), v);
+        } else {
+            d.fields.insert("spacing".into(), spacing);
+        }
+    });
+    let bold = d.get("bold", "0") == "1";
+    let italic = d.get("italic", "0") == "1";
+    let underline = d.get("underline", "none");
+    let strike = d.get("strike", "none");
+    let shown = finite_pt(&d.get("size", "18")).unwrap_or(18.0).clamp(12.0, 28.0) as f32;
+    let mut sample = egui::RichText::new("AaBbCcDd").size(shown);
+    if bold {
+        sample = sample.strong();
+    }
+    if italic {
+        sample = sample.italics();
+    }
+    if underline != "none" {
+        sample = sample.underline();
+    }
+    if strike != "none" {
+        sample = sample.strikethrough();
+    }
+    ui.add_space(6.0);
+    ui.label(sample);
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        let family = d.get("family", "");
+        let family = family.trim();
+        if family.is_empty() {
+            app.set_status("Choose a font");
+            return false;
+        }
+        let Some(size) = finite_pt(&d.get("size", "")) else {
+            app.set_status("Font size must be a number");
+            return false;
+        };
+        let Some(spacing) = finite_pt(&d.get("spacing", "0")) else {
+            app.set_status("Character spacing must be a number");
+            return false;
+        };
+        let mut params = json!({
+            "family": family,
+            "size": size,
+            "bold": d.get("bold", "0") == "1",
+            "italic": d.get("italic", "0") == "1",
+            "underline": d.get("underline", "none"),
+            "strike": d.get("strike", "none"),
+            "baseline": d.get("baseline", "none"),
+            "caps": d.get("caps", "none"),
+            "spacing": spacing,
+        });
+        let color = d.get("color", "");
+        let seed = d.get("colorSeed", "");
+        if color == seed {
+            if let Some(c) = d.params.get("color").filter(|v| !v.is_null()) {
+                params["color"] = c.clone();
+            }
+        } else if !color.trim().is_empty() {
+            params["color"] = json!(color.trim());
+        }
+        let _ = app.run("format.fontDialog", params);
+    }
+    ok || cancel
+}
+
+fn pt_text(v: Option<&Value>, default: f64) -> String {
+    match v.and_then(Value::as_f64).filter(|n| n.is_finite()) {
+        Some(n) => crate::widgets::fmt_num(n, ""),
+        None => crate::widgets::fmt_num(default, ""),
+    }
+}
+
+fn inches_text(v: Option<&Value>) -> String {
+    crate::widgets::fmt_num(v.and_then(Value::as_f64).filter(|n| n.is_finite()).unwrap_or(0.0) / 72.0, "")
+}
+
+fn seed_paragraph_fields(d: &mut Dialog) {
+    seed_once(d, "align", json_text(d.params.get("align"), "left"));
+    seed_once(d, "before", inches_text(d.params.get("indentLeft")));
+    seed_once(d, "after", inches_text(d.params.get("indentRight")));
+    seed_once(d, "special", json_text(d.params.get("special"), "none"));
+    seed_once(d, "by", inches_text(d.params.get("specialBy")));
+    seed_once(d, "spaceBefore", pt_text(d.params.get("spaceBefore"), 0.0));
+    seed_once(d, "spaceBeforeSeed", pt_text(d.params.get("spaceBefore"), 0.0));
+    seed_once(d, "spaceAfter", pt_text(d.params.get("spaceAfter"), 0.0));
+    seed_once(d, "spaceAfterSeed", pt_text(d.params.get("spaceAfter"), 0.0));
+    seed_once(d, "lineKind", json_text(d.params.get("lineKind"), "multiple"));
+    seed_once(d, "lineValue", pt_text(d.params.get("lineValue"), 1.0));
+}
+
+fn paragraph_return_params(d: &mut Dialog) -> Value {
+    let before = finite_pt(&d.get("before", "0")).unwrap_or(0.0) * 72.0;
+    let after = finite_pt(&d.get("after", "0")).unwrap_or(0.0) * 72.0;
+    let by = finite_pt(&d.get("by", "0")).unwrap_or(0.0) * 72.0;
+    let space_before = finite_pt(&d.get("spaceBefore", "0")).unwrap_or(0.0);
+    let space_after = finite_pt(&d.get("spaceAfter", "0")).unwrap_or(0.0);
+    let line_value = finite_pt(&d.get("lineValue", "1")).unwrap_or(1.0);
+    let before_same = d.get("spaceBefore", "") == d.get("spaceBeforeSeed", "");
+    let after_same = d.get("spaceAfter", "") == d.get("spaceAfterSeed", "");
+    let v = json!({
+        "align": d.get("align", "left"),
+        "indentLeft": before,
+        "indentRight": after,
+        "special": d.get("special", "none"),
+        "specialBy": by,
+        "spaceBefore": space_before,
+        "spaceBeforeKind": if before_same { d.params.get("spaceBeforeKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+        "spaceAfter": space_after,
+        "spaceAfterKind": if after_same { d.params.get("spaceAfterKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+        "lineKind": d.get("lineKind", "multiple"),
+        "lineValue": line_value,
+        "tabs": d.params.get("tabs").cloned().unwrap_or_else(|| json!([])),
+        "defaultTab": d.params.get("defaultTab").cloned().unwrap_or_else(|| json!(72.0)),
+    });
+    v
+}
+
+fn line_preset_label(kind: &str, value: &str) -> &'static str {
+    if kind == "exactly" {
+        "Exactly"
+    } else {
+        match value {
+            "1" => "Single",
+            "1.5" => "1.5 lines",
+            "2" => "Double",
+            _ => "Multiple",
+        }
+    }
+}
+
+/// Home › Paragraph launcher. One OK applies alignment, indentation and spacing together.
+fn paragraph_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.set_min_width(460.0);
+    seed_paragraph_fields(d);
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 20.0), egui::Label::new("Alignment"));
+        choice(
+            ui,
+            d,
+            "paragraph_align",
+            "align",
+            &[
+                ("left", "Left"),
+                ("center", "Center"),
+                ("right", "Right"),
+                ("justify", "Justify"),
+                ("justLow", "Justify low"),
+                ("distributed", "Distributed"),
+            ],
+        );
+    });
+    ui.label(egui::RichText::new("Indentation").strong());
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Before text", "before", 64.0);
+        ui.label("in");
+        ui.add_space(12.0);
+        let _ = labeled_text(ui, d, "After text", "after", 64.0);
+        ui.label("in");
+    });
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 20.0), egui::Label::new("Special"));
+        choice(ui, d, "paragraph_special", "special", &[("none", "None"), ("first", "First line"), ("hanging", "Hanging")]);
+        ui.add_space(8.0);
+        let _ = labeled_text(ui, d, "By", "by", 64.0);
+        ui.label("in");
+    });
+    ui.label(egui::RichText::new("Spacing").strong());
+    ui.horizontal(|ui| {
+        let _ = labeled_text(ui, d, "Spacing before", "spaceBefore", 64.0);
+        ui.label("pt");
+        ui.add_space(12.0);
+        let _ = labeled_text(ui, d, "Spacing after", "spaceAfter", 64.0);
+        ui.label("pt");
+    });
+    let mut picked: Option<(&'static str, Option<&'static str>)> = None;
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(110.0, 20.0), egui::Label::new("Line spacing"));
+        let kind = d.get("lineKind", "multiple");
+        let value = d.get("lineValue", "1");
+        egui::ComboBox::from_id_salt("paragraph_line").selected_text(line_preset_label(&kind, &value)).width(140.0).show_ui(ui, |ui| {
+            for (label, k, v) in [
+                ("Single", "multiple", Some("1")),
+                ("1.5 lines", "multiple", Some("1.5")),
+                ("Double", "multiple", Some("2")),
+                ("Multiple", "multiple", None),
+                ("Exactly", "exactly", None),
+            ] {
+                if ui.selectable_label(line_preset_label(&kind, &value) == label, label).clicked() {
+                    picked = Some((k, v));
+                }
+            }
+        });
+        ui.add_space(8.0);
+        let _ = labeled_text(ui, d, "At", "lineValue", 64.0);
+    });
+    if let Some((kind, value)) = picked {
+        d.fields.insert("lineKind".into(), kind.into());
+        if let Some(v) = value {
+            d.fields.insert("lineValue".into(), v.into());
+        } else if kind == "exactly" && finite_pt(&d.get("lineValue", "1")).is_some_and(|n| n <= 9.99) {
+            d.fields.insert("lineValue".into(), "18".into());
+        } else if kind == "multiple" && finite_pt(&d.get("lineValue", "1")).is_some_and(|n| n > 9.99) {
+            d.fields.insert("lineValue".into(), "1".into());
+        }
+    }
+    let mut open_tabs = false;
+    ui.horizontal(|ui| {
+        if ui.button("Tabs…").clicked() {
+            open_tabs = true;
+        }
+    });
+    let (ok, cancel) = buttons(ui, "OK");
+    if open_tabs {
+        let mut tabs = Dialog::new("tabs");
+        tabs.params = json!({
+            "tabs": d.params.get("tabs").cloned().unwrap_or_else(|| json!([])),
+            "defaultTab": d.params.get("defaultTab").cloned().unwrap_or_else(|| json!(72.0)),
+            "returnId": "paragraph",
+            "returnParams": paragraph_return_params(d),
+        });
+        app.dialog = Some(tabs);
+        return true;
+    }
+    if ok {
+        let Some(before_in) = finite_pt(&d.get("before", "")) else {
+            app.set_status("Indent before text must be a number of inches");
+            return false;
+        };
+        let Some(after_in) = finite_pt(&d.get("after", "")) else {
+            app.set_status("Indent after text must be a number of inches");
+            return false;
+        };
+        let Some(by_in) = finite_pt(&d.get("by", "")) else {
+            app.set_status("Special indent must be a number of inches");
+            return false;
+        };
+        let Some(space_before) = finite_pt(&d.get("spaceBefore", "")) else {
+            app.set_status("Spacing before must be a number");
+            return false;
+        };
+        let Some(space_after) = finite_pt(&d.get("spaceAfter", "")) else {
+            app.set_status("Spacing after must be a number");
+            return false;
+        };
+        let Some(line_value) = finite_pt(&d.get("lineValue", "")) else {
+            app.set_status("Line spacing must be a number");
+            return false;
+        };
+        let mut params = json!({
+            "align": d.get("align", "left"),
+            "indentLeft": before_in * 72.0,
+            "indentRight": after_in * 72.0,
+            "special": d.get("special", "none"),
+            "specialBy": by_in * 72.0,
+            "spaceBefore": space_before,
+            "spaceAfter": space_after,
+            "spaceBeforeKind": if d.get("spaceBefore", "") == d.get("spaceBeforeSeed", "") { d.params.get("spaceBeforeKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+            "spaceAfterKind": if d.get("spaceAfter", "") == d.get("spaceAfterSeed", "") { d.params.get("spaceAfterKind").and_then(Value::as_str).unwrap_or("pts") } else { "pts" },
+        });
+        if d.get("lineKind", "multiple") == "exactly" {
+            params["lineSpacingPt"] = json!(line_value);
+        } else {
+            params["lineSpacing"] = json!(line_value);
+        }
+        if app.run("format.paragraphDialog", params).is_err() {
+            return false;
+        }
+    }
+    ok || cancel
+}
+
+const TAB_KINDS: [(&str, &str); 4] = [("l", "Left"), ("ctr", "Center"), ("r", "Right"), ("dec", "Decimal")];
+
+/// Format › Tabs: the default spacing and the tab stops of the selected paragraphs, edited as a
+/// list (inches, as PowerPoint's dialog) and applied together with OK.
+fn tabs_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    if !d.fields.contains_key("stops") {
+        // Opened from Paragraph (or by `format.tabs` with no fields) the stops come with the
+        // dialog; otherwise they are read from the caret's paragraph.
+        let r = if d.params.get("tabs").is_some() { d.params.clone() } else { app.session.execute("format.ruler", &json!({})).unwrap_or_default() };
+        let stops: Vec<String> = r["tabs"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|t| Some(format!("{}:{}", t["pos"].as_f64()? / 72.0, t["align"].as_str().unwrap_or("l")))).collect())
+            .unwrap_or_default();
+        d.fields.insert("stops".into(), stops.join("|"));
+        d.fields.insert("default".into(), format!("{}", r["defaultTab"].as_f64().unwrap_or(72.0) / 72.0));
+    }
+    let mut stops: Vec<(f64, String)> = d
+        .get("stops", "")
+        .split('|')
+        .filter_map(|x| {
+            let (p, a) = x.split_once(':')?;
+            Some((p.parse::<f64>().ok().filter(|v| v.is_finite())?, a.to_string()))
+        })
+        .collect();
+    field(ui, d, "Default tab stops (in):", "default", "1");
+    ui.add_space(6.0);
+    ui.label("Tab stops:");
+    let mut remove = None;
+    egui::Grid::new("tab_stops").num_columns(3).spacing(vec2(12.0, 4.0)).show(ui, |ui| {
+        if stops.is_empty() {
+            ui.label("(none)");
+            ui.end_row();
+        }
+        for (i, (pos, align)) in stops.iter().enumerate() {
+            ui.label(format!("{pos:.2}\""));
+            ui.label(TAB_KINDS.iter().find(|k| k.0 == align).map(|k| k.1).unwrap_or("Left"));
+            if ui.small_button("Clear").on_hover_text(format!("Clear the tab at {pos:.2}\"")).clicked() {
+                remove = Some(i);
+            }
+            ui.end_row();
+        }
+    });
+    if let Some(i) = remove {
+        stops.remove(i);
+    }
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        ui.label("Tab stop position (in):");
+        let mut v = d.get("newpos", "");
+        ui.add(egui::TextEdit::singleline(&mut v).desired_width(60.0));
+        d.fields.insert("newpos".into(), v);
+    });
+    let cur = d.get("newalign", "l");
+    ui.horizontal(|ui| {
+        ui.label("Alignment:");
+        for (k, label) in TAB_KINDS {
+            if ui.radio(cur == k, label).clicked() {
+                d.fields.insert("newalign".into(), k.into());
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Set").clicked()
+            && let Some(p) = Some(num(d, "newpos", f64::NAN)).filter(|v| v.is_finite() && *v >= 0.0 && *v <= 56.0)
+        {
+            stops.retain(|(q, _)| (q - p).abs() > 0.005);
+            stops.push((p, d.get("newalign", "l")));
+            stops.sort_by(|a, b| a.0.total_cmp(&b.0));
+            d.fields.insert("newpos".into(), String::new());
+        }
+        if ui.button("Clear All").clicked() {
+            stops.clear();
+        }
+    });
+    d.fields.insert("stops".into(), stops.iter().map(|(p, a)| format!("{p}:{a}")).collect::<Vec<_>>().join("|"));
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        let set: Vec<Value> = stops.iter().map(|(p, a)| json!({"pos": p * 72.0, "align": a})).collect();
+        let dt = num(d, "default", 1.0).clamp(0.02, 56.0) * 72.0;
+        if let Err(e) = app.run("format.tabs", json!({"set": set, "defaultTab": dt})) {
+            app.set_status(e);
+        } else if let Some(ret) = d.params.get_mut("returnParams").and_then(Value::as_object_mut) {
+            // Back in Paragraph, its Tabs… shows what was just applied.
+            ret.insert("tabs".into(), json!(set));
+            ret.insert("defaultTab".into(), json!(dt));
+        }
+    }
+    ok || cancel
+}
+
+/// Home › Find / Replace: step through matches (slide text, table cells, notes) or replace them.
+fn find_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    let replace_mode = d.get("replace", "0") == "1";
+    field(ui, d, "Find what:", "text", "");
+    if replace_mode {
+        field(ui, d, "Replace with:", "with", "");
+    }
+    let case = check(ui, d, "Match case", "matchCase", false);
+    let whole = check(ui, d, "Find whole words only", "wholeWords", false);
+    let text = d.get("text", "");
+    let q = json!({"text": text, "matchCase": case, "wholeWords": whole});
+    let mut close = false;
+    let mut find_next = false;
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
+        let has = !text.is_empty();
+        if ui.add_enabled(has, egui::Button::new("Find Next")).clicked() || (has && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+            find_next = true;
+        }
+        if replace_mode {
+            if ui.add_enabled(has, egui::Button::new("Replace")).clicked() {
+                let cur: Option<Value> = serde_json::from_str(&d.get("cur", "")).ok();
+                if let Some(at) = cur {
+                    let mut p = q.clone();
+                    p["with"] = json!(d.get("with", ""));
+                    p["at"] = at;
+                    if app.session.execute("text.replace", &p).is_ok() {
+                        let n = d.get("next", "1").parse::<usize>().unwrap_or(1);
+                        d.fields.insert("next".into(), n.saturating_sub(1).to_string());
+                    }
+                }
+                find_next = true;
+            }
+            if ui.add_enabled(has, egui::Button::new("Replace All")).clicked() {
+                let mut p = q.clone();
+                p["with"] = json!(d.get("with", ""));
+                let msg = match app.session.execute("text.replace", &p) {
+                    Ok(v) => format!("Replaced {} occurrence(s).", v.get("replaced").and_then(Value::as_u64).unwrap_or(0)),
+                    Err(_) => format!("DeckCraft can't find “{text}”."),
+                };
+                d.fields.insert("status".into(), msg);
+                d.fields.remove("cur");
+            }
+        } else if ui.button("Replace…").clicked() {
+            d.fields.insert("replace".into(), "1".into());
+        }
+        if ui.button("Close").clicked() {
+            close = true;
+        }
+    });
+    if find_next {
+        let list = app.session.execute("text.find", &q).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+        if list.is_empty() {
+            d.fields.insert("status".into(), format!("DeckCraft can't find “{text}”."));
+            d.fields.remove("cur");
+        } else {
+            let n = d.get("next", "0").parse::<usize>().unwrap_or(0) % list.len();
+            let m = &list[n];
+            let _ = app.run("slide.go", json!({"index": m.get("slide").cloned().unwrap_or_default()}));
+            if let Some(id) = m.get("shape").filter(|v| !v.is_null()) {
+                let _ = app.run("edit.select", json!({"ids": [id]}));
+            }
+            d.fields.insert("cur".into(), m.to_string());
+            d.fields.insert("next".into(), (n + 1).to_string());
+            let where_ = if m.get("shape").is_some_and(Value::is_null) { " (notes)" } else { "" };
+            d.fields.insert(
+                "status".into(),
+                format!("Match {} of {} on slide {}{where_}.", n + 1, list.len(), m.get("slide").and_then(Value::as_u64).unwrap_or(0) + 1),
+            );
+        }
+    }
+    let status = d.get("status", "");
+    if !status.is_empty() {
+        ui.add_space(4.0);
+        ui.label(status);
+    }
+    close
+}
+
+#[cfg(test)]
+#[path = "font_dialog_tests.rs"]
+mod font_dialog_tests;
+
 #[cfg(test)]
 #[path = "size_position_tests.rs"]
 mod size_position_tests;
@@ -2582,6 +3221,64 @@ mod size_position_tests;
 #[cfg(test)]
 #[path = "photo_album_tests.rs"]
 mod photo_album_tests;
+
+/// The export dialog's Animated GIF options (size, seconds per slide, loop, slide range, hidden
+/// slides) as `file.export` params; a slide range that doesn't fit the deck is an error message.
+fn gif_options(app: &SlideApp, ui: &mut Ui, d: &mut Dialog) -> Result<Value, String> {
+    use deckcraft_engine::gif_export::{MAX_SECONDS, MAX_WIDTH, MIN_SECONDS, MIN_WIDTH, SIZE_PRESETS};
+    let n = app.session.active().map_or(0, |s| s.doc.slides.len());
+    let size = d.get("gifSize", "medium");
+    let size_label = |k: &str| match k {
+        "small" => "Small (640 px wide)",
+        "large" => "Large (1280 px wide)",
+        "extraLarge" => "Extra Large (1920 px wide)",
+        "custom" => "Custom width",
+        _ => "Medium (960 px wide)",
+    };
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(120.0, 20.0), egui::Label::new("Size:"));
+        egui::ComboBox::from_id_salt("gif_size").selected_text(size_label(&size)).show_ui(ui, |ui| {
+            for k in SIZE_PRESETS.iter().map(|(k, _)| *k).chain(["custom"]) {
+                if ui.selectable_label(size == k, size_label(k)).clicked() {
+                    d.fields.insert("gifSize".into(), k.into());
+                }
+            }
+        });
+    });
+    if size == "custom" {
+        field(ui, d, "Width (pixels):", "gifWidth", "960");
+    }
+    field(ui, d, "Seconds per slide:", "gifSeconds", "5");
+    let n_text = n.max(1).to_string();
+    field(ui, d, "From slide:", "gifFrom", "1");
+    field(ui, d, "To slide:", "gifTo", &n_text);
+    let forever = check(ui, d, "Loop forever", "gifLoop", true);
+    let hidden = check(ui, d, "Include hidden slides", "gifHidden", false);
+
+    let width = if size == "custom" {
+        let w = num(d, "gifWidth", 960.0).round();
+        if !(f64::from(MIN_WIDTH)..=f64::from(MAX_WIDTH)).contains(&w) {
+            return Err(format!("Width: enter {MIN_WIDTH} to {MAX_WIDTH} pixels"));
+        }
+        json!(w as u32)
+    } else {
+        json!(size)
+    };
+    let seconds = num(d, "gifSeconds", f64::NAN);
+    if deckcraft_engine::gif_export::check_seconds(seconds).is_err() {
+        return Err(format!("Seconds per slide: enter {MIN_SECONDS} to {MAX_SECONDS}"));
+    }
+    let mut p = json!({"width": width, "secondsPerSlide": seconds, "loop": forever, "includeHidden": hidden});
+    let (from, to) = (num(d, "gifFrom", 1.0).round(), num(d, "gifTo", n as f64).round());
+    if !(from >= 1.0 && from <= to && to <= n as f64) {
+        return Err(format!("Slides: choose a range from 1 to {n}"));
+    }
+    if from > 1.0 || to < n as f64 {
+        p["slides"] = json!(((from as usize - 1)..(to as usize)).collect::<Vec<_>>());
+    }
+    Ok(p)
+}
 
 #[cfg(test)]
 #[path = "theme_colors_tests.rs"]
@@ -2623,6 +3320,68 @@ mod tests {
         let mut h = link(Action::Url { url: address.into() }, tip);
         h.highlight_click = tip == "glow";
         h
+    }
+
+    /// The Export… dialog (Animated GIF) shows the GIF options and exports through `file.export` (#171).
+    #[test]
+    fn export_dialog_writes_an_animated_gif() {
+        use std::cell::RefCell;
+
+        use egui::vec2;
+        use egui_kittest::kittest::Queryable as _;
+        use serde_json::json;
+
+        use crate::SlideApp;
+        let dir = std::env::temp_dir().join(format!("deckcraft-ui-gif-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("deck.gif");
+        let picked = path.to_string_lossy().to_string();
+        let suggested = std::rc::Rc::new(RefCell::new(String::new()));
+        let seen = suggested.clone();
+        let services = crate::Services {
+            pick_save: Some(Box::new(move |s: &str| {
+                *seen.borrow_mut() = s.to_string();
+                Some(picked.clone())
+            })),
+            ..Default::default()
+        };
+        let mut session = deckcraft_engine::Session::with_new();
+        session.execute("slide.new", &json!({})).unwrap();
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1200.0, 900.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, services),
+        );
+        harness.run_steps(2);
+        harness.state_mut().run("app.exportDialog", json!({})).unwrap();
+        harness.run_steps(2);
+        harness.get_by_label("Animated GIF (.gif)").click_accesskit();
+        harness.run_steps(2);
+        assert_eq!(harness.state().dialog.as_ref().and_then(|d| d.fields.get("fmt")).map(String::as_str), Some("gif"));
+        harness.get_by_label("Seconds per slide:");
+        harness.get_by_label("Loop forever").click_accesskit();
+        harness.run_steps(2);
+        // A range outside the deck keeps the dialog open with a message, and nothing is written.
+        harness.state_mut().dialog.as_mut().unwrap().fields.insert("gifTo".into(), "9".into());
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_some());
+        assert!(harness.state().status.as_ref().is_some_and(|(m, _)| m.contains("Slides")), "{:?}", harness.state().status);
+        assert!(!path.exists());
+        harness.state_mut().dialog.as_mut().unwrap().fields.insert("gifTo".into(), "2".into());
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none(), "the dialog closes after exporting");
+        assert!(suggested.borrow().ends_with(".gif"), "{}", suggested.borrow());
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"GIF89a"));
+        assert_eq!(u16::from_le_bytes([bytes[6], bytes[7]]), 960, "medium by default");
+        assert!(!bytes.windows(11).any(|w| w == b"NETSCAPE2.0"), "Loop forever unticked: plays once");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -2818,3 +3577,7 @@ mod trim_media_tests {
 #[cfg(test)]
 #[path = "spelling_tests.rs"]
 mod spelling_tests;
+
+#[cfg(test)]
+#[path = "paragraph_dialog_tests.rs"]
+mod paragraph_dialog_tests;

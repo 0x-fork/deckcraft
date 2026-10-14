@@ -398,6 +398,14 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     ui.label(RichText::new(bs.page.label()).font(theme::bold(22.0)).color(t.text));
                     ui.add_space(16.0);
                 }
+                // Errors raised on a backstage page (a missing recent file, a failed open) would
+                // otherwise vanish: the status bar only draws once the backstage is closed (#172).
+                // A real label, not painted text, so screen readers see it too.
+                if let Some(msg) = app.fresh_status() {
+                    ui.label(RichText::new(&msg).font(theme::font(12.0)).color(t.accent));
+                    ui.add_space(8.0);
+                    ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+                }
                 match bs.page {
                     Page::Home => home(app, ui, &mut bs, &mut out),
                     Page::New => new_page(app, ui, &mut bs),
@@ -583,6 +591,7 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
     }
     let width = ui.available_width().min(CONTENT_W);
     for path in list {
+        let missing = !app.recent_exists(&path);
         let (name, folder) = split_path(&path);
         let (rect, resp) = ui.allocate_exact_size(vec2(width, 44.0), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
@@ -590,10 +599,36 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
         if resp.hovered() {
             p.rect_filled(rect, CornerRadius::same(3), t.hover);
         }
-        icons::paint(p, Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(22.0, 22.0)), Icon::Slide, t.text, false);
-        p.text(pos2(rect.left() + 44.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &name, theme::font(13.0), t.text);
-        p.text(pos2(rect.left() + 44.0, rect.center().y + 9.0), Align2::LEFT_CENTER, &folder, theme::font(11.0), t.text_dim);
-        if resp.on_hover_text(&path).clicked()
+        let ink = if missing { t.text_dim } else { t.text };
+        // The row is as wide as the page's content, which a narrow window clips: keep the mark
+        // and the remove button inside the visible part of the row.
+        let visible_right = rect.right().min(ui.clip_rect().right() - 6.0);
+        {
+            let p = ui.painter();
+            icons::paint(p, Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(22.0, 22.0)), Icon::Slide, ink, false);
+            p.text(pos2(rect.left() + 44.0, rect.center().y - 8.0), Align2::LEFT_CENTER, &name, theme::font(13.0), ink);
+            p.text(pos2(rect.left() + 44.0, rect.center().y + 9.0), Align2::LEFT_CENTER, &folder, theme::font(11.0), t.text_dim);
+            // A missing file says so before it is clicked (#172).
+            if missing {
+                p.text(pos2(visible_right - 82.0, rect.center().y), Align2::RIGHT_CENTER, "(missing)", theme::font(11.0), t.text_dim);
+            }
+        }
+        let resp = if missing { resp.on_hover_text(format!("{path} — this file can't be found")) } else { resp.on_hover_text(&path) };
+        // Remove from the list: a real labelled widget on top of the row, with a code-drawn icon
+        // (a text glyph would need a font that has it).
+        let x = ui.allocate_rect(
+            Rect::from_min_max(pos2(visible_right - 32.0, rect.top() + 5.0), pos2(visible_right, rect.bottom() - 5.0)),
+            Sense::click(),
+        );
+        x.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Remove from Recent"));
+        if x.hovered() {
+            ui.painter().rect_filled(x.rect, CornerRadius::same(3), t.hover);
+        }
+        icons::paint(ui.painter(), Rect::from_center_size(x.rect.center(), vec2(14.0, 14.0)), Icon::Close, t.text_dim, false);
+        if x.on_hover_text("Remove from Recent").clicked() {
+            app.forget_recent(&path);
+        }
+        if resp.clicked()
             && let Err(e) = app.open_path(&path)
         {
             app.notify(e);

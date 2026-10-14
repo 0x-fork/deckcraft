@@ -578,6 +578,20 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             p.custom_shows.push(CustomShow { name: cs.attr("name").unwrap_or("").to_string(), slides });
         }
     }
+    // Drawing guides (eighths of a point).
+    if let Some(r) = pres_part.rels.first_of("viewProps")
+        && let Some(d) = pkg.xml(&r.target)
+        && let Some(lst) = d.root.find("slideViewPr").and_then(|v| v.find("guideLst"))
+    {
+        p.guides = lst
+            .children_named("guide")
+            .filter_map(|g| {
+                let pos = g.attr("pos").and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0) / 8.0;
+                pos.is_finite().then_some(deckcraft_model::DrawGuide { vertical: g.attr("orient") != Some("horz"), pos })
+            })
+            .take(1000)
+            .collect();
+    }
     // Show settings.
     if let Some(r) = pres_part.rels.first_of("presProps")
         && let Some(d) = pkg.xml(&r.target)

@@ -2,7 +2,7 @@
 //! names and alt text.
 
 use deckcraft_color::{ColorTransform, Rgba, SchemeSlot};
-use deckcraft_model::style::{Dash, Glow, Gradient, GradientShape, GradientStop, LineEnd, PatternFill, PictureFill, Reflection, Shadow};
+use deckcraft_model::style::{Dash, Glow, Gradient, GradientShape, GradientStop, LineEnd, PatternFill, PictureFill, PictureMode, Reflection, Shadow};
 use deckcraft_model::{ColorRef, Effects, Fill, Geom, Line, ShapeStyle};
 use serde_json::{Value, json};
 
@@ -29,11 +29,36 @@ pub fn specs() -> Vec<CommandSpec> {
             has_slide,
             freeform
         ),
+        cmd!(
+            "draw.inkToShape",
+            "Ink to Shape",
+            ["Draw", "Convert"],
+            None,
+            "{} → {shapes: [ids], kept: n} turns recognisable ink strokes on the slide into lines, rectangles, ellipses and triangles",
+            has_slide,
+            ink_to_shape
+        ),
         cmd!(query "shape.sites", "Connection Sites", [], None, "{id} → [[x, y]] connection sites in slide points", has_slide, sites),
-        cmd!("shape.move", "Move", [], None, "{dx?, dy?: pt (relative) | x?, y?: pt (absolute), ids?}", has_selection, move_by),
-        cmd!("shape.resize", "Size", ["Shape Format", "Size"], None, "{w?, h?: pt, lockAspect?: bool, ids?}", has_selection, resize),
+        cmd!(
+            "shape.move",
+            "Move",
+            [],
+            None,
+            "{dx?: pt (relative), dy?: pt (relative), ids?} | {x?: pt (absolute), y?: pt (absolute), ids?}",
+            has_selection,
+            move_by
+        ),
+        cmd!("shape.resize", "Size", ["Shape Format", "Size"], None, "{w?: pt, h?: pt, lockAspect?: bool, ids?}", has_selection, resize),
         cmd!("shape.setBounds", "Position and Size", [], None, "{x, y, w, h, ids?}", has_selection, set_bounds),
-        cmd!("shape.rotate", "Rotation", ["Shape Format", "Arrange", "Rotate"], None, "{deg?: absolute, by?: relative, ids?}", has_selection, rotate),
+        cmd!(
+            "shape.rotate",
+            "Rotation",
+            ["Shape Format", "Arrange", "Rotate"],
+            None,
+            "{deg?: absolute, by?: relative, ids?, gesture?: move|end}",
+            has_selection,
+            rotate
+        ),
         cmd!(
             "shape.sizePosition",
             "Size and Position…",
@@ -47,11 +72,20 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("shape.adjust", "Adjust Shape", [], None, "{index, value (file units), ids?}", has_selection, adjust),
         cmd!("shape.change", "Change Shape", ["Shape Format", "Insert Shapes", "Edit Shape"], None, "{preset, ids?}", has_selection, change),
         cmd!(
+            "shape.smoothCorners",
+            "Smooth Corners",
+            ["Shape Format", "Insert Shapes", "Edit Shape"],
+            None,
+            "{smoothing: 0..100 (%), radius?: pt (default: the rounded rectangle's own), ids?} → rectangle outline with smoothed (squircle) corners",
+            has_selection,
+            smooth_corners
+        ),
+        cmd!(
             "shape.fill",
             "Shape Fill",
             ["Shape Format", "Shape Styles"],
             None,
-            "{color? | none?: true | gradient?: {stops: [[pos, color]], angle?, kind?: linear|radial} | picture?: base64 | pattern?: {preset, fg, bg} | transparency?: 0..1 | reset?: true, ids?}",
+            "{color? | none?: true | gradient?: {stops: [[pos, color]], angle?, kind?: linear|radial} | picture?: base64 | pattern?: {preset, fg, bg} | transparency?: 0..1 | reset?: true, ids?}; pictureProps?: {tile?: bool, offsetX?, offsetY?: pt, scaleX?, scaleY?: 0..10, align?: tl|t|tr|l|ctr|r|bl|b|br, mirror?: none|x|y|xy, stretch?: [l, t, r, b] fractions, rotateWithShape?: bool} adjusts a picture fill",
             has_selection,
             fill
         ),
@@ -95,7 +129,15 @@ pub fn specs() -> Vec<CommandSpec> {
             lock
         ),
         cmd!("shape.setDefault", "Set as Default Shape", [], None, "{}", has_selection, set_default),
-        cmd!("picture.crop", "Crop", ["Picture Format", "Size"], None, "{left?, top?, right?, bottom?: fraction 0..1, ids?}", has_selection, crop),
+        cmd!(
+            "picture.crop",
+            "Crop",
+            ["Picture Format", "Size"],
+            None,
+            "{left?: fraction 0..1, top?: fraction 0..1, right?: fraction 0..1, bottom?: fraction 0..1, ids?}",
+            has_selection,
+            crop
+        ),
         cmd!(
             "picture.adjust",
             "Corrections",
@@ -336,6 +378,15 @@ fn size_position(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn rotate(s: &mut Session, p: &Value) -> Result<Value> {
+    // A trackpad twist sends many small steps. `gesture: move` keeps them as one undo;
+    // `gesture: end` commits that step and does not rotate again.
+    if p.get("gesture").and_then(Value::as_str) == Some("end") {
+        s.commit_named("Rotation");
+        return Ok(json!({}));
+    }
+    if p.get("gesture").and_then(Value::as_str) == Some("move") {
+        s.begin("Rotation");
+    }
     let (abs, by) = (f64_param(p, "deg"), f64_param(p, "by"));
     edit_geometry(s, p, "shape.rotate", |sh| {
         if let Some(x) = sh.xfrm.as_mut() {
@@ -374,6 +425,47 @@ fn adjust(s: &mut Session, p: &Value) -> Result<Value> {
                 *slot = v;
             }
         }
+        Ok(())
+    })
+}
+
+/// Rectangles and rounded rectangles become custom geometry whose corners are smoothed
+/// ([`deckcraft_geom::squircle`]); the radius is the rounded rectangle's own unless `radius` says.
+fn smooth_corners(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "shape.smoothCorners";
+    let smoothing =
+        f64_param(p, "smoothing").filter(|v| v.is_finite()).ok_or_else(|| bad(CMD, "missing `smoothing` (0–100)"))?.clamp(0.0, 100.0) / 100.0;
+    let radius = f64_param(p, "radius").filter(|v| v.is_finite()).map(|v| v.max(0.0));
+    edit_geometry(s, p, CMD, |sh| {
+        let Some(x) = sh.xfrm else { return Err(bad(CMD, "the shape has no size of its own")) };
+        let ss = x.w.min(x.h).max(0.0);
+        let own = match &sh.geom {
+            Geom::Preset { name, adj } if name == "roundRect" => Some(ss * adj.first().copied().unwrap_or(16667.0).clamp(0.0, 50000.0) / 100000.0),
+            Geom::Preset { name, .. } if name == "rect" => Some(ss * 16667.0 / 100000.0),
+            _ => None,
+        };
+        // A custom outline qualifies only when it is a squircle this command drew with `radius`
+        // (re-smoothing as the slider moves), never an arbitrary freeform.
+        let custom = match (&sh.geom, radius) {
+            (Geom::Custom { paths }, Some(r)) => match paths.as_slice() {
+                [only] => (0..=100).any(|k| deckcraft_geom::squircle::path_d(only.w, only.h, r, f64::from(k) / 100.0) == only.d),
+                _ => false,
+            },
+            _ => false,
+        };
+        let r = match (radius, own) {
+            (Some(r), _) if own.is_some() || custom => r,
+            (None, Some(r)) => r,
+            _ => return Err(bad(CMD, "only rectangles, rounded rectangles and shapes already smoothed with this `radius` can be smoothed")),
+        };
+        sh.geom = Geom::Custom {
+            paths: vec![deckcraft_model::CustomPath {
+                w: x.w,
+                h: x.h,
+                d: deckcraft_geom::squircle::path_d(x.w, x.h, r, smoothing),
+                ..Default::default()
+            }],
+        };
         Ok(())
     })
 }
@@ -452,8 +544,9 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
         None
     };
     let transparency = f64_param(p, "transparency");
-    if new_fill.is_none() && transparency.is_none() {
-        return Err(bad("shape.fill", "give `color`, `none`, `gradient`, `pattern`, `picture`, `transparency` or `reset`"));
+    let pic_props = p.get("pictureProps").filter(|v| v.is_object());
+    if new_fill.is_none() && transparency.is_none() && pic_props.is_none() {
+        return Err(bad("shape.fill", "give `color`, `none`, `gradient`, `pattern`, `picture`, `pictureProps`, `transparency` or `reset`"));
     }
     // Transparency on an inherited (style) fill needs the effective colour.
     let st = s.doc()?;
@@ -481,6 +574,14 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(f) = &new_fill {
             sh.fill.clone_from(f);
         }
+        if let (Some(pp), Some(Fill::Picture(pf))) = (pic_props, sh.fill.as_mut()) {
+            picture_props(pf, pp);
+        }
+        if let (Some(t), Some(Fill::Picture(pf))) = (transparency, sh.fill.as_mut()) {
+            let a = 1.0 - t.clamp(0.0, 1.0);
+            pf.alpha = (a < 1.0).then_some(a);
+            return Ok(());
+        }
         if let Some(t) = transparency {
             let base = sh.fill.clone().or_else(|| ctx_fill.iter().find(|(i, _)| *i == sh.id).and_then(|(_, f)| f.clone()));
             if let Some(Fill::Solid { mut color }) = base {
@@ -493,6 +594,54 @@ fn fill(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })
+}
+
+/// Applies Format Shape ▸ Picture or texture fill options to a picture fill.
+fn picture_props(pf: &mut PictureFill, pp: &Value) {
+    let f = |k: &str| pp.get(k).and_then(Value::as_f64).filter(|v| v.is_finite());
+    if let Some(up) = pp.get("rotateWithShape").and_then(Value::as_bool) {
+        pf.upright = !up;
+    }
+    match pp.get("tile").and_then(Value::as_bool) {
+        Some(true) if !matches!(pf.mode, PictureMode::Tile { .. }) => {
+            pf.mode = PictureMode::Tile { tx: 0.0, ty: 0.0, sx: 1.0, sy: 1.0, flip: "none".into(), align: "tl".into() };
+        }
+        Some(false) if !matches!(pf.mode, PictureMode::Stretch { .. }) => pf.mode = PictureMode::default(),
+        _ => {}
+    }
+    match &mut pf.mode {
+        PictureMode::Tile { tx, ty, sx, sy, flip, align } => {
+            if let Some(v) = f("offsetX") {
+                *tx = v.clamp(-4000.0, 4000.0);
+            }
+            if let Some(v) = f("offsetY") {
+                *ty = v.clamp(-4000.0, 4000.0);
+            }
+            if let Some(v) = f("scaleX") {
+                *sx = v.clamp(0.01, 10.0);
+            }
+            if let Some(v) = f("scaleY") {
+                *sy = v.clamp(0.01, 10.0);
+            }
+            if let Some(m) = pp.get("mirror").and_then(Value::as_str).filter(|m| matches!(*m, "none" | "x" | "y" | "xy")) {
+                *flip = m.to_string();
+            }
+            if let Some(a) =
+                pp.get("align").and_then(Value::as_str).filter(|a| matches!(*a, "tl" | "t" | "tr" | "l" | "ctr" | "r" | "bl" | "b" | "br"))
+            {
+                *align = a.to_string();
+            }
+        }
+        PictureMode::Stretch { fill_rect } => {
+            if let Some(arr) = pp.get("stretch").and_then(Value::as_array) {
+                for (slot, v) in fill_rect.iter_mut().zip(arr) {
+                    if let Some(v) = v.as_f64().filter(|v| v.is_finite()) {
+                        *slot = v.clamp(-10.0, 0.99);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn line_end(v: &str) -> Option<LineEnd> {
@@ -1244,5 +1393,129 @@ mod size_position_tests {
         s.execute("edit.select", &json!({"ids": []})).unwrap();
         let err = s.execute("shape.sizePosition", &json!({})).unwrap_err();
         assert!(err.to_string().contains("nothing selected"), "{err}");
+    }
+}
+
+/// Draw › Ink to Shape: each recognisable stroke of the slide's ink becomes a preset shape
+/// outlined in the stroke's colour and width; the rest stays ink. One undo step.
+fn ink_to_shape(s: &mut Session, _p: &Value) -> Result<Value> {
+    use crate::inkshape::{Recognized, recognize};
+    use deckcraft_model::{Shape, ShapeId, ShapeKind};
+    let shapes = s.doc()?.shapes();
+    let Some(ink) = shapes.iter().find(|sh| matches!(sh.kind, ShapeKind::Ink { .. })) else {
+        return Ok(json!({"shapes": [], "kept": 0}));
+    };
+    let (ink_id, off) = (ink.id, ink.xfrm.map(|x| (x.x, x.y)).unwrap_or((0.0, 0.0)));
+    let ShapeKind::Ink { strokes } = &ink.kind else { return Ok(json!({"shapes": [], "kept": 0})) };
+    let found: Vec<Option<Recognized>> = strokes
+        .iter()
+        .map(|st| if st.highlighter { None } else { recognize(&st.points.iter().map(|(x, y, _)| (x + off.0, y + off.1)).collect::<Vec<_>>()) })
+        .collect();
+    if found.iter().all(Option::is_none) {
+        return Ok(json!({"shapes": [], "kept": strokes.len()}));
+    }
+    s.edit(|doc, sel| {
+        let mut new = vec![];
+        let list = crate::shapes_mut(doc, sel).ok_or_else(|| bad("draw.inkToShape", "no slide"))?;
+        let Some(pos) = list.iter().position(|sh| sh.id == ink_id) else { return Err(bad("draw.inkToShape", "ink gone")) };
+        let ShapeKind::Ink { strokes } = &mut list[pos].kind else { return Err(bad("draw.inkToShape", "not ink")) };
+        let all = std::mem::take(strokes);
+        let mut kept = vec![];
+        let mut made = vec![];
+        for (st, r) in all.into_iter().zip(found.iter()) {
+            let Some(r) = r else {
+                kept.push(st);
+                continue;
+            };
+            let (preset, xfrm) = match *r {
+                Recognized::Line { x0, y0, x1, y1 } => {
+                    ("line", crate::tools::line_xfrm(deckcraft_geom::Point::new(x0, y0), deckcraft_geom::Point::new(x1, y1), 0.0))
+                }
+                Recognized::Rect { x, y, w, h } => ("rect", deckcraft_geom::Xfrm::new(x, y, w, h)),
+                Recognized::Ellipse { x, y, w, h } => ("ellipse", deckcraft_geom::Xfrm::new(x, y, w, h)),
+                Recognized::Triangle { x, y, w, h, flip_v } => ("triangle", deckcraft_geom::Xfrm { flip_v, ..deckcraft_geom::Xfrm::new(x, y, w, h) }),
+            };
+            made.push((preset, xfrm, st.color, st.width));
+        }
+        let remaining = kept.len();
+        *strokes = kept;
+        if remaining == 0 {
+            list.remove(pos);
+        }
+        for (preset, xfrm, color, width) in made {
+            let id = ShapeId(doc.alloc_id());
+            let name = format!(
+                "{} {}",
+                match preset {
+                    "line" => "Straight Connector",
+                    "rect" => "Rectangle",
+                    "ellipse" => "Oval",
+                    _ => "Isosceles Triangle",
+                },
+                id.0
+            );
+            let list = crate::shapes_mut(doc, sel).ok_or_else(|| bad("draw.inkToShape", "no slide"))?;
+            list.push(Shape {
+                id,
+                name,
+                xfrm: Some(xfrm),
+                geom: Geom::preset(preset),
+                fill: Some(Fill::None),
+                line: Some(Line::solid(ColorRef::rgb(color), width.clamp(0.25, 100.0))),
+                kind: ShapeKind::Shape,
+                ..Default::default()
+            });
+            new.push(id);
+        }
+        sel.shapes = new.clone();
+        Ok(json!({"shapes": new.iter().map(|i| i.0).collect::<Vec<_>>(), "kept": remaining}))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use serde_json::json;
+
+    fn rotation(s: &Session) -> f64 {
+        let st = s.active().unwrap();
+        let id = st.selection.shapes[0];
+        st.shape(id).unwrap().xfrm.unwrap().rot
+    }
+
+    #[test]
+    fn a_twist_is_one_undo_and_wraps_past_a_full_turn() {
+        let mut s = Session::with_new();
+        s.execute("edit.select", &json!({"ids": []})).unwrap();
+        let id = s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 80.0, 40.0]})).unwrap();
+        let id = id.get("id").and_then(Value::as_u64).unwrap();
+        s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        assert!((rotation(&s) - 0.0).abs() < 0.01);
+
+        s.execute("shape.rotate", &json!({"by": 10.0, "gesture": "move"})).unwrap();
+        s.execute("shape.rotate", &json!({"by": 350.0, "gesture": "move"})).unwrap();
+        assert!((rotation(&s) - 0.0).abs() < 0.01, "10 + 350 wraps to 0, got {}", rotation(&s));
+        s.execute("shape.rotate", &json!({"by": 20.0, "gesture": "move"})).unwrap();
+        s.execute("shape.rotate", &json!({"gesture": "end", "ids": []})).unwrap();
+        assert!((rotation(&s) - 20.0).abs() < 0.01);
+        assert_eq!(s.active().unwrap().history.undo.last().unwrap().label, "Rotation");
+        assert!(s.active().unwrap().interaction.is_none());
+
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!((rotation(&s) - 0.0).abs() < 0.01, "one undo undoes the whole twist");
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert!((rotation(&s) - 20.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn ending_a_twist_does_not_commit_a_drag() {
+        let mut s = Session::with_new();
+        s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [10.0, 10.0, 30.0, 30.0]})).unwrap();
+        let st = s.active_mut().unwrap();
+        st.interaction = Some(crate::Interaction { label: "Move".into(), doc: st.doc.clone(), selection: st.selection.clone() });
+        s.execute("shape.rotate", &json!({"gesture": "end", "ids": []})).unwrap();
+        assert_eq!(s.active().unwrap().interaction.as_ref().unwrap().label, "Move");
     }
 }

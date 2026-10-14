@@ -1,9 +1,9 @@
 # PowerPoint feature checklist
 
-> **Generated:** 2026-10-10 (summary by `cargo xtask parity`; rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Generated:** 2026-10-13 (summary by `cargo xtask parity`; Preview in editor re-scored; earlier rows re-scored 2026-10-10 against PowerPoint for Mac 16.113.4; video/animated GIF row re-scored 2026-10-11, #171) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The summary between `<!-- SUMMARY -->
-**Weighted breadth parity: 80%** over 191 features.
+**Weighted breadth parity: 82%** over 193 features.
 
 | Priority | Features | Done | Partial | Missing | Parity |
 |---|---|---|---|---|---|
@@ -18,15 +18,15 @@ The summary between `<!-- SUMMARY -->
 | P2 | 54 | 14 | 17 | 23 | 42% |
 | P1 | 65 | 38 | 21 | 6 | 75% |
 | P2 | 54 | 13 | 16 | 25 | 39% |
+| P1 | 66 | 43 | 18 | 5 | 79% |
+| P2 | 55 | 16 | 20 | 19 | 47% |
 
 | Area | Parity |
 |---|---|
 | Application shell | 81% |
 | Files | 71% |
 | Slides | 90% |
-| Views | 93% |
-| Masters & themes | 85% |
-| Views | 90% |
+| Views | 98% |
 | Masters & themes | 88% |
 | Views | 90% |
 | Masters & themes | 88% |
@@ -34,21 +34,25 @@ The summary between `<!-- SUMMARY -->
 | Shapes | 91% |
 | Format | 83% |
 | Arrange | 100% |
-| Text | 80% |
+| Text | 82% |
 | Tables | 95% |
 | Tables | 92% |
 | Charts | 65% |
-| SmartArt | 33% |
-| Pictures | 52% |
 | SmartArt | 50% |
-| Pictures | 48% |
+| Pictures | 52% |
 | Media | 67% |
 | Transitions | 100% |
 | Animations | 79% |
 | Slide show | 68% |
+| Transitions | 92% |
+| Animations | 85% |
+| Slide show | 66% |
 | Review | 60% |
+| Review | 70% |
 | Draw | 33% |
 | Undo & clipboard | 100% |
+| Draw | 50% |
+| Undo & clipboard | 88% |
 | Automation (✱) | 100% |
 | Platforms (✱) | 67% |
 
@@ -81,7 +85,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Files | Export to PDF (slides, notes pages, handouts; text layer, links, bookmarks; vector artwork pending) | P0 | P |
 | Files | Export slides as PNG/JPEG | P0 | D |
 | Files | Export outline / RTF | P2 | P |
-| Files | Export video (MP4) / animated GIF | P2 | M |
+| Files | Export video (MP4) / animated GIF (GIF: one frame per slide, no transitions; no video) | P2 | P |
 | Files | Print (slides, handouts, notes, outline) | P1 | M |
 | Files | Password protection | P2 | M |
 | Files | Reuse slides from another file | P1 | M |
@@ -102,7 +106,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Views | Notes Page | P1 | D |
 | Views | Reading View | P1 | D |
 | Views | Zoom, fit to window | P0 | D |
-| Views | Rulers, gridlines, guides | P1 | P |
+| Views | Rulers, gridlines, guides | P1 | D |
 | Views | Smart guides | P1 | D |
 | Views | Grayscale / black and white view | P2 | D |
 | Views | New window / arrange windows | P2 | P |
@@ -164,7 +168,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Bullets and numbering | P0 | D |
 | Text | Picture bullets, custom bullet symbols | P2 | P |
 | Text | List levels (Tab / Shift+Tab) | P0 | D |
-| Text | Tab stops | P2 | P |
+| Text | Tab stops | P2 | D |
 | Text | Columns | P2 | D |
 | Text | Vertical anchor, margins, wrap | P0 | D |
 | Text | Autofit (shrink on overflow, resize shape) | P0 | D |
@@ -173,6 +177,8 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Text | Spelling check | P1 | P |
 | Text | Thesaurus | P2 | M |
 | Text | AutoCorrect and smart quotes | P2 | Y |
+| Text | Thesaurus | P2 | P |
+| Text | AutoCorrect and smart quotes | P2 | M |
 | Text | Symbols and emoji | P1 | D |
 | Text | Equations | P2 | M |
 | Text | Hyperlinks (URL, slide, email) | P1 | D |
@@ -226,7 +232,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Animations | By-paragraph text builds | P1 | D |
 | Animations | Triggers | P2 | D |
 | Animations | Animation Painter | P2 | D |
-| Animations | Preview in editor | P1 | P |
+| Animations | Preview in editor | P1 | D |
 | Slide show | Full-screen show from start / current | P0 | D |
 | Slide show | Navigation (keys, click, go to slide, blank screen) | P0 | D |
 | Slide show | Presenter view (notes, next slide, timer) | P0 | P |
@@ -239,10 +245,10 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Slide show | Multi-monitor presenting | P1 | M |
 | Review | Comments (add, reply, resolve, delete) | P1 | D |
 | Review | Accessibility checker | P2 | D |
-| Review | Compare presentations | P2 | M |
+| Review | Compare presentations | P2 | P |
 | Review | Track changes / version history | P2 | M |
 | Draw | Ink pens, highlighter, eraser | P1 | P |
-| Draw | Ink to shape / text | P2 | M |
+| Draw | Ink to shape / text | P2 | P |
 | Undo & clipboard | Unlimited undo/redo | P0 | D |
 | Undo & clipboard | Cut, copy, paste shapes and slides | P0 | D |
 | Undo & clipboard | Paste special (keep formatting, picture, text only) | P1 | D |

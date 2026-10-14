@@ -16,6 +16,10 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (custom show playback; previous: trivial, presenter timer) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (go to slide shows the typed number; previous: trivial, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines are drawn; the charts gap stays open for the data grid, chartex and secondary-axis export; previous: trivial, chart trendlines round-trip; the real-deck corpus stays open; core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (canvas animation preview; beta item 9 keeps the timeline; previous: minor, core-workflow alpha gate) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options; previous: core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M9 text warps: adjust handles drag; gallery and command remain) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (after beta: pen pressure scales ink width, tilt remains; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -82,6 +86,8 @@ Beta means ~75% ready for real work and opening and saving PowerPoint's `.pptx` 
 | 8 | Charts: data grid, elements | 6–10 | Features |
 | 9 | Animation Pane timeline, preview, effect options | 5–8 | Features |
 | 10 | Presenter view on the right display, swap displays | 2–4 | Hardware, Slide show |
+| 9 | Animation Pane timeline, preview from the selected effect, effect options | 4–7 | Features |
+| 10 | Presenter view on the right display, timer controls | 3–5 | Hardware, Slide show |
 | 11 | Native macOS menu bar, Format Shape pane depth, start screen and window chrome fixes | 13–22 | UI/UX 60 → 75% |
 | 12 | Performance baseline and the obvious fixes | 4–8 | Performance |
 | **Total** | | **~120–210** | Ready ~55% → ~75% |
@@ -97,6 +103,10 @@ Handout masters, edit points, text warp and 3-D, proofing dictionaries, Zoom, re
 GIF export, legacy `.ppt` import and `.odp` (owner decision), GPU rasterization and hardware video
 decode, the other 21 languages with RTL mirroring, a larger template gallery (six original starters
 ship), and local AI features (owner decision on models). Itemized with hours in [gaps.md](gaps.md).
+GIF export, legacy `.ppt` import and `.odp` (owner decision), GPU rasterization, hardware video
+decode, pen tilt (pressure already scales ink width) and pinch zoom, the other 21 languages with
+RTL mirroring, a larger original template gallery, and local AI features (owner decision on
+models). Itemized with hours in [gaps.md](gaps.md).
 
 ## Milestones
 
@@ -114,9 +124,12 @@ From the local execution plan (`plan/execution-plan.md`, gitignored). Status as 
 | M7 | Slide show | mostly | second-display placement, laser, record |
 | M8 | Tables and charts | partly | chart data grid, elements, chartex types, draw table |
 | M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), warp adjust handles |
+| M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), warp gallery and command |
 | M10 | Views | done | grid options, New Window |
 | M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), text warps |
 | M10 | Views | done | grid options, Arrange All |
+| M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), text warps |
+| M10 | Views | done | New Window |
 | M11 | Output | partly | vector PDF, SVG, GIF, MP4, print |
 | M12 | Review | partly | dictionaries, AutoCorrect, find/replace dialog, compare |
 | M13 | Automation and CLI parity | done | |
@@ -164,5 +177,9 @@ plan above.
 | 2026-10-14 | trivial | Present workflow notes custom show playback |
 | 2026-10-14 | trivial | Present workflow notes presenter timer pause/reset, clock and notes size. Display placement stays open |
 | 2026-10-14 | trivial | Present workflow notes See All Slides and zoom |
+| 2026-10-13 | trivial | Canvas animation preview landed; beta item 9 keeps the timeline and preview from the selected effect |
+| 2026-10-13 | minor | M10: Grid Options dialog; New Window stays open |
+| 2026-10-13 | minor | M9: WordArt adjust handles drag; the Transform gallery and command stay open |
+| 2026-10-14 | trivial | After beta: pen pressure scales ink width; tilt and pinch zoom remain |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

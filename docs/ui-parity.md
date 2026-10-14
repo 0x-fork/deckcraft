@@ -20,6 +20,11 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Trim Media dialog follows the selection; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (copy and paste rich text and pictures with other apps; previous: text editing keys, #268, and File tab, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (animation preview on the editor canvas; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Format Shape fill transparency follows the selection; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (Grid Options dialog; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (WordArt adjust handles; previous: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -28,6 +33,10 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Date and Time dialog; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Design ▸ Effects; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; previous: text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture and solid options; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (copy and paste rich text and pictures with other apps; previous: text editing keys, #268, and File tab, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Font dialog; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Paragraph dialog; previous: minor, Font dialog) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -88,11 +97,15 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 |---|---|---|
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line (dash, compound, cap, join, begin/end arrows and sizes), some effects, size (lock aspect ratio); no 3-D, thin picture/texture options |
 | Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, shadow/glow/reflection details (colour, transparency, blur, angle, distance, size), soft edges, size; no 3-D, thin picture/texture options |
-| Format Background pane | yes | yes |
+| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill (solid transparency follows the selection), gradient editor, line, some effects, size; no 3-D, thin picture/texture options |
+| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, picture/texture fill (source, tile, offsets, scale, alignment, mirror, transparency, rotate with shape), line, some effects, size; no 3-D |
 | Slide Master | Insert Layout, Rename, Delete, Preserve, Insert Placeholder, Title and Footers | Insert Layout, Rename, Delete, Insert Placeholder, and Preserve, Title and Footers checkboxes (`master.preserve`, `master.placeholders`). A master thumbnail selects the master |
+| Format Background pane | yes | yes: solid transparency; picture transparency, tile, offset, scale, alignment and mirror; Apply to All copies a picture. Stretch insets and rotate-with-shape are command parameters |
 | Selection Pane | front-most first, groups fold, drag to restack, Bring Forward / Send Backward arrows, Show All / Hide All, eye, padlock (Lock), rename in place | same: drag restacks among siblings (a child stays in its group), Ctrl+click toggles, Shift+click selects a run, arrows / Home / End / F2 / Esc in the list, right-click menu |
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
 | Comments pane (threads) | yes | yes: every slide, with Previous and Next on the Review tab |
+| Animation Pane | list + advanced timeline | list, reorder, timing, play the current slide on the canvas; no timeline |
+| Comments pane (threads) | yes | yes |
 | Design Ideas (Designer) | yes (cloud) | no |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Size and Position, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Photo Album, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Photo Album, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
@@ -107,6 +120,10 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Design ▸ Effects | named theme effect schemes | DeckCraft, Soft, Crisp, Lift, Glow and Plain (`design.effects`); colours and fonts stay |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 | Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 27 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media (start, end and fades follow the selection), SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Font, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 29 (`crates/ui-egui/src/dialogs.rs`): Font, Paragraph, Tabs, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Grid Options, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
+| Dialogs | ~60 (Font, Paragraph, Bullets and Numbering, Find, Replace, Replace Fonts, Hyperlink, Action Settings, Header and Footer, Slide Size, Set Up Show, Custom Shows, Print, Page Setup, Insert Object, Symbol, Equation, Chart data sheet, SmartArt chooser, Preferences…) | 28 (`crates/ui-egui/src/dialogs.rs`): Find and Replace, Table, Slide Size, Header and Footer, Hyperlink, Set Up Show, Zoom, Comment, Alt Text, Outline, Rename (section, shape, layout), Paragraph, About, Preferences, Export, Symbol, Equation (placeholder), Spelling, Accessibility, Language, Custom Shows, Chart Data, Trim Media, SmartArt chooser, Quit, Notes Pages |
 
 ## Direct manipulation
 
@@ -116,28 +133,35 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Marquee, Shift/Cmd multi-select, Tab to cycle | yes | yes |
 | Objects off the slide: drawn on the area around it in Normal view (full strength, master graphics too), selectable and movable there; clipped in the show, exports and thumbnails | yes | yes (#270) |
 | Smart guides (edges, centres, equal spacing) | yes | yes |
-| Snap to grid, grid options, drawing guides | yes | gridlines, guides and snap to grid (engine setting); no Grid Options dialog or menu toggle |
+| Snap to grid, grid options, drawing guides | yes | Grid Options (`view.gridOptions`): spacing, snap to grid, snap to other objects, display grid and guides; the on-screen grid uses that spacing |
 | Nudge (arrows), fine nudge (Option+arrows) | yes | yes |
 | Shift-constrained move, Option-drag to duplicate | yes | yes |
 | Connector glue and rerouting | yes | yes |
 | Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices and their Bézier handles, Ctrl/Cmd-click to add or delete, right-click for Smooth/Straight/Corner Point and Delete Point; no Straight/Curved Segment or Open/Close Path yet |
+| Edit points on freeforms | yes | **no** |
+| WordArt adjust handles | yellow handles on transformed text | yes, one per adjust when the text has a warp; dragging sets that guide value |
 | Crop handles, crop to shape, aspect ratio | yes | partial |
 | Text caret, selection, double/triple click, drag-select | yes | yes |
 | Exact size/position, lock aspect | yes | yes — Size and Position dialog (height, width, rotation, scale %, lock aspect, position from the top-left), one undo step; ribbon spinners still resize one side at a time |
+| Drag the frame of a text box being edited to move it | yes | yes |
+| Table cells: caret and selection in the cell, click into another cell, drag row and column borders | yes | yes; no cell-range selection by dragging across cells |
 | Rulers with indent markers and tab stops | yes | rulers yes; tab stops partial |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter; a right click selects the shape under the pointer first |
 | WordArt transform | Transform gallery | Shape Format ▸ Text Effects ▸ Transform (`format.textWarp`): No Transform, Follow Path and the other 36 presets. No adjust handles |
+| Exact size/position, lock aspect | yes | yes |
+| Rulers with indent markers and tab stops | yes | yes: indent markers and tab stops drag on the ruler (a click adds a tab, the corner selector picks its kind); Tabs dialog from Home › Paragraph and the Paragraph dialog |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
 | Drag and drop of files and between thumbnails | yes | yes |
 | Slide Sorter sections: a bar per section, add, rename in place, collapse, drag the whole section (its slides move with it) | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
+| Image paste from the clipboard | yes | macOS pastes a picture when the paste carries no text (TIFF), and rich text copies and pastes as HTML (bold, italic, underline). Windows and Linux image paste stays #53 |
 | Font menu: every installed family with its faces | yes | families yes; only Regular/Bold/Italic faces (#69) |
 
 ## Keyboard shortcuts
 
 Every common PowerPoint for Mac shortcut is bound (checklist row done): new slide, duplicate,
-group/ungroup, bold/italic/underline, alignment, font size, list levels, Format Painter, show from
-start/current, view switching. Not yet: Cmd+F Find opening a find bar on the slide, Option+drag
+group/ungroup, bold/italic/underline, alignment, font size, list levels, Format Painter, the Font
+dialog (Cmd+T), show from start/current, view switching. Not yet: Cmd+F Find opening a find bar on the slide, Option+drag
 precision without snapping, F6 pane cycling, ribbon KeyTips (Windows).
 
 ### Text editing keys
@@ -174,8 +198,10 @@ Alt+Shift+arrows in text are handled elsewhere (#78, #93).
 Colours, spacing, ribbon card and tab geometry follow the observations in
 `plan/powerpoint/01-observed-ui.md`; the ribbon and menu icons are original (~240, drawn in code)
 and must not imitate Microsoft's. Insert › Icons places Lucide stroke icons (ISC, release 1.56.0)
-on the slide as shapes. No pixel comparison against PowerPoint screenshots has been run since
-2026-10-07. Cross-app icon consistency is open (#73, #56).
+on the slide as shapes. The editing canvas, thumbnails and layout previews are drawn on the
+physical pixel grid, so a Retina display does not blur them between pixels (#184). No pixel
+comparison against PowerPoint screenshots has been run since 2026-10-07. Cross-app icon
+consistency is open (#73, #56).
 
 ## Estimates
 
@@ -186,13 +212,18 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object; Create New Theme Colors is in) | 8–14 |
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object; Create New Theme Fonts is in) | 8–14 |
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Action Settings, Print, Insert Object) | 8–14 |
+| Missing dialogs (Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 6–12 |
+| Missing dialogs (Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 4–8 |
+| Missing dialogs (Font, Bullets and Numbering, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
 | Window chrome, system appearance, palette fixes (#41, #71, #79) | 3–5 |
 | Missing dialogs (Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object) | 8–14 |
 | Window chrome and system appearance (#41, #71) | 3–5 |
 | Grid Options, edit points UI, crop depth | 4–7 |
 | Arrange All (New Window is one extra window) | 2–3 |
+| Edit points UI, crop depth | 3–6 |
+| Multiple windows | 3–5 |
 | A screenshot comparison pass on the most-used tabs | 2–4 |
-| **Total** | **~30–52** |
+| **Total** | **~29–51** |
 
 ## Revision history
 
@@ -220,6 +251,17 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | minor | Design ▸ Effects applies a named effect scheme (fills, lines and effects). Not a new dialog; dialogs stay 27 |
 | 2026-10-14 | minor | Slide Master: Preserve, and Title and Footers placeholders, on the open master or layout |
 | 2026-10-14 | trivial | Trim Media dialog: start, end and fades follow the selected clip |
+| 2026-10-12 | minor | Dragging the frame of a text box being edited moves it, as in PowerPoint |
+| 2026-10-12 | minor | Table cells: caret and selection shown in the edited cell, clicks place the caret in the clicked cell, row and column borders drag to resize |
+| 2026-10-14 | minor | Format Background pane: solid transparency, picture transparency, tile, offset, scale, alignment, mirror, and Apply to All copying a picture. Not a new dialog; the dialog count stays 27 |
+| 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
+| 2026-10-14 | minor | Copy and paste rich text (HTML: bold, italic, underline) with other apps |
+| 2026-10-13 | minor | Animations ▸ Preview and Animation Pane ▸ Play All play the current slide on the editor canvas |
+| 2026-10-14 | trivial | Format Shape Fill transparency slider follows the selected solid fill and does not clear it on focus loss |
+| 2026-10-14 | minor | Paragraph dialog from the Home › Paragraph launcher; Tabs… opens a standalone Tabs dialog |
+| 2026-10-14 | minor | Font dialog from Home › Font, the shape menu and Cmd+T |
+| 2026-10-13 | minor | Grid Options dialog: spacing, snap, and whether gridlines and guides are drawn; the on-screen grid uses that spacing |
+| 2026-10-13 | minor | WordArt adjust handles on a selected text warp; dragging one sets that `prstTxWarp` adjust |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

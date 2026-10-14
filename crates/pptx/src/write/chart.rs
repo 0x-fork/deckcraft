@@ -111,6 +111,20 @@ fn num_cache(w: &mut W, f: &str, vals: &[Option<f64>]) {
     w.close("c:numRef");
 }
 
+/// Numbers written into the chart itself (`c:numLit`), with no worksheet range behind them.
+fn num_lit(w: &mut W, vals: &[Option<f64>]) {
+    w.open0("c:numLit");
+    w.val("c:ptCount", vals.len());
+    for (i, v) in vals.iter().enumerate() {
+        if let Some(v) = v.filter(|v| v.is_finite()) {
+            w.open("c:pt", A::new().a("idx", i));
+            w.elt("c:v", &fmt_num(v));
+            w.close("c:pt");
+        }
+    }
+    w.close("c:numLit");
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Group {
     Bar,
@@ -212,6 +226,28 @@ fn series(w: &mut W, c: &Chart, s: &Series, i: usize, kind: ChartType, g: Group)
     }
     let n = c.categories.len().max(s.values.len());
     let last = n + 1;
+    if let Some(e) = &s.error_bars {
+        let word = |v: &str, ok: &[&'static str], d: &'static str| ok.iter().copied().find(|o| *o == v).unwrap_or(d);
+        w.open0("c:errBars");
+        if matches!(g, Group::Scatter | Group::Bubble) {
+            w.val("c:errDir", "y");
+        }
+        w.val("c:errBarType", word(&e.bar_type, &["both", "plus", "minus"], "both"));
+        let vt = word(&e.val_type, &["fixedVal", "percentage", "stdDev", "stdErr", "cust"], "fixedVal");
+        w.val("c:errValType", vt);
+        w.val("c:noEndCap", if e.end_cap { 0 } else { 1 });
+        if vt == "cust" {
+            w.open0("c:plus");
+            num_lit(w, &e.plus);
+            w.close("c:plus");
+            w.open0("c:minus");
+            num_lit(w, &e.minus);
+            w.close("c:minus");
+        } else if e.value.is_finite() {
+            w.val("c:val", fmt_num(e.value));
+        }
+        w.close("c:errBars");
+    }
     if matches!(g, Group::Scatter | Group::Bubble) {
         let xs: Vec<Option<f64>> = if s.x_values.is_empty() { (1..=s.values.len()).map(|v| Some(v as f64)).collect() } else { s.x_values.clone() };
         w.open0("c:xVal");

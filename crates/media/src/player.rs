@@ -13,6 +13,7 @@
 //! different source replaces its audio instead of keeping the previous clip.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::{Bytes, ClipParams, Pcm};
@@ -22,6 +23,12 @@ use crate::{Bytes, ClipParams, Pcm};
 pub trait AudioOut {
     fn start(&mut self, fill: Box<dyn FnMut(&mut [f32], usize, u32) + Send>) -> Result<(), String>;
     fn stop(&mut self);
+    /// Why the started stream has died, if it has (the device went away), reported once. Polled
+    /// by [`Player::tick`] on the host thread; must not block. Outputs that cannot tell return
+    /// `None`: the player also notices a stream whose callbacks stopped.
+    fn failure(&mut self) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -197,6 +204,17 @@ impl Mixer {
 /// Default mix rate when no device says otherwise.
 const DEFAULT_RATE: u32 = 48_000;
 
+/// Seconds without a single device callback, while a voice plays, after which the stream counts
+/// as stalled and the wall clock takes over.
+const STALL_SECS: f64 = 1.0;
+
+/// Seconds a just-started stream may take to ask for its first samples (Bluetooth and other slow
+/// devices) before it counts as stalled.
+const FIRST_CALLBACK_SECS: f64 = 5.0;
+
+/// Output failures after which the player stops retrying the device and plays silently.
+const MAX_OUTPUT_FAILURES: u32 = 3;
+
 pub struct Player {
     out: Option<Box<dyn AudioOut>>,
     streaming: bool,
@@ -204,12 +222,31 @@ pub struct Player {
     last_tick: Option<f64>,
     idle_since: Option<f64>,
     cache: HashMap<u64, CachedAudio>,
+    /// Device callbacks so far (the audio thread counts, [`Player::tick`] watches).
+    pulls: Arc<AtomicU64>,
+    /// The pull count last seen by `tick` and when it last changed.
+    pulls_seen: Option<(u64, f64)>,
+    /// Times the output failed or stalled after starting.
+    failures: u32,
+    /// `pulls` when the current stream started: callbacks beyond it mean the device is running.
+    pulls_at_start: u64,
 }
 
 impl Player {
     /// A player over `out` (`None`: silent, clocked by [`Player::tick`]).
     pub fn new(out: Option<Box<dyn AudioOut>>) -> Player {
-        Player { out, streaming: false, mixer: Arc::new(Mutex::new(Mixer::default())), last_tick: None, idle_since: None, cache: HashMap::new() }
+        Player {
+            out,
+            streaming: false,
+            mixer: Arc::new(Mutex::new(Mixer::default())),
+            last_tick: None,
+            idle_since: None,
+            cache: HashMap::new(),
+            pulls: Arc::new(AtomicU64::new(0)),
+            pulls_seen: None,
+            failures: 0,
+            pulls_at_start: 0,
+        }
     }
 
     pub fn has_output(&self) -> bool {
@@ -290,15 +327,21 @@ impl Player {
         }
         let Some(out) = self.out.as_mut() else { return };
         let m = self.mixer.clone();
+        let pulls = self.pulls.clone();
         let fill = Box::new(move |buf: &mut [f32], channels: usize, rate: u32| match m.lock() {
             Ok(mut g) => {
+                pulls.fetch_add(1, Ordering::Relaxed);
                 let frames = buf.len() / channels.max(1);
                 g.mix(Some(buf), frames, channels, rate)
             }
             Err(_) => buf.fill(0.0),
         });
         match out.start(fill) {
-            Ok(()) => self.streaming = true,
+            Ok(()) => {
+                self.streaming = true;
+                self.pulls_seen = None;
+                self.pulls_at_start = self.pulls.load(Ordering::Relaxed);
+            }
             Err(e) => {
                 log::warn!("audio output unavailable ({e}); media plays silently");
                 self.out = None;
@@ -361,6 +404,7 @@ impl Player {
     pub fn tick(&mut self, now: f64) {
         let dt = self.last_tick.map(|l| (now - l).clamp(0.0, 0.25)).unwrap_or(0.0);
         self.last_tick = Some(now);
+        self.check_output(now);
         if !self.streaming && dt > 0.0 {
             let frames = (dt * DEFAULT_RATE as f64).round() as usize;
             self.with(|m| m.mix(None, frames, 2, DEFAULT_RATE));
@@ -375,6 +419,56 @@ impl Player {
                 self.streaming = false;
                 self.idle_since = None;
             }
+        }
+    }
+
+    /// Drop a stream that died or stalled, so the voices fall back to the wall clock instead of
+    /// freezing. The next `play` tries the device again, up to [`MAX_OUTPUT_FAILURES`] times.
+    fn check_output(&mut self, now: f64) {
+        if !self.streaming {
+            return;
+        }
+        // Only a playing voice needs callbacks; an idle stream may legitimately sleep.
+        let playing = self.any_playing();
+        let Some(out) = self.out.as_mut() else { return };
+        let pulls = self.pulls.load(Ordering::Relaxed);
+        let running = pulls > self.pulls_at_start;
+        // A stream that delivers again has recovered: later failures start counting afresh.
+        if running {
+            self.failures = 0;
+        }
+        let limit = if running { STALL_SECS } else { FIRST_CALLBACK_SECS };
+        let reason = if let Some(e) = out.failure() {
+            Some(e)
+        } else {
+            match self.pulls_seen {
+                Some((seen, since)) if seen == pulls => {
+                    if !playing {
+                        self.pulls_seen = Some((pulls, now));
+                        None
+                    } else if now - since > limit {
+                        Some("the audio device stopped asking for samples".to_string())
+                    } else {
+                        None
+                    }
+                }
+                _ => {
+                    self.pulls_seen = Some((pulls, now));
+                    None
+                }
+            }
+        };
+        let Some(reason) = reason else { return };
+        out.stop();
+        self.streaming = false;
+        self.pulls_seen = None;
+        self.idle_since = None;
+        self.failures = self.failures.saturating_add(1);
+        if self.failures >= MAX_OUTPUT_FAILURES {
+            log::warn!("audio output failed ({reason}); giving up on the device, media plays silently");
+            self.out = None;
+        } else {
+            log::warn!("audio output failed ({reason}); media plays silently until it restarts");
         }
     }
 
@@ -594,5 +688,138 @@ mod tests {
         p.play(1, quiet_key, &quiet, audible(0.0), None);
         let again = p.status(1).map(|s| s.position).unwrap_or(-1.0);
         assert!((again - pos).abs() < 1e-6, "resume moved {pos} -> {again}");
+    }
+
+    type Fill = Box<dyn FnMut(&mut [f32], usize, u32) + Send>;
+
+    /// An output that starts, then fails or goes quiet on command.
+    #[derive(Clone, Default)]
+    struct Flaky {
+        fill: Arc<Mutex<Option<Fill>>>,
+        fail: Arc<Mutex<Option<String>>>,
+        starts: Arc<Mutex<u32>>,
+    }
+    impl AudioOut for Flaky {
+        fn start(&mut self, fill: Fill) -> Result<(), String> {
+            *self.fill.lock().map_err(|e| e.to_string())? = Some(fill);
+            *self.starts.lock().map_err(|e| e.to_string())? += 1;
+            Ok(())
+        }
+        fn stop(&mut self) {
+            if let Ok(mut f) = self.fill.lock() {
+                *f = None;
+            }
+        }
+        fn failure(&mut self) -> Option<String> {
+            self.fail.lock().ok().and_then(|mut f| f.take())
+        }
+    }
+    impl Flaky {
+        fn pull(&self, frames: usize) {
+            let mut buf = vec![0.0; frames * 2];
+            if let Some(f) = self.fill.lock().ok().as_mut().and_then(|g| g.as_mut()) {
+                f(&mut buf, 2, 48_000);
+            }
+        }
+        fn starts(&self) -> u32 {
+            self.starts.lock().map(|s| *s).unwrap_or(0)
+        }
+    }
+
+    fn pos(p: &Player, key: u64) -> f64 {
+        p.status(key).map(|s| s.position).unwrap_or(-1.0)
+    }
+
+    #[test]
+    fn a_failed_output_falls_back_to_the_wall_clock() {
+        let out = Flaky::default();
+        let mut p = Player::new(Some(Box::new(out.clone())));
+        let b: Bytes = Arc::new(vec![]);
+        p.play(1, 1, &b, spec(10.0, false), None);
+        p.tick(0.0);
+        out.pull(4800);
+        assert!((pos(&p, 1) - 0.1).abs() < 1e-6);
+        if let Ok(mut f) = out.fail.lock() {
+            *f = Some("unplugged".into());
+        }
+        p.tick(0.2);
+        p.tick(0.4);
+        // The voice keeps moving on wall time instead of freezing: 0.1 s from the device, then
+        // the 0.4 s of wall time since the last tick before the failure.
+        assert!((pos(&p, 1) - 0.5).abs() < 1e-3, "{}", pos(&p, 1));
+        assert_eq!(p.status(1).map(|s| s.state), Some(PlayState::Playing));
+        // Playing again restarts the device.
+        p.play(2, 2, &b, spec(10.0, false), None);
+        assert_eq!(out.starts(), 2);
+        assert!(p.has_output());
+    }
+
+    #[test]
+    fn a_stalled_output_falls_back_to_the_wall_clock() {
+        let out = Flaky::default();
+        let mut p = Player::new(Some(Box::new(out.clone())));
+        let b: Bytes = Arc::new(vec![]);
+        p.play(1, 1, &b, spec(10.0, false), None);
+        // No callback ever arrives: after the first-callback grace the wall clock takes over.
+        for i in 0..=21 {
+            p.tick(i as f64 * 0.25);
+        }
+        let before = pos(&p, 1);
+        assert!(before > 0.0, "{before}");
+        p.tick(5.5);
+        assert!((pos(&p, 1) - before - 0.25).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_slow_device_that_answers_within_the_grace_is_not_a_stall() {
+        let out = Flaky::default();
+        let mut p = Player::new(Some(Box::new(out.clone())));
+        let b: Bytes = Arc::new(vec![]);
+        p.play(1, 1, &b, spec(10.0, false), None);
+        for i in 0..=8 {
+            p.tick(i as f64 * 0.25);
+        }
+        // Two seconds in, the device starts asking for samples: the same stream keeps playing.
+        out.pull(256);
+        p.tick(2.25);
+        p.tick(2.5);
+        assert_eq!(out.starts(), 1, "the stream was not restarted");
+    }
+
+    #[test]
+    fn an_idle_stream_without_callbacks_is_not_a_stall() {
+        let out = Flaky::default();
+        let mut p = Player::new(Some(Box::new(out.clone())));
+        let b: Bytes = Arc::new(vec![]);
+        p.play(1, 1, &b, spec(10.0, false), None);
+        p.pause(1);
+        for i in 0..=8 {
+            p.tick(i as f64 * 0.25);
+        }
+        // Resuming keeps the running stream: no restart.
+        p.play(1, 1, &b, spec(10.0, false), None);
+        assert_eq!(out.starts(), 1);
+    }
+
+    #[test]
+    fn repeated_failures_give_up_on_the_device() {
+        let out = Flaky::default();
+        let mut p = Player::new(Some(Box::new(out.clone())));
+        let b: Bytes = Arc::new(vec![]);
+        let mut now = 0.0;
+        for _ in 0..MAX_OUTPUT_FAILURES {
+            p.play(1, 1, &b, spec(100.0, false), None);
+            if let Ok(mut f) = out.fail.lock() {
+                *f = Some("broken".into());
+            }
+            p.tick(now);
+            now += 0.1;
+        }
+        assert!(!p.has_output());
+        assert_eq!(out.starts(), MAX_OUTPUT_FAILURES);
+        // Still plays, silently on wall time.
+        let before = pos(&p, 1);
+        p.tick(now + 0.2);
+        assert!(pos(&p, 1) > before);
     }
 }

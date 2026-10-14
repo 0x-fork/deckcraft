@@ -216,3 +216,29 @@ fn export_rejects_unknown_format() {
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("docx"), "{r}");
     assert!(!path.exists(), "nothing may be written for an unknown format");
 }
+
+#[test]
+fn export_tool_lists_gif_and_its_options() {
+    let mut s = Server::new(Box::new(Headless::new()));
+    let tools = call(&mut s, 1, "tools/list", json!({}));
+    let export = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "export").unwrap().clone();
+    assert!(export["description"].as_str().unwrap().contains("gif"), "{export}");
+    let props = &export["inputSchema"]["properties"];
+    assert!(props["format"]["enum"].as_array().unwrap().iter().any(|x| x == "gif"), "{export}");
+    assert_eq!(props["width"]["oneOf"][1]["enum"], json!(["small", "medium", "large", "extraLarge"]));
+    for p in ["secondsPerSlide", "loop", "slides", "includeHidden"] {
+        assert!(props.get(p).is_some(), "{p}: {export}");
+    }
+    // What the schema describes is accepted, and bad values are tool errors, not crashes.
+    let dir = std::env::temp_dir().join(format!("deckcraft-mcp-gif-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    tool(&mut s, "new_presentation", json!({}));
+    for width in [json!("small"), json!(200)] {
+        let path = dir.join("deck.gif");
+        tool(&mut s, "export", json!({"path": path.to_string_lossy(), "width": width, "secondsPerSlide": 2, "loop": false, "slides": [0]}));
+        assert!(std::fs::read(&path).unwrap().starts_with(b"GIF89a"), "{width}");
+    }
+    let r = call(&mut s, 9, "tools/call", json!({"name": "export", "arguments": {"path": dir.join("bad.gif").to_string_lossy(), "width": 0}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

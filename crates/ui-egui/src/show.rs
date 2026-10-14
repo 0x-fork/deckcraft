@@ -53,6 +53,8 @@ pub struct Show {
     notes_px: f32,
     timings: Vec<(usize, f64)>,
     last_move: f64,
+    /// The last trackpad flick or mouse-wheel notch, so one gesture turns one page.
+    last_swipe: f64,
     pub ended: bool,
     /// The slide whose media was last started (auto-play runs once per visit).
     media_slide: Option<usize>,
@@ -199,6 +201,7 @@ impl Show {
             notes_px: NOTES_DEFAULT,
             timings: vec![],
             last_move: 0.0,
+            last_swipe: f64::NEG_INFINITY,
             ended: false,
             media_slide: None,
             last_viewed: None,
@@ -374,6 +377,14 @@ fn fit(avail: Rect, doc: &Presentation) -> Rect {
 
 /// A transition layer as an egui mesh: [`deckcraft_anim::layer_mesh`]'s triangles (perspective
 /// cards subdivided so their pictures stay straight) with per-vertex opacity.
+/// Where presenter view's "Next" preview goes: the column's width below its label, kept inside
+/// the top 60% of the column. A portrait slide used to get the full width and a height many
+/// times the window (a white slab over the notes and past the window edge).
+fn next_rect(right: Rect, doc: &Presentation) -> Rect {
+    let area = Rect::from_min_max(right.min + vec2(0.0, 22.0), pos2(right.max.x, right.min.y + 22.0 + (right.height() - 22.0).max(0.0) * 0.6));
+    Rect::from_min_size(area.min, fit(area, doc).size())
+}
+
 fn quad_mesh(tex: Option<egui::TextureId>, rect: Rect, l: &Layer, color: Color32) -> Mesh {
     let mut m = match tex {
         Some(id) => Mesh::with_texture(id),
@@ -399,7 +410,7 @@ fn part_textures(ctx: &egui::Context, doc: &Presentation, from: Option<usize>, t
     let opts = RenderOpts { scale: size.0 as f64 / doc.slide_size.width.max(1.0), size: Some(size), threads, ..Default::default() };
     let tex = |i: usize, part: SlidePart, name: &str| {
         let img = deckcraft_render::render_slide_part(doc, i, part, &opts);
-        ctx.load_texture(name, crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR)
+        crate::textures::upload(ctx, name, crate::textures::to_color_image(&img, false))
     };
     [
         from.map(|i| tex(i, SlidePart::Backdrop, "trans-old-back")),
@@ -605,6 +616,24 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     if secondary && !show.ended && !show.grid && show.zoom.is_none() && !show.zoom_arm {
         actions.push(show.state.prev(&doc));
     }
+    // A trackpad swipe (and the mouse wheel) turns the page. The pen is drawing, so a flick
+    // there stays on the slide. Pinch zoom is not a show gesture.
+    if !show.pen
+        && let Some(next) = crate::canvas::page_flick(ctx.input(|i| i.smooth_scroll_delta))
+        && now - show.last_swipe > 0.35
+    {
+        show.last_swipe = now;
+        if next {
+            if show.ended {
+                keep = false;
+            } else {
+                actions.push(show.state.next(&doc));
+            }
+        } else {
+            show.ended = false;
+            actions.push(show.state.prev(&doc));
+        }
+    }
     // Apply input first: a step started by this click must restart the clock before it is read.
     for a in actions.drain(..) {
         if !show.apply(a, &doc, now) {
@@ -649,7 +678,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let painter = ui.painter_at(full);
     painter.rect_filled(full, CornerRadius::ZERO, Color32::BLACK);
     let ppp = ctx.pixels_per_point();
-    let size = ((srect.width() * ppp).round().max(1.0) as u32, (srect.height() * ppp).round().max(1.0) as u32);
+    // A huge screen or DPI mustn't ask for a picture the GPU can't hold: render at most its limit
+    // (drawn stretched to the screen).
+    let size = crate::textures::fit_size(
+        ((srect.width() * ppp).round().clamp(1.0, u32::MAX as f32) as u32, (srect.height() * ppp).round().clamp(1.0, u32::MAX as f32) as u32),
+        crate::textures::max_side(&ctx),
+    );
     if show.ended {
         painter.text(
             pos2(full.center().x, full.min.y + 40.0),
@@ -697,10 +731,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             };
             let tex = match show.tex.take() {
                 Some((_, mut h)) => {
-                    h.set(ci, egui::TextureOptions::LINEAR);
+                    crate::textures::replace(&ctx, &mut h, ci);
                     h
                 }
-                None => ctx.load_texture("show", ci, egui::TextureOptions::LINEAR),
+                None => crate::textures::upload(&ctx, "show", ci),
             };
             show.tex = Some((key, tex.clone()));
             Some(tex)
@@ -753,10 +787,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             let ci = crate::textures::to_color_image(&img, false);
             let frame = match tr.morph.take() {
                 Some(mut h) => {
-                    h.set(ci, egui::TextureOptions::LINEAR);
+                    crate::textures::replace(&ctx, &mut h, ci);
                     h
                 }
-                None => ctx.load_texture("morph", ci, egui::TextureOptions::LINEAR),
+                None => crate::textures::upload(&ctx, "morph", ci),
             };
             painter.image(frame.id(), srect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
             tr.morph = Some(frame);
@@ -1684,7 +1718,7 @@ fn render_thumb(ctx: &egui::Context, show: &mut Show, doc: &Presentation, i: usi
         i,
         &RenderOpts { scale: w / doc.slide_size.width.max(1.0), size: Some((w as u32, h as u32)), ..Default::default() },
     );
-    let tex = ctx.load_texture(format!("show-grid-{i}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+    let tex = crate::textures::upload(ctx, format!("show-grid-{i}"), crate::textures::to_color_image(&img, false));
     show.thumbs.push((i, tex.clone()));
     Some(tex)
 }
@@ -1696,16 +1730,17 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     if let Some(n) = next
         && show.next_tex.as_ref().is_none_or(|(k, _)| *k != n)
     {
+        // A very tall slide shape would otherwise ask for a picture taller than the GPU's limit.
+        let next_size = crate::textures::fit_size(
+            (480, (480.0 * doc.slide_size.height / doc.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+            crate::textures::max_side(ctx),
+        );
         let img = deckcraft_render::render_slide(
             doc,
             n,
-            &RenderOpts {
-                scale: 480.0 / doc.slide_size.width.max(1.0),
-                size: Some((480, (480.0 * doc.slide_size.height / doc.slide_size.width.max(1.0)) as u32)),
-                ..Default::default()
-            },
+            &RenderOpts { scale: next_size.0 as f64 / doc.slide_size.width.max(1.0), size: Some(next_size), ..Default::default() },
         );
-        show.next_tex = Some((n, ctx.load_texture("presenter-next", crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR)));
+        show.next_tex = Some((n, crate::textures::upload(ctx, "presenter-next", crate::textures::to_color_image(&img, false))));
     }
     let next_tex = show.next_tex.as_ref().filter(|(k, _)| Some(*k) == next).map(|(_, t)| t.clone());
     let notes = doc.slides.get(cur).map(|s| s.notes_text()).unwrap_or_default();
@@ -1797,10 +1832,7 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                 if let Some(c) = show.blank {
                     ui.painter().rect_filled(cr, CornerRadius::ZERO, c);
                 }
-                let nr = Rect::from_min_size(
-                    right.min + vec2(0.0, 22.0),
-                    vec2(right.width(), right.width() * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32),
-                );
+                let nr = next_rect(right, doc);
                 ui.painter().text(right.min, Align2::LEFT_TOP, "Next", theme::font(13.0), Color32::from_gray(170));
                 match &next_tex {
                     Some(t) => {
@@ -1963,7 +1995,7 @@ mod tests {
         s.execute("transition.set", &json!({"kind": "fade", "index": 1})).unwrap();
         let doc = s.active().unwrap().doc.clone();
         let ctx = egui::Context::default();
-        let red = ctx.load_texture("show", egui::ColorImage::filled([1, 1], Color32::RED), egui::TextureOptions::LINEAR);
+        let red = crate::textures::upload(&ctx, "show", egui::ColorImage::filled([1, 1], Color32::RED));
         let mut show = Show::new(&doc, 0, false, false);
         show.tex = Some((Key { slide: 0, step: 0, size: (1, 1), doc: 0, hidden: vec![], gif: 0, plays: vec![] }, red.clone()));
         assert!(show.apply(ShowAction::Slide(1), &doc, 0.0));
@@ -2196,5 +2228,22 @@ mod tests {
         assert_eq!(show.goto.len(), GOTO_DIGITS);
         show.push_slide_number('a', 1.0);
         assert!(show.goto.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn the_next_preview_fits_its_column_whatever_the_slide_shape() {
+        let right = Rect::from_min_size(pos2(700.0, 100.0), vec2(400.0, 600.0));
+        let mut s = deckcraft_engine::Session::with_new();
+        for (w, h) in [(72, 4032), (4032, 72), (960, 540)] {
+            s.execute("design.slideSize", &json!({"w": w, "h": h})).unwrap();
+            let doc = s.active().unwrap().doc.clone();
+            let r = next_rect(right, &doc);
+            assert!(right.contains_rect(r), "{w}x{h}: {r:?}");
+            let aspect = r.height() / r.width();
+            assert!((aspect - h as f32 / w as f32).abs() / (h as f32 / w as f32) < 0.01, "{w}x{h}: {r:?}");
+        }
+        // 16:9 still takes the column's full width.
+        let doc = s.active().unwrap().doc.clone();
+        assert_eq!(next_rect(right, &doc).width(), 400.0);
     }
 }

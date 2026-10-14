@@ -242,6 +242,76 @@ pub struct Series {
     /// Trendlines (`c:trendline`), in file order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub trendlines: Vec<Trendline>,
+    /// `c:errBars` on the values (y bars; a bar chart's run along its value axis).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_bars: Option<ErrorBars>,
+}
+
+/// Error bars (`c:errBars`): how far each point's bar reaches below and above it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ErrorBars {
+    /// `both`, `plus` or `minus`.
+    pub bar_type: String,
+    /// `fixedVal`, `percentage`, `stdDev`, `stdErr` or `cust`.
+    pub val_type: String,
+    pub value: f64,
+    /// `cust`: the per-point plus and minus amounts.
+    pub plus: Vec<Option<f64>>,
+    pub minus: Vec<Option<f64>>,
+    pub end_cap: bool,
+}
+
+impl Default for ErrorBars {
+    fn default() -> Self {
+        ErrorBars { bar_type: "both".into(), val_type: "fixedVal".into(), value: 1.0, plus: vec![], minus: vec![], end_cap: true }
+    }
+}
+
+/// Count, mean and sample standard deviation of a series' finite values (for error bars).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SeriesStats {
+    pub n: f64,
+    pub mean: f64,
+    pub sd: f64,
+}
+
+impl SeriesStats {
+    pub fn of(values: &[Option<f64>]) -> Self {
+        let vals = || values.iter().flatten().copied().filter(|v| v.is_finite());
+        let n = vals().count() as f64;
+        let mean = vals().sum::<f64>() / n.max(1.0);
+        let sd = if n > 1.0 { (vals().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)).sqrt() } else { 0.0 };
+        SeriesStats { n, mean, sd }
+    }
+}
+
+impl ErrorBars {
+    /// Where point `i` (value `v`) of a series with `values` has its bar: (low, high) in data units.
+    /// Standard deviation bars stand around the series' mean, as Excel draws them; the others
+    /// around the point. `None` for an amount that isn't a finite number.
+    pub fn range(&self, values: &[Option<f64>], i: usize, v: f64) -> Option<(f64, f64)> {
+        self.range_in(&SeriesStats::of(values), i, v)
+    }
+
+    /// [`ErrorBars::range`] with the series' statistics worked out once ([`SeriesStats::of`]), so
+    /// drawing every point of a long series stays linear.
+    pub fn range_in(&self, stats: &SeriesStats, i: usize, v: f64) -> Option<(f64, f64)> {
+        let SeriesStats { n, mean, sd } = *stats;
+        let (centre, minus, plus) = match self.val_type.as_str() {
+            "percentage" => (v, (v * self.value / 100.0).abs(), (v * self.value / 100.0).abs()),
+            "stdDev" => (mean, sd * self.value, sd * self.value),
+            "stdErr" => (v, sd / n.max(1.0).sqrt(), sd / n.max(1.0).sqrt()),
+            "cust" => (v, self.minus.get(i).copied().flatten().unwrap_or(0.0), self.plus.get(i).copied().flatten().unwrap_or(0.0)),
+            _ => (v, self.value, self.value),
+        };
+        let (lo, hi) = match self.bar_type.as_str() {
+            "plus" => (centre, centre + plus),
+            "minus" => (centre - minus, centre),
+            _ => (centre - minus, centre + plus),
+        };
+        (lo.is_finite() && hi.is_finite()).then_some((lo, hi))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -730,6 +800,23 @@ mod tests {
         c.y_log_base = Some(10.0);
         assert_eq!(c.log_axis_scale(8), Some((0.0, 5.0, 1.0)));
         assert_eq!(c.log_axis_scale(2), Some((0.0, 6.0, 3.0)));
+    }
+
+    #[test]
+    fn error_bar_ranges() {
+        let vals = [Some(3.0), Some(5.0), Some(2.0), Some(4.0)];
+        let mut e = ErrorBars::default();
+        assert_eq!(e.range(&vals, 0, 3.0), Some((2.0, 4.0)));
+        e.val_type = "percentage".into();
+        e.value = 20.0;
+        assert_eq!(e.range(&vals, 1, 5.0), Some((4.0, 6.0)));
+        e.bar_type = "plus".into();
+        assert_eq!(e.range(&vals, 1, 5.0), Some((5.0, 6.0)));
+        e = ErrorBars { val_type: "cust".into(), plus: vec![Some(0.5)], minus: vec![Some(1.5)], ..Default::default() };
+        assert_eq!(e.range(&vals, 0, 3.0), Some((1.5, 3.5)));
+        e = ErrorBars { val_type: "stdDev".into(), ..Default::default() };
+        let (lo, hi) = e.range(&vals, 0, 3.0).unwrap();
+        assert!((lo + hi - 7.0).abs() < 1e-9 && (hi - lo - 2.0 * 1.2909944487358056).abs() < 1e-9);
     }
 
     #[test]

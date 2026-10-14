@@ -590,6 +590,15 @@ fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {
         return None;
     }
     let (w, h) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
+    // PPTX keeps one line width. A pressured stroke exports at its mean sample width;
+    // a legacy flat `0.5` stroke stays at the pen width.
+    let legacy = deckcraft_model::ink_pressure_is_legacy(&st.points);
+    let width = if legacy {
+        st.width
+    } else {
+        let n = st.points.len().max(1) as f64;
+        st.points.iter().map(|p| deckcraft_model::ink_sample_width(st.width, p.2, false)).sum::<f64>() / n
+    };
     let mut d = String::new();
     for (k, (px, py)) in pts.iter().enumerate() {
         d.push_str(if k == 0 { "M " } else { "L " });
@@ -608,7 +617,7 @@ fn ink_shape(st: &deckcraft_model::InkStroke, i: usize) -> Option<Shape> {
         line: Some(deckcraft_model::Line {
             cap: Some(deckcraft_model::style::LineCap::Round),
             join: Some(deckcraft_model::style::LineJoin::Round),
-            ..deckcraft_model::Line::solid(c, st.width.max(0.25))
+            ..deckcraft_model::Line::solid(c, width.max(0.25))
         }),
         ..Default::default()
     })

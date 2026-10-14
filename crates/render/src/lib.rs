@@ -930,24 +930,46 @@ impl Renderer {
             }
             ShapeKind::Ink { strokes } => {
                 for sk in strokes {
-                    let w = if sk.width.is_finite() { sk.width.abs() } else { 0.0 };
-                    for (px, py, _) in &sk.points {
+                    let legacy = deckcraft_model::ink_pressure_is_legacy(&sk.points);
+                    let pen = if sk.width.is_finite() { sk.width.abs() } else { 0.0 };
+                    for (px, py, pr) in &sk.points {
+                        let w = deckcraft_model::ink_sample_width(pen, *pr, legacy);
                         self.track(parent, Rect::new(*px, *py, *px, *py).inflate(w, w));
                     }
-                    let mut bp = BezPath::new();
-                    for (i, (px, py, _)) in sk.points.iter().enumerate() {
-                        if i == 0 {
-                            bp.move_to((*px, *py));
-                        } else {
-                            bp.line_to((*px, *py));
-                        }
+                    let pts: Vec<(f64, f64, f32)> = sk.points.iter().copied().filter(|p| p.0.is_finite() && p.1.is_finite()).collect();
+                    if pts.len() < 2 {
+                        continue;
                     }
                     let (base, rel) = self.line_space(parent, depth);
-                    bp.apply_affine(rel);
                     ctx.set_transform(base);
                     ctx.set_paint(color(sk.color, if sk.highlighter { 0.4 } else { 1.0 }));
-                    ctx.set_stroke(kurbo::Stroke::new(sk.width.max(0.1)).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round));
-                    ctx.stroke_path(&bp);
+                    // Uniform-width and highlighter strokes are one path: segments drawn one by one
+                    // overlap at the joins, which darkens see-through highlighter ink in beads.
+                    if legacy || sk.highlighter {
+                        let mut bp = BezPath::new();
+                        for (i, (px, py, _)) in pts.iter().enumerate() {
+                            if i == 0 {
+                                bp.move_to((*px, *py));
+                            } else {
+                                bp.line_to((*px, *py));
+                            }
+                        }
+                        bp.apply_affine(rel);
+                        ctx.set_stroke(kurbo::Stroke::new(pen.max(0.1)).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round));
+                        ctx.stroke_path(&bp);
+                        continue;
+                    }
+                    for pair in pts.windows(2) {
+                        let [p0, p1] = pair else { continue };
+                        let mut bp = BezPath::new();
+                        bp.move_to((p0.0, p0.1));
+                        bp.line_to((p1.0, p1.1));
+                        bp.apply_affine(rel);
+                        let a = deckcraft_model::ink_sample_width(pen, p0.2, legacy);
+                        let b = deckcraft_model::ink_sample_width(pen, p1.2, legacy);
+                        ctx.set_stroke(kurbo::Stroke::new(((a + b) * 0.5).max(0.1)).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round));
+                        ctx.stroke_path(&bp);
+                    }
                 }
             }
             _ => self.geometry_shape(ctx, f, rctx, s, m, x.w, x.h, &st, depth),
@@ -2245,6 +2267,49 @@ fn draw_glyph_with(
         ctx.set_stroke(kurbo::Stroke::new(ow / k.max(1e-9)).with_join(kurbo::Join::Round));
         ctx.stroke_path(&path);
     }
+}
+
+/// Render `ids` together onto a transparent canvas, in their slide positions (copy as a picture).
+pub fn render_shapes(pres: &Presentation, slide: &Slide, ids: &[ShapeId], scale: f64) -> Option<Image> {
+    if ids.is_empty() || !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    let rctx = Ctx::for_slide(pres, slide)?;
+    let mut items = Vec::new();
+    let mut bounds: Option<Rect> = None;
+    for id in ids.iter().take(256) {
+        let Some(s) = slide.shape(*id) else { continue };
+        let b = resolve::xfrm(&rctx, s).bounds();
+        if !b.width().is_finite() || !b.height().is_finite() || b.width() < 0.0 || b.height() < 0.0 {
+            continue;
+        }
+        bounds = Some(match bounds {
+            Some(u) => u.union(b),
+            None => b,
+        });
+        items.push(s);
+    }
+    let b = bounds?.inflate(8.0, 8.0);
+    if !(b.width() > 0.0 && b.height() > 0.0 && b.width().is_finite() && b.height().is_finite()) {
+        return None;
+    }
+    let fit = (2048.0 / b.width().max(b.height())).min(scale);
+    if !(fit.is_finite() && fit > 0.0) {
+        return None;
+    }
+    let w = (b.width() * fit).ceil().clamp(1.0, 2048.0) as u16;
+    let h = (b.height() * fit).ceil().clamp(1.0, 2048.0) as u16;
+    let mut ctx = RenderContext::new_with(w, h, vello_cpu::RenderSettings { num_threads: 0, ..Default::default() });
+    let opts = RenderOpts { scale: fit, ..Default::default() };
+    let f = Frame { pres, opts: &opts, fields: SlideFields::new(1, String::new(), &opts) };
+    let view = Affine::scale(fit) * Affine::translate(-b.origin().to_vec2());
+    RENDERER.with(|r| {
+        let mut r = r.borrow_mut();
+        for s in items {
+            r.shape(&mut ctx, &f, &rctx, s, view, 0);
+        }
+        Some(r.finish(ctx, w, h))
+    })
 }
 
 /// Render one shape alone onto a transparent canvas (drag previews, copy as picture).

@@ -1,10 +1,11 @@
 //! Table Design and Table Layout tabs.
 
-use deckcraft_model::{ShapeKind, Table};
+use deckcraft_geom::{Affine, Point, Rect};
+use deckcraft_model::{Shape, ShapeKind, Table};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::{Result, Session};
+use crate::{DocState, Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -27,7 +28,15 @@ pub fn specs() -> Vec<CommandSpec> {
             s, p, "delCol"
         )),
         cmd!("table.merge", "Merge Cells", ["Table Layout", "Merge"], None, "{from: [r, c], to: [r, c], id?}", has_selection, merge),
-        cmd!("table.split", "Split Cells", ["Table Layout", "Merge"], None, "{cell: [r, c], id?}", has_selection, split),
+        cmd!(
+            "table.split",
+            "Split Cells",
+            ["Table Layout", "Merge"],
+            None,
+            "{cell?: [r, c] (else the edited cell), id?} | {row?: index, col?: index, id?}",
+            has_selection,
+            split
+        ),
         cmd!(
             "table.style",
             "Table Styles",
@@ -42,7 +51,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Table Style Options",
             ["Table Design", "Table Style Options"],
             None,
-            "{headerRow?, totalRow?, bandedRows?, firstColumn?, lastColumn?, bandedColumns?: bool, id?}",
+            "{headerRow?: bool, totalRow?: bool, bandedRows?: bool, firstColumn?: bool, lastColumn?: bool, bandedColumns?: bool, id?}",
             has_selection,
             options
         ),
@@ -86,7 +95,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("table.distributeColumns", "Distribute Columns", ["Table Layout", "Cell Size"], None, "{id?}", has_selection, |s, p| distribute(
             s, p, false
         )),
-        cmd!("table.columnWidth", "Width", ["Table Layout", "Cell Size"], None, "{col, width: pt, id?}", has_selection, column_width),
+        cmd!(
+            "table.columnWidth",
+            "Width",
+            ["Table Layout", "Cell Size"],
+            None,
+            "{col, width: pt, keepTotal?: bool (the next column absorbs the change), id?}",
+            has_selection,
+            column_width
+        ),
         cmd!("table.rowHeight", "Height", ["Table Layout", "Cell Size"], None, "{row, height: pt, id?}", has_selection, row_height),
         cmd!(
             "table.drawLine",
@@ -108,6 +125,104 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "table.selectCells", "Select Cells", [], None, "{from: [r,c], to: [r,c], id?}", has_selection, select_cells),
     ]
+}
+
+/// Narrowest a column gets when its border is dragged (points).
+pub const MIN_COLUMN_WIDTH: f64 = 12.0;
+
+/// A table as drawn on the slide: where it is, its drawn row heights and its visible cells.
+#[derive(Clone, Debug)]
+pub struct TableFrame {
+    /// Table-local (points from the table's top-left corner) → slide space, as the table is drawn.
+    pub affine: Affine,
+    pub cols: Vec<f64>,
+    /// Row heights as drawn: a stored height is a minimum, rows grow to fit their text.
+    pub heights: Vec<f64>,
+    /// Visible cells (merges honoured): (row, col, table-local rect).
+    pub cells: Vec<(usize, usize, Rect)>,
+}
+
+/// A border between table rows or columns that can be dragged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TableBorder {
+    /// The right edge of this column (the last one is the table's right edge).
+    Column(usize),
+    /// The bottom edge of this row (the last one is the table's bottom edge).
+    Row(usize),
+}
+
+/// The drawn geometry of table shape `sh` on the edited slide (`None` if it isn't a table).
+pub fn table_frame(st: &DocState, sh: &Shape) -> Option<TableFrame> {
+    let ShapeKind::Table(t) = &sh.kind else { return None };
+    // The table is drawn in its own box; rows that grow past it don't move it.
+    let x = sh.xfrm.unwrap_or_else(|| xfrm_of(&st.doc, &st.selection, sh));
+    let heights = table_drawn_heights(&st.doc, &st.selection, t);
+    let cells = deckcraft_render::table_cell_rects(t, &heights);
+    Some(TableFrame { affine: x.affine(), cols: t.cols.clone(), heights, cells })
+}
+
+impl TableFrame {
+    pub fn width(&self) -> f64 {
+        self.cols.iter().map(|w| w.max(0.0)).sum()
+    }
+
+    pub fn height(&self) -> f64 {
+        self.heights.iter().map(|h| h.max(0.0)).sum()
+    }
+
+    /// Table-local point for slide point `p`.
+    pub fn local(&self, p: Point) -> Point {
+        self.affine.inverse() * p
+    }
+
+    /// Table-local rect of visible cell (`r`, `c`).
+    pub fn cell_rect(&self, r: usize, c: usize) -> Option<Rect> {
+        self.cells.iter().find(|(cr, cc, _)| (*cr, *cc) == (r, c)).map(|x| x.2)
+    }
+
+    /// The visible cell at table-local point `p` (points outside the table go to the nearest cell).
+    pub fn cell_at(&self, p: Point) -> Option<(usize, usize)> {
+        let q = Point::new(p.x.clamp(0.0, self.width().max(0.0)), p.y.clamp(0.0, self.height().max(0.0)));
+        let inside = |r: &Rect| q.x >= r.x0 && q.x <= r.x1 && q.y >= r.y0 && q.y <= r.y1;
+        // Edges are shared: prefer the cell the point is strictly inside.
+        self.cells
+            .iter()
+            .find(|(_, _, r)| q.x >= r.x0 && q.x < r.x1 && q.y >= r.y0 && q.y < r.y1)
+            .or_else(|| self.cells.iter().rev().find(|(_, _, r)| inside(r)))
+            .map(|(r, c, _)| (*r, *c))
+    }
+
+    /// The draggable border within `tol` of table-local point `p`: the inner borders and the right
+    /// and bottom edges (the left and top edges move the table). Borders hidden inside merged
+    /// cells don't count.
+    pub fn border_at(&self, p: Point, tol: f64) -> Option<TableBorder> {
+        let (w, h) = (self.width(), self.height());
+        if !(p.x >= -tol && p.y >= -tol && p.x <= w + tol && p.y <= h + tol) {
+            return None;
+        }
+        let q = Point::new(p.x.clamp(0.0, w), p.y.clamp(0.0, h));
+        let mut best: Option<(f64, TableBorder)> = None;
+        let mut x = 0.0;
+        for (i, cw) in self.cols.iter().enumerate() {
+            x += cw.max(0.0);
+            let d = (p.x - x).abs();
+            // A cell ending at this edge at this height shows the border.
+            let shown = self.cells.iter().any(|(_, _, r)| (r.x1 - x).abs() < 1e-6 && q.y >= r.y0 && q.y <= r.y1);
+            if d <= tol && shown && best.is_none_or(|b| d < b.0) {
+                best = Some((d, TableBorder::Column(i)));
+            }
+        }
+        let mut y = 0.0;
+        for (i, rh) in self.heights.iter().enumerate() {
+            y += rh.max(0.0);
+            let d = (p.y - y).abs();
+            let shown = self.cells.iter().any(|(_, _, r)| (r.y1 - y).abs() < 1e-6 && q.x >= r.x0 && q.x <= r.x1);
+            if d <= tol && shown && best.is_none_or(|b| d < b.0) {
+                best = Some((d, TableBorder::Row(i)));
+            }
+        }
+        best.map(|b| b.1)
+    }
 }
 
 fn cell_param(p: &Value, key: &str) -> Option<(usize, usize)> {
@@ -418,9 +533,27 @@ fn distribute(s: &mut Session, p: &Value, rows: bool) -> Result<Value> {
 fn column_width(s: &mut Session, p: &Value) -> Result<Value> {
     let (_, c) = at(s, p);
     let w = f64_param(p, "width").ok_or_else(|| bad("table.columnWidth", "missing `width`"))?.clamp(4.0, 4000.0);
+    let keep_total = bool_or(p, "keepTotal", false);
     with_table(s, p, "table.columnWidth", move |t| {
-        if let Some(x) = t.cols.get_mut(c) {
-            *x = w;
+        // Keeping the table's width, the column to the right gives or takes the difference (dragging
+        // an inner border). The last column has none: the table gets wider or narrower.
+        let pair = t.cols.get(c).zip(t.cols.get(c + 1)).map(|(a, b)| a.max(0.0) + b.max(0.0)).filter(|x| x.is_finite());
+        match pair {
+            Some(pair) if keep_total => {
+                let min = MIN_COLUMN_WIDTH.min(pair / 2.0);
+                let w = w.max(min).min(pair - min);
+                if let Some(x) = t.cols.get_mut(c) {
+                    *x = w;
+                }
+                if let Some(x) = t.cols.get_mut(c + 1) {
+                    *x = pair - w;
+                }
+            }
+            _ => {
+                if let Some(x) = t.cols.get_mut(c) {
+                    *x = w;
+                }
+            }
         }
         Ok(())
     })

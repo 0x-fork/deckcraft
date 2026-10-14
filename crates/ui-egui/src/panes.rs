@@ -29,6 +29,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 "comments" => "Comments",
                 "designer" => "Design Ideas",
                 "smartart" => "Text Pane",
+                "thesaurus" => "Thesaurus",
+                "revisions" => "Revisions",
                 _ => "Pane",
             };
             ui.horizontal(|ui| {
@@ -53,6 +55,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 "comments" => comments(app, ui),
                 "designer" => designer(app, ui),
                 "smartart" => smartart(app, ui),
+                "thesaurus" => thesaurus(app, ui),
+                "revisions" => revisions(app, ui),
                 _ => {}
             });
         });
@@ -149,6 +153,29 @@ fn smartart(app: &mut SlideApp, ui: &mut Ui) {
 
 fn run(app: &mut SlideApp, id: &str, p: Value) {
     let _ = app.run(id, p);
+}
+
+/// Percent transparency (0 = opaque) of a solid fill, the same number `shape.fill`'s
+/// `transparency` parameter writes as an alpha transform. Anything else — no fill, a
+/// gradient, a picture, a pattern — is 0, because that command only changes a solid.
+fn solid_fill_transparency_percent(fill: Option<&Fill>) -> f32 {
+    let Some(Fill::Solid { color }) = fill else {
+        return 0.0;
+    };
+    ((1.0 - color.alpha()) * 100.0) as f32
+}
+
+/// Fraction to pass to `shape.fill` when the slider moved. An unchanged value (a focus
+/// loss, or switching to another shape) is `None`, so the pane does not rewrite the fill.
+fn fill_transparency_to_apply(shown_percent: f32, seed_percent: f32) -> Option<f64> {
+    if !shown_percent.is_finite() {
+        return None;
+    }
+    let shown = shown_percent.clamp(0.0, 100.0);
+    if (shown - seed_percent).abs() <= 0.01 {
+        return None;
+    }
+    Some(f64::from(shown) / 100.0)
 }
 
 fn scheme(app: &SlideApp) -> deckcraft_color::ColorScheme {
@@ -423,9 +450,14 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                 Some(Fill::Pattern(_)) => "pattern",
                 _ => "auto",
             };
-            for (l, k) in
-                [("No fill", "none"), ("Solid fill", "solid"), ("Gradient fill", "gradient"), ("Pattern fill", "pattern"), ("Automatic", "auto")]
-            {
+            for (l, k) in [
+                ("No fill", "none"),
+                ("Solid fill", "solid"),
+                ("Gradient fill", "gradient"),
+                ("Picture or texture fill", "picture"),
+                ("Pattern fill", "pattern"),
+                ("Automatic", "auto"),
+            ] {
                 if ui.radio(kind == k, l).clicked() {
                     match k {
                         "none" => run(app, "shape.fill", json!({"none": true})),
@@ -436,6 +468,7 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                             json!({"gradient": {"stops": [[0, "accent1"], [1, {"scheme": "accent1", "lumMod": 50000}]], "angle": 90}}),
                         ),
                         "pattern" => run(app, "shape.fill", json!({"pattern": {"preset": "pct25", "fg": "accent1", "bg": "bg1"}})),
+                        "picture" => pick_fill_picture(app),
                         _ => run(app, "shape.fill", json!({"reset": true})),
                     }
                 }
@@ -446,14 +479,24 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             });
             ui.horizontal(|ui| {
                 ui.label("Transparency");
-                let id = ui.id().with("ftr");
-                let mut v: f32 = ui.data_mut(|d| d.get_temp(id).unwrap_or(0.0));
+                // Seed from this shape. A shared temp defaulted to 0, so a shape that was
+                // already 40% transparent showed as opaque, and leaving the slider wrote 0.
+                let seed = solid_fill_transparency_percent(sh.fill.as_ref());
+                let id = ui.id().with(("ftr", sh.id.0));
+                let mut v: f32 = ui.data_mut(|d| d.get_temp(id).unwrap_or(seed));
                 let r = ui.add(egui::Slider::new(&mut v, 0.0..=100.0).suffix("%"));
-                ui.data_mut(|d| d.insert_temp(id, v));
                 if r.drag_stopped() || r.lost_focus() {
-                    let _ = app.run("shape.fill", json!({"transparency": v as f64 / 100.0}));
+                    if let Some(t) = fill_transparency_to_apply(v, seed) {
+                        let _ = app.run("shape.fill", json!({"transparency": t}));
+                    }
+                    ui.data_mut(|d| d.remove::<f32>(id));
+                } else if r.dragged() || r.changed() {
+                    ui.data_mut(|d| d.insert_temp(id, v));
                 }
             });
+            if let Some(Fill::Picture(pf)) = &sh.fill {
+                picture_fill_options(app, ui, sh.id.0, pf);
+            }
             if let Some(Fill::Gradient(g)) = &sh.fill {
                 let sc = scheme(app);
                 if let Some(ng) = crate::fillui::gradient_editor(ui, "shape-grad", g, &sc) {
@@ -594,6 +637,95 @@ fn fx_slider(
     });
 }
 
+/// Asks for a picture file and makes it the selected shapes' fill.
+fn pick_fill_picture(app: &mut SlideApp) {
+    if let Some(pick) = app.services.pick_open.as_mut()
+        && let Some(path) = pick("picture")
+        && let Some(Ok(bytes)) = app.services.read.as_ref().map(|r| r(&path))
+    {
+        run(app, "shape.fill", json!({"picture": deckcraft_engine::cmd::base64_encode(&bytes)}));
+    }
+}
+
+/// A number field for one picture-fill option; runs `shape.fill` with `{pictureProps: {key: v × scale}}`
+/// when it changes.
+fn pic_drag(app: &mut SlideApp, ui: &mut Ui, label: &str, value: f64, suffix: &str, key: &str, scale: f64) {
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+        let mut v = value;
+        let r = ui.add(egui::DragValue::new(&mut v).suffix(suffix).max_decimals(1));
+        if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+            run(app, "shape.fill", json!({"pictureProps": {key: v * scale}}));
+        }
+    });
+}
+
+/// Format Shape ▸ Fill ▸ Picture or texture fill: source, tiling, offsets, transparency.
+fn picture_fill_options(app: &mut SlideApp, ui: &mut Ui, id: u32, pf: &deckcraft_model::style::PictureFill) {
+    use deckcraft_model::style::PictureMode;
+    ui.horizontal(|ui| {
+        ui.label("Picture source");
+        if ui.button("Insert…").clicked() {
+            pick_fill_picture(app);
+        }
+    });
+    let mut tile = matches!(pf.mode, PictureMode::Tile { .. });
+    if ui.checkbox(&mut tile, "Tile picture as texture").changed() {
+        run(app, "shape.fill", json!({"pictureProps": {"tile": tile}}));
+    }
+    match &pf.mode {
+        PictureMode::Tile { tx, ty, sx, sy, flip, align } => {
+            pic_drag(app, ui, "Offset X", *tx, " pt", "offsetX", 1.0);
+            pic_drag(app, ui, "Offset Y", *ty, " pt", "offsetY", 1.0);
+            pic_drag(app, ui, "Scale X", sx * 100.0, "%", "scaleX", 0.01);
+            pic_drag(app, ui, "Scale Y", sy * 100.0, "%", "scaleY", 0.01);
+            let aligns = [
+                ("tl", "Top left"),
+                ("t", "Top"),
+                ("tr", "Top right"),
+                ("l", "Left"),
+                ("ctr", "Center"),
+                ("r", "Right"),
+                ("bl", "Bottom left"),
+                ("b", "Bottom"),
+                ("br", "Bottom right"),
+            ];
+            let mirrors = [("none", "None"), ("x", "Horizontal"), ("y", "Vertical"), ("xy", "Both")];
+            for (label, key, opts, cur) in [("Alignment", "align", &aligns[..], align), ("Mirror type", "mirror", &mirrors[..], flip)] {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+                    let shown = opts.iter().find(|(k, _)| k == cur).map_or(opts[0].1, |(_, l)| *l);
+                    egui::ComboBox::from_id_salt(("picfill", id, key)).selected_text(shown).show_ui(ui, |ui| {
+                        for (k, l) in opts {
+                            if ui.selectable_label(*k == cur.as_str(), *l).clicked() {
+                                run(app, "shape.fill", json!({"pictureProps": {key: k}}));
+                            }
+                        }
+                    });
+                });
+            }
+        }
+        PictureMode::Stretch { fill_rect } => {
+            for (i, label) in ["Offset left", "Offset top", "Offset right", "Offset bottom"].into_iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+                    let mut v = fill_rect[i] * 100.0;
+                    let r = ui.add(egui::DragValue::new(&mut v).suffix("%").max_decimals(0));
+                    if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+                        let mut rect = *fill_rect;
+                        rect[i] = v / 100.0;
+                        run(app, "shape.fill", json!({"pictureProps": {"stretch": rect}}));
+                    }
+                });
+            }
+        }
+    }
+    let mut rot = !pf.upright;
+    if ui.checkbox(&mut rot, "Rotate with shape").changed() {
+        run(app, "shape.fill", json!({"pictureProps": {"rotateWithShape": rot}}));
+    }
+}
+
 fn background(app: &mut SlideApp, ui: &mut Ui) {
     let sc = scheme(app);
     let bg = app.session.active().and_then(|d| d.current_slide().and_then(|s| s.background.clone()));
@@ -652,6 +784,10 @@ fn background(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 });
             });
+            let mut tr = ((1.0 - color.alpha()) * 100.0) as f32;
+            if ui.add(egui::Slider::new(&mut tr, 0.0..=100.0).text("Transparency").suffix("%")).drag_stopped() {
+                run(app, "design.background", json!({"transparency": (f64::from(tr) / 100.0).clamp(0.0, 1.0)}));
+            }
         }
         Some(Fill::Gradient(g)) => {
             current = Some(json!({"gradient": crate::fillui::gradient_json(g)}));
@@ -681,7 +817,7 @@ fn background(app: &mut SlideApp, ui: &mut Ui) {
                 });
             }
         }
-        Some(Fill::Picture(_)) => {
+        Some(Fill::Picture(pf)) => {
             if ui.button("Insert picture from file…").clicked()
                 && let Some(pick) = app.services.pick_open.as_mut()
                 && let Some(path) = pick("picture")
@@ -689,6 +825,7 @@ fn background(app: &mut SlideApp, ui: &mut Ui) {
             {
                 let _ = app.run("design.background", json!({"picture": deckcraft_engine::cmd::base64_encode(&bytes)}));
             }
+            picture_background_options(app, ui, pf);
         }
         _ => {}
     }
@@ -699,16 +836,99 @@ fn background(app: &mut SlideApp, ui: &mut Ui) {
         run(app, "design.hideBackgroundGraphics", json!({"hide": h}));
     }
     ui.add_space(8.0);
+    let picture = matches!(fill, Some(Fill::Picture(_)));
     ui.horizontal(|ui| {
-        if ui.add_enabled(current.is_some(), egui::Button::new("Apply to All")).clicked()
-            && let Some(Value::Object(mut o)) = current.clone()
-        {
-            o.insert("all".into(), json!(true));
-            run(app, "design.background", Value::Object(o));
+        if ui.add_enabled(current.is_some() || picture, egui::Button::new("Apply to All")).clicked() {
+            if let Some(Value::Object(mut o)) = current.clone() {
+                o.insert("all".into(), json!(true));
+                run(app, "design.background", Value::Object(o));
+            } else if picture {
+                run(app, "design.background", json!({"copy": true}));
+            }
         }
         if ui.button("Reset Background").clicked() {
             run(app, "design.background", json!({"reset": true}));
         }
+    });
+}
+
+fn picture_background_options(app: &mut SlideApp, ui: &mut Ui, pf: &deckcraft_model::style::PictureFill) {
+    use deckcraft_model::style::PictureMode;
+    let alpha = pf.alpha.unwrap_or(1.0);
+    let mut tr = ((1.0 - alpha) * 100.0) as f32;
+    if ui.add(egui::Slider::new(&mut tr, 0.0..=100.0).text("Transparency").suffix("%")).drag_stopped() {
+        run(app, "design.background", json!({"transparency": (f64::from(tr) / 100.0).clamp(0.0, 1.0)}));
+    }
+    let mut tile = matches!(pf.mode, PictureMode::Tile { .. });
+    if ui.checkbox(&mut tile, "Tile picture as texture").changed() {
+        run(app, "design.background", json!({"pictureProps": {"tile": tile}}));
+    }
+    let PictureMode::Tile { tx, ty, sx, sy, flip, align } = &pf.mode else { return };
+    for (label, id, value, suffix, scale) in [
+        ("Offset X", "bg-ox", *tx, " pt", 1.0),
+        ("Offset Y", "bg-oy", *ty, " pt", 1.0),
+        ("Scale X", "bg-sx", *sx * 100.0, "%", 0.01),
+        ("Scale Y", "bg-sy", *sy * 100.0, "%", 0.01),
+    ] {
+        ui.horizontal(|ui| {
+            ui.add_sized(vec2(72.0, 20.0), egui::Label::new(label));
+            if let Some(v) = widgets::spinner(ui, id, value, if scale < 1.0 { 5.0 } else { 1.0 }, suffix, 64.0) {
+                let key = match id {
+                    "bg-ox" => "offsetX",
+                    "bg-oy" => "offsetY",
+                    "bg-sx" => "scaleX",
+                    _ => "scaleY",
+                };
+                run(app, "design.background", json!({"pictureProps": {key: v * scale}}));
+            }
+        });
+    }
+    let align_name = match align.as_str() {
+        "t" => "Top",
+        "tr" => "Top Right",
+        "l" => "Left",
+        "ctr" => "Center",
+        "r" => "Right",
+        "bl" => "Bottom Left",
+        "b" => "Bottom",
+        "br" => "Bottom Right",
+        _ => "Top Left",
+    };
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(72.0, 20.0), egui::Label::new("Alignment"));
+        egui::ComboBox::from_id_salt("bg-align").selected_text(align_name).width(140.0).show_ui(ui, |ui| {
+            for (k, l) in [
+                ("tl", "Top Left"),
+                ("t", "Top"),
+                ("tr", "Top Right"),
+                ("l", "Left"),
+                ("ctr", "Center"),
+                ("r", "Right"),
+                ("bl", "Bottom Left"),
+                ("b", "Bottom"),
+                ("br", "Bottom Right"),
+            ] {
+                if ui.selectable_label(align == k, l).clicked() {
+                    run(app, "design.background", json!({"pictureProps": {"align": k}}));
+                }
+            }
+        });
+    });
+    let mirror_name = match flip.as_str() {
+        "x" => "Horizontal",
+        "y" => "Vertical",
+        "xy" => "Both",
+        _ => "None",
+    };
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(72.0, 20.0), egui::Label::new("Mirror"));
+        egui::ComboBox::from_id_salt("bg-mirror").selected_text(mirror_name).width(140.0).show_ui(ui, |ui| {
+            for (k, l) in [("none", "None"), ("x", "Horizontal"), ("y", "Vertical"), ("xy", "Both")] {
+                if ui.selectable_label(flip == k, l).clicked() {
+                    run(app, "design.background", json!({"pictureProps": {"mirror": k}}));
+                }
+            }
+        });
     });
 }
 
@@ -722,13 +942,9 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
     let names: Vec<(u32, String)> = st.shapes().iter().map(|s| (s.id.0, s.name.clone())).collect();
     let selected: Vec<u32> = st.selection.shapes.iter().map(|i| i.0).collect();
     ui.horizontal(|ui| {
-        if ui.button("▶ Play All").clicked() {
-            let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(from, true);
-            if let Some(s) = app.show.as_mut() {
-                s.preview_only = true;
-                s.autoplay = true;
-            }
+        let playing = app.anim_preview_active();
+        if ui.button(if playing { "■ Stop" } else { "▶ Play All" }).clicked() {
+            run(app, "animation.preview", json!({"on": !playing}));
         }
     });
     ui.separator();
@@ -873,6 +1089,61 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
     let _ = paint_anim_tile;
 }
 
+/// Review › Compare: the revised copy's slide-level changes; click to go there, Accept to take it.
+fn revisions(app: &mut SlideApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let Ok(v) = app.session.execute("review.revisions", &json!({})) else {
+        ui.label(egui::RichText::new("Compare this presentation with a revised copy from Review › Compare.").color(t.text_dim));
+        return;
+    };
+    let changes = v["changes"].as_array().cloned().unwrap_or_default();
+    ui.label(egui::RichText::new(format!("Compared with {}", v["name"].as_str().unwrap_or("?"))).color(t.text_dim));
+    if v["byPosition"].as_bool() == Some(true) {
+        ui.label(egui::RichText::new("Not a copy of this presentation: slides are matched by position.").size(11.0).color(t.text_faint));
+    }
+    ui.add_space(4.0);
+    if changes.is_empty() {
+        ui.label("No differences left.");
+        if ui.button("End Review").clicked() {
+            run(app, "review.endCompare", json!({}));
+            app.ui.pane = None;
+        }
+        return;
+    }
+    if ui.button(format!("Accept All ({})", changes.len())).clicked() {
+        run(app, "review.accept", json!({"all": true}));
+    }
+    ui.separator();
+    for (i, c) in changes.iter().enumerate() {
+        let slide = c["slide"].as_u64().unwrap_or(0);
+        let (head, col) = match c["kind"].as_str().unwrap_or("") {
+            "inserted" => (format!("Slide inserted after {slide}"), Color32::from_rgb(0x2E, 0xA3, 0x6F)),
+            "deleted" => (format!("Slide {} deleted", slide.saturating_add(1)), Color32::from_rgb(0xD8, 0x3F, 0x6B)),
+            _ => (format!("Slide {} changed", slide.saturating_add(1)), Color32::from_rgb(0x2E, 0x6F, 0xD8)),
+        };
+        egui::Frame::NONE.fill(t.chrome).corner_radius(CornerRadius::same(6)).inner_margin(egui::Margin::same(8)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(4.0, 16.0), Sense::hover());
+                ui.painter().rect_filled(r, CornerRadius::same(2), col);
+                if ui.link(egui::RichText::new(&head).font(theme::bold(12.5))).clicked() {
+                    let max = app.session.active().map(|d| d.doc.slides.len().saturating_sub(1)).unwrap_or(0);
+                    run(app, "slide.go", json!({"index": (slide as usize).min(max)}));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("Accept").clicked() {
+                        run(app, "review.accept", json!({"index": i}));
+                    }
+                });
+            });
+            for d in c["details"].as_array().into_iter().flatten().filter_map(Value::as_str).take(8) {
+                ui.label(egui::RichText::new(format!("• {d}")).size(11.5).color(t.text_dim));
+            }
+        });
+        ui.add_space(4.0);
+    }
+}
+
 fn comments(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     if ui.button("+ New Comment").clicked() {
@@ -993,7 +1264,7 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     let key_doc = (st.uid, st.revision);
     let w = ui.available_width() - 8.0;
     let ppp = ui.ctx().pixels_per_point();
-    let px = (w * ppp).max(16.0) as u32;
+    let px = (w * ppp).round().max(16.0) as u32;
     let ideas = deckcraft_engine::cmd::ideas::ideas_for(&doc, idx);
     let themes = deckcraft_model::theme::builtin_themes();
     let cache_id = egui::Id::new("design-idea-thumbs");
@@ -1002,13 +1273,16 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     if cache.key != key || cache.tex.is_empty() {
         cache = IdeaThumbs { key, tex: vec![] };
         let mut render = |name: String, d: &deckcraft_model::Presentation| {
-            let h = (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)) as u32;
+            let (px, h) = crate::textures::fit_size(
+                (px, (px as f64 * d.slide_size.height / d.slide_size.width.max(1.0)).clamp(1.0, 1e9) as u32),
+                crate::textures::max_side(ui.ctx()),
+            );
             let img = deckcraft_render::render_slide(
                 d,
                 idx,
                 &deckcraft_render::RenderOpts { scale: px as f64 / d.slide_size.width.max(1.0), size: Some((px, h)), ..Default::default() },
             );
-            let tex = ui.ctx().load_texture(format!("idea-{name}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+            let tex = crate::textures::upload_editor(ui.ctx(), format!("idea-{name}"), crate::textures::to_color_image(&img, false));
             cache.tex.push((name, tex, px, h));
         };
         for (id, _) in &ideas {
@@ -1029,9 +1303,12 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     let thumb = |ui: &mut Ui, name: &str, tip: &str| -> bool {
         let Some((_, tex, tw, th)) = cache.tex.iter().find(|e| e.0 == name) else { return false };
         let (r, resp) = ui.allocate_exact_size(vec2(w, w * *th as f32 / (*tw).max(1) as f32), Sense::click());
-        ui.painter().image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        // On the physical pixel grid, one texel per device pixel (#184).
+        let at = crate::textures::device_pixel_rect(r, ppp);
+        let at = Rect::from_min_size(at.min, vec2(*tw as f32 / ppp, *th as f32 / ppp));
+        ui.painter().image(tex.id(), at, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         ui.painter().rect_stroke(
-            r,
+            at,
             CornerRadius::same(2),
             Stroke::new(if resp.hovered() { 2.5 } else { 1.0 }, if resp.hovered() { t.accent } else { t.border }),
             egui::StrokeKind::Outside,
@@ -1088,3 +1365,135 @@ pub(crate) fn text_transparency_slider(app: &mut SlideApp, ui: &mut Ui, sh: &dec
 #[cfg(test)]
 #[path = "smartart_tests.rs"]
 mod smartart_tests;
+
+#[cfg(test)]
+#[path = "background_tests.rs"]
+mod background_tests;
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use deckcraft_color::{ColorTransform, SchemeSlot};
+    use deckcraft_engine::Session;
+    use deckcraft_model::{ColorRef, Fill, ShapeId};
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    use serde_json::json;
+
+    use super::{fill_transparency_to_apply, solid_fill_transparency_percent};
+    use crate::{Services, SlideApp};
+
+    #[test]
+    fn solid_fill_transparency_reads_the_alpha_shape_fill_writes() {
+        assert_eq!(solid_fill_transparency_percent(None), 0.0);
+        assert_eq!(solid_fill_transparency_percent(Some(&Fill::None)), 0.0);
+        assert_eq!(solid_fill_transparency_percent(Some(&Fill::Group)), 0.0);
+        let plain = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1));
+        assert_eq!(solid_fill_transparency_percent(Some(&plain)), 0.0);
+        // `shape.fill` transparency 0.4 stores Alpha((1 - 0.4) * 100_000).
+        let forty = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(60_000)));
+        let p = solid_fill_transparency_percent(Some(&forty));
+        assert!((p - 40.0).abs() < 0.01, "{p}");
+        let clear = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(0)));
+        assert!((solid_fill_transparency_percent(Some(&clear)) - 100.0).abs() < 0.01);
+        // A later alpha wins, matching ColorRef::alpha.
+        let layered = Fill::solid(ColorRef::scheme(SchemeSlot::Accent1).with(ColorTransform::Alpha(0)).with(ColorTransform::Alpha(60_000)));
+        assert!((solid_fill_transparency_percent(Some(&layered)) - 40.0).abs() < 0.01);
+
+        assert_eq!(fill_transparency_to_apply(40.0, 40.0), None);
+        assert_eq!(fill_transparency_to_apply(40.005, 40.0), None);
+        assert_eq!(fill_transparency_to_apply(f32::NAN, 40.0), None);
+        assert_eq!(fill_transparency_to_apply(55.0, 40.0), Some(0.55));
+        assert_eq!(fill_transparency_to_apply(0.0, 40.0), Some(0.0));
+    }
+
+    fn solid_alpha(app: &SlideApp, id: u32) -> Option<i32> {
+        let sh = app.session.active()?.shape(ShapeId(id))?;
+        let Fill::Solid { color } = sh.fill.as_ref()? else { return None };
+        color.mods.iter().find_map(|m| match m {
+            ColorTransform::Alpha(v) => Some(*v),
+            _ => None,
+        })
+    }
+
+    fn slider_values(h: &Harness<'_, SlideApp>) -> Vec<f64> {
+        h.query_all_by_role(egui::accesskit::Role::Slider).filter_map(|n| n.accesskit_node().numeric_value()).collect()
+    }
+
+    /// The Fill slider shows the selected solid's transparency, and opening the pane
+    /// (or looking at another shape first) does not write 0% over it.
+    #[test]
+    fn fill_transparency_slider_follows_the_selection() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        let a = s.execute("shape.insert", &json!({"preset": "rect", "rect": [40.0, 40.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap() as u32;
+        let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [200.0, 40.0, 120.0, 80.0]})).unwrap()["id"].as_u64().unwrap() as u32;
+        s.execute("shape.fill", &json!({"id": a, "color": "accent1", "transparency": 0.0})).unwrap();
+        s.execute("shape.fill", &json!({"id": b, "color": "accent1", "transparency": 0.4})).unwrap();
+        s.execute("edit.select", &json!({"ids": [a]})).unwrap();
+        let mut app = SlideApp::new(s, Services::default());
+        app.ui.pane = Some("format".into());
+        app.ui.format_tab = "fill".into();
+        let mut h = Harness::builder().with_size(egui::vec2(1400.0, 900.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        let opaque: Vec<f64> = slider_values(&h);
+        assert!(opaque.iter().any(|v| (*v - 0.0).abs() < 0.5), "opaque shape should show 0%, got {opaque:?}");
+        assert!(opaque.iter().all(|v| (*v - 40.0).abs() > 0.5), "opaque shape should not show 40%, got {opaque:?}");
+
+        h.state_mut().session.execute("edit.select", &json!({"ids": [b]})).unwrap();
+        h.run_steps(3);
+        let clear: Vec<f64> = slider_values(&h);
+        assert!(clear.iter().any(|v| (*v - 40.0).abs() < 0.5), "40% fill should show 40%, got {clear:?}");
+        assert_eq!(solid_alpha(h.state(), b), Some(60_000));
+
+        h.get_by_label("Transparency").click();
+        h.run_steps(2);
+        assert_eq!(solid_alpha(h.state(), b), Some(60_000));
+    }
+}
+
+/// Review › Thesaurus: look a word up; clicking a synonym puts it in place of the selected word
+/// when editing text, otherwise looks that synonym up in turn.
+fn thesaurus(app: &mut SlideApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let mut q = app.thesaurus_query.clone();
+    let edit = ui.add(egui::TextEdit::singleline(&mut q).hint_text("Search for a word").desired_width(f32::INFINITY));
+    if edit.changed() {
+        app.thesaurus_query = q.clone();
+    }
+    ui.add_space(6.0);
+    let senses = deckcraft_engine::thesaurus::lookup(&q);
+    if q.trim().is_empty() {
+        ui.label(egui::RichText::new("Select a word on the slide, or type one above.").color(t.text_dim));
+        return;
+    }
+    if senses.is_empty() {
+        ui.label(egui::RichText::new(format!("No synonyms for \"{}\".", q.trim())).color(t.text_dim));
+        return;
+    }
+    let editing = app.session.active().is_some_and(|d| d.selection.text.is_some());
+    for sense in senses {
+        ui.label(egui::RichText::new(&sense.word).font(theme::bold(13.0)));
+        for syn in sense.synonyms {
+            let r = ui.add(egui::Button::new(&syn).frame(false)).on_hover_text(if editing { "Insert" } else { "Look up" });
+            if r.clicked() {
+                if editing {
+                    run(app, "review.replaceWord", json!({"with": syn}));
+                }
+                app.thesaurus_query = syn;
+            }
+        }
+        ui.add_space(6.0);
+    }
+}
+
+#[cfg(test)]
+#[path = "thesaurus_tests.rs"]
+mod thesaurus_tests;

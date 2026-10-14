@@ -48,3 +48,6 @@ sync_github_name = true
 
 [people.Momentum96]
 sync_github_name = true
+
+[people.RCShoemaker]
+real_name = "Ryan C. Shoemaker"

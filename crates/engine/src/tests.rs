@@ -142,6 +142,62 @@ fn clipboard_copy_paste_shapes_and_slides() {
 }
 
 #[test]
+fn bold_copy_is_html_and_pages_html_pastes_bold() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hello"})).unwrap();
+    s.execute("text.selectAll", &json!({})).unwrap();
+    s.execute("format.bold", &json!({"on": true})).unwrap();
+    let v = s.execute("edit.copy", &json!({})).unwrap();
+    let html = v["html"].as_str().unwrap();
+    assert!(html.contains("<b>"), "{html}");
+    assert_eq!(v["text"], "Hello");
+    // The same plain words are our own clipboard, so a plainer HTML fragment is not reparsed.
+    s.execute("text.select", &json!({"anchor": [0, 5], "caret": [0, 5]})).unwrap();
+    s.execute("edit.paste", &json!({"text": "Hello", "html": "<p>Hello</p>"})).unwrap();
+    let body = s.doc().unwrap().shape(deckcraft_model::ShapeId(title)).unwrap().text.clone().unwrap();
+    assert_eq!(body.text(), "HelloHello");
+    assert!(body.paragraphs.iter().flat_map(|p| p.runs.iter()).all(|r| r.props.bold == Some(true)), "{body:?}");
+    s.execute("text.select", &json!({"anchor": [0, 10], "caret": [0, 10]})).unwrap();
+    let caret = s.execute("edit.copy", &json!({})).unwrap();
+    assert_eq!(caret["text"], "");
+    assert_eq!(caret["html"], "");
+
+    let mut ext = session();
+    ext.execute("edit.paste", &json!({"text": "Hello", "html": "<p style=\"font-weight: bold\">Hello</p>"})).unwrap();
+    let pasted = ext
+        .doc()
+        .unwrap()
+        .current_slide()
+        .unwrap()
+        .shapes
+        .iter()
+        .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hello"))
+        .unwrap()
+        .text
+        .clone()
+        .unwrap();
+    assert_eq!(pasted.paragraphs[0].runs[0].props.bold, Some(true), "{pasted:?}");
+
+    let mut mismatched = session();
+    mismatched.execute("edit.paste", &json!({"text": "Hi", "html": "<b>Nope</b>"})).unwrap();
+    let plain = mismatched
+        .doc()
+        .unwrap()
+        .current_slide()
+        .unwrap()
+        .shapes
+        .iter()
+        .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hi"))
+        .unwrap()
+        .text
+        .clone()
+        .unwrap();
+    assert_ne!(plain.paragraphs[0].runs[0].props.bold, Some(true));
+}
+
+#[test]
 fn group_ungroup_roundtrip_positions() {
     let mut s = session();
     let a = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 50, 50]})).unwrap()["id"].as_u64().unwrap();
@@ -174,7 +230,7 @@ fn align_and_distribute() {
 fn pointer_draw_move_resize() {
     let mut s = session();
     s.set_tool(ToolKind::Shape { preset: "rect".into() });
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::Down, 100.0, 100.0)).unwrap();
     s.pointer(ev(PointerKind::Drag, 200.0, 180.0)).unwrap();
     let r = s.pointer(ev(PointerKind::Up, 200.0, 180.0)).unwrap();
@@ -205,7 +261,7 @@ fn pointer_draw_move_resize() {
 #[test]
 fn click_into_placeholder_starts_editing() {
     let mut s = session();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::Down, 480.0, 200.0)).unwrap();
     s.pointer(ev(PointerKind::Up, 480.0, 200.0)).unwrap();
     assert!(s.doc().unwrap().selection.text.is_some());
@@ -237,7 +293,8 @@ fn writable_format_for_path_rejects_formats_deckcraft_does_not_write() {
     assert_eq!(f("a.pdf"), Some("pdf"));
     assert_eq!(f("a.jpg"), Some("jpeg"));
     assert_eq!(f("a.txt"), Some("outline"));
-    for path in ["a.odp", "a.gif", "a.svg", "a.outline", "a", "dir.v2/a"] {
+    assert_eq!(f("a.gif"), Some("gif"));
+    for path in ["a.odp", "a.bmp", "a.svg", "a.outline", "a", "dir.v2/a"] {
         assert_eq!(f(path), None, "{path}");
     }
 }
@@ -285,6 +342,34 @@ fn base64_roundtrip() {
         assert_eq!(cmd::base64_decode(&cmd::base64_encode(&data)).unwrap(), data);
     }
     assert!(cmd::base64_decode("!!").is_none());
+}
+
+#[test]
+fn new_slide_body_tabs_match_text_set() {
+    let body = "Install from DMG\nLaunch app\n\tCheck signing\n\t\tDeep\nBuild a deck";
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "Test Plan", "body": body})).unwrap();
+    let levels = |s: &Session| {
+        let slide = s.doc().unwrap().current_slide().unwrap();
+        let sh = slide.shapes.iter().find(|x| x.ph_type() == Some(deckcraft_model::PhType::Obj)).unwrap();
+        let rows: Vec<(u8, String)> = sh.text.as_ref().unwrap().paragraphs.iter().map(|p| (p.level, p.text())).collect();
+        (sh.id.0, rows)
+    };
+    let (id, from_new) = levels(&s);
+    assert_eq!(
+        from_new,
+        vec![
+            (0, "Install from DMG".to_string()),
+            (0, "Launch app".to_string()),
+            (1, "Check signing".to_string()),
+            (2, "Deep".to_string()),
+            (0, "Build a deck".to_string()),
+        ]
+    );
+    s.execute("text.set", &json!({"id": id, "text": body})).unwrap();
+    assert_eq!(levels(&s).1, from_new);
+    s.execute("text.set", &json!({"id": id, "text": "\t\t\t\t\t\t\t\t\tCapped"})).unwrap();
+    assert_eq!(levels(&s).1, vec![(8, "Capped".to_string())]);
 }
 
 #[test]
@@ -356,7 +441,7 @@ fn drawing_a_line_between_shapes_glues_it() {
     let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 100, 100, 100]})).unwrap()["id"].as_u64().unwrap();
     s.execute("edit.deselect", &json!({})).unwrap();
     s.tool.kind = tools::ToolKind::Shape { preset: "straightConnector1".into() };
-    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0 };
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0, pressure: None };
     // Right site of the ellipse (200,150) → left site of the rect (400,150), a little off.
     s.pointer(ev(tools::PointerKind::Down, 202.0, 151.0)).unwrap();
     s.pointer(ev(tools::PointerKind::Drag, 300.0, 150.0)).unwrap();
@@ -389,7 +474,7 @@ fn freeform_tools_and_command() {
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().shapes().len(), before + 1);
 
-    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 3.0 };
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 3.0, pressure: None };
     // Polygon: click, click, click, click on the start → closed, filled.
     s.set_tool(tools::ToolKind::Shape { preset: "freeform".into() });
     for (x, y) in [(300.0, 300.0), (400.0, 300.0), (400.0, 400.0)] {
@@ -442,7 +527,7 @@ fn double_click_in_table_uses_grown_row_heights() {
     for row in 0..3 {
         s.execute("table.rowHeight", &json!({"id": id, "row": row, "height": 4.0})).unwrap();
     }
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::DoubleClick, 120.0, 106.0)).unwrap();
     assert_eq!(s.doc().unwrap().selection.text.as_ref().and_then(|t| t.cell), Some((0, 0)));
 }
@@ -457,7 +542,7 @@ fn double_click_edits_text_inside_group() {
     let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [300.0, 200.0, 50.0, 50.0]})).unwrap()["id"].as_u64().unwrap();
     s.execute("edit.select", &json!({"ids": [a, b]})).unwrap();
     s.execute("arrange.group", &json!({})).unwrap();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     // Double-click the grouped text box: it becomes editable and targets that member.
     s.pointer(ev(PointerKind::DoubleClick, 160.0, 125.0)).unwrap();
     assert_eq!(s.doc().unwrap().selection.text.as_ref().map(|t| t.shape.0 as u64), Some(a));
@@ -481,6 +566,300 @@ fn grown_table_frame_covers_its_drawn_rows() {
     assert!((x.h - drawn).abs() < 1e-6, "frame {} vs drawn {drawn}", x.h);
     let below_stored = deckcraft_geom::Point::new(120.0, 100.0 + drawn - 2.0);
     assert!(matches!(s.hit_test(below_stored, 1.0), Some(tools::Hit::Shape { .. })));
+}
+
+/// A table at (100, 100): columns `cols` wide, rows 40 pt tall, cells holding `data`.
+fn table_at(s: &mut Session, cols: &[f64], data: serde_json::Value) -> deckcraft_model::ShapeId {
+    let rows = data.as_array().map_or(1, Vec::len);
+    let w: f64 = cols.iter().sum();
+    let r =
+        s.execute("insert.table", &json!({"rows": rows, "cols": cols.len(), "rect": [100.0, 100.0, w, 40.0 * rows as f64], "data": data})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    for (c, cw) in cols.iter().enumerate() {
+        s.execute("table.columnWidth", &json!({"id": id, "col": c, "width": cw})).unwrap();
+    }
+    s.execute("edit.deselect", &json!({})).unwrap();
+    id
+}
+
+fn table_of(s: &Session, id: deckcraft_model::ShapeId) -> deckcraft_model::Table {
+    match &s.doc().unwrap().shape(id).unwrap().kind {
+        deckcraft_model::ShapeKind::Table(t) => t.clone(),
+        k => panic!("not a table: {k:?}"),
+    }
+}
+
+fn tev(kind: PointerKind, x: f64, y: f64) -> PointerEvent {
+    PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None }
+}
+
+fn text_sel(s: &Session) -> Option<TextSel> {
+    s.doc().unwrap().selection.text.clone()
+}
+
+/// Slide point of the caret before character `ch` of paragraph `para` in the text being edited.
+fn caret_point(s: &Session, para: usize, ch: usize) -> deckcraft_geom::Point {
+    let st = s.doc().unwrap();
+    text_point(st, st.selection.text.as_ref().unwrap(), para, ch)
+}
+
+/// Slide point of the caret before character `ch` of paragraph `para` of text `t`.
+fn text_point(st: &DocState, t: &TextSel, para: usize, ch: usize) -> deckcraft_geom::Point {
+    let (l, m) = cmd::text::text_frame(st, t).unwrap();
+    let (x, top, bot) = l.caret(deckcraft_text::Pos { para, ch }).unwrap();
+    m * deckcraft_geom::Point::new(x, (top + bot) / 2.0)
+}
+
+#[test]
+fn cell_text_is_laid_out_where_the_cell_draws_it() {
+    // The caret and hit testing of a cell's text use the cell's rect, not the table's.
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", ""]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1], "at": [0, 0]})).unwrap();
+    let c = caret_point(&s, 0, 0);
+    assert!(c.x > 300.0 && c.x < 320.0 && c.y > 100.0 && c.y < 140.0, "caret of cell (0, 1) at {c:?}");
+    // An empty cell still has a caret.
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 1]})).unwrap();
+    let c = caret_point(&s, 0, 0);
+    assert!(c.x > 300.0 && c.y > 140.0 && c.y < 180.0, "caret of empty cell (1, 1) at {c:?}");
+    // Hit testing: the start and the end of "Hello world".
+    let st = s.doc().unwrap();
+    let t = TextSel { shape: id, cell: Some((0, 0)), ..Default::default() };
+    assert_eq!(cmd::text::text_pos_at(st, &t, deckcraft_geom::Point::new(101.0, 115.0)), (0, 0));
+    assert_eq!(cmd::text::text_pos_at(st, &t, deckcraft_geom::Point::new(295.0, 115.0)), (0, 11));
+}
+
+#[test]
+fn double_click_in_a_cell_selects_the_word_clicked() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", "d"]]));
+    // Where "world" is drawn.
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let p = caret_point(&s, 0, 8);
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // As the UI sends it: press, release, press, double-click (on release), then the release.
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    assert!(text_sel(&s).is_none(), "a click on an unselected table selects it");
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 0)), ((0, 6), (0, 11))), "the word under the double-click");
+    // The control channel sends the double-click alone.
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    assert_eq!(text_sel(&s).map(|t| t.ordered()), Some(((0, 6), (0, 11))));
+}
+
+#[test]
+fn clicks_while_editing_a_cell_move_the_caret_between_cells() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "Second cell"], ["c", "d"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1], "at": [0, 0]})).unwrap();
+    let p6 = caret_point(&s, 0, 6);
+    let p11 = caret_point(&s, 0, 11);
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 0]})).unwrap();
+    // A click in another cell of the table moves the caret there, at the click.
+    s.pointer(tev(PointerKind::Down, p6.x, p6.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.shape, t.cell, t.caret, t.anchor), (id, Some((0, 1)), (0, 6), (0, 6)));
+    // Dragging selects within that cell, even past its edge.
+    s.pointer(tev(PointerKind::Drag, p11.x, p11.y)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 600.0, p11.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, 600.0, p11.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 1)), ((0, 6), (0, 11))));
+    // Shift+click in another cell starts a new caret there instead of extending across cells.
+    let shift = Mods { shift: true, ..Default::default() };
+    s.pointer(PointerEvent { mods: shift, ..tev(PointerKind::Down, 150.0, 165.0) }).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 165.0)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.is_range()), (Some((1, 0)), false));
+    // Typing goes into the clicked cell.
+    s.execute("text.insert", &json!({"text": "X"})).unwrap();
+    assert_eq!(table_of(&s, id).cell(1, 0).unwrap().text.text(), "cX");
+    // A click outside the table stops editing.
+    s.pointer(tev(PointerKind::Down, 50.0, 400.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 50.0, 400.0)).unwrap();
+    assert!(text_sel(&s).is_none());
+}
+
+#[test]
+fn a_click_in_a_selected_table_enters_the_clicked_cell() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "Hello world"]]));
+    s.pointer(tev(PointerKind::Down, 350.0, 160.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 350.0, 160.0)).unwrap();
+    assert_eq!((s.doc().unwrap().selection.shapes.clone(), text_sel(&s)), (vec![id], None), "the first click selects the table");
+    let st = s.doc().unwrap();
+    let p = text_point(st, &TextSel { shape: id, cell: Some((1, 1)), ..Default::default() }, 0, 6);
+    s.pointer(tev(PointerKind::Down, p.x, p.y)).unwrap();
+    s.pointer(tev(PointerKind::Up, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.caret), (Some((1, 1)), (0, 6)), "caret at the click");
+    // Dragging a selected table still moves it.
+    s.execute("text.exit", &json!({})).unwrap();
+    s.pointer(tev(PointerKind::Down, 150.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 170.0, 130.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 170.0, 130.0)).unwrap();
+    assert!(text_sel(&s).is_none());
+    assert_ne!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().x, 100.0);
+}
+
+#[test]
+fn caret_moves_by_line_in_a_wrapped_cell() {
+    let mut s = session();
+    let id = table_at(&mut s, &[90.0, 200.0], json!([["one two three four five six seven", "b"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0], "at": [0, 0]})).unwrap();
+    s.execute("text.move", &json!({"to": "down"})).unwrap();
+    let down = text_sel(&s).unwrap().caret;
+    assert!(down.0 == 0 && down.1 > 0, "down goes to the next line of the paragraph: {down:?}");
+    s.execute("text.move", &json!({"to": "lineEnd"})).unwrap();
+    let end = text_sel(&s).unwrap().caret;
+    assert!(end.1 > down.1 && end.1 < 33, "end of the second line: {end:?}");
+    s.execute("text.move", &json!({"to": "up"})).unwrap();
+    assert!(text_sel(&s).unwrap().caret.1 < down.1);
+}
+
+#[test]
+fn table_borders_are_hit_where_they_are_drawn() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    let hit = |s: &Session, x: f64, y: f64| s.hit_test(deckcraft_geom::Point::new(x, y), 3.0);
+    assert_eq!(hit(&s, 201.0, 125.0), Some(tools::Hit::TableColumn { id, col: 0 }));
+    assert_eq!(hit(&s, 400.0, 125.0), Some(tools::Hit::TableColumn { id, col: 2 }), "the right edge");
+    assert_eq!(hit(&s, 150.0, 139.0), Some(tools::Hit::TableRow { id, row: 0 }));
+    assert_eq!(hit(&s, 150.0, 181.0), Some(tools::Hit::TableRow { id, row: 1 }), "the bottom edge");
+    assert!(matches!(hit(&s, 100.0, 125.0), Some(tools::Hit::Shape { .. })), "the left edge moves the table");
+    assert!(matches!(hit(&s, 150.0, 125.0), Some(tools::Hit::Shape { .. })));
+    // Hovering a border shows it (the UI picks the resize cursor from the hover).
+    s.pointer(tev(PointerKind::Move, 300.0, 170.0)).unwrap();
+    assert_eq!(s.tool.hover, Some(tools::Hit::TableColumn { id, col: 1 }));
+    // A border inside a merged cell isn't there.
+    s.execute("table.merge", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    assert!(matches!(hit(&s, 200.0, 120.0), Some(tools::Hit::Shape { .. })));
+    assert_eq!(hit(&s, 200.0, 160.0), Some(tools::Hit::TableColumn { id, col: 0 }));
+}
+
+#[test]
+fn dragging_column_borders_resizes_columns() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    let undo_depth = s.doc().unwrap().history.undo.len();
+    // An inner border: the two columns share the change, the table keeps its width.
+    s.pointer(tev(PointerKind::Down, 200.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 215.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 230.0, 128.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 230.0, 128.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![130.0, 70.0, 100.0]);
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 300.0);
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo_depth + 1, "one undo step per drag");
+    // Columns don't collapse.
+    s.pointer(tev(PointerKind::Down, 230.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 500.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 500.0, 125.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![200.0 - cmd::table::MIN_COLUMN_WIDTH, cmd::table::MIN_COLUMN_WIDTH, 100.0]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0, 100.0]);
+    // The right edge: the last column and the table get wider.
+    s.pointer(tev(PointerKind::Down, 400.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 450.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 450.0, 120.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0, 150.0]);
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 350.0);
+    // A click on a border without dragging changes nothing.
+    let before = s.doc().unwrap().doc.clone();
+    s.pointer(tev(PointerKind::Down, 200.0, 125.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 200.0, 125.0)).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&before, &s.doc().unwrap().doc));
+}
+
+#[test]
+fn dragging_a_row_border_sets_the_row_height() {
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "d"]]));
+    let drawn = |s: &Session| {
+        let st = s.doc().unwrap();
+        tools::table_rows(st, &table_of(s, id))
+    };
+    s.pointer(tev(PointerKind::Down, 150.0, 140.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, 170.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 170.0)).unwrap();
+    assert_eq!(drawn(&s), vec![70.0, 40.0]);
+    let st = s.doc().unwrap();
+    assert_eq!(cmd::xfrm_of(&st.doc, &st.selection, st.shape(id).unwrap()).h, 110.0, "the table grows");
+    // Rows still fit their text: dragging the border up stops at the text.
+    s.pointer(tev(PointerKind::Down, 150.0, 170.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, 60.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, 60.0)).unwrap();
+    let h = drawn(&s)[0];
+    assert!(h > 10.0 && h < 40.0, "row 0 shrinks to its text: {h}");
+    // The bottom edge sizes the last row.
+    let bottom = 100.0 + drawn(&s).iter().sum::<f64>();
+    s.pointer(tev(PointerKind::Down, 150.0, bottom)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 150.0, bottom + 20.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 150.0, bottom + 20.0)).unwrap();
+    assert_eq!(drawn(&s)[1], 60.0);
+}
+
+#[test]
+fn dragging_a_border_while_editing_a_cell_keeps_editing() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 1]})).unwrap();
+    s.pointer(tev(PointerKind::Down, 200.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 180.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 180.0, 120.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![80.0, 120.0]);
+    assert_eq!(text_sel(&s).and_then(|t| t.cell), Some((0, 1)));
+}
+
+#[test]
+fn column_width_can_keep_the_table_width() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"]]));
+    s.execute("table.columnWidth", &json!({"id": id, "col": 1, "width": 150.0, "keepTotal": true})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 150.0, 50.0]);
+    s.execute("table.columnWidth", &json!({"id": id, "col": 1, "width": 1000.0, "keepTotal": true})).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![100.0, 200.0 - cmd::table::MIN_COLUMN_WIDTH, cmd::table::MIN_COLUMN_WIDTH]);
+    // The last column has no neighbour: the table changes width.
+    s.execute("table.columnWidth", &json!({"id": id, "col": 2, "width": 80.0, "keepTotal": true})).unwrap();
+    assert_eq!(s.doc().unwrap().shape(id).unwrap().xfrm.unwrap().w, 100.0 + (200.0 - cmd::table::MIN_COLUMN_WIDTH) + 80.0);
+}
+
+#[test]
+fn rotated_tables_hit_the_cell_under_the_pointer() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
+    s.execute("shape.rotate", &json!({"ids": [id], "deg": 90})).unwrap();
+    let st = s.doc().unwrap();
+    let f = cmd::table::table_frame(st, st.shape(id).unwrap()).unwrap();
+    let p = f.affine * deckcraft_geom::Point::new(150.0, 60.0);
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    assert_eq!(text_sel(&s).and_then(|t| t.cell), Some((1, 1)));
+}
+
+#[test]
+fn tab_moves_between_cells_skipping_merged_ones() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0, 100.0], json!([["a", "b", "c"], ["d", "e", "f"]]));
+    s.execute("table.merge", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let cell = |s: &Session| text_sel(s).and_then(|t| t.cell);
+    let shift = Mods { shift: true, ..Default::default() };
+    s.key("Tab", Mods::default()).unwrap();
+    assert_eq!(cell(&s), Some((0, 2)), "the cell under the merge is skipped");
+    s.key("Tab", shift).unwrap();
+    assert_eq!(cell(&s), Some((0, 0)));
+    s.key("Tab", shift).unwrap();
+    assert_eq!(cell(&s), Some((0, 0)), "Shift+Tab in the first cell stays");
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 2]})).unwrap();
+    s.key("Tab", Mods::default()).unwrap();
+    assert_eq!((cell(&s), table_of(&s, id).n_rows()), (Some((2, 0)), 3), "Tab in the last cell adds a row");
 }
 
 #[test]
@@ -753,7 +1132,7 @@ fn shapes_off_the_slide_can_be_selected_and_moved() {
     // Inserting off the slide keeps the box where it was asked for.
     assert_eq!(s.execute("shape.inspect", &json!({"id": off})).unwrap()["box"]["x"], 1000.0);
     s.execute("edit.select", &json!({"ids": []})).unwrap();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     // Hover and click wholly off the slide.
     assert!(matches!(s.hit_test(deckcraft_geom::Point::new(1060.0, 140.0), 3.0), Some(tools::Hit::Shape { id, .. }) if id.0 as u64 == off));
     s.pointer(ev(PointerKind::Down, 1060.0, 140.0)).unwrap();
@@ -871,9 +1250,9 @@ fn ime_composition_is_kept_by_a_key_a_click_or_another_command() {
     assert_eq!(s.doc().unwrap().history.undo.len(), undo0 + 1);
 
     s.compose_text("녕", None).unwrap();
-    s.pointer(PointerEvent { kind: PointerKind::Move, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Move, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
     assert!(s.doc().unwrap().composition.is_some(), "hovering keeps composing");
-    s.pointer(PointerEvent { kind: PointerKind::Down, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Down, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
     assert!(s.doc().unwrap().composition.is_none(), "a click settles it");
     assert_eq!(title_text(&s), "안녕");
 
@@ -1119,7 +1498,7 @@ fn text_box_xfrm(s: &Session, id: u64) -> deckcraft_geom::Xfrm {
 }
 
 fn right_click(s: &mut Session, x: f64, y: f64) -> serde_json::Value {
-    s.pointer(PointerEvent { kind: PointerKind::ContextClick, x, y, mods: Mods::default(), tol: 3.0 }).unwrap()
+    s.pointer(PointerEvent { kind: PointerKind::ContextClick, x, y, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap()
 }
 
 /// A blank slide with a rectangle A (100,100 200×100) and a text box B (400,100 200 wide),
@@ -1150,7 +1529,7 @@ fn right_click_selects_the_shape_under_the_pointer() {
     assert_eq!(st.selection.shapes, vec![a]);
     assert!(st.selection.text.is_none());
     assert!(!s.tool.dragging());
-    s.pointer(PointerEvent { kind: PointerKind::Drag, x: 190.0, y: 190.0, mods: Mods::default(), tol: 3.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Drag, x: 190.0, y: 190.0, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
     assert_eq!(text_box_xfrm(&s, a.0 as u64).x, 100.0);
     // A text box, which a left click would start editing: only selected.
     right_click(&mut s, 450.0, 115.0);
@@ -2335,6 +2714,306 @@ fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((u32::from_be_bytes(w), u32::from_be_bytes(h)))
 }
 
+/// A blank slide holding one text box being edited, with smart guides and grid snapping off so
+/// drags move by exactly the pointer delta. Returns the session, the box id and its box.
+fn editing_text_box(rot: f64) -> (Session, u64, deckcraft_geom::Xfrm) {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    let id = s.execute("insert.textBox", &json!({"rect": [200.0, 150.0, 240.0, 60.0], "text": "Hello world"})).unwrap()["id"].as_u64().unwrap();
+    if rot != 0.0 {
+        s.execute("shape.rotate", &json!({"ids": [id], "deg": rot})).unwrap();
+    }
+    s.execute("text.edit", &json!({"id": id, "at": [0, 0]})).unwrap();
+    let x = text_box_xfrm(&s, id);
+    (s, id, x)
+}
+
+/// Slide point for a point in the box's own (rotated) frame.
+fn on_box(x: &deckcraft_geom::Xfrm, lx: f64, ly: f64) -> (f64, f64) {
+    let p = x.affine() * deckcraft_geom::Point::new(lx, ly);
+    (p.x, p.y)
+}
+
+fn drag_gesture(s: &mut Session, from: (f64, f64), to: (f64, f64)) -> serde_json::Value {
+    let ev = |kind, (x, y): (f64, f64)| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
+    let down = s.pointer(ev(PointerKind::Down, from)).unwrap();
+    let mid = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
+    s.pointer(ev(PointerKind::Drag, mid)).unwrap();
+    s.pointer(ev(PointerKind::Drag, to)).unwrap();
+    s.pointer(ev(PointerKind::Up, to)).unwrap();
+    down
+}
+
+#[test]
+fn dragging_the_frame_of_edited_text_moves_the_box() {
+    let (mut s, id, x) = editing_text_box(0.0);
+    assert!(x.h > 12.0, "{x:?}");
+    let sid = deckcraft_model::ShapeId(id as u32);
+    // Hovering the band on either side of the edge says "move"; the inside says "text".
+    for ly in [-2.0, 2.0, x.h + 2.0] {
+        let (px, py) = on_box(&x, x.w / 4.0, ly);
+        s.pointer(PointerEvent { kind: PointerKind::Move, x: px, y: py, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
+        assert_eq!(s.tool.hover, Some(tools::Hit::Frame { id: sid }), "ly {ly}");
+    }
+    let (px, py) = on_box(&x, x.w / 4.0, x.h / 2.0);
+    s.pointer(PointerEvent { kind: PointerKind::Move, x: px, y: py, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
+    assert_eq!(s.tool.hover, Some(tools::Hit::Shape { id: sid, text: true }));
+
+    // Press on the top edge, just outside, and drag: the box moves, text editing ends.
+    let undo_before = s.doc().unwrap().history.undo.len();
+    let from = on_box(&x, x.w / 4.0, -1.0);
+    let down = drag_gesture(&mut s, from, (from.0 + 30.0, from.1 + 20.0));
+    assert_eq!(down["hit"], json!({"kind": "frame", "id": id}));
+    let moved = text_box_xfrm(&s, id);
+    assert!((moved.x - (x.x + 30.0)).abs() < 1e-9 && (moved.y - (x.y + 20.0)).abs() < 1e-9, "{moved:?}");
+    assert_eq!((moved.w, moved.h), (x.w, x.h));
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.is_none());
+    assert_eq!(st.selection.shapes, vec![sid]);
+    // One undo step, which puts the box back.
+    assert_eq!(st.history.undo.len(), undo_before + 1);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(text_box_xfrm(&s, id), x);
+
+    // The inner side of the band works too; a click there without a drag selects the box whole
+    // and changes nothing.
+    s.execute("text.edit", &json!({"id": id, "at": [0, 0]})).unwrap();
+    let undo_before = s.doc().unwrap().history.undo.len();
+    let (px, py) = on_box(&x, x.w * 0.75, x.h - 1.0);
+    let ev = |kind| PointerEvent { kind, x: px, y: py, mods: Mods::default(), tol: 3.0, pressure: None };
+    s.pointer(ev(PointerKind::Down)).unwrap();
+    s.pointer(ev(PointerKind::Up)).unwrap();
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.is_none());
+    assert_eq!(st.selection.shapes, vec![sid]);
+    assert_eq!(st.history.undo.len(), undo_before);
+    assert_eq!(text_box_xfrm(&s, id), x);
+}
+
+#[test]
+fn dragging_inside_edited_text_selects_text() {
+    let (mut s, id, x) = editing_text_box(0.0);
+    let undo_before = s.doc().unwrap().history.undo.len();
+    let down = drag_gesture(&mut s, on_box(&x, 8.0, x.h / 2.0), on_box(&x, x.w - 8.0, x.h / 2.0));
+    assert!(down.get("caret").is_some(), "{down}");
+    assert_eq!(text_box_xfrm(&s, id), x);
+    let st = s.doc().unwrap();
+    let t = st.selection.text.as_ref().expect("still editing");
+    assert!(t.is_range(), "{t:?}");
+    assert_eq!(t.ordered(), ((0, 0), (0, 11)));
+    assert_eq!(st.history.undo.len(), undo_before);
+}
+
+#[test]
+fn frame_of_rotated_edited_text_follows_the_rotation() {
+    let (mut s, id, x) = editing_text_box(30.0);
+    assert_eq!(x.rot, 30.0);
+    let sid = deckcraft_model::ShapeId(id as u32);
+    // The rotated bottom edge is the frame; dragging it moves the box and keeps its rotation.
+    let from = on_box(&x, x.w / 4.0, x.h + 1.0);
+    assert_eq!(s.hit_test(deckcraft_geom::Point::new(from.0, from.1), 3.0), Some(tools::Hit::Frame { id: sid }));
+    let down = drag_gesture(&mut s, from, (from.0 + 25.0, from.1 - 10.0));
+    assert_eq!(down["hit"]["kind"], "frame");
+    let moved = text_box_xfrm(&s, id);
+    assert!((moved.x - (x.x + 25.0)).abs() < 1e-9 && (moved.y - (x.y - 10.0)).abs() < 1e-9, "{moved:?}");
+    assert_eq!(moved.rot, 30.0);
+    // Inside the rotated box, pressing still places the caret.
+    s.execute("text.edit", &json!({"id": id, "at": [0, 0]})).unwrap();
+    let mx = text_box_xfrm(&s, id);
+    let (px, py) = on_box(&mx, mx.w / 2.0, mx.h / 2.0);
+    let r = s.pointer(PointerEvent { kind: PointerKind::Down, x: px, y: py, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Up, x: px, y: py, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
+    assert!(r.get("caret").is_some(), "{r}");
+    assert_eq!(text_box_xfrm(&s, id), mx);
+    // Inside the axis-aligned bounds but off the rotated box: neither text nor frame, so a press
+    // there leaves editing instead of moving the caret.
+    let off = on_box(&mx, mx.w / 2.0, -mx.h);
+    let off_pt = deckcraft_geom::Point::new(off.0, off.1);
+    assert!(mx.bounds().contains(off_pt));
+    assert_ne!(s.hit_test(off_pt, 3.0), Some(tools::Hit::Frame { id: sid }));
+    let r = s.pointer(PointerEvent { kind: PointerKind::Down, x: off.0, y: off.1, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Up, x: off.0, y: off.1, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
+    assert!(r.get("caret").is_none(), "{r}");
+    assert!(s.doc().unwrap().selection.text.is_none());
+    assert_eq!(text_box_xfrm(&s, id), mx);
+}
+
+#[test]
+fn resize_handles_beat_the_frame_of_edited_text() {
+    let (mut s, id, x) = editing_text_box(0.0);
+    // The SE corner lies in the frame band, but its handle wins.
+    let from = on_box(&x, x.w, x.h);
+    let down = drag_gesture(&mut s, from, (from.0 + 40.0, from.1));
+    assert_eq!(down["hit"]["kind"], "resize");
+    let sized = text_box_xfrm(&s, id);
+    assert!((sized.w - (x.w + 40.0)).abs() < 1e-9, "{sized:?}");
+    assert_eq!((sized.x, sized.y), (x.x, x.y));
+}
+
+#[test]
+fn format_language_marks_the_selected_text() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hola mundo"})).unwrap();
+    s.execute("text.move", &json!({"to": "wordLeft", "extend": true})).unwrap();
+    s.execute("format.language", &json!({"lang": "es-ES"})).unwrap();
+    assert_eq!(s.execute("format.state", &json!({})).unwrap()["lang"], "es-ES");
+    let body = s.doc().unwrap().current_slide().unwrap().shapes[0].text.clone().unwrap();
+    let langs: Vec<_> = body.paragraphs[0].runs.iter().map(|r| (r.text.as_str(), r.props.lang.as_deref())).collect();
+    assert_eq!(langs, vec![("Hola ", None), ("mundo", Some("es-ES"))]);
+}
+
+#[test]
+fn every_params_doc_names_its_keys() {
+    for c in command_specs() {
+        assert!(cmd::param_keys(c.params).is_ok(), "{}: {:?}", c.id, cmd::param_keys(c.params));
+    }
+    assert_eq!(cmd::param_keys("{index} | {id}").unwrap(), ["index", "id"]);
+    assert_eq!(cmd::param_keys("{color? | none?: true, kind?: a|b (x, y), ids?} → {id}").unwrap(), ["color", "none", "kind", "ids"]);
+}
+
+#[test]
+fn a_params_doc_spells_out_each_parameter() {
+    use cmd::Param;
+    let p = |name, optional, about, or, object| Param { name, optional, about, or, object };
+    assert_eq!(
+        cmd::parse_params("{preset: rect|roundRect, rect?: [x,y,w,h] pt, index? (else selected shapes)} → {id}").unwrap(),
+        [
+            p("preset", false, "rect|roundRect", false, 0),
+            p("rect", true, "[x,y,w,h] pt", false, 0),
+            p("index", true, "(else selected shapes)", false, 0)
+        ]
+    );
+    assert_eq!(
+        cmd::parse_params("{color? | none?: true, gradient?: {stops, kind?: a|b}, ids?}").unwrap(),
+        [
+            p("color", true, "", false, 0),
+            p("none", true, "true", true, 0),
+            p("gradient", true, "{stops, kind?: a|b}", false, 0),
+            p("ids", true, "", false, 0)
+        ]
+    );
+    assert_eq!(
+        cmd::parse_params("{name} | {major, minor}").unwrap(),
+        [p("name", false, "", false, 0), p("major", false, "", false, 1), p("minor", false, "", false, 1)]
+    );
+}
+
+#[test]
+fn what_a_command_acts_on_names_only_keys_it_takes() {
+    for c in command_specs() {
+        let keys = cmd::param_keys(c.params).unwrap();
+        let said = c.acts_on().unwrap_or_default();
+        assert!(!said.contains("`ids`") || keys.contains(&"ids"), "{}: {said}", c.id);
+        assert!(!said.contains("`id`") || keys.contains(&"id"), "{}: {said}", c.id);
+    }
+    let acts = |id: &str| find_command(id).and_then(|c| c.acts_on());
+    assert_eq!(acts("shape.resize").as_deref(), Some("Acts on the shapes in `ids`, else on the selected shapes."));
+    assert_eq!(acts("table.style").as_deref(), Some("Acts on the shape in `id`, else on the selected shapes."));
+    assert_eq!(acts("shape.setDefault").as_deref(), Some("Acts on the selected shapes."));
+    assert_eq!(acts("format.size").as_deref(), Some("Acts on the selected text or shapes."));
+    assert_eq!(acts("slide.new"), None);
+}
+
+/// Tables whose style the file defines (#292, #294: its look and background drawn) edit like the
+/// others: the caret is laid out with the file style's lettering, clicks and double-clicks land
+/// in the cell where it is drawn, and borders still resize.
+#[test]
+fn tables_with_a_file_defined_style_edit_and_resize() {
+    use deckcraft_model::style::{ColorRef, Fill};
+    use deckcraft_model::table::{TablePart, TablePartStyle, TableStyleDef};
+    let mut s = session();
+    let id = table_at(&mut s, &[200.0, 200.0], json!([["Hello world", "b"], ["c", "d"]]));
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let built_in = caret_point(&s, 0, 8);
+    s.execute("text.exit", &json!({})).unwrap();
+    // The table's style, defined by the file: a plain (not bold) header, a filled body, a
+    // background.
+    {
+        let style = table_of(&s, id).style;
+        let d = s.doc_mut().unwrap();
+        let doc = std::sync::Arc::make_mut(&mut d.doc);
+        let solid = |r, g, b| Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(r, g, b))));
+        doc.table_styles.push(TableStyleDef {
+            id: style,
+            name: "File style".into(),
+            parts: vec![
+                (TablePart::WholeTbl, TablePartStyle { fill: solid(230, 240, 250), ..Default::default() }),
+                (TablePart::FirstRow, TablePartStyle { fill: solid(40, 60, 90), bold: Some(false), ..Default::default() }),
+            ],
+            background: Some(TablePartStyle { fill: solid(200, 200, 200), ..Default::default() }),
+            raw: String::new(),
+        });
+    }
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    let p = caret_point(&s, 0, 8);
+    assert!((p.x - built_in.x).abs() > 0.5, "the header is laid out in the file style's (regular) weight: {p:?} vs {built_in:?}");
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    // A double-click selects the word drawn there.
+    s.pointer(tev(PointerKind::DoubleClick, p.x, p.y)).unwrap();
+    let t = text_sel(&s).unwrap();
+    assert_eq!((t.cell, t.ordered()), (Some((0, 0)), ((0, 6), (0, 11))));
+    // A click in another cell moves the caret there.
+    s.pointer(tev(PointerKind::Down, 400.0, 160.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 400.0, 160.0)).unwrap();
+    assert_eq!(text_sel(&s).unwrap().cell, Some((1, 1)));
+    // Border drag, while editing: the columns resize, editing goes on.
+    s.pointer(tev(PointerKind::Down, 300.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 320.0, 120.0)).unwrap();
+    s.pointer(tev(PointerKind::Drag, 330.0, 121.0)).unwrap();
+    s.pointer(tev(PointerKind::Up, 330.0, 121.0)).unwrap();
+    assert_eq!(table_of(&s, id).cols, vec![230.0, 170.0]);
+    assert_eq!(text_sel(&s).unwrap().cell, Some((1, 1)));
+}
+
+#[test]
+fn editing_notes_keeps_their_formatting_through_pptx() {
+    use deckcraft_model::text::{Bullet, ParaProps, Paragraph, Run, RunProps, TextBody};
+    // A deck whose notes have a bold heading over indented bullet points, as saved by PowerPoint.
+    let mut p = deckcraft_model::defaults::new_presentation(None);
+    let bullet = ParaProps { margin_left: Some(22.5), indent: Some(-22.5), bullet: Some(Bullet::Char { char: "•".into() }), ..Default::default() };
+    let point = |t: &str| Paragraph { level: 1, props: bullet.clone(), runs: vec![Run::new(t)], ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).notes = TextBody {
+        paragraphs: vec![
+            Paragraph { runs: vec![Run::with("Overview", RunProps { bold: Some(true), ..Default::default() })], ..Default::default() },
+            point("First point"),
+            point("Second point"),
+        ],
+        ..Default::default()
+    };
+    let bytes = deckcraft_pptx::export(&p).unwrap();
+    let mut s = session();
+    s.execute("file.openBytes", &json!({"name": "notes.pptx", "data": crate::cmd::base64_encode(&bytes)})).unwrap();
+    // Type a word into the second bullet, as the notes pane does.
+    s.execute("slide.notes", &json!({"index": 0, "text": "Overview\nFirst point\nSecond main point"})).unwrap();
+    let check = |notes: &TextBody| {
+        assert_eq!(notes.text(), "Overview\nFirst point\nSecond main point");
+        assert_eq!(notes.paragraphs[0].runs[0].props.bold, Some(true));
+        for para in &notes.paragraphs[1..] {
+            assert_eq!(para.level, 1);
+            assert_eq!(para.props.margin_left, Some(22.5));
+            assert_eq!(para.props.indent, Some(-22.5));
+            assert_eq!(para.props.bullet, Some(Bullet::Char { char: "•".into() }));
+        }
+    };
+    check(&s.doc().unwrap().doc.slides[0].notes);
+    let saved = s.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].as_str().unwrap().to_string();
+    let reopened = deckcraft_pptx::import(&crate::cmd::base64_decode(&saved).unwrap()).unwrap();
+    check(&reopened.slides[0].notes);
+    // slide.inspect hands out the formatted notes, and slide.notes {body} takes them back as they are.
+    let body = s.execute("slide.inspect", &json!({"index": 0})).unwrap()["notesBody"].clone();
+    s.execute("slide.notes", &json!({"index": 0, "text": "Plain"})).unwrap();
+    assert_eq!(s.doc().unwrap().doc.slides[0].notes, TextBody::from_text("Plain"), "new text shares nothing: plain");
+    s.execute("slide.notes", &json!({"index": 0, "body": body})).unwrap();
+    check(&s.doc().unwrap().doc.slides[0].notes);
+    assert!(s.execute("slide.notes", &json!({"index": 0, "body": 7})).is_err());
+}
+
 #[test]
 fn autocorrect_options_as_you_type() {
     let mut s = session();
@@ -2524,4 +3203,172 @@ fn the_caret_takes_the_colour_of_the_text() {
     let st = s.doc().unwrap();
     let red = cmd::text::caret_color(st, &st.selection.text.clone().unwrap()).unwrap();
     assert_eq!((red.r, red.g, red.b), (0xFF, 0, 0));
+}
+
+/// Smooth Corners (#286): a rounded rectangle becomes a squircle outline that survives PPTX.
+#[test]
+fn smooth_corners_makes_a_squircle_outline() {
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "roundRect", "rect": [100, 100, 200, 100]})).unwrap();
+    let id = deckcraft_model::ShapeId(r["id"].as_u64().unwrap() as u32);
+    s.execute("shape.smoothCorners", &json!({"smoothing": 60})).unwrap();
+    let d = |s: &Session| match &s.doc().unwrap().shape(id).unwrap().geom {
+        deckcraft_model::Geom::Custom { paths } => paths[0].d.clone(),
+        g => panic!("{g:?}"),
+    };
+    // The default roundRect radius is 16.667% of the short side: 16.667 pt, smoothed 60%.
+    assert_eq!(d(&s), deckcraft_geom::squircle::path_d(200.0, 100.0, 16.667, 0.6));
+    // The smoothed outline takes a new smoothing with the radius it was drawn with; without a
+    // radius, or with another one (it could be any freeform), it is refused.
+    s.execute("shape.smoothCorners", &json!({"smoothing": 100, "radius": 16.667})).unwrap();
+    assert_eq!(d(&s), deckcraft_geom::squircle::path_d(200.0, 100.0, 16.667, 1.0));
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50})).is_err());
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50, "radius": 30})).is_err());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(d(&s), deckcraft_geom::squircle::path_d(200.0, 100.0, 16.667, 0.6));
+    // Other shapes are refused.
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [0, 0, 50, 50]})).unwrap();
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50})).is_err());
+    // So is a freeform, whatever radius is given.
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [0, 0, 50, 50]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": false})).unwrap();
+    assert!(matches!(s.doc().unwrap().shapes().last().unwrap().geom, deckcraft_model::Geom::Custom { .. }), "Edit Points made a freeform");
+    assert!(s.execute("shape.smoothCorners", &json!({"smoothing": 50, "radius": 8})).is_err());
+    // The outline round-trips through PPTX as custom geometry.
+    let bytes = crate::cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    let back = crate::cmd::file::open_presentation("x.pptx", &bytes).unwrap();
+    let sh = back.slides.iter().flat_map(|sl| sl.shapes.iter()).find(|sh| matches!(sh.geom, deckcraft_model::Geom::Custom { .. }));
+    assert!(sh.is_some(), "a custom outline in the saved file");
+}
+
+#[test]
+fn wordart_adjust_handle_drags_and_undoes() {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.prefs.smart_guides = false;
+    let id =
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 60.0, 420.0, 200.0], "text": "ARCHED"})).unwrap()["id"].as_u64().unwrap();
+    let sid = model::ShapeId(id as u32);
+    {
+        let st = s.doc_mut().unwrap();
+        let slide = st.selection.slide;
+        let mut doc = (*st.doc).clone();
+        let sh = model::find_shape_mut(&mut std::sync::Arc::make_mut(&mut doc.slides[slide]).shapes, sid).unwrap();
+        sh.text.as_mut().unwrap().body.warp = Some("textArchUp".into());
+        st.doc = std::sync::Arc::new(doc);
+    }
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    let (at, top) = {
+        let st = s.doc().unwrap();
+        let sh = st.shape(sid).unwrap();
+        let x = cmd::xfrm_of(&st.doc, &st.selection, sh);
+        let hs = tools::wordart_handles(&st.doc, &st.selection, sh, x.w, x.h);
+        assert_eq!(hs.len(), 1);
+        let at = x.affine() * hs[0].pos;
+        (at, deckcraft_geom::Point::new(x.center().x, x.y))
+    };
+    assert!(matches!(s.hit_test(at, 4.0), Some(tools::Hit::Warp { index: 0, .. })));
+    let ev = |kind, p: deckcraft_geom::Point| PointerEvent { kind, x: p.x, y: p.y, mods: Mods::default(), tol: 4.0, pressure: None };
+    s.pointer(ev(PointerKind::Down, at)).unwrap();
+    s.pointer(ev(PointerKind::Drag, top)).unwrap();
+    s.pointer(ev(PointerKind::Up, top)).unwrap();
+    let adj = s.doc().unwrap().shape(sid).unwrap().text.as_ref().unwrap().body.warp_adj.clone();
+    let deg = adj.first().copied().unwrap_or(0.0) / 60_000.0;
+    assert!((deg - 270.0).abs() < 2.0, "{deg} from {adj:?}");
+    s.execute("edit.undo", &json!({})).unwrap();
+    let body = &s.doc().unwrap().shape(sid).unwrap().text.as_ref().unwrap().body;
+    assert_eq!(body.warp.as_deref(), Some("textArchUp"));
+    assert!(body.warp_adj.is_empty(), "undo restores the default adjusts");
+}
+
+#[test]
+fn shape_picture_fill_options_tile_offset_and_round_trip() {
+    use deckcraft_model::style::PictureMode;
+    let mut img = image::RgbaImage::new(4, 4);
+    img.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
+    let mut png = Vec::new();
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    let pf = |s: &Session| match s.doc().unwrap().selected_shapes()[0].fill.clone() {
+        Some(deckcraft_model::Fill::Picture(pf)) => pf,
+        other => panic!("{other:?}"),
+    };
+    // Options without a picture fill are a no-op, not an error.
+    s.execute("shape.fill", &json!({"pictureProps": {"tile": true}})).unwrap();
+    s.execute("shape.fill", &json!({"picture": cmd::base64_encode(&png)})).unwrap();
+    s.execute("shape.fill", &json!({"pictureProps": {"stretch": [0.1, 0.2, 5, "x"]}})).unwrap();
+    assert_eq!(pf(&s).mode, PictureMode::Stretch { fill_rect: [0.1, 0.2, 0.99, 0.0] });
+    s.execute("shape.fill", &json!({"pictureProps": {"tile": true, "offsetX": 12, "offsetY": -3, "scaleX": 0.5, "scaleY": 50, "align": "ctr", "mirror": "xy", "rotateWithShape": false}})).unwrap();
+    s.execute("shape.fill", &json!({"pictureProps": {"align": "bogus", "offsetX": f64::NAN}, "transparency": 0.4})).unwrap();
+    let want = PictureMode::Tile { tx: 12.0, ty: -3.0, sx: 0.5, sy: 10.0, flip: "xy".into(), align: "ctr".into() };
+    let got = pf(&s);
+    assert_eq!(got.mode, want);
+    assert!(got.upright);
+    assert!((got.alpha.unwrap() - 0.6).abs() < 1e-9);
+    // PPTX round trip keeps the options.
+    let bytes = cmd::file::save_bytes(&s.doc().unwrap().doc, "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": "p.pptx", "data": cmd::base64_encode(&bytes)})).unwrap();
+    let doc = &s.doc().unwrap().doc;
+    let back = doc.slides.iter().flat_map(|sl| sl.shapes.iter()).find_map(|sh| match &sh.fill {
+        Some(deckcraft_model::Fill::Picture(pf)) => Some(pf.clone()),
+        _ => None,
+    });
+    let back = back.unwrap();
+    assert_eq!(back.mode, want);
+    assert!(back.upright);
+    assert!((back.alpha.unwrap() - 0.6).abs() < 1e-6);
+}
+
+#[test]
+fn find_and_replace_across_shapes_and_notes() {
+    let mut s = session();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100], "text": "Old plan, old team\nboldly"})).unwrap();
+    s.execute("slide.notes", &json!({"text": "Discuss the old plan"})).unwrap();
+    let q = json!({"text": "old"});
+    let found = s.execute("text.find", &q).unwrap();
+    let n = found.as_array().unwrap().len();
+    assert!(n >= 3, "{found}");
+    let whole = s.execute("text.find", &json!({"text": "old", "wholeWords": true, "matchCase": true})).unwrap();
+    assert_eq!(whole.as_array().unwrap().len(), n - 2, "Old and boldly are not whole lower-case matches");
+
+    let first = found[0].clone();
+    assert_eq!((first["para"].as_u64(), first["start"].as_u64()), (Some(0), Some(0)));
+    s.execute("text.replace", &json!({"text": "old", "with": "New", "at": first})).unwrap();
+    assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+
+    let r = s.execute("text.replace", &json!({"text": "old", "with": "new", "wholeWords": true})).unwrap();
+    assert_eq!(r["replaced"].as_u64(), Some(n as u64 - 2));
+    let text = s.doc().unwrap().doc.slides[0].shapes.iter().filter_map(|x| x.text.as_ref()).map(|t| t.text()).collect::<Vec<_>>().join("|");
+    assert!(text.contains("New plan, new team\nboldly"), "{text}");
+    assert!(s.execute("text.replace", &json!({"text": "zebra", "with": "x"})).is_err());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+}
+
+#[test]
+fn pen_pressure_is_kept_and_a_mouse_draws_at_full_width() {
+    let mut s = session();
+    s.set_tool(tools::ToolKind::Ink { mode: "pen".into(), color: deckcraft_model::Rgba::rgb(20, 20, 20), width: 4.0 });
+    let ev = |kind, x, y, pressure| tools::PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure };
+    s.pointer(ev(PointerKind::Down, 40.0, 80.0, Some(0.2))).unwrap();
+    s.pointer(ev(PointerKind::Drag, 80.0, 80.0, Some(1.0))).unwrap();
+    s.pointer(ev(PointerKind::Drag, 120.0, 80.0, Some(0.4))).unwrap();
+    s.pointer(ev(PointerKind::Up, 120.0, 80.0, Some(0.4))).unwrap();
+    s.pointer(ev(PointerKind::Down, 40.0, 160.0, None)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 100.0, 160.0, Some(f32::NAN))).unwrap();
+    s.pointer(ev(PointerKind::Up, 100.0, 160.0, None)).unwrap();
+    let got = ink_pressures(&s);
+    assert_eq!(got, vec![vec![0.2, 1.0, 0.4], vec![1.0, 1.0]]);
+}
+
+fn ink_pressures(s: &Session) -> Vec<Vec<f32>> {
+    let st = s.doc().unwrap();
+    let Some(sh) = st.shapes().iter().rev().find(|sh| matches!(sh.kind, deckcraft_model::ShapeKind::Ink { .. })) else {
+        return vec![];
+    };
+    let deckcraft_model::ShapeKind::Ink { strokes } = &sh.kind else { return vec![] };
+    strokes.iter().map(|stroke| stroke.points.iter().map(|p| p.2).collect()).collect()
 }

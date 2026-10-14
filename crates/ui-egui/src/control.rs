@@ -3,8 +3,8 @@
 //! Methods (JSON lines over the host's transport, see `docs/control-protocol.md`):
 //! - `engine.execute {command, params}` / `ui.menu.invoke {command, params}`: run any command (engine or UI)
 //! - `engine.commands`: engine + UI commands with enablement; `document.inspect`; `ui.inspect`
-//! - `ui.pointer {events:[{kind: down|drag|up|move|doubleclick, x, y}], mods}`: drive the active tool in
-//!   slide points (same path as the mouse)
+//! - `ui.pointer {events:[{kind: down|drag|up|move|doubleclick, x, y, pressure?}], mods}`: drive the active tool in
+//!   slide points (same path as the mouse; `pressure` is `0..=1` when a pen reported one)
 //! - `ui.key {key, shift?, alt?, cmd?}` / `ui.text {text}`: keyboard through the engine
 //! - `ui.tool.select {tool, preset?}`
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}` / `ui.drag {x, y, toX, toY, steps?}`: real egui pointer
@@ -83,6 +83,7 @@ pub fn inspect(app: &SlideApp, ctx: &egui::Context) -> Value {
             let now = ctx.input(|i| i.time);
             s.showing_value(n, aspect, ctx.content_rect(), now)
         }),
+        "animPreview": app.anim_preview_report().map(|(slide, time, duration)| json!({"slide": slide, "time": time, "duration": duration})),
         "documents": app.session.documents().iter().map(|d| json!({"title": d.title(), "dirty": d.is_dirty(), "path": d.path})).collect::<Vec<_>>(),
         "status": app.status.as_ref().map(|s| s.0.clone()),
         "perf": {"frameMs": app.perf.frame_ms, "renderMs": app.perf.render_ms, "fps": app.perf.fps},
@@ -132,7 +133,8 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
                     return err("pointer events need x and y");
                 };
                 let mods = e.get("mods").map(mods_from).unwrap_or(base);
-                match app.session.pointer(PointerEvent { kind, x, y, mods, tol: (4.0 / app.canvas_scale.max(0.05)) as f64 }) {
+                let pressure = e.get("pressure").and_then(Value::as_f64).map(|v| v as f32);
+                match app.session.pointer(PointerEvent { kind, x, y, mods, tol: (4.0 / app.canvas_scale.max(0.05)) as f64, pressure }) {
                     Ok(v) => last = v,
                     Err(e) => return err(e),
                 }
@@ -141,6 +143,10 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
         }
         "ui.key" => {
             let Some(k) = s("key") else { return err("missing `key`") };
+            if app.anim_preview_active() && app.show.is_none() && matches!(k.to_ascii_lowercase().as_str(), "escape" | "esc") {
+                app.stop_anim_preview();
+                return ok(json!({"preview": false}));
+            }
             if let Some(show) = app.show.as_ref()
                 && !show.ended
                 && let Some(key) = key_from(k)
@@ -236,7 +242,11 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 };
             }
             if let Some(z) = p.get("zoom") {
-                app.ui.zoom = z.as_f64().map(|v| v as f32);
+                app.ui.zoom = z
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|v| v.clamp(*crate::ZOOM_RANGE.start(), *crate::ZOOM_RANGE.end()));
             }
             if let Some(d) = p.get("dark").and_then(Value::as_bool) {
                 let _ = app.run("view.dark", json!({"on": d}));

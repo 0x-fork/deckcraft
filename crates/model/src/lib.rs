@@ -252,7 +252,8 @@ pub struct MediaClip {
     pub height: u32,
 }
 
-/// One ink stroke (Draw tab): points in slide coordinates with pressure.
+/// One ink stroke (Draw tab): points in slide coordinates with pressure (`0..=1`,
+/// where `1` is [`InkStroke::width`]).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct InkStroke {
@@ -260,6 +261,24 @@ pub struct InkStroke {
     pub color: Rgba,
     pub width: f64,
     pub highlighter: bool,
+}
+
+/// True when every sample is the placeholder `0.5` written before a device reported pressure.
+/// Those strokes were drawn at [`InkStroke::width`] and still are.
+pub fn ink_pressure_is_legacy(points: &[(f64, f64, f32)]) -> bool {
+    !points.is_empty() && points.iter().all(|p| (p.2 - 0.5).abs() <= 1.0e-3)
+}
+
+/// Width of one ink sample. `pressure` of `1` is the pen width. A legacy flat stroke
+/// (`legacy`) draws at the pen width. A missing reading draws at the pen width too.
+/// A light touch stays visible (at least 8% of the pen).
+pub fn ink_sample_width(pen: f64, pressure: f32, legacy: bool) -> f64 {
+    let pen = if pen.is_finite() { pen.abs() } else { 0.0 };
+    if legacy {
+        return pen;
+    }
+    let p = if pressure.is_finite() { pressure.clamp(0.08, 1.0) } else { 1.0 };
+    pen * f64::from(p)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -980,9 +999,21 @@ pub struct Presentation {
     /// sensitivity label and custom document properties.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub kept_parts: Vec<KeptPart>,
+    /// Drawing guides (View › Guides), shared by every slide (`p:guideLst` in viewProps).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub guides: Vec<DrawGuide>,
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
+}
+
+/// A drawing guide: a vertical line at `pos` points from the slide's left edge, or a horizontal
+/// one from its top.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DrawGuide {
+    pub vertical: bool,
+    pub pos: f64,
 }
 
 impl Default for Presentation {

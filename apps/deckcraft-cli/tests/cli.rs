@@ -1,118 +1,139 @@
-//! `deckcraft-cli mcp` with the automation root flags, run as the real binary.
-// Integration tests: unwrapping and panicking on failure is fine here, unlike in shipped code (AGENTS.md).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+use std::process::{Command, Output};
 
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
-
-use serde_json::Value;
-
-fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_deckcraft-cli"))
+fn cli(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_deckcraft-cli")).args(args).output().unwrap()
 }
 
-fn run(args: &[&str]) -> Output {
-    bin().args(args).output().unwrap()
+fn stdout(o: &Output) -> String {
+    assert!(o.status.success(), "exit {:?}\nstderr: {}", o.status, String::from_utf8_lossy(&o.stderr));
+    String::from_utf8_lossy(&o.stdout).into_owned()
 }
 
-fn tmpdir(tag: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("dc-cli-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+fn stderr(o: &Output) -> String {
+    assert!(!o.status.success(), "exit {:?}\nstdout: {}", o.status, String::from_utf8_lossy(&o.stdout));
+    String::from_utf8_lossy(&o.stderr).into_owned()
+}
+
+const SUBCOMMANDS: [&str; 11] = ["info", "render", "render-transition", "convert", "run", "commands", "describe", "app", "mcp", "bench", "links"];
+
+fn words(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn an_unknown_subcommand_is_named_before_the_overview() {
+    for args in [vec!["frobnicate"], vec!["help", "frobnicate"], vec!["--info", "--help"]] {
+        let err = stderr(&cli(&args));
+        assert!(err.contains("unknown subcommand `") && err.contains("\n\ndeckcraft-cli works on"), "{args:?}: {err}");
+    }
+}
+
+#[test]
+fn no_subcommand_shows_the_overview_and_fails() {
+    assert!(stderr(&cli(&[])).starts_with("deckcraft-cli works on"));
+}
+
+#[test]
+fn help_lists_every_subcommand_with_a_run_example() {
+    for flag in ["help", "--help", "-h"] {
+        let out = stdout(&cli(&[flag]));
+        for sub in SUBCOMMANDS {
+            assert!(out.contains(&format!("\n  {sub} ")), "{flag} lacks {sub}: {out}");
+        }
+        assert!(out.contains("deckcraft-cli run --cmd 'slide.new={\"title\":\"Q3 results\"}' --save q3.deckcraft"), "{out}");
+    }
+}
+
+#[test]
+fn every_subcommand_answers_help_and_does_nothing_else() {
+    let dir = std::env::temp_dir().join(format!("dc-cli-help-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    dir
-}
-
-/// Send `calls` (tool name, arguments) to `deckcraft-cli mcp <args>`; returns whether it exited
-/// cleanly, its stderr, and the stdout lines after `initialize`, one per call.
-fn mcp_session(args: &[&str], calls: &[(&str, Value)]) -> (bool, String, Vec<Value>) {
-    let mut child = bin().arg("mcp").args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
-    {
-        let stdin = child.stdin.as_mut().unwrap();
-        writeln!(stdin, r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18"}}}}"#).unwrap();
-        for (i, (name, arguments)) in calls.iter().enumerate() {
-            let call = serde_json::json!({"jsonrpc": "2.0", "id": i + 2, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
-            writeln!(stdin, "{call}").unwrap();
+    for sub in SUBCOMMANDS {
+        for args in [vec![sub, "--help"], vec![sub, "-h", "out.png"], vec!["help", sub]] {
+            let o = Command::new(env!("CARGO_BIN_EXE_deckcraft-cli")).current_dir(&dir).args(&args).output().unwrap();
+            assert!(stdout(&o).starts_with(&format!("usage: deckcraft-cli {sub}")), "{args:?}");
         }
     }
-    let out = child.wait_with_output().unwrap();
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    let replies = stdout.lines().skip(1).map(|l| serde_json::from_str(l).unwrap()).collect();
-    (out.status.success(), String::from_utf8_lossy(&out.stderr).into_owned(), replies)
-}
-
-fn text(reply: &Value) -> &str {
-    reply["result"]["content"][0]["text"].as_str().unwrap()
-}
-
-#[test]
-fn mcp_automation_roots_confine_the_server() {
-    let base = tmpdir("roots");
-    let (work, elsewhere) = (base.join("work"), base.join("elsewhere"));
-    std::fs::create_dir_all(&work).unwrap();
-    std::fs::create_dir_all(&elsewhere).unwrap();
-    std::fs::write(work.join("in.txt"), "Inside text").unwrap();
-    std::fs::write(elsewhere.join("secret.txt"), "TOP SECRET").unwrap();
-    let work_s = work.to_str().unwrap();
-    let secret = elsewhere.join("secret.txt").to_str().unwrap().to_string();
-
-    // Both spellings of the flags; inside works, outside is refused with a readable message.
-    let read_flag = format!("--automation-read-root={work_s}");
-    let calls = [
-        ("open_presentation", serde_json::json!({"path": work.join("in.txt").to_str().unwrap()})),
-        ("open_presentation", serde_json::json!({"path": secret})),
-        ("save_presentation", serde_json::json!({"path": work.join("saved.deckcraft").to_str().unwrap()})),
-        ("save_presentation", serde_json::json!({"path": elsewhere.join("saved.deckcraft").to_str().unwrap()})),
-    ];
-    let (success, stderr, replies) = mcp_session(&[&read_flag, "--automation-write-root", work_s], &calls);
-    assert!(success, "{stderr}");
-    assert!(stderr.contains("files confined"), "{stderr}");
-    assert_eq!(replies[0]["result"]["isError"], false, "{}", replies[0]);
-    assert_eq!(replies[1]["result"]["isError"], true);
-    assert!(text(&replies[1]).contains("outside the read root"), "{}", text(&replies[1]));
-    assert_eq!(replies[2]["result"]["isError"], false, "{}", replies[2]);
-    assert!(work.join("saved.deckcraft").exists());
-    assert_eq!(replies[3]["result"]["isError"], true);
-    assert!(text(&replies[3]).contains("outside the write root"), "{}", text(&replies[3]));
-    assert!(!elsewhere.join("saved.deckcraft").exists());
-
-    // A root left out grants none of its access.
-    let save = [("new_presentation", serde_json::json!({})), calls[2].clone()];
-    let (_, _, replies) = mcp_session(&[&read_flag], &save);
-    assert_eq!(replies[1]["result"]["isError"], true);
-    assert!(text(&replies[1]).contains("write authority is absent"), "{}", text(&replies[1]));
-
-    // No flags: nothing is confined.
-    let (success, _, replies) = mcp_session(&[], &calls[1..2]);
-    assert!(success);
-    assert_eq!(replies[0]["result"]["isError"], false, "{}", replies[0]);
-    let _ = std::fs::remove_dir_all(base);
+    assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "help wrote nothing");
+    std::fs::remove_dir_all(&dir).unwrap();
+    for args in [["help", "version"], ["--version", "--help"]] {
+        assert!(stdout(&cli(&args)).starts_with("usage: deckcraft-cli --version"), "{args:?}");
+    }
+    for args in [["help", "help"], ["help", "--help"]] {
+        assert!(stdout(&cli(&args)).starts_with("deckcraft-cli works on"), "{args:?}");
+    }
 }
 
 #[test]
-fn mcp_automation_root_flags_are_checked_up_front() {
-    let base = tmpdir("roots-args");
-    let dir = base.to_str().unwrap();
-    let missing = base.join("missing");
-    let fails = |args: &[&str], needle: &str| {
-        let mut full = vec!["mcp"];
-        full.extend_from_slice(args);
-        let o = run(&full);
-        assert!(!o.status.success(), "{args:?}");
-        let err = String::from_utf8_lossy(&o.stderr).into_owned();
-        assert!(err.contains(needle), "{args:?}: {err}");
-    };
-    // The flags confine the in-process server, so they cannot be combined with --connect.
-    fails(&["--connect", "7979", "--automation-read-root", dir], "--connect");
-    fails(&["--automation-write-root", dir, "--connect", "7979"], "--connect");
-    fails(&["--automation-read-root", dir, "--automation-read-root", dir], "given twice");
-    fails(&["--automation-write-root", dir, "--automation-write-root", dir], "given twice");
-    fails(&["--automation-read-root"], "needs a folder");
-    fails(&["--automation-write-root", "--sample"], "needs a folder");
-    fails(&["--automation-read-root", missing.to_str().unwrap()], "cannot open the automation read root");
-    fails(&["--automation-write-root="], "needs a non-empty folder");
-    // A file is not a folder.
-    std::fs::write(base.join("f.txt"), "x").unwrap();
-    fails(&["--automation-write-root", base.join("f.txt").to_str().unwrap()], "cannot open the automation write root");
-    let _ = std::fs::remove_dir_all(base);
+fn run_help_says_what_the_ids_do_not() {
+    let out = words(&stdout(&cli(&["run", "--help"])));
+    for fact in [
+        "COMMAND is a command id, then `=`, then the command's parameters as one JSON object.",
+        "points on a 960×540 slide",
+        "Slide indices start at 0.",
+        "Shape ids are looked up on the current slide only.",
+        "A command that adds a shape (shape.insert, insert.textBox, insert.table…) selects it.",
+        "format.* acts on the selected text or shapes",
+    ] {
+        assert!(out.contains(fact), "{fact}: {out}");
+    }
+}
+
+#[test]
+fn describe_spells_out_a_command() {
+    assert_eq!(
+        stdout(&cli(&["describe", "shape.insert"])),
+        "shape.insert: Shapes, in Insert ▸ Illustrations.
+
+Parameters:
+  preset          rect|roundRect|ellipse|triangle|rightArrow|star5|… (see shape.presets)
+  rect            [x,y,w,h] pt
+  text, optional  string
+
+Run it with: deckcraft-cli run --cmd 'shape.insert={…}'
+"
+    );
+    assert_eq!(
+        stdout(&cli(&["describe", "format.size"])),
+        "format.size: Font Size, in Home ▸ Font.
+
+Parameters:
+  size  pt
+Acts on the selected text or shapes.
+
+Run it with: deckcraft-cli run --cmd 'format.size={…}'
+"
+    );
+    assert!(stdout(&cli(&["describe", "edit.copy"])).contains("Answers with {text, html?}.\n\nRun it with: deckcraft-cli run --cmd edit.copy\n"));
+    assert!(stdout(&cli(&["describe", "text.set"])).contains("Note: replaces the whole text, keeping the first run's formatting\n"));
+    assert_eq!(
+        stdout(&cli(&["describe", "shape.setDefault"])),
+        "shape.setDefault: Set as Default Shape.\n\nTakes no parameters.\nActs on the selected shapes.\n\nRun it with: deckcraft-cli run --cmd shape.setDefault\n"
+    );
+}
+
+#[test]
+fn describe_shows_alternative_sets_of_parameters() {
+    assert!(stdout(&cli(&["describe", "slide.go"])).contains("Parameters:\n  either:\n    index\n  or:\n    id\n"));
+    let remove = stdout(&cli(&["describe", "animation.remove"]));
+    assert!(remove.contains("  or:\n    ids, optional  (all of the shapes' animations)\n"), "{remove}");
+    assert!(remove.ends_with("Run it with: deckcraft-cli run --cmd animation.remove\n") && !remove.contains("Note:"), "{remove}");
+    assert!(stdout(&cli(&["describe", "shape.move"])).contains(
+        "  either:
+    dx, optional   pt (relative)
+    dy, optional   pt (relative)
+    ids, optional
+  or:
+    x, optional    pt (absolute)
+    y, optional    pt (absolute)
+    ids, optional
+"
+    ));
+}
+
+#[test]
+fn commands_lists_one_line_per_command() {
+    assert_eq!(stdout(&cli(&["commands", "format.size"])), "format.size — Font Size: {size: pt}\n");
+    assert_eq!(stdout(&cli(&["commands", "slide.next"])), "slide.next — Next Slide\n");
+    assert_eq!(stdout(&cli(&["commands", "shape.presets"])), "shape.presets — Shape Gallery → [{name, label, category}]\n");
 }

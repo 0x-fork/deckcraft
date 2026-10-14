@@ -75,7 +75,7 @@ Today it can:
 - **Present**: transitions (including Morph), entrance/emphasis/exit and motion-path animations,
   by-paragraph builds, full-screen slide show, presenter view, pen, rehearse timings, media playback.
 - **Exchange files**: open and save PowerPoint `.pptx`, export PDF (slides, notes pages, handouts
-  with selectable text), PNG/JPEG and outlines. Unsaved work is kept by AutoRecover.
+  with selectable text), PNG/JPEG, an animated GIF of the deck and outlines. Unsaved work is kept by AutoRecover.
 - **Automate**: 200+ commands with undo, all scriptable from the CLI, a JSON control channel and an
   MCP server for AI agents.
 
@@ -155,7 +155,7 @@ deckcraft-cli mcp --automation-read-root DIR --automation-write-root DIR   # con
 
 ## Roadmap
 
-DeckCraft is in **alpha**. It covers **79% of PowerPoint's features by breadth** (92% of the core
+DeckCraft is in **alpha**. It covers **80% of PowerPoint's features by breadth** (92% of the core
 ones, measured) and is about **55% of the way to replacing PowerPoint for real work** (estimated).
 See [ROADMAP.md](ROADMAP.md) for the stage, numbers by dimension and what's next,
 [docs/target-app-parity.md](docs/target-app-parity.md) for the full assessment,

@@ -166,7 +166,12 @@ fn every_writing_command_is_refused_outside_the_write_root() {
     for f in ["x.deckcraft", "x.pptx", "x.pdf", "all1.png", "all2.png", "r.png"] {
         assert!(base.join("out").join(f).exists(), "{f}");
     }
-    assert!(!base.join("out/x.deckcraft.saving").exists(), "the temporary file is renamed away");
+    let temporaries: Vec<_> = std::fs::read_dir(base.join("out"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".saving"))
+        .collect();
+    assert!(temporaries.is_empty(), "the temporary file is renamed away");
     let _ = std::fs::remove_dir_all(base);
 }
 
