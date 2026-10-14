@@ -467,7 +467,7 @@ impl Exporter<'_> {
                 .enumerate()
                 .map(|(gi, g)| {
                     let next = run.glyphs.get(gi + 1).map_or(g.1 + run.face.advance(g.0) * run.size / run.face.upem.max(1.0), |nx| nx.1);
-                    let range = ranges[gi].clone();
+                    let range = ranges.get(gi).cloned().unwrap_or(text.len()..text.len());
                     KrillaGlyph::new(GlyphId::new(g.0), ((next - g.1) / run.size) as f32, 0.0, ((g.2 - y0) / run.size) as f32, 0.0, range, None)
                 })
                 .collect();

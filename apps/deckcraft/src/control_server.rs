@@ -35,7 +35,8 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             max_clients: 16,
-            max_line: 16 * 1024 * 1024,
+            // Picture and media inserts carry base64 payloads: room for files of about 190 MB.
+            max_line: 256 * 1024 * 1024,
             queue: 64,
             idle_timeout: Duration::from_secs(600),
             write_timeout: Duration::from_secs(30),

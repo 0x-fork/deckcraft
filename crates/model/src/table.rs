@@ -321,7 +321,8 @@ impl Merge {
         } else {
             self
         };
-        (m.rs > 1 || m.gs > 1).then_some(m)
+        // A merge that lost its only row or column is gone, not a 0-span merge over its neighbours.
+        (m.rs >= 1 && m.gs >= 1 && (m.rs > 1 || m.gs > 1)).then_some(m)
     }
     fn delete_col(self, at: usize) -> Option<Self> {
         let m = if at < self.c {
@@ -331,7 +332,8 @@ impl Merge {
         } else {
             self
         };
-        (m.rs > 1 || m.gs > 1).then_some(m)
+        // A merge that lost its only row or column is gone, not a 0-span merge over its neighbours.
+        (m.rs >= 1 && m.gs >= 1 && (m.rs > 1 || m.gs > 1)).then_some(m)
     }
 }
 
@@ -549,6 +551,22 @@ mod tests {
         assert!(!a.is_covered());
         assert_eq!((a.row_span, a.grid_span), (1, 1));
         assert_eq!(anchor_text(&t, 1, 1), "M");
+        assert_topology(&t);
+    }
+
+    #[test]
+    fn deleting_the_only_row_or_column_of_a_merge_removes_it() {
+        // A 1x3 merge across a row: deleting that row leaves no merge behind.
+        let mut t = Table::new(3, 3, 300.0, 30.0);
+        assert!(t.merge(1, 0, 1, 2));
+        assert!(t.delete_row(1));
+        assert!((0..t.n_rows()).all(|r| (0..t.n_cols()).all(|c| t.cell(r, c).is_some_and(|x| !x.is_covered() && x.grid_span <= 1))));
+        assert_topology(&t);
+        // A 3x1 merge down a column: deleting that column leaves no merge behind.
+        let mut t = Table::new(3, 3, 300.0, 30.0);
+        assert!(t.merge(0, 1, 2, 1));
+        assert!(t.delete_col(1));
+        assert!((0..t.n_rows()).all(|r| (0..t.n_cols()).all(|c| t.cell(r, c).is_some_and(|x| !x.is_covered() && x.row_span <= 1))));
         assert_topology(&t);
     }
 

@@ -592,12 +592,13 @@ fn gap_stream(gaps: bool) -> Vec<u8> {
 }
 
 #[test]
-fn frame_num_gap_is_rejected_when_the_sps_forbids_gaps() {
+fn frame_num_gap_is_concealed_even_when_the_sps_forbids_gaps() {
+    // A cut or lossy stream: the gap is filled (bounded) instead of dropping the picture.
     let mut dec = Decoder::with_threads(1);
-    let res = dec.decode(&gap_stream(false), 0);
-    let _ = dec.flush();
-    assert!(res.is_err() || dec.take_error().is_some(), "a forbidden gap must be reported");
-    assert_eq!(dec.stats().frame_num_gaps, 0);
+    let mut out = dec.decode(&gap_stream(false), 0).unwrap();
+    out.extend(dec.flush());
+    assert_eq!(out.len(), 2);
+    assert_eq!(dec.stats().frame_num_gaps, 1);
 }
 
 #[test]

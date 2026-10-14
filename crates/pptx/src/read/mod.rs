@@ -745,10 +745,6 @@ pub fn color_map(cm: &El) -> Vec<(String, String)> {
     cm.attrs.iter().filter(|(k, _)| !k.starts_with("xmlns")).map(|(k, v)| (k.clone(), v.clone())).collect()
 }
 
-/// Placeholders read without a geometry (an empty custom geometry, see `shapes::sp`) take the
-/// geometry of the layout or master placeholder they inherit from, as PowerPoint draws them: a
-/// layout's picture placeholder cut into a shape keeps that shape on the slide. Anything left
-/// is a rectangle.
 /// The anchor the theme's shape defaults (`a:objectDefaults/a:spDef/a:bodyPr`) give new shapes
 /// text, if any.
 fn theme_shape_anchor(t: &deckcraft_model::Theme) -> Option<deckcraft_model::text::Anchor> {
@@ -796,6 +792,10 @@ fn default_text_anchor(p: &mut Presentation) {
     }
 }
 
+/// Placeholders read without a geometry (an empty custom geometry, see `shapes::sp`) take the
+/// geometry of the layout or master placeholder they inherit from, as PowerPoint draws them: a
+/// layout's picture placeholder cut into a shape keeps that shape on the slide. Anything left
+/// is a rectangle.
 fn inherit_placeholder_geometry(p: &mut Presentation) {
     let unset = |g: &Geom| matches!(g, Geom::Custom { paths } if paths.is_empty());
     // Masters first, then layouts (from their masters), then slides (from layouts and masters).

@@ -476,9 +476,8 @@ impl Decoder {
         } else {
             let max = sps.max_frame_num();
             if sh.frame_num != self.prev_ref_frame_num && sh.frame_num != (self.prev_ref_frame_num + 1) % max {
-                // A gap is only legal when the SPS allows it (7.4.2.1.1); otherwise the stream is broken
-                // and filling it would only cost work, so the picture is rejected.
-                ensure!(sps.gaps_in_frame_num_allowed, "frame_num gap in a stream that does not allow gaps");
+                // A gap is only legal when the SPS allows it (7.4.2.1.1), but a cut or lossy stream has
+                // them anyway: those are concealed too rather than dropping the picture.
                 // frame_num gap (8.2.5.2): insert "non-existing" frames. Their samples are never used by
                 // conforming streams; copy the latest decoded frame for concealment.
                 let meta = Arc::new(output_meta(sps, pts, false));
