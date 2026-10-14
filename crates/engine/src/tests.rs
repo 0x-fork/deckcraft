@@ -835,3 +835,34 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// Image export keeps the whole slide: the scale is lowered so the picture fits the renderer's
+/// largest side (past it the renderer clips, and big exports came out cropped).
+#[test]
+fn image_export_scale_fits_the_largest_picture() {
+    let mut s = Session::with_new();
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(crate::cmd::file::image_scale(&doc, 2.0), 2.0);
+    assert_eq!(crate::cmd::file::image_scale(&doc, f64::NAN), 1.0);
+    let max = f64::from(deckcraft_render::MAX_SIDE);
+    assert_eq!(crate::cmd::file::image_scale(&doc, 16.0), 16.0, "16× of 960 pt fits");
+    s.execute("design.slideSize", &json!({"w": 4032, "h": 72})).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    let k = crate::cmd::file::image_scale(&doc, 4.0);
+    assert!(k * 4032.0 <= max + 1e-6 && k * 4032.0 > max - 1.0, "{k}");
+}
+
+/// Exporting every slide as images: when one file can't be written, the error says which
+/// slides already were.
+#[test]
+fn a_failed_all_slides_export_says_what_was_written() {
+    let dir = std::env::temp_dir().join(format!("deckcraft-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("deck2.png")).unwrap();
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({})).unwrap();
+    let e = s.execute("file.export", &json!({"path": dir.join("deck.png").to_string_lossy(), "all": true, "scale": 0.1})).unwrap_err().to_string();
+    assert!(e.contains("slides 1–1 were written"), "{e}");
+    assert!(dir.join("deck1.png").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}

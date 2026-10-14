@@ -252,10 +252,19 @@ fn save_bytes_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"data": base64_encode(&bytes), "bytes": bytes.len()}))
 }
 
+/// `scale` for rendering `doc`'s slides to an image: within 0.01–16, and small enough that the
+/// slide fits the renderer's largest picture ([`deckcraft_render::MAX_SIDE`]). Past that the
+/// renderer clips, so a 4× export of a 4032 pt slide came out cropped to its first 16,000 pixels.
+pub fn image_scale(doc: &Presentation, scale: f64) -> f64 {
+    let scale = if scale.is_finite() { scale.clamp(0.01, 16.0) } else { 1.0 };
+    let longest = doc.slide_size.width.max(doc.slide_size.height).max(1.0);
+    scale.min(f64::from(deckcraft_render::MAX_SIDE) / longest)
+}
+
 /// Render slide `index` (current when absent) to PNG bytes.
 pub fn render_png(doc: &Presentation, index: usize, scale: f64, edit: bool) -> (Vec<u8>, u32, u32) {
     let img =
-        deckcraft_render::render_slide(doc, index, &deckcraft_render::RenderOpts { scale: scale.clamp(0.01, 16.0), edit, ..Default::default() });
+        deckcraft_render::render_slide(doc, index, &deckcraft_render::RenderOpts { scale: image_scale(doc, scale), edit, ..Default::default() });
     (img.to_png(), img.width, img.height)
 }
 
@@ -281,16 +290,14 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                 None if bool_or(p, "all", false) => (0..st.doc.slides.len()).collect(),
                 None => vec![st.selection.slide],
             };
+            // Every slide checked before any file is written, so a bad index leaves nothing behind.
+            if let Some(i) = slides.iter().find(|i| **i >= st.doc.slides.len()) {
+                return Err(bad("file.export", format!("no slide {i}")));
+            }
+            let scale = image_scale(&st.doc, scale);
             let mut written = vec![];
             for (k, i) in slides.iter().enumerate() {
-                if *i >= st.doc.slides.len() {
-                    return Err(bad("file.export", format!("no slide {i}")));
-                }
-                let img = deckcraft_render::render_slide(
-                    &st.doc,
-                    *i,
-                    &deckcraft_render::RenderOpts { scale: scale.clamp(0.01, 16.0), ..Default::default() },
-                );
+                let img = deckcraft_render::render_slide(&st.doc, *i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
                 let bytes = if format == "png" { img.to_png() } else { img.to_jpeg(92) };
                 let out = if slides.len() == 1 {
                     path.clone()
@@ -300,7 +307,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                     let ext = pth.extension().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| format.clone());
                     pth.with_file_name(format!("{stem}{}.{ext}", k + 1)).to_string_lossy().to_string()
                 };
-                write_file(&out, &bytes)?;
+                // Say which slides made it when one can't be written (disk full part-way).
+                write_file(&out, &bytes)
+                    .map_err(|e| if written.is_empty() { e } else { EngineError::Other(format!("{e} (slides 1–{k} were written)")) })?;
                 written.push(out);
             }
             Ok(json!({"files": written}))
