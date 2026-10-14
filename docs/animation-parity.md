@@ -72,7 +72,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | Triggers on a media bookmark | yes | no |
 | Animation Painter | yes | yes (#54) |
 | Animation Pane: list, reorder, remove | yes | yes |
-| Animation Pane: advanced timeline (bars you drag) | yes | **no** |
+| Animation Pane: advanced timeline (bars you drag) | yes | yes: bars from the show schedule, drag the body for delay, the right edge for duration, seconds ruler (`animpane_tests`) |
 | Preview in the editor (current effect, from selected) | yes | partly |
 | Motion path editing (edit points, reverse, lock) | yes | partly (no edit points) |
 | Multiple animations on one object | yes | yes |
@@ -82,7 +82,7 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 
 | Work | Hours |
 |---|---|
-| Animation Pane timeline, preview from selected, effect dialog depth | 5–8 |
+| Preview from selected, effect dialog depth | 4–6 |
 | The remaining ~126 effects (most are parameter variations of existing ones) | 3–6 |
 | Rewind and other effect options on round trip (#77) | 1–2 |
 | Transition sounds: the rest of PowerPoint's built-in list (Applause, Arrow, Bomb…) | 1 |
