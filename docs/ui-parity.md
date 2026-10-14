@@ -1,6 +1,6 @@
 # UI parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Format Shape fill transparency follows the selection; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -58,7 +58,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 
 | Pane / dialog | PowerPoint | DeckCraft |
 |---|---|---|
-| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, some effects, size; no 3-D, thin picture/texture options |
+| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill (solid transparency follows the selection), gradient editor, line, some effects, size; no 3-D, thin picture/texture options |
 | Format Background pane | yes | yes |
 | Selection Pane | front-most first, groups fold, drag to restack, Bring Forward / Send Backward arrows, Show All / Hide All, eye, padlock (Lock), rename in place | same: drag restacks among siblings (a child stays in its group), Ctrl+click toggles, Shift+click selects a run, arrows / Home / End / F2 / Esc in the list, right-click menu |
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |
@@ -148,6 +148,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Format Shape Fill transparency slider follows the selected solid fill and does not clear it on focus loss |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
