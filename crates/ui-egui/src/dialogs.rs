@@ -486,7 +486,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 Some(Action::EndShow) => ("endShow", String::new()),
                 Some(Action::PlayMedia) => ("playMedia", String::new()),
                 Some(Action::Url { url }) => ("url", url.clone()),
-                Some(Action::CustomShow { name }) => ("customShow", name.clone()),
+                Some(Action::CustomShow { name, .. }) => ("customShow", name.clone()),
                 Some(Action::Program { path }) => ("program", path.clone()),
                 Some(Action::Slide { slide }) => ("slide", slides.iter().position(|(id, _)| id == slide).unwrap_or(0).to_string()),
             };

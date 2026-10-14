@@ -686,7 +686,7 @@ fn shape_action(s: &mut Session, p: &Value) -> Result<Value> {
             if !s.doc()?.doc.custom_shows.iter().any(|c| c.name == name) {
                 return Err(bad(CMD, format!("no custom show `{name}`")));
             }
-            Some(Action::CustomShow { name })
+            Some(Action::CustomShow { name, returns: true })
         }
         "program" => Some(Action::Program { path: need("path")? }),
         "slide" => {
@@ -698,7 +698,7 @@ fn shape_action(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let highlight = bool_param(p, "highlight").unwrap_or(true);
     let tooltip = str_param(p, "tooltip").unwrap_or("").to_string();
-    let link = action.map(|action| Hyperlink { action, tooltip, highlight_click: highlight });
+    let link = action.map(|action| Hyperlink { action, tooltip, highlight_click: highlight, sound: None, stop_sound: false });
     edit_shapes(s, p, CMD, |sh| {
         if hover {
             sh.hover = link.clone();
