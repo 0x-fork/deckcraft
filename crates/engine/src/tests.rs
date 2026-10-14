@@ -1728,3 +1728,41 @@ fn smartart_text_pane_edits_regenerate_the_diagram() {
     let back = deckcraft_format::load(&bytes).unwrap();
     assert!(back.slides[0].shapes.iter().any(|x| x.diagram.as_ref().is_some_and(|d| d.nodes.len() == 3)));
 }
+
+#[test]
+fn smartart_round_trips_through_pptx_as_a_diagram() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("insert.smartArt", &json!({"kind": "hierarchy", "items": ["CEO", "\tCTO", "\t\tDev", "\tCFO"]})).unwrap();
+    let doc = s.doc().unwrap().doc.as_ref().clone();
+    let bytes = deckcraft_pptx::export(&doc).unwrap();
+    let names: Vec<String> = {
+        let z = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+        z.file_names().map(String::from).collect()
+    };
+    for part in ["data1", "layout1", "quickStyle1", "colors1", "drawing1"] {
+        assert!(names.iter().any(|n| n == &format!("ppt/diagrams/{part}.xml")), "{part} in {names:?}");
+    }
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    assert!(back.validate().is_empty());
+    let g = back.slides[1].shapes.iter().find(|x| x.diagram.is_some()).expect("a SmartArt group");
+    let d = g.diagram.as_ref().unwrap();
+    assert_eq!(d.kind, "hierarchy");
+    assert!(d.imported);
+    let outline: Vec<(&str, u8)> = d.nodes.iter().map(|n| (n.text.as_str(), n.level)).collect();
+    assert_eq!(outline, [("CEO", 0), ("CTO", 1), ("Dev", 2), ("CFO", 1)]);
+    assert!(g.children().len() >= 4, "the cached drawing is read back as shapes");
+
+    // The Text Pane works on the imported diagram, and a second round trip keeps the edit.
+    let gid = g.id.0;
+    let path = std::env::temp_dir().join(format!("deckcraft-smartart-{}.pptx", std::process::id()));
+    std::fs::write(&path, &bytes).unwrap();
+    let mut s2 = Session::new();
+    s2.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap();
+    let _ = std::fs::remove_file(&path);
+    s2.execute("slide.go", &json!({"index": 1})).unwrap();
+    s2.execute("smartArt.addNode", &json!({"id": gid, "index": 3, "position": "after", "text": "COO"})).unwrap();
+    let again = deckcraft_pptx::import(&deckcraft_pptx::export(s2.doc().unwrap().doc.as_ref()).unwrap()).unwrap();
+    let d = again.slides[1].shapes.iter().find_map(|x| x.diagram.clone()).unwrap();
+    assert_eq!(d.nodes.last().map(|n| (n.text.as_str(), n.level)), Some(("COO", 1)));
+}

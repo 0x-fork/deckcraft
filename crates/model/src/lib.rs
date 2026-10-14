@@ -339,6 +339,21 @@ pub struct Diagram {
     /// list, process, cycle, hierarchy, pyramid or matrix.
     pub kind: String,
     pub nodes: Vec<DiagramNode>,
+    /// The group's shapes are the file's drawing, not generated from `nodes`: text typed into them
+    /// isn't mapped back to nodes (the first outline edit regenerates them).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub imported: bool,
+    /// PowerPoint's layout id (`layoutDef@uniqueId`) the diagram came with.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub layout_id: String,
+    /// The file's own layout, quick style and colour definitions, written back unchanged while the
+    /// layout isn't switched.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout_xml: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style_xml: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colors_xml: Option<String>,
 }
 
 /// One line of the Text Pane: its text and outline level (0 = top level).

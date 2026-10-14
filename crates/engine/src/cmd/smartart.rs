@@ -194,6 +194,9 @@ fn node_map(d: &Diagram) -> Vec<Vec<usize>> {
 
 /// Read text typed into the diagram's shapes back into its nodes.
 fn sync_text(d: &mut Diagram, children: &[Shape]) {
+    if d.imported {
+        return;
+    }
     for (shape, idx) in children.iter().zip(node_map(d)) {
         let Some(body) = &shape.text else { continue };
         if body.paragraphs.len() != idx.len() {
@@ -436,6 +439,7 @@ fn edit_diagram<T>(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Di
         sync_text(&mut d, &children);
         let out = f(&mut d)?;
         normalize(&mut d.nodes);
+        d.imported = false;
         let kids = regenerate(doc, &d, child);
         let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad(cmd, "no slide"))?;
         let sh = deckcraft_model::find_shape_mut(shapes, gid).ok_or_else(|| bad(cmd, "no such shape"))?;
@@ -458,7 +462,7 @@ pub fn insert(s: &mut Session, kind: &str, mut nodes: Vec<DiagramNode>) -> Resul
         nodes = (0..3).map(|_| DiagramNode { text: "Text".into(), level: 0 }).collect();
     }
     normalize(&mut nodes);
-    let d = Diagram { kind: kind.into(), nodes };
+    let d = Diagram { kind: kind.into(), nodes, ..Default::default() };
     let size = s.doc()?.doc.slide_size;
     let area = Xfrm::new(size.width * 0.1, size.height * 0.28, size.width * 0.8, size.height * 0.6);
     let id = s.edit(|doc, sel| {
@@ -542,6 +546,11 @@ fn change_layout(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "smartArt.layout";
     let kind = str_param(p, "kind").filter(|k| KINDS.contains(k)).ok_or_else(|| bad(CMD, "unknown layout"))?.to_string();
     edit_diagram(s, p, CMD, |d| {
+        if d.kind != kind {
+            // PowerPoint's own layout no longer applies.
+            d.layout_id.clear();
+            d.layout_xml = None;
+        }
         d.kind = kind;
         Ok(Value::Null)
     })
@@ -586,18 +595,18 @@ mod tests {
     #[test]
     fn layouts_map_nodes_to_shapes() {
         let area = Xfrm::new(0.0, 0.0, 800.0, 400.0);
-        let d = Diagram { kind: "list".into(), nodes: mk(&[0, 1, 1, 0]) };
+        let d = Diagram { kind: "list".into(), nodes: mk(&[0, 1, 1, 0]), ..Default::default() };
         let v = layout(&d, area);
         assert_eq!(v.len(), 2);
         let t = v[0].text.as_ref().map(|b| b.paragraphs.len());
         assert_eq!(t, Some(3), "sub-points are bullets in their parent's shape");
-        let h = Diagram { kind: "hierarchy".into(), nodes: mk(&[0, 1, 2, 1]) };
+        let h = Diagram { kind: "hierarchy".into(), nodes: mk(&[0, 1, 2, 1]), ..Default::default() };
         let v = layout(&h, area);
         assert_eq!(v.len(), 4 + 3, "a box per node and a line per parent link");
         for sh in &v {
             let x = sh.xfrm.unwrap_or_default();
             assert!(x.x >= -0.01 && x.x + x.w <= 800.01 && x.y >= -0.01 && x.y + x.h <= 400.01, "{x:?}");
         }
-        assert!(layout(&Diagram { kind: "cycle".into(), nodes: vec![] }, area).is_empty());
+        assert!(layout(&Diagram { kind: "cycle".into(), ..Default::default() }, area).is_empty());
     }
 }
