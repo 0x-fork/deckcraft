@@ -96,8 +96,15 @@ fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<
     Ok(out)
 }
 
-/// Read a presentation.
+/// Read a presentation. Embedded media that is missing or damaged is left empty; use
+/// [`load_checked`] to learn which.
 pub fn load(bytes: &[u8]) -> Result<Presentation> {
+    load_checked(bytes).map(|(p, _)| p)
+}
+
+/// Read a presentation and list the embedded media that couldn't be read (missing, too large
+/// or failing its CRC), one message each. Linked media saved without its bytes isn't damage.
+pub fn load_checked(bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
     let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
     let m: Manifest = serde_json::from_slice(&json).map_err(|e| FormatError::Damaged(e.to_string()))?;
@@ -105,13 +112,18 @@ pub fn load(bytes: &[u8]) -> Result<Presentation> {
         return Err(FormatError::NotOurs(m.format));
     }
     let mut p = m.presentation;
+    let mut damaged = vec![];
     for item in &mut p.media {
-        if let Ok(data) = read_entry(&mut z, &format!("media/{}", item.id.0)) {
-            item.data = Arc::new(data);
+        let name = format!("media/{}", item.id.0);
+        let linked_only = item.link.is_some() && z.index_for_name(&name).is_none();
+        match read_entry(&mut z, &name) {
+            Ok(data) => item.data = Arc::new(data),
+            Err(_) if linked_only => {}
+            Err(e) => damaged.push(e.to_string()),
         }
     }
     repair(&mut p);
-    Ok(p)
+    Ok((p, damaged))
 }
 
 /// Make a loaded presentation safe to edit: a master exists, every slide's layout exists,
@@ -278,6 +290,44 @@ pub fn slides_to_outline(p: &Presentation) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The same package without the entries `drop` names.
+    fn without(bytes: &[u8], drop: &str) -> Vec<u8> {
+        let mut z = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for i in 0..z.len() {
+            let f = z.by_index(i).unwrap();
+            if f.name() != drop {
+                out.raw_copy_file(f).unwrap();
+            }
+        }
+        out.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn missing_or_corrupt_media_is_reported() {
+        let mut p = Presentation::default();
+        let id = p.add_media("a.png", "image/png", b"PICTURE-BYTES-0123456789".to_vec());
+        let good = save(&p).unwrap();
+        assert!(load_checked(&good).unwrap().1.is_empty());
+        // Missing member.
+        let (q, damaged) = load_checked(&without(&good, &format!("media/{}", id.0))).unwrap();
+        assert_eq!(damaged.len(), 1, "{damaged:?}");
+        assert!(q.media(id).is_some_and(|m| m.data.is_empty()));
+        // Bad CRC: PNGs are stored, so their bytes sit in the file as they are.
+        let mut bad = good.clone();
+        let at = bad.windows(13).position(|w| w == b"PICTURE-BYTES").unwrap();
+        bad[at] ^= 0xff;
+        let (_, damaged) = load_checked(&bad).unwrap();
+        assert_eq!(damaged.len(), 1, "{damaged:?}");
+        // Linked media saved without its bytes isn't damage.
+        let mut l = Presentation::default();
+        let lid = l.add_media("v.mp4", "video/mp4", vec![]);
+        if let Some(m) = l.media.iter_mut().find(|m| m.id == lid) {
+            m.link = Some("file:///movies/v.mp4".into());
+        }
+        assert!(load_checked(&save(&l).unwrap()).unwrap().1.is_empty());
+    }
 
     #[test]
     fn roundtrip_with_media() {

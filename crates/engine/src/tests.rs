@@ -1491,3 +1491,35 @@ fn edit_points_types_and_handles() {
     let (_, ho3, _) = crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 2).unwrap();
     assert!((ho3.unwrap() - ho).hypot() < 1e-3);
 }
+
+/// #392: a `.deckcraft` whose embedded picture is damaged opens as an untitled "(Repaired)"
+/// copy with a message, so Save can't overwrite the original with the empty media.
+#[test]
+fn damaged_native_file_opens_as_repaired_copy() {
+    let mut p = deckcraft_model::Presentation::default();
+    p.add_media("a.png", "image/png", b"PICTURE-BYTES-0123456789".to_vec());
+    let good = deckcraft_format::save(&p).unwrap();
+    // PNGs are stored as they are, so flipping a byte breaks the entry's CRC.
+    let mut bad = good.clone();
+    let at = bad.windows(13).position(|w| w == b"PICTURE-BYTES").unwrap();
+    bad[at] ^= 0xff;
+    let dir = std::env::temp_dir().join(format!("deckcraft-392-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, bytes, damaged) in [("good.deckcraft", &good, false), ("bad.deckcraft", &bad, true)] {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let mut s = Session::new();
+        s.ui_requests.clear();
+        let r = s.execute("file.open", &json!({"path": path.to_string_lossy()})).unwrap();
+        let st = s.doc().unwrap();
+        assert_eq!(r["damagedMedia"].as_array().map(|a| a.len()), Some(usize::from(damaged)), "{r}");
+        assert_eq!(st.path.is_none(), damaged, "{name}");
+        assert_eq!(st.title.ends_with("(Repaired)"), damaged);
+        assert_eq!(s.ui_requests.iter().any(|u| matches!(u, crate::UiRequest::Message { .. })), damaged);
+        // Bytes route too.
+        let r = s.execute("file.openBytes", &json!({"name": name, "data": crate::cmd::base64_encode(bytes)})).unwrap();
+        assert_eq!(r["damagedMedia"].as_array().map(|a| a.len()), Some(usize::from(damaged)));
+    }
+    assert_eq!(std::fs::read(dir.join("bad.deckcraft")).unwrap(), bad, "original untouched");
+    let _ = std::fs::remove_dir_all(&dir);
+}

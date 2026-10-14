@@ -74,9 +74,18 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Recognise and read presentation bytes (native, PPTX).
 pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
+    open_checked(name, bytes).map(|(p, _)| p)
+}
+
+/// [`open_presentation`], plus the embedded media a `.deckcraft` file had lost or damaged.
+pub fn open_checked(name: &str, bytes: &[u8]) -> Result<(Presentation, Vec<String>)> {
     if deckcraft_format::sniff(bytes) {
-        return deckcraft_format::load(bytes).map_err(|e| EngineError::Other(e.to_string()));
+        return deckcraft_format::load_checked(bytes).map_err(|e| EngineError::Other(e.to_string()));
     }
+    open_other(name, bytes).map(|p| (p, vec![]))
+}
+
+fn open_other(name: &str, bytes: &[u8]) -> Result<Presentation> {
     if deckcraft_pptx::sniff(bytes) {
         let mut p = deckcraft_pptx::import(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
         deckcraft_format::repair(&mut p);
@@ -115,11 +124,15 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
     let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let doc = open_presentation(path, &bytes)?;
+    let (doc, damaged) = open_checked(path, &bytes)?;
     let native = deckcraft_format::sniff(&bytes) || deckcraft_pptx::sniff(&bytes);
-    let i = add_opened(s, path, native.then(|| path.to_string()), doc);
+    // A damaged file opens as an untitled repaired copy, so Save can't overwrite the original
+    // with the empty media.
+    let keep_path = native && damaged.is_empty();
+    let i = add_opened(s, path, keep_path.then(|| path.to_string()), doc);
+    report_damage(s, &damaged)?;
     let st = s.doc()?;
-    Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts}))
+    Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts, "damagedMedia": damaged}))
 }
 #[cfg(target_arch = "wasm32")]
 fn open(_s: &mut Session, _p: &Value) -> Result<Value> {
@@ -129,9 +142,28 @@ fn open(_s: &mut Session, _p: &Value) -> Result<Value> {
 fn open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").unwrap_or("Presentation");
     let data = str_param(p, "data").and_then(base64_decode).ok_or_else(|| bad("file.openBytes", "missing or invalid base64 `data`"))?;
-    let doc = open_presentation(name, &data)?;
+    let (doc, damaged) = open_checked(name, &data)?;
     let i = add_opened(s, name, None, doc);
-    Ok(json!({"document": i, "missingFonts": s.doc()?.missing_fonts}))
+    report_damage(s, &damaged)?;
+    Ok(json!({"document": i, "missingFonts": s.doc()?.missing_fonts, "damagedMedia": damaged}))
+}
+
+/// Tell the user which pictures and media a damaged file lost, and mark the copy repaired.
+fn report_damage(s: &mut Session, damaged: &[String]) -> Result<()> {
+    if damaged.is_empty() {
+        return Ok(());
+    }
+    let st = s.doc_mut()?;
+    st.title = format!("{} (Repaired)", st.title);
+    let n = damaged.len();
+    let text = format!(
+        "{n} picture{} or media file{} in this presentation couldn't be read and {} empty. It was opened as a repaired copy; save it under a new name to keep the original file.",
+        if n == 1 { "" } else { "s" },
+        if n == 1 { "" } else { "s" },
+        if n == 1 { "is" } else { "are" },
+    );
+    s.ui_requests.push(crate::UiRequest::Message { text });
+    Ok(())
 }
 
 /// Encode the presentation in `format` (`deckcraft`, `pptx`, `potx`, `ppsx`, `outline`, `pdf`).
