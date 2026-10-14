@@ -205,7 +205,11 @@ fn cell_fill(s: &mut Session, p: &Value) -> Result<Value> {
     with_table(s, p, "table.cellFill", move |t| {
         let list: Vec<(usize, usize)> = match (&cells, sel) {
             (Some(c), _) => c.clone(),
-            (None, Some((_, a, b))) => (a.0.min(b.0)..=a.0.max(b.0)).flat_map(|r| (a.1.min(b.1)..=a.1.max(b.1)).map(move |c| (r, c))).collect(),
+            (None, Some((_, a, b))) => {
+                // The selection can name cells outside the table; only walk the ones that exist.
+                let (r1, c1) = (a.0.max(b.0).min(t.n_rows().saturating_sub(1)), a.1.max(b.1).min(t.n_cols().saturating_sub(1)));
+                (a.0.min(b.0)..=r1).flat_map(|r| (a.1.min(b.1)..=c1).map(move |c| (r, c))).collect()
+            }
             _ => (0..t.n_rows()).flat_map(|r| (0..t.n_cols()).map(move |c| (r, c))).collect(),
         };
         for (r, c) in list {

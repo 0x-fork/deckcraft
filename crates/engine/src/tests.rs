@@ -835,3 +835,17 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+#[test]
+fn cell_fill_walks_only_the_cells_a_huge_selection_covers() {
+    // A selection may reach far past the table; filling it touches the real cells and nothing more.
+    let mut s = session();
+    let id = s.execute("insert.table", &json!({"rows": 2, "cols": 2, "rect": [100.0, 100.0, 200.0, 40.0]})).unwrap()["id"].clone();
+    s.execute("table.selectCells", &json!({"id": id, "from": [1, 1], "to": [1_000_000_000u64, 1_000_000_000u64]})).unwrap();
+    s.execute("table.cellFill", &json!({"none": true})).unwrap();
+    let st = s.doc().unwrap();
+    let sh = st.shapes().iter().find(|sh| json!(sh.id) == id).unwrap();
+    let deckcraft_model::ShapeKind::Table(t) = &sh.kind else { panic!("not a table") };
+    let fills: Vec<bool> = [(0, 0), (0, 1), (1, 0), (1, 1)].iter().map(|&(r, c)| t.cell(r, c).is_some_and(|x| x.fill.is_some())).collect();
+    assert_eq!(fills, [false, false, false, true]);
+}
