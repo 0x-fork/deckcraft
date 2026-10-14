@@ -646,9 +646,14 @@ fn diagram_outline(imp: &Imp, part: &Part, rel_ids: &El, data: &El) -> Option<de
         .and_then(|p| p.attr("loTypeId"))
         .unwrap_or("");
     let id = if layout_id.is_empty() { lo_type.to_string() } else { layout_id };
+    let pr = data.path(&["ptLst"]).and_then(|l| l.children_named("pt").find(|p| p.attr("type") == Some("doc"))).and_then(|p| p.child("prSet"));
+    let style = crate::dgm::style_for(pr.and_then(|p| p.attr("qsTypeId")).unwrap_or("")).to_string();
+    let colors = crate::dgm::colors_for(pr.and_then(|p| p.attr("csTypeId")).unwrap_or(""));
     Some(deckcraft_model::Diagram {
         kind: crate::dgm::kind_for(&id, &cat).to_string(),
         nodes,
+        style,
+        colors,
         imported: true,
         layout_id: id,
         layout_xml,

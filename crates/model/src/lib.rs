@@ -336,9 +336,16 @@ pub struct Shape {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Diagram {
-    /// list, process, cycle, hierarchy, pyramid or matrix.
+    /// The layout: list, blockList, hBulletList, process, chevron, verticalProcess, stepUp, cycle,
+    /// blockCycle, radial, hierarchy, pyramid, invertedPyramid, matrix or titledMatrix.
     pub kind: String,
     pub nodes: Vec<DiagramNode>,
+    /// SmartArt Style: `flat` (default), `subtle`, `intense` or `outline`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub style: String,
+    /// Change Colors: `colorful` (default: each shape its own accent) or `accent1`…`accent6`.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub colors: String,
     /// The group's shapes are the file's drawing, not generated from `nodes`: text typed into them
     /// isn't mapped back to nodes (the first outline edit regenerates them).
     #[serde(skip_serializing_if = "std::ops::Not::not")]

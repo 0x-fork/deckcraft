@@ -216,8 +216,10 @@ Detail in [file-format-parity.md](file-format-parity.md).
   Shape, Promote, Demote, Remove and layout switching (`crates/engine/src/cmd/smartart.rs`). On
   `.pptx` the outline is written as a real diagram (data, layout, quick style, colours and the
   cached drawing; `crates/pptx/src/dgm.rs`), and PowerPoint diagrams read their outline from the
-  data model, so they get the Text Pane too. Still missing: DeckCraft's own layout definitions are
-  simple (not yet checked in PowerPoint itself); there are six layouts rather than ~200; editing an
+  data model, so they get the Text Pane too. 15 layouts (bullet and block lists, five process, two cycle and
+  a radial, hierarchy, two pyramids, two matrices), four SmartArt Styles and Change Colors
+  (colourful or one accent). Still missing: DeckCraft's own layout definitions are simple (not yet
+  checked in PowerPoint itself); PowerPoint has ~200 layouts, picture layouts and 3-D styles; editing an
   imported diagram's outline redraws it with DeckCraft's layout; a diagram with no cached drawing
   isn't drawn.
 - **Impact:** a PowerPoint diagram edited in DeckCraft changes look.

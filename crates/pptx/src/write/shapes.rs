@@ -541,10 +541,10 @@ fn diagram(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, d: &dec
     x.pkg.xml_part(&layout, dgm::CT_LAYOUT, lo_xml);
     let lo = rel(o, "diagramLayout", &layout);
     let style = name("quickStyle");
-    x.pkg.xml_part(&style, dgm::CT_STYLE, d.style_xml.clone().map(String::into_bytes).unwrap_or_else(dgm::style_xml));
+    x.pkg.xml_part(&style, dgm::CT_STYLE, d.style_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::style_xml(&d.style)));
     let qs = rel(o, "diagramQuickStyle", &style);
     let colors = name("colors");
-    x.pkg.xml_part(&colors, dgm::CT_COLORS, d.colors_xml.clone().map(String::into_bytes).unwrap_or_else(dgm::colors_xml));
+    x.pkg.xml_part(&colors, dgm::CT_COLORS, d.colors_xml.clone().map(String::into_bytes).unwrap_or_else(|| dgm::colors_xml(&d.colors)));
     let cs = rel(o, "diagramColors", &colors);
     let mut fs = s.clone();
     fs.xfrm = Some(frame);
