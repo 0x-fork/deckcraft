@@ -320,6 +320,10 @@ impl Dictionary {
 
     /// Up to `n` corrections for a misspelt `word`, best first.
     pub fn suggest(&self, word: &str, n: usize) -> Vec<String> {
+        // Edit-distance candidates grow with the word: nothing is suggested for a run-on token.
+        if word.chars().count() > MAX_SUGGEST_CHARS {
+            return vec![];
+        }
         let cap = word.chars().next().is_some_and(char::is_uppercase);
         let lower = if cap && word.chars().skip(1).all(|c| !c.is_uppercase()) { word.to_lowercase() } else { word.to_string() };
         let w: Vec<char> = lower.chars().collect();
@@ -438,8 +442,17 @@ fn names(lang: &str) -> (String, String) {
     (full, base)
 }
 
+/// A language tag as dictionaries are named: 1–16 ASCII letters, digits, `-` or `_`.
+fn valid_lang(lang: &str) -> bool {
+    (1..=16).contains(&lang.len()) && lang.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 /// The `.aff`/`.dic` pair for `lang` in `dirs`: the exact locale first, then any of its language.
 pub fn find_in(dirs: &[PathBuf], lang: &str) -> Option<(PathBuf, PathBuf)> {
+    // A language tag names a file in the dictionary folders and nothing else: no `..`, no separators.
+    if !valid_lang(lang) {
+        return None;
+    }
     let (full, base) = names(lang);
     let pair = |d: &Path, stem: &str| {
         let (a, b) = (d.join(format!("{stem}.aff")), d.join(format!("{stem}.dic")));
@@ -467,6 +480,9 @@ pub fn find_in(dirs: &[PathBuf], lang: &str) -> Option<(PathBuf, PathBuf)> {
     }
     None
 }
+
+/// Longest word `Dictionary::suggest` generates corrections for.
+const MAX_SUGGEST_CHARS: usize = 64;
 
 type Cache = Mutex<HashMap<String, Option<Arc<Dictionary>>>>;
 
@@ -527,6 +543,19 @@ SFX D Y 1\nSFX D 0 ed/S .\n";
         for w in ["slidez", "makeing", "citys", "unslide", "Nasa", "nasa", "foo", "teh"] {
             assert!(!d.check(w), "{w}");
         }
+    }
+
+    #[test]
+    fn a_language_tag_cannot_leave_the_dictionary_folders() {
+        let dir = std::env::temp_dir().join(format!("deckcraft-dict-lang-{}", std::process::id()));
+        let inner = dir.join("dicts");
+        std::fs::create_dir_all(&inner).unwrap();
+        std::fs::write(dir.join("evil.aff"), "SET UTF-8\n").unwrap();
+        std::fs::write(dir.join("evil.dic"), "1\nword\n").unwrap();
+        assert!(find_in(std::slice::from_ref(&inner), "../evil").is_none());
+        assert!(find_in(std::slice::from_ref(&inner), "en/../../evil").is_none());
+        assert!(!valid_lang("") && !valid_lang("a".repeat(17).as_str()) && valid_lang("en-US") && valid_lang("pt_BR"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
