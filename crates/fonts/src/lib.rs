@@ -254,6 +254,36 @@ mod tests {
     }
 
     #[test]
+    fn faces_without_outlines_are_not_cataloged() {
+        // Rename the Semibold's `glyf` table, as in fonts whose glyphs are bitmaps or are stored in
+        // Apple's `hvgl` table. The face still maps "A", but its outline is empty. The new tag
+        // keeps the table directory sorted.
+        let mut semibold = include_bytes!("../tests/fixtures/legacy-semibold.ttf").to_vec();
+        let tables = u16::from_be_bytes([semibold[4], semibold[5]]) as usize;
+        let glyf = (0..tables).map(|i| 12 + 16 * i).find(|&r| &semibold[r..r + 4] == b"glyf").unwrap();
+        semibold[glyf..glyf + 4].copy_from_slice(b"gxyz");
+        let loaded = FontDb::with_font_dirs(Vec::new());
+        assert_eq!(loaded.add_font(semibold.clone()), 1);
+        let face = loaded.face("DeckCraft Legacy", "Semibold");
+        assert!(face.covers('A'));
+        assert!(loaded.outline(&face, face.glyph_for('A')).elements().is_empty());
+        // The system font scan lists the Regular, which has outlines, and leaves out the Semibold
+        // under both of its names.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let dir = std::env::temp_dir().join(format!("deckcraft-fonts-outlines-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("legacy-semibold.ttf"), &semibold).unwrap();
+            std::fs::write(dir.join("legacy-regular.ttf"), include_bytes!("../tests/fixtures/legacy-regular.ttf")).unwrap();
+            let db = FontDb::with_font_dirs(vec![dir.clone()]);
+            db.set_system_fallback(false);
+            assert_eq!(db.styles("DeckCraft Legacy"), ["Regular"]);
+            assert!(!db.has_family("DeckCraft Legacy Semibold"));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
     fn missing_document_fonts_are_drawn_in_calibri() {
         // PowerPoint draws a missing family in Calibri, whatever its panose or the theme says.
         let db = FontDb::global();
