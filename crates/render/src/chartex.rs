@@ -15,6 +15,10 @@ use crate::color;
 /// Draw `c` inside `area` (the space left by the title and legend).
 pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rect, base: f64, text_col: Rgba) {
     let Some(s) = c.series.first() else { return };
+    if c.kind == ChartType::RegionMap {
+        region_tiles(ctx, rctx, c, m, area, base, text_col);
+        return;
+    }
     let vals: Vec<f64> = s.values.iter().map(|v| v.unwrap_or(0.0).max(0.0)).collect();
     if vals.iter().all(|v| *v <= 0.0) {
         return;
@@ -62,6 +66,93 @@ fn funnel(
         }
         label(ctx, rctx, m, &value_label(*v), Rect::new(cx - 60.0, y, cx + 60.0, y + band), base, Align::Center, Anchor::Middle, Rgba::WHITE, false);
     }
+}
+
+/// Mix `a` towards `b` by `t` (0..1).
+fn mix(a: Rgba, b: Rgba, t: f64) -> Rgba {
+    let t = t.clamp(0.0, 1.0);
+    let f = |x: u8, y: u8| (x as f64 + (y as f64 - x as f64) * t).round().clamp(0.0, 255.0) as u8;
+    Rgba::rgb(f(a.r, b.r), f(a.g, b.g), f(a.b, b.b))
+}
+
+/// A region map without its geography: the boundaries PowerPoint caches come from an online
+/// map service in an undocumented format and DeckCraft ships no map data, so each region is a
+/// tile in a grid, coloured on the map's value scale, with the scale below and a note saying
+/// the map itself is not drawn.
+fn region_tiles(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rect, base: f64, text_col: Rgba) {
+    let Some(s) = c.series.first() else { return };
+    let regions: Vec<(String, Option<f64>)> =
+        c.categories.iter().enumerate().map(|(i, n)| (n.clone(), s.values.get(i).copied().flatten())).filter(|(n, _)| !n.is_empty()).collect();
+    let note_h = base * 1.4;
+    let scale_h = base * 2.6;
+    let grid = Rect::new(area.x0, area.y0, area.x1, (area.y1 - note_h - scale_h).max(area.y0));
+    let hi = series_color(rctx, c, 0);
+    let lo = mix(hi, Rgba::WHITE, 0.85);
+    let (min, max) = regions.iter().filter_map(|(_, v)| *v).fold((f64::MAX, f64::MIN), |(a, b), v| (a.min(v), b.max(v)));
+    let span = if max > min { max - min } else { 1.0 };
+    let n = regions.len();
+    if n > 0 && grid.area() > 0.0 {
+        // Columns so that tiles come out about twice as wide as tall.
+        let aspect = grid.width() / grid.height().max(1.0);
+        let cols = ((n as f64 * aspect / 2.0).sqrt().ceil() as usize).clamp(1, n);
+        let rows = n.div_ceil(cols).max(1);
+        let (tw, th) = (grid.width() / cols as f64, grid.height() / rows as f64);
+        for (i, (name, v)) in regions.iter().enumerate() {
+            let (col, row) = (i % cols, i / cols);
+            let t = Rect::new(grid.x0 + tw * col as f64, grid.y0 + th * row as f64, grid.x0 + tw * (col + 1) as f64, grid.y0 + th * (row + 1) as f64)
+                .inset(-1.5);
+            let fill = v.map_or(Rgba::rgb(0xD9, 0xD9, 0xD9), |v| mix(lo, hi, (v - min) / span));
+            ctx.set_transform(m);
+            ctx.set_paint(color(fill, 1.0));
+            ctx.fill_rect(&t);
+            let dark = v.is_some_and(|v| (v - min) / span > 0.55);
+            let mut text = name.clone();
+            if c.data_labels
+                && let Some(v) = v
+            {
+                text = format!(
+                    "{text}
+{}",
+                    c.data_label(s, *v)
+                );
+            }
+            let inner = t.inset(-base * 0.25);
+            if inner.width() > base && inner.height() > base * 0.8 {
+                label(ctx, rctx, m, &text, inner, base * 0.9, Align::Center, Anchor::Middle, if dark { Rgba::WHITE } else { text_col }, false);
+            }
+        }
+    }
+    // The colour scale: a gradient bar from the lowest to the highest value.
+    if min <= max {
+        let bar_w = (area.width() * 0.5).min(base * 24.0);
+        let y = grid.y1 + base * 0.6;
+        let bar = Rect::new(area.center().x - bar_w / 2.0, y, area.center().x + bar_w / 2.0, y + base * 0.8);
+        let steps = 48;
+        for k in 0..steps {
+            let x0 = bar.x0 + bar.width() * k as f64 / steps as f64;
+            let x1 = bar.x0 + bar.width() * (k + 1) as f64 / steps as f64 + 0.5;
+            ctx.set_transform(m);
+            ctx.set_paint(color(mix(lo, hi, k as f64 / (steps - 1) as f64), 1.0));
+            ctx.fill_rect(&Rect::new(x0, bar.y0, x1.min(bar.x1), bar.y1));
+        }
+        let ly = Rect::new(bar.x0 - base * 8.0, bar.y0 - base * 0.2, bar.x0 - base * 0.4, bar.y1 + base * 0.2);
+        label(ctx, rctx, m, &c.data_label(s, min), ly, base, Align::Right, Anchor::Middle, text_col, false);
+        let ry = Rect::new(bar.x1 + base * 0.4, bar.y0 - base * 0.2, bar.x1 + base * 8.0, bar.y1 + base * 0.2);
+        label(ctx, rctx, m, &c.data_label(s, max), ry, base, Align::Left, Anchor::Middle, text_col, false);
+    }
+    let note = Rect::new(area.x0, area.y1 - note_h, area.x1, area.y1);
+    label(
+        ctx,
+        rctx,
+        m,
+        "Map preview unavailable: regions shown as tiles",
+        note,
+        base * 0.85,
+        Align::Center,
+        Anchor::Middle,
+        mix(text_col, Rgba::WHITE, 0.4),
+        false,
+    );
 }
 
 /// Squarified treemap (Bruls, Huizing, van Wijk): rows of tiles laid along the short side,

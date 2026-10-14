@@ -94,7 +94,7 @@ the round trip even though DeckCraft doesn't model it.
 | SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save. A diagram with no relationship parts keeps its XML; the drawing and data parts are still dropped (#203) |
 | Tables with styles | yes | yes | |
 | Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw` |
-| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept; edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; no region maps |
+| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept; edited and new ones written from the model with a plain-chart fallback. Treemap and sunburst hierarchy levels kept; region maps kept, drawn as tiles (no map geometry) |
 | SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save |
 | Equations (OMML, `a14:m`) | no | no | PR #55 open |
 | Audio / video (`p14:media`, trim, fades, bookmarks) | yes | partly | Playback options lost on save (#74) |

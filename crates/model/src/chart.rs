@@ -34,6 +34,9 @@ pub enum ChartType {
     Funnel,
     Treemap,
     Sunburst,
+    /// A filled (choropleth) map of regions coloured by value, kept and drawn from its data; it
+    /// is not offered in the chart menus (PowerPoint needs an online map service to make one).
+    RegionMap,
     Combo,
 }
 
@@ -51,7 +54,7 @@ impl ChartType {
 
     /// Whether the type is saved as a `chartEx` part (with a plain chart as the fallback).
     pub fn is_chartex(self) -> bool {
-        Self::OFFICE_2016.contains(&self)
+        Self::OFFICE_2016.contains(&self) || self == ChartType::RegionMap
     }
 
     pub const MAIN: [ChartType; 12] = [
@@ -96,6 +99,7 @@ impl ChartType {
             ChartType::Funnel => "Funnel",
             ChartType::Treemap => "Treemap",
             ChartType::Sunburst => "Sunburst",
+            ChartType::RegionMap => "Map",
             ChartType::Combo => "Combo",
         }
     }

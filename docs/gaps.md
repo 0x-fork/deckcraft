@@ -213,8 +213,9 @@ Detail in [file-format-parity.md](file-format-parity.md).
   written from the model, with a plain chart fallback). Waterfalls float and total, funnels,
   treemaps (squarified, nested by level with group banners) and sunbursts (one ring per level)
   have their own layouts, histograms and Paretos bin their data (count, width or Scott's rule),
-  and box & whisker charts use exclusive or inclusive quartiles with 1.5 IQR whiskers. Region maps
-  remain.
+  and box & whisker charts use exclusive or inclusive quartiles with 1.5 IQR whiskers. Region maps are kept
+  (their cached geography too, also through edits) and drawn as value-coloured tiles with a
+  colour scale, since DeckCraft ships no map boundaries.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 

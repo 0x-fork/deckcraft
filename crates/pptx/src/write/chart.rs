@@ -588,6 +588,18 @@ fn cx_level(w: &mut W, pts: &[String], format: Option<&str>) {
     w.close("cx:lvl");
 }
 
+/// The `cx:layoutPr` of the region map series in a kept `chartEx` part.
+fn kept_region_layout(raw: &str) -> Option<String> {
+    let doc = crate::xml::parse(raw.as_bytes()).ok()?;
+    let mut root = doc.root;
+    crate::read::resolve_mc(&mut root, 0);
+    let region = root.child("chart")?.child("plotArea")?.child("plotAreaRegion")?;
+    let s = region.children_named("series").find(|s| s.attr("layoutId") == Some("regionMap"))?;
+    let lp = s.child("layoutPr")?;
+    // Written under our `cx` prefix; a part that bound chartex to another prefix is not copied.
+    lp.name.starts_with("cx:").then(|| lp.to_xml())
+}
+
 /// Writes an Office 2016 chart from the model, as PowerPoint lays the part out: one `cx:data`
 /// per series (categories and values), then the plot area with each series' layout, the axes
 /// the layout uses, the title and the legend.
@@ -605,7 +617,11 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
             }
             w.close("cx:strDim");
         }
-        let ty = if matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) { "size" } else { "val" };
+        let ty = match c.kind {
+            ChartType::Treemap | ChartType::Sunburst => "size",
+            ChartType::RegionMap => "colorVal",
+            _ => "val",
+        };
         w.open("cx:numDim", A::new().a("type", ty));
         let vals: Vec<String> = s.values.iter().map(|v| v.map(fmt_num).unwrap_or_default()).collect();
         cx_level(&mut w, &vals, Some(s.number_format.as_deref().unwrap_or("General")));
@@ -627,6 +643,7 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
         ChartType::Treemap => "treemap",
         ChartType::Sunburst => "sunburst",
         ChartType::BoxWhisker => "boxWhisker",
+        ChartType::RegionMap => "regionMap",
         _ => "clusteredColumn",
     };
     let one = !matches!(c.kind, ChartType::BoxWhisker);
@@ -666,6 +683,13 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
                 w.empty("cx:statistics", A::new().a("quartileMethod", if c.inclusive_quartiles { "inclusive" } else { "exclusive" }));
                 w.close("cx:layoutPr");
             }
+            ChartType::RegionMap => {
+                // The map's geography (projection, region level and the cached boundaries
+                // PowerPoint downloaded) is not modelled: carry it over from the part we read.
+                if let Some(lp) = c.raw.as_deref().and_then(kept_region_layout) {
+                    w.raw(&lp);
+                }
+            }
             _ => {}
         }
         w.close("cx:series");
@@ -676,7 +700,7 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
         w.close("cx:series");
     }
     w.close("cx:plotAreaRegion");
-    if !matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) {
+    if !matches!(c.kind, ChartType::Treemap | ChartType::Sunburst | ChartType::RegionMap) {
         w.open("cx:axis", A::new().a("id", "0"));
         w.empty("cx:catScaling", A::new().a("gapWidth", if matches!(c.kind, ChartType::Histogram | ChartType::Pareto) { "0" } else { "0.5" }));
         w.empty0("cx:tickLabels");
@@ -705,4 +729,35 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
     w.close("cx:chart");
     w.close("cx:chartSpace");
     w.finish()
+}
+
+#[cfg(test)]
+mod region_map_tests {
+    use super::*;
+
+    /// A region map part as PowerPoint writes it (our own numbers; the cached geography is a
+    /// stand-in blob).
+    const MAP: &str = r#"<cx:chartSpace xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chartData><cx:data id="0"><cx:strDim type="cat"><cx:f>Sheet1!$A$2:$A$4</cx:f><cx:lvl ptCount="3"><cx:pt idx="0">Minsk</cx:pt><cx:pt idx="1">Brest</cx:pt><cx:pt idx="2">Gomel</cx:pt></cx:lvl></cx:strDim><cx:numDim type="colorVal"><cx:f>Sheet1!$B$2:$B$4</cx:f><cx:lvl ptCount="3" formatCode="General"><cx:pt idx="0">12</cx:pt><cx:pt idx="1">5</cx:pt><cx:pt idx="2">8</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData><cx:chart><cx:title pos="t" align="ctr" overlay="0"/><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="regionMap" uniqueId="{00000000-0000-4000-8000-000000000001}"><cx:tx><cx:txData><cx:f>Sheet1!$B$1</cx:f><cx:v>Sales</cx:v></cx:txData></cx:tx><cx:dataId val="0"/><cx:layoutPr><cx:geography cultureLanguage="en-US" cultureRegion="BY" attribution="Powered by Bing"><cx:geoCache provider="{E9337A44-BEBE-4D9F-B70C-5C5E7DAFC167}"><cx:binary>ZGVja2NyYWZ0LXRlc3Q=</cx:binary></cx:geoCache></cx:geography></cx:layoutPr></cx:series></cx:plotAreaRegion></cx:plotArea><cx:legend pos="r" align="min" overlay="0"/></cx:chart></cx:chartSpace>"#;
+
+    #[test]
+    fn region_maps_keep_their_geography_through_save_and_edit() {
+        let c = crate::read::read_chartex_xml(MAP.as_bytes()).expect("a region map is read");
+        assert_eq!(c.kind, ChartType::RegionMap);
+        assert_eq!(c.categories, ["Minsk", "Brest", "Gomel"]);
+        assert_eq!(c.series.first().map(|s| s.values.clone()), Some(vec![Some(12.0), Some(5.0), Some(8.0)]));
+        // Unchanged: written back as read.
+        let kept = String::from_utf8(chartex_xml(&c).unwrap_or_default()).unwrap_or_default();
+        assert!(kept.contains("ZGVja2NyYWZ0LXRlc3Q=") && kept.contains("cultureRegion=\"BY\""), "{kept}");
+        // Edited: rebuilt from the model, with the geography carried over.
+        let mut e = c.clone();
+        if let Some(s) = e.series.first_mut() {
+            s.values[1] = Some(20.0);
+        }
+        let built = String::from_utf8(chartex_xml(&e).unwrap_or_default()).unwrap_or_default();
+        assert!(built.contains("<cx:geoCache") && built.contains("ZGVja2NyYWZ0LXRlc3Q=") && built.contains("colorVal"), "{built}");
+        assert!(!built.contains("<cx:axis"), "{built}");
+        let back = crate::read::read_chartex_xml(built.as_bytes()).expect("the rebuilt part reads");
+        assert_eq!(back.kind, ChartType::RegionMap);
+        assert_eq!(back.series.first().and_then(|s| s.values.get(1).copied().flatten()), Some(20.0));
+    }
 }
