@@ -1796,7 +1796,12 @@ fn smartart_pictures_3d_styles_and_colour_variants() {
     let bytes = deckcraft_pptx::export(s.doc().unwrap().doc.as_ref()).unwrap();
     let back = deckcraft_pptx::import(&bytes).unwrap();
     assert!(back.validate().is_empty());
-    assert_eq!(back.slides[1].shapes.iter().find_map(|x| x.diagram.as_ref()).map(|d| d.kind.clone()).as_deref(), Some("pictureCaption"));
+    let bd = back.slides[1].shapes.iter().find_map(|x| x.diagram.as_ref()).unwrap();
+    assert_eq!(bd.kind, "pictureCaption");
+    // The node's picture comes back from the data model's blip, as its media.
+    let m = bd.nodes[0].picture.expect("node picture read back");
+    assert!(back.media(m).is_some_and(|x| !x.data.is_empty()));
+    assert!(bd.nodes.iter().skip(1).all(|n| n.picture.is_none()));
     s.execute("smartArt.picture", &json!({"index": 0, "reset": true})).unwrap();
     assert!(pics(&s).iter().all(|p| !matches!(p.fill, Some(deckcraft_model::Fill::Picture(_)))));
 

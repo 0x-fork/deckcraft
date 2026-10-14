@@ -509,6 +509,17 @@ fn smartart(imp: &mut Imp, part: &Part, gd: &El, frame: &Shape, depth: usize) ->
     let x = frame.xfrm.unwrap_or_default();
     g.kind = ShapeKind::Group { children, child: Xfrm::new(0.0, 0.0, x.w, x.h) };
     g.diagram = diagram_outline(imp, part, rel_ids, &data.root);
+    // Node pictures, from the blips of the data model's presentation points.
+    if let Some(d) = &mut g.diagram {
+        let rels = imp.pkg.rels(&dm.target);
+        for (k, rid) in crate::dgm::node_pictures(&data.root) {
+            let Some(target) = rels.get(&rid).filter(|r| !r.external).map(|r| r.target.clone()) else { continue };
+            let media = imp.media_for(&target);
+            if let Some(n) = d.nodes.get_mut(k) {
+                n.picture = media;
+            }
+        }
+    }
     Some(g)
 }
 

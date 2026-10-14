@@ -111,7 +111,11 @@ pub fn layout_id(kind: &str) -> &'static str {
         "titledMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix1",
         "pictureList" => "urn:microsoft.com/office/officeart/2005/8/layout/vList4",
         "pictureCaption" => "urn:microsoft.com/office/officeart/2005/8/layout/pList1",
-        "pictureProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/pList2",
+        "pictureProcess" => "urn:microsoft.com/office/officeart/2005/8/layout/hProcess10",
+        "pictureHList" => "urn:microsoft.com/office/officeart/2005/8/layout/pList2",
+        "timeline" => "urn:microsoft.com/office/officeart/2005/8/layout/hProcess11",
+        "venn" => "urn:microsoft.com/office/officeart/2005/8/layout/venn1",
+        "target" => "urn:microsoft.com/office/officeart/2005/8/layout/target1",
         _ => "urn:microsoft.com/office/officeart/2005/8/layout/vList2",
     }
 }
@@ -138,6 +142,10 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "pictureList",
         "pictureCaption",
         "pictureProcess",
+        "pictureHList",
+        "timeline",
+        "venn",
+        "target",
         "list",
     ] {
         if layout_id == layout_id_of(k) {
@@ -145,7 +153,13 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         }
     }
     let s = format!("{last} {}", category.to_ascii_lowercase());
-    if s.contains("hierarchy") || s.contains("orgchart") {
+    if s.contains("venn") {
+        "venn"
+    } else if s.contains("target") {
+        "target"
+    } else if s.contains("timeline") {
+        "timeline"
+    } else if s.contains("hierarchy") || s.contains("orgchart") {
         "hierarchy"
     } else if s.contains("radial") {
         "radial"
@@ -174,7 +188,8 @@ fn layout_id_of(kind: &str) -> &'static str {
 
 fn category(kind: &str) -> &'static str {
     match kind {
-        "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" => "process",
+        "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" | "timeline" => "process",
+        "venn" | "target" => "relationship",
         "cycle" | "blockCycle" | "radial" => "cycle",
         "hierarchy" => "hierarchy",
         "pyramid" | "invertedPyramid" => "pyramid",
@@ -206,8 +221,8 @@ fn text(w: &mut W, t: &str) {
 }
 
 /// `ppt/diagrams/dataN.xml` for the outline. `drawing_rel` is the slide's relationship id of the
-/// cached drawing.
-pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str) -> Vec<u8> {
+/// cached drawing; `pics` the data part's relationship ids of node pictures, by node index.
+pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str, pics: &[(usize, String)]) -> Vec<u8> {
     let lo = if d.layout_id.is_empty() { layout_id(&d.kind).to_string() } else { d.layout_id.clone() };
     let mut w = W::new();
     w.open("dgm:dataModel", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("xmlns:r", crate::opc::NS_R));
@@ -244,6 +259,24 @@ pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str) -> Vec<u8> {
             text(&mut w, "");
             w.close("dgm:pt");
         }
+    }
+    // A node's picture sits on the presentation point of its picture placeholder, as PowerPoint
+    // stores it (`presAssocID` names the node, the blip is a relationship of the data part).
+    for (k, rid) in pics {
+        if *k >= d.nodes.len() {
+            continue;
+        }
+        w.open("dgm:pt", A::new().a("modelId", guid(seed, 0x20_0000 + k)).a("type", "pres"));
+        w.empty("dgm:prSet", A::new().a("presAssocID", node(*k)).a("presName", "Image").a("presStyleLbl", "fgImgPlace1"));
+        w.open0("dgm:spPr");
+        w.open0("a:blipFill");
+        w.empty("a:blip", A::new().a("r:embed", rid.as_str()));
+        w.open0("a:stretch");
+        w.empty0("a:fillRect");
+        w.close("a:stretch");
+        w.close("a:blipFill");
+        w.close("dgm:spPr");
+        w.close("dgm:pt");
     }
     w.close("dgm:ptLst");
     w.open0("dgm:cxnLst");
@@ -286,6 +319,31 @@ pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str) -> Vec<u8> {
 
 /// The outline of a data part: the `parOf` tree under the document point, depth first.
 pub fn outline(data: &El) -> Vec<DiagramNode> {
+    outline_ids(data).into_iter().map(|(_, n)| n).collect()
+}
+
+/// The relationship ids (of the data part) of node pictures, by node index in [`outline`]: the
+/// blip fill of a presentation point associated with the node.
+pub fn node_pictures(data: &El) -> Vec<(usize, String)> {
+    let ids: HashMap<String, usize> = outline_ids(data).into_iter().enumerate().map(|(k, (id, _))| (id, k)).collect();
+    let Some(pts) = data.child("ptLst") else { return vec![] };
+    let mut out: Vec<(usize, String)> = vec![];
+    for pt in pts.children_named("pt").take(MAX_NODES * 8) {
+        if pt.attr("type") != Some("pres") {
+            continue;
+        }
+        let Some(k) = pt.child("prSet").and_then(|p| p.attr("presAssocID")).and_then(|a| ids.get(a)) else { continue };
+        let Some(rid) = pt.child("spPr").and_then(|s| s.child("blipFill")).and_then(|b| b.child("blip")).and_then(|b| b.attr("r:embed")) else {
+            continue;
+        };
+        if !out.iter().any(|(j, _)| j == k) {
+            out.push((*k, rid.to_string()));
+        }
+    }
+    out
+}
+
+fn outline_ids(data: &El) -> Vec<(String, DiagramNode)> {
     let Some(pts) = data.child("ptLst") else { return vec![] };
     let mut texts: HashMap<&str, String> = HashMap::new();
     let mut doc: Option<&str> = None;
@@ -324,7 +382,7 @@ pub fn outline(data: &El) -> Vec<DiagramNode> {
         if out.len() >= MAX_NODES || !seen.insert(id) {
             continue;
         }
-        out.push(DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8), picture: None });
+        out.push((id.to_string(), DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8), picture: None }));
         if let Some(v) = kids.get(id) {
             stack.extend(v.iter().rev().map(|(_, c)| (*c, level.saturating_add(1))));
         }
@@ -348,10 +406,12 @@ fn paragraphs(t: &El) -> String {
 /// The layout algorithm and node shape of a DeckCraft layout.
 fn alg(kind: &str) -> (&'static str, Vec<(&'static str, &'static str)>, &'static str) {
     match kind {
-        "process" | "stepUp" | "pictureProcess" | "pictureCaption" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "roundRect"),
+        "process" | "stepUp" | "pictureProcess" | "pictureCaption" | "pictureHList" | "timeline" => {
+            ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "roundRect")
+        }
         "chevron" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "chevron"),
         "verticalProcess" => ("lin", vec![("linDir", "fromT"), ("nodeHorzAlign", "ctr")], "roundRect"),
-        "cycle" | "radial" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
+        "cycle" | "radial" | "venn" | "target" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
         "blockCycle" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "roundRect"),
         "pyramid" | "invertedPyramid" => {
             ("pyra", vec![("linDir", if kind == "pyramid" { "fromT" } else { "fromB" }), ("txDir", "fromT"), ("pyraAcctPos", "bef")], "trapezoid")
@@ -500,6 +560,8 @@ fn bevel(style: &str) -> Option<(&'static str, i64)> {
 
 /// `ppt/diagrams/quickStyleN.xml`: flat shapes drawn from the theme's first styles.
 pub fn style_xml(style: &str) -> Vec<u8> {
+    // Brick Scene looks at the diagram from above and to the side.
+    let camera = if style == "brick" { "isometricOffAxis2Top" } else { "orthographicFront" };
     let mut w = W::new();
     w.open("dgm:styleDef", A::new().a("xmlns:dgm", NS_DGM).a("xmlns:a", crate::opc::NS_A).a("uniqueId", qs_id(style)));
     w.empty("dgm:title", A::new().a("val", ""));
@@ -508,12 +570,12 @@ pub fn style_xml(style: &str) -> Vec<u8> {
     w.empty("dgm:cat", A::new().a("type", if bevel(style).is_some() { "3D" } else { "simple" }).a("pri", "10100"));
     w.close("dgm:catLst");
     w.open0("dgm:scene3d");
-    w.empty("a:camera", A::new().a("prst", "orthographicFront"));
+    w.empty("a:camera", A::new().a("prst", camera));
     w.empty("a:lightRig", A::new().a("rig", "threePt").a("dir", "t"));
     w.close("dgm:scene3d");
     w.open("dgm:styleLbl", A::new().a("name", "node1"));
     w.open0("dgm:scene3d");
-    w.empty("a:camera", A::new().a("prst", "orthographicFront"));
+    w.empty("a:camera", A::new().a("prst", camera));
     w.empty("a:lightRig", A::new().a("rig", "threePt").a("dir", "t"));
     w.close("dgm:scene3d");
     match bevel(style) {
@@ -593,7 +655,7 @@ mod tests {
     fn outline_survives_the_data_model() {
         let d =
             Diagram { kind: "hierarchy".into(), nodes: nodes(&[("CEO", 0), ("CTO", 1), ("Dev", 2), ("CFO", 1), ("Board", 0)]), ..Default::default() };
-        let xml = data_xml(&d, 7, "rId9");
+        let xml = data_xml(&d, 7, "rId9", &[]);
         let doc = crate::xml::parse(&xml).unwrap();
         assert_eq!(outline(&doc.root), d.nodes);
         let s = String::from_utf8(xml).unwrap();
@@ -614,6 +676,14 @@ mod tests {
     }
 
     #[test]
+    fn node_pictures_come_from_presentation_points() {
+        let d = Diagram { kind: "pictureList".into(), nodes: nodes(&[("A", 0), ("a", 1), ("B", 0)]), ..Default::default() };
+        let xml = data_xml(&d, 3, "rId1", &[(2, "rId7".into()), (9, "rId8".into())]);
+        let doc = crate::xml::parse(&xml).unwrap();
+        assert_eq!(node_pictures(&doc.root), vec![(2, "rId7".to_string())]);
+    }
+
+    #[test]
     fn style_and_colour_ids_round_trip() {
         for st in ["", "subtle", "intense", "outline", "polished", "inset", "cartoon", "powder", "brick"] {
             assert_eq!(style_for(&qs_id(st)), st);
@@ -622,7 +692,9 @@ mod tests {
             assert_eq!(colors_for(&cs_id(c)), c);
         }
         assert!(String::from_utf8(style_xml("cartoon")).unwrap().contains("bevelT"));
-        for k in ["pictureList", "pictureCaption", "pictureProcess"] {
+        assert!(layout_id("pictureProcess").ends_with("/hProcess10"), "Picture Accent Process");
+        assert!(layout_id("pictureHList").ends_with("/pList2"), "Horizontal Picture List");
+        for k in ["pictureList", "pictureCaption", "pictureProcess", "pictureHList", "timeline", "venn", "target"] {
             assert_eq!(kind_for(layout_id(k), ""), k);
         }
     }

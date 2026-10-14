@@ -23,7 +23,7 @@ pub const MAX_LEVEL: u8 = 8;
 const MAX_SHAPES: usize = 40;
 
 /// DeckCraft's layouts, with the names PowerPoint's gallery gives them.
-pub const LAYOUTS: [(&str, &str); 18] = [
+pub const LAYOUTS: [(&str, &str); 22] = [
     ("list", "Vertical Bullet List"),
     ("blockList", "Basic Block List"),
     ("hBulletList", "Horizontal Bullet List"),
@@ -42,6 +42,10 @@ pub const LAYOUTS: [(&str, &str); 18] = [
     ("pictureList", "Vertical Picture List"),
     ("pictureCaption", "Picture Caption List"),
     ("pictureProcess", "Picture Accent Process"),
+    ("pictureHList", "Horizontal Picture List"),
+    ("timeline", "Basic Timeline"),
+    ("venn", "Basic Venn"),
+    ("target", "Basic Target"),
 ];
 /// SmartArt Styles.
 pub const STYLES: [(&str, &str); 9] = [
@@ -125,7 +129,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Change Layout",
             ["SmartArt Design", "Layouts"],
             None,
-            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess}",
+            "{id?, kind: list|blockList|hBulletList|process|chevron|verticalProcess|stepUp|cycle|blockCycle|radial|hierarchy|pyramid|invertedPyramid|matrix|titledMatrix|pictureList|pictureCaption|pictureProcess|pictureHList|timeline|venn|target}",
             has_selection,
             change_layout
         ),
@@ -323,13 +327,16 @@ fn shade(d: &Diagram, i: usize) -> Option<ColorTransform> {
 
 /// The 3-D XML (`scene3d` + `sp3d`) for a 3-D SmartArt Style: a top bevel (`w`, `h` in points)
 /// lit by the three-point rig.
-fn three_d(bevel: &str, w: f64, h: f64) -> String {
+fn three_d(bevel: &str, w: f64, h: f64, camera: &str) -> String {
     format!(
-        "<a:scene3d><a:camera prst=\"orthographicFront\"/><a:lightRig rig=\"threePt\" dir=\"t\"/></a:scene3d><a:sp3d prstMaterial=\"matte\"><a:bevelT w=\"{}\" h=\"{}\" prst=\"{bevel}\"/></a:sp3d>",
+        "<a:scene3d><a:camera prst=\"{camera}\"/><a:lightRig rig=\"threePt\" dir=\"t\"/></a:scene3d><a:sp3d prstMaterial=\"matte\"><a:bevelT w=\"{}\" h=\"{}\" prst=\"{bevel}\"/></a:sp3d>",
         (w * 12700.0).round() as i64,
         (h * 12700.0).round() as i64
     )
 }
+
+/// Brick Scene's camera: the diagram's shapes seen from above and to the side.
+pub const BRICK_CAMERA: &str = "isometricOffAxis2Top";
 
 /// Whether `style` is one of the 3-D SmartArt Styles.
 pub fn is_3d(style: &str) -> bool {
@@ -374,7 +381,7 @@ fn paint(d: &Diagram, sh: &mut Shape, i: usize, light: bool) {
             sh.effects = Some(Effects {
                 outer_shadow: (d.style != "inset").then(|| shadow(6.0, 4.0)),
                 bevel: Some(bevel.into()),
-                raw3d: Some(three_d(bevel, bw, bw * 0.6)),
+                raw3d: Some(three_d(bevel, bw, bw * 0.6, if d.style == "brick" { BRICK_CAMERA } else { "orthographicFront" })),
                 ..Default::default()
             });
         }
@@ -776,6 +783,105 @@ fn layout_raw(d: &Diagram, area: Xfrm) -> Vec<Item> {
                     let a = (gap * 0.7).min(ch * 0.2);
                     arrow(&mut out, Xfrm::new(x + bw + (gap - a) / 2.0, y + ph / 2.0 - a / 2.0, a, a), 0.0, i);
                 }
+            }
+        }
+        "pictureHList" => {
+            // Horizontal Picture List: a column per node, a big picture over its text.
+            let w = area.w / nf;
+            for (i, g) in gs.iter().enumerate() {
+                let x = area.x + i as f64 * w + w * 0.04;
+                let bw = w * 0.92;
+                let ph = area.h * 0.55;
+                out.push((picture_shape(d, "rect", Xfrm::new(x, area.y, bw, ph), i, g[0]), vec![]));
+                let mut sh = text_shape("rect", Xfrm::new(x, area.y + ph, bw, area.h - ph), &nodes(g), true);
+                if let Some(b) = &mut sh.text {
+                    b.body.anchor = Some(deckcraft_model::text::Anchor::Top);
+                }
+                paint(d, &mut sh, i, false);
+                out.push((sh, g.clone()));
+            }
+        }
+        "timeline" => {
+            // Basic Timeline: an arrow across the middle, a dot per node on it, the text above and
+            // below in turn.
+            let mid = area.y + area.h / 2.0;
+            let bar = (area.h * 0.08).max(6.0);
+            let mut sh = deco("rightArrow", Xfrm::new(area.x, mid - bar, area.w, bar * 2.0), 0.0);
+            paint(d, &mut sh, 0, true);
+            out.push((sh, vec![]));
+            let w = area.w * 0.92 / nf;
+            for (i, g) in gs.iter().enumerate() {
+                let cx = area.x + w * (i as f64 + 0.5);
+                let dot = bar * 1.4;
+                let mut dsh = deco("ellipse", Xfrm::new(cx - dot / 2.0, mid - dot / 2.0, dot, dot), 0.0);
+                paint(d, &mut dsh, i, false);
+                out.push((dsh, vec![]));
+                let th = area.h / 2.0 - bar * 1.6;
+                let y = if i % 2 == 0 { area.y } else { mid + bar * 1.6 };
+                let mut t = text_shape("rect", Xfrm::new(cx - w * 0.48, y, w * 0.96, th.max(1.0)), &nodes(g), true);
+                if let Some(b) = &mut t.text {
+                    b.body.anchor = Some(if i % 2 == 0 { deckcraft_model::text::Anchor::Bottom } else { deckcraft_model::text::Anchor::Top });
+                }
+                paint(d, &mut t, i, true);
+                t.fill = Some(Fill::None);
+                t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                out.push((t, g.clone()));
+            }
+        }
+        "venn" => {
+            // Basic Venn: see-through circles overlapping in a ring (two or three in a row/triangle).
+            let s = area.h.min(area.w);
+            let (cx, cy) = (area.x + area.w / 2.0, area.y + area.h / 2.0);
+            let dc = if n == 1 { s } else { s * 0.62 };
+            let r = if n == 1 { 0.0 } else { (s - dc) / 2.0 };
+            for (i, g) in gs.iter().enumerate() {
+                let a = (i as f64 / nf * 360.0 + if n == 2 { 180.0 } else { -90.0 }).to_radians();
+                let mut sh = text_shape("ellipse", Xfrm::new(cx + r * a.cos() - dc / 2.0, cy + r * a.sin() - dc / 2.0, dc, dc), &nodes(g), true);
+                paint(d, &mut sh, i, false);
+                if let Some(Fill::Solid { color: c }) = &mut sh.fill {
+                    *c = c.clone().with(ColorTransform::Alpha(50_000));
+                }
+                if let Some(b) = &mut sh.text {
+                    // Text towards the circle's outer side, clear of the overlap.
+                    let p = dc * 0.18;
+                    let (dx, dy) = (a.cos() * p, a.sin() * p);
+                    b.body.inset_l = Some((7.2 + dx).max(2.0));
+                    b.body.inset_r = Some((7.2 - dx).max(2.0));
+                    b.body.inset_t = Some((3.6 + dy).max(2.0));
+                    b.body.inset_b = Some((3.6 - dy).max(2.0));
+                }
+                out.push((sh, g.clone()));
+            }
+        }
+        "target" => {
+            // Basic Target: nested rings, the outermost first, each ring's text in a box beside it
+            // with a line from the ring.
+            let s = area.h.min(area.w * 0.5);
+            let (cx, cy) = (area.x + s / 2.0, area.y + area.h / 2.0);
+            let band = s / 2.0 / nf;
+            for (i, _) in gs.iter().enumerate() {
+                let dc = s - 2.0 * band * i as f64;
+                let mut sh = deco("ellipse", Xfrm::new(cx - dc / 2.0, cy - dc / 2.0, dc, dc), 0.0);
+                paint(d, &mut sh, i, false);
+                out.push((sh, vec![]));
+            }
+            let tx = area.x + s + area.w * 0.06;
+            let rh = area.h / nf;
+            for (i, g) in gs.iter().enumerate() {
+                let ty = area.y + rh * (i as f64 + 0.5);
+                // The point on ring i's band level with the text, else its top.
+                let ry = cy - s / 2.0 + band * (i as f64 + 0.5);
+                out.push((line_shape((cx, ry.min(ty)), (tx, ty)), vec![]));
+                let mut t = text_shape("rect", Xfrm::new(tx, ty - rh * 0.45, (area.x + area.w - tx).max(1.0), rh * 0.9), &nodes(g), true);
+                paint(d, &mut t, i, true);
+                t.fill = Some(Fill::None);
+                t.line = Some(Line { fill: Some(Fill::None), ..Default::default() });
+                if let Some(b) = &mut t.text {
+                    for p in &mut b.paragraphs {
+                        p.props.align = Some(Align::Left);
+                    }
+                }
+                out.push((t, g.clone()));
             }
         }
         _ => {}
