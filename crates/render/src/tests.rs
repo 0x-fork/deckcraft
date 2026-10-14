@@ -1846,7 +1846,7 @@ fn extruded_deck() -> Presentation {
             701,
             280.0,
             "ellipse",
-            r#"<a:scene3d><a:camera prst="isometricTopUp"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="254000"><a:extrusionClr><a:srgbClr val="C00000"/></a:extrusionClr></a:sp3d>"#,
+            r#"<a:scene3d><a:camera prst="isometricTopUp"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="254000" contourW="63500"><a:extrusionClr><a:srgbClr val="C00000"/></a:extrusionClr><a:contourClr><a:srgbClr val="FFC000"/></a:contourClr></a:sp3d>"#,
         ),
         mk(
             702,
@@ -1858,9 +1858,29 @@ fn extruded_deck() -> Presentation {
             703,
             760.0,
             "rect",
-            r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="381000"/>"#,
+            r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="381000" contourW="76200" prstMaterial="metal"><a:contourClr><a:srgbClr val="00B050"/></a:contourClr></a:sp3d>"#,
         ),
     ])
+}
+
+#[test]
+fn contours_band_the_outline_in_their_colour() {
+    let img = render_slide(&extruded_deck(), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let n = |x0: u32, x1: u32, f: &dyn Fn([u8; 4]) -> bool| {
+        let mut k = 0;
+        for y in 0..img.height {
+            for x in x0..x1.min(img.width) {
+                let i = ((y * img.width + x) * 4) as usize;
+                if img.pixels.get(i..i + 4).and_then(|p| <[u8; 4]>::try_from(p).ok()).is_some_and(f) {
+                    k += 1;
+                }
+            }
+        }
+        k
+    };
+    // The ellipse's yellow contour and the flat rectangle's green one.
+    assert!(n(260, 480, &|p| p[0] > 200 && (150..230).contains(&p[1]) && p[2] < 80) > 200);
+    assert!(n(740, 960, &|p| p[0] < 80 && p[1] > 120 && p[2] < 120) > 300);
 }
 
 #[test]

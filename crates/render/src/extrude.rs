@@ -44,20 +44,53 @@ pub fn from_raw(raw: &str) -> Option<Extrusion> {
     if !(depth.is_finite() && depth > 0.01) {
         return None;
     }
-    let color = raw.find("extrusionClr").and_then(|j| {
-        let body = raw.get(j..)?;
-        let body = body.get(..body.find("/a:extrusionClr").or_else(|| body.find("/extrusionClr")).unwrap_or(body.len()))?;
-        if let Some(k) = body.find("srgbClr ") {
-            let v = attr(body.get(k..)?, "val")?;
-            let n = u32::from_str_radix(v, 16).ok()?;
-            Some(ColorRef::rgb(Rgba::rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)))
-        } else if let Some(k) = body.find("schemeClr ") {
-            SchemeSlot::from_xml(attr(body.get(k..)?, "val")?).map(ColorRef::scheme)
-        } else {
-            None
-        }
-    });
+    let color = color_in(raw, "extrusionClr");
     Some(Extrusion { depth: depth.min(4000.0), color })
+}
+
+/// The colour in the first `<a:{name}>` element of `raw` (an `srgbClr` or a `schemeClr`).
+fn color_in(raw: &str, name: &str) -> Option<ColorRef> {
+    let j = raw.find(&format!("{name}>"))?;
+    let body = raw.get(j..)?;
+    let end = body.find(&format!("/a:{name}")).or_else(|| body.find(&format!("/{name}"))).unwrap_or(body.len());
+    let body = body.get(..end)?;
+    if let Some(k) = body.find("srgbClr ") {
+        let v = attr(body.get(k..)?, "val")?;
+        let n = u32::from_str_radix(v, 16).ok()?;
+        Some(ColorRef::rgb(Rgba::rgb((n >> 16) as u8, (n >> 8) as u8, n as u8)))
+    } else if let Some(k) = body.find("schemeClr ") {
+        SchemeSlot::from_xml(attr(body.get(k..)?, "val")?).map(ColorRef::scheme)
+    } else {
+        None
+    }
+}
+
+/// A 3-D contour: a band of `width` points around the shape's outline (`a:sp3d contourW`,
+/// `a:contourClr`), drawn behind the face so only its outer half shows past the outline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Contour {
+    pub width: f64,
+    pub color: Option<ColorRef>,
+}
+
+/// The contour in 3-D XML kept from the file, if it has one.
+pub fn contour_from_raw(raw: &str) -> Option<Contour> {
+    let i = raw.find("sp3d ")?;
+    let tag = raw.get(i..)?;
+    let tag = tag.get(..tag.find('>')?)?;
+    let width = attr(tag, "contourW")?.parse::<f64>().ok()? / 12700.0;
+    if !(width.is_finite() && width > 0.01) {
+        return None;
+    }
+    Some(Contour { width: width.min(2000.0), color: color_in(raw, "contourClr") })
+}
+
+/// Draw `c` around `outline` (shape space, mapped by `m`), lit as a surface facing the viewer.
+pub fn draw_contour(ctx: &mut RenderContext, outline: &BezPath, m: Affine, width: f64, color: Rgba, lit: &Lighting) {
+    ctx.set_transform(m);
+    ctx.set_paint(crate::color(lit.shade(color, [0.0, 0.0, 1.0]), 1.0));
+    ctx.set_stroke(kurbo::Stroke::new(2.0 * width).with_join(kurbo::Join::Round));
+    ctx.stroke_path(outline);
 }
 
 /// The camera's view of the depth axis: where the back face sits relative to the front face, in
