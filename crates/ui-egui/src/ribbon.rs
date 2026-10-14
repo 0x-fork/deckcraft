@@ -1747,7 +1747,9 @@ fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
                 run(app, "show.setup", json!({"noNarration": !narr}));
             }
             let mut mc = app.session.active().is_none_or(|d| d.doc.show.show_media_controls);
-            let _ = ui.checkbox(&mut mc, "Show Media Controls");
+            if ui.checkbox(&mut mc, "Show Media Controls").changed() {
+                run(app, "show.setup", json!({"showMediaControls": mc}));
+            }
         });
     });
 }

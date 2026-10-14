@@ -314,8 +314,8 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             _ => {}
         }
     }
-    let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx);
-    let gif_click = if clicked && on_slide { gif_hit(&ctx, ui, &show, &doc, app) } else { None };
+    let on_slide = !show.pen && !show.ended && show.blank.is_none() && !show.reading_bar_hit(&ctx) && !pointer_on_media_bar(&ctx, ui, &doc, &show);
+    let gif_click = if clicked && on_slide && doc.show.show_media_controls { gif_hit(&ctx, ui, &show, &doc, app) } else { None };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
     let link = if on_slide && gif_click.is_none() && media_click.is_none() { link_hit(&ctx, ui, &mut show, &doc) } else { None };
     if let Some(id) = gif_click {
@@ -330,7 +330,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             LinkJump::Exit => keep = false,
             LinkJump::None => {}
         }
-    } else if clicked && !show.pen && !show.reading_bar_hit(&ctx) {
+    } else if clicked && !show.pen && !show.reading_bar_hit(&ctx) && !pointer_on_media_bar(&ctx, ui, &doc, &show) {
         if show.ended {
             keep = false;
         } else if show.blank.is_some() {
@@ -549,13 +549,29 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 };
                 crate::media::paint_frame(&painter, &app.media, *id, r);
             }
-            // Play/pause on the animated GIF under the pointer.
-            if let Some(p) = ctx.input(|i| i.pointer.hover_pos()).filter(|_| !show.pen && now - show.last_move < 2.5) {
-                for g in &gifs {
-                    let r = on_screen(srect, k, &g.rect);
-                    if r.contains(p) {
-                        let b = crate::media::gif_button_rect(r);
-                        crate::media::paint_gif_button(&painter, b, g.paused, b.contains(p));
+            // Play/pause on the animated GIF under the pointer, and the audio/video bar.
+            // Slide Show ▸ Show Media Controls hides both (the click still plays a clip).
+            if doc.show.show_media_controls {
+                if let Some(p) = ctx.input(|i| i.pointer.hover_pos()).filter(|_| !show.pen && now - show.last_move < 2.5) {
+                    for g in &gifs {
+                        let r = on_screen(srect, k, &g.rect);
+                        if r.contains(p) {
+                            let b = crate::media::gif_button_rect(r);
+                            crate::media::paint_gif_button(&painter, b, g.paused, b.contains(p));
+                        }
+                    }
+                }
+                if let Some((id, clip, bar)) = media_bar_target(&ctx, &doc, &show, srect) {
+                    let action = {
+                        let status = app.media.status(id);
+                        crate::media::control_bar(ui, bar, status.as_ref(), &clip)
+                    };
+                    let pos = app.media.status(id).map(|s| s.position).unwrap_or(0.0);
+                    match action {
+                        Some(crate::media::BarAction::Toggle) => app.media.toggle(&doc, id, &clip, crate::media::Owner::Show),
+                        Some(crate::media::BarAction::Seek(t)) => app.media.seek(&doc, id, &clip, t, crate::media::Owner::Show),
+                        Some(crate::media::BarAction::Nudge(dt)) => app.media.seek(&doc, id, &clip, (pos + dt).max(0.0), crate::media::Owner::Show),
+                        None => {}
                     }
                 }
             }
@@ -710,6 +726,60 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc: &Presentation) {
             }
         }
     }
+}
+
+/// Slide rectangle the show draws into (the reading bar keeps its strip).
+fn shown_slide_rect(ui: &Ui, show: &Show, doc: &Presentation) -> Rect {
+    let full = ui.max_rect();
+    let avail = if show.reading { Rect::from_min_max(full.min, pos2(full.max.x, full.max.y - 34.0)) } else { full };
+    fit(avail, doc)
+}
+
+/// Playback bar for one clip: along the bottom inside a large shape, just under a small icon.
+fn media_bar_rect(shape: Rect) -> Rect {
+    let h = 26.0f32;
+    let w = shape.width().clamp(160.0, 420.0);
+    if shape.height() >= h + 16.0 && shape.width() >= 160.0 {
+        Rect::from_min_size(pos2(shape.min.x + 4.0, shape.max.y - h - 4.0), vec2((shape.width() - 8.0).min(w), h))
+    } else {
+        Rect::from_min_size(pos2(shape.center().x - w / 2.0, shape.max.y + 4.0), vec2(w, h))
+    }
+}
+
+fn slide_media_bars(srect: Rect, doc: &Presentation, slide: usize) -> Vec<(ShapeId, deckcraft_model::MediaClip, Rect, Rect)> {
+    let k = srect.width() / doc.slide_size.width.max(1.0) as f32;
+    crate::media::slide_media(doc, slide)
+        .into_iter()
+        .map(|(id, x, clip)| {
+            let r = Rect::from_min_size(pos2(srect.min.x + x.x as f32 * k, srect.min.y + x.y as f32 * k), vec2(x.w as f32 * k, x.h as f32 * k));
+            let bar = media_bar_rect(r);
+            (id, clip, r, bar)
+        })
+        .collect()
+}
+
+/// The clip whose bar or shape is under the pointer, when Show Media Controls is on.
+fn media_bar_target(ctx: &egui::Context, doc: &Presentation, show: &Show, srect: Rect) -> Option<(ShapeId, deckcraft_model::MediaClip, Rect)> {
+    if !doc.show.show_media_controls || show.pen || show.ended || show.blank.is_some() {
+        return None;
+    }
+    let p = ctx.input(|i| i.pointer.hover_pos())?;
+    let items = slide_media_bars(srect, doc, show.state.slide);
+    if let Some((id, clip, _, bar)) = items.iter().rev().find(|(_, _, _, bar)| bar.contains(p)) {
+        return Some((*id, clip.clone(), *bar));
+    }
+    let (id, clip, _, bar) = items.iter().rev().find(|(_, _, r, _)| r.contains(p))?;
+    Some((*id, clip.clone(), *bar))
+}
+
+/// True when the pointer is on a visible playback bar, so that click must not advance the show.
+fn pointer_on_media_bar(ctx: &egui::Context, ui: &Ui, doc: &Presentation, show: &Show) -> bool {
+    if !doc.show.show_media_controls || show.pen || show.ended || show.blank.is_some() {
+        return false;
+    }
+    let Some(p) = ctx.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos())) else { return false };
+    let srect = shown_slide_rect(ui, show, doc);
+    slide_media_bars(srect, doc, show.state.slide).iter().any(|(_, _, _, bar)| bar.contains(p))
 }
 
 /// The media shape under the pointer on the shown slide.
