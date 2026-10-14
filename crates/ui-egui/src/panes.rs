@@ -131,6 +131,26 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 }
             });
+            let fx = sh.effects.clone().unwrap_or_default();
+            let shadow = fx.outer_shadow.as_ref().or(fx.inner_shadow.as_ref());
+            if let Some(sw) = shadow {
+                color_button(app, ui, "Color", None, |c| ("shape.effects".into(), json!({"shadowProps": {"color": c.as_ref().map(cref_param)}})));
+                fx_slider(
+                    app,
+                    ui,
+                    ("shadow", sh.id.0, "t"),
+                    "Transparency",
+                    (1.0 - sw.color.alpha()) * 100.0,
+                    0.0..=100.0,
+                    "%",
+                    "shadowProps",
+                    "transparency",
+                    0.01,
+                );
+                fx_slider(app, ui, ("shadow", sh.id.0, "b"), "Blur", sw.blur, 0.0..=100.0, " pt", "shadowProps", "blur", 1.0);
+                fx_slider(app, ui, ("shadow", sh.id.0, "a"), "Angle", sw.dir, 0.0..=359.0, "°", "shadowProps", "dir", 1.0);
+                fx_slider(app, ui, ("shadow", sh.id.0, "d"), "Distance", sw.dist, 0.0..=200.0, " pt", "shadowProps", "dist", 1.0);
+            }
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Reflection").font(theme::bold(13.0)));
             ui.horizontal_wrapped(|ui| {
@@ -140,11 +160,41 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 }
             });
+            if let Some(r) = &fx.reflection {
+                fx_slider(
+                    app,
+                    ui,
+                    ("refl", sh.id.0, "t"),
+                    "Transparency",
+                    (1.0 - r.start_alpha) * 100.0,
+                    0.0..=100.0,
+                    "%",
+                    "reflectionProps",
+                    "transparency",
+                    0.01,
+                );
+                fx_slider(app, ui, ("refl", sh.id.0, "s"), "Size", r.end_pos * 100.0, 0.0..=100.0, "%", "reflectionProps", "size", 0.01);
+                fx_slider(app, ui, ("refl", sh.id.0, "d"), "Distance", r.dist, 0.0..=100.0, " pt", "reflectionProps", "dist", 1.0);
+                fx_slider(app, ui, ("refl", sh.id.0, "b"), "Blur", r.blur, 0.0..=100.0, " pt", "reflectionProps", "blur", 1.0);
+            }
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Glow").font(theme::bold(13.0)));
-            let mut g = sh.effects.as_ref().and_then(|e| e.glow.as_ref().map(|g| g.radius)).unwrap_or(0.0);
-            if ui.add(egui::Slider::new(&mut g, 0.0..=40.0).text("size (pt)")).drag_stopped() {
-                run(app, "shape.effects", json!({"glow": if g > 0.0 { json!(g) } else { Value::Null }}));
+            let radius = fx.glow.as_ref().map_or(0.0, |g| g.radius);
+            fx_slider(app, ui, ("glow", sh.id.0, "r"), "Size", radius, 0.0..=150.0, " pt", "glowProps", "radius", 1.0);
+            if let Some(g) = &fx.glow {
+                color_button(app, ui, "Color", None, |c| ("shape.effects".into(), json!({"glowProps": {"color": c.as_ref().map(cref_param)}})));
+                fx_slider(
+                    app,
+                    ui,
+                    ("glow", sh.id.0, "t"),
+                    "Transparency",
+                    (1.0 - g.color.alpha()) * 100.0,
+                    0.0..=100.0,
+                    "%",
+                    "glowProps",
+                    "transparency",
+                    0.01,
+                );
             }
             ui.label(egui::RichText::new("Soft Edges").font(theme::bold(13.0)));
             let mut s = sh.effects.as_ref().and_then(|e| e.soft_edge).unwrap_or(0.0);
@@ -410,6 +460,39 @@ fn line_details(app: &mut SlideApp, ui: &mut Ui, sh: &deckcraft_model::Shape) {
             line_choice(app, ui, size_label, size_key, &e.w, &sizes);
         }
     }
+}
+
+/// A slider for one property of a shape effect: shows `value` (in display units), and when the
+/// drag ends runs `shape.effects` with `{key: {prop: shown × scale}}`.
+#[allow(clippy::too_many_arguments)]
+fn fx_slider(
+    app: &mut SlideApp,
+    ui: &mut Ui,
+    id: (&str, u32, &str),
+    label: &str,
+    value: f64,
+    range: std::ops::RangeInclusive<f64>,
+    suffix: &str,
+    key: &str,
+    prop: &str,
+    scale: f64,
+) {
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+        // Hold the value while dragging; otherwise follow the shape.
+        let sid = ui.id().with(id);
+        let mut v: f64 = ui.data_mut(|d| d.get_temp(sid)).unwrap_or(value);
+        let r = ui.add(egui::Slider::new(&mut v, range).suffix(suffix).max_decimals(0));
+        if r.dragged() || r.has_focus() {
+            ui.data_mut(|d| d.insert_temp(sid, v));
+        } else {
+            ui.data_mut(|d| d.remove::<f64>(sid));
+        }
+        if r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged()) {
+            ui.data_mut(|d| d.remove::<f64>(sid));
+            run(app, "shape.effects", json!({key: {prop: v * scale}}));
+        }
+    });
 }
 
 fn background(app: &mut SlideApp, ui: &mut Ui) {
