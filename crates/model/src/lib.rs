@@ -372,6 +372,9 @@ pub struct DiagramNode {
     /// The picture shown in the node's picture placeholder (picture layouts).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub picture: Option<MediaId>,
+    /// An assistant (organisation charts): drawn beside its parent, off the row of its siblings.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub assistant: bool,
 }
 
 impl Default for Shape {

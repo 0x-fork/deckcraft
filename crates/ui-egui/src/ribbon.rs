@@ -2599,9 +2599,13 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
         rows(ui, |ui| {
             let (r, _) = small_button_ex(ui, Icon::Plus, "Add Shape", gid.is_some(), false, true);
             egui::Popup::menu(&r).show(|ui| {
-                for (label, pos) in
-                    [("Add Shape After", "after"), ("Add Shape Before", "before"), ("Add Shape Above", "above"), ("Add Shape Below", "below")]
-                {
+                for (label, pos) in [
+                    ("Add Shape After", "after"),
+                    ("Add Shape Before", "before"),
+                    ("Add Shape Above", "above"),
+                    ("Add Shape Below", "below"),
+                    ("Add Assistant", "assistant"),
+                ] {
                     if ui.button(label).clicked() {
                         let index = if n == 0 { Value::Null } else { json!(at) };
                         run(app, "smartArt.addNode", json!({"id": gid, "index": index, "position": pos}));

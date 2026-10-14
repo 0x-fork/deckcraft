@@ -122,6 +122,13 @@ pub fn layout_id(kind: &str) -> &'static str {
         "gridMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/matrix2",
         "gear" => "urn:microsoft.com/office/officeart/2005/8/layout/gear1",
         "funnel" => "urn:microsoft.com/office/officeart/2005/8/layout/funnel1",
+        "segmentedCycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle8",
+        "multidirectionalCycle" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle7",
+        "orgChart" => "urn:microsoft.com/office/officeart/2005/8/layout/orgChart1",
+        "halfCircleOrgChart" => "urn:microsoft.com/office/officeart/2008/layout/HalfCircleOrganizationChart",
+        "cycleMatrix" => "urn:microsoft.com/office/officeart/2005/8/layout/cycle4",
+        "segmentedPyramid" => "urn:microsoft.com/office/officeart/2005/8/layout/pyramid4",
+        "pie" => "urn:microsoft.com/office/officeart/2005/8/layout/chart3",
         _ => "urn:microsoft.com/office/officeart/2005/8/layout/vList2",
     }
 }
@@ -163,6 +170,13 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "gridMatrix",
         "gear",
         "funnel",
+        "segmentedCycle",
+        "multidirectionalCycle",
+        "orgChart",
+        "halfCircleOrgChart",
+        "cycleMatrix",
+        "segmentedPyramid",
+        "pie",
         "list",
     ] {
         if layout_id == layout_id_of(k) {
@@ -180,7 +194,9 @@ pub fn kind_for(layout_id: &str, category: &str) -> &'static str {
         "target"
     } else if s.contains("timeline") {
         "timeline"
-    } else if s.contains("hierarchy") || s.contains("orgchart") {
+    } else if s.contains("orgchart") || s.contains("organizationchart") || s.contains("organizationalchart") {
+        "orgChart"
+    } else if s.contains("hierarchy") {
         "hierarchy"
     } else if s.contains("radial") {
         "radial"
@@ -211,9 +227,11 @@ fn category(kind: &str) -> &'static str {
     match kind {
         "process" | "chevron" | "verticalProcess" | "stepUp" | "pictureProcess" | "timeline" | "gear" | "funnel" => "process",
         "venn" | "target" => "relationship",
-        "cycle" | "blockCycle" | "radial" | "textCycle" | "continuousCycle" => "cycle",
-        "hierarchy" | "horizontalHierarchy" => "hierarchy",
-        "pyramid" | "invertedPyramid" => "pyramid",
+        "cycle" | "blockCycle" | "radial" | "textCycle" | "continuousCycle" | "segmentedCycle" | "multidirectionalCycle" | "cycleMatrix" | "pie" => {
+            "cycle"
+        }
+        "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart" => "hierarchy",
+        "pyramid" | "invertedPyramid" | "segmentedPyramid" => "pyramid",
         "matrix" | "titledMatrix" | "gridMatrix" => "matrix",
         _ => "list",
     }
@@ -267,7 +285,11 @@ pub fn data_xml(d: &Diagram, seed: u32, drawing_rel: &str, pics: &[(usize, Strin
     // Node k: model id 1 + 3k; its link's parent and sibling transitions 2 + 3k and 3 + 3k.
     let node = |k: usize| guid(seed, 1 + 3 * k);
     for (k, n) in d.nodes.iter().enumerate() {
-        w.open("dgm:pt", A::new().a("modelId", node(k)));
+        let mut a = A::new().a("modelId", node(k));
+        if n.assistant {
+            a = a.a("type", "asst");
+        }
+        w.open("dgm:pt", a);
         w.empty("dgm:prSet", A::new().a("phldrT", "[Text]"));
         w.empty0("dgm:spPr");
         text(&mut w, &n.text);
@@ -367,14 +389,18 @@ pub fn node_pictures(data: &El) -> Vec<(usize, String)> {
 fn outline_ids(data: &El) -> Vec<(String, DiagramNode)> {
     let Some(pts) = data.child("ptLst") else { return vec![] };
     let mut texts: HashMap<&str, String> = HashMap::new();
+    let mut assistants: std::collections::HashSet<&str> = std::collections::HashSet::new();
     let mut doc: Option<&str> = None;
     for pt in pts.children_named("pt").take(MAX_NODES * 4) {
         let Some(id) = pt.attr("modelId") else { continue };
         match pt.attr("type").unwrap_or("node") {
             "doc" => doc = doc.or(Some(id)),
-            "node" => {
+            ty @ ("node" | "asst") => {
                 let t = pt.child("t").map(paragraphs).unwrap_or_default();
                 texts.insert(id, t);
+                if ty == "asst" {
+                    assistants.insert(id);
+                }
             }
             _ => {}
         }
@@ -403,7 +429,10 @@ fn outline_ids(data: &El) -> Vec<(String, DiagramNode)> {
         if out.len() >= MAX_NODES || !seen.insert(id) {
             continue;
         }
-        out.push((id.to_string(), DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8), picture: None }));
+        out.push((
+            id.to_string(),
+            DiagramNode { text: texts.get(id).cloned().unwrap_or_default(), level: level.min(8), picture: None, assistant: assistants.contains(id) },
+        ));
         if let Some(v) = kids.get(id) {
             stack.extend(v.iter().rev().map(|(_, c)| (*c, level.saturating_add(1))));
         }
@@ -432,11 +461,19 @@ fn alg(kind: &str) -> (&'static str, Vec<(&'static str, &'static str)>, &'static
         }
         "chevron" => ("lin", vec![("linDir", "fromL"), ("nodeVertAlign", "mid")], "chevron"),
         "verticalProcess" => ("lin", vec![("linDir", "fromT"), ("nodeHorzAlign", "ctr")], "roundRect"),
-        "cycle" | "radial" | "venn" | "target" | "textCycle" | "continuousCycle" | "gear" => {
-            ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse")
-        }
+        "cycle"
+        | "radial"
+        | "venn"
+        | "target"
+        | "textCycle"
+        | "continuousCycle"
+        | "gear"
+        | "segmentedCycle"
+        | "multidirectionalCycle"
+        | "cycleMatrix"
+        | "pie" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "ellipse"),
         "blockCycle" => ("cycle", vec![("stAng", "0"), ("spanAng", "360")], "roundRect"),
-        "pyramid" | "invertedPyramid" => {
+        "pyramid" | "invertedPyramid" | "segmentedPyramid" => {
             ("pyra", vec![("linDir", if kind == "pyramid" { "fromT" } else { "fromB" }), ("txDir", "fromT"), ("pyraAcctPos", "bef")], "trapezoid")
         }
         "matrix" | "titledMatrix" | "gridMatrix" | "blockList" => (
@@ -502,7 +539,7 @@ pub fn layout_xml(kind: &str) -> Vec<u8> {
     w.empty0("dgm:dir");
     w.empty("dgm:resizeHandles", A::new().a("val", "exact"));
     w.close("dgm:varLst");
-    if matches!(kind, "hierarchy" | "horizontalHierarchy") {
+    if matches!(kind, "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart") {
         // Each node over the row of its children, recursively.
         w.empty("dgm:alg", A::new().a("type", "hierChild"));
         w.open("dgm:shape", A::new().a("r:blip", ""));
@@ -671,7 +708,7 @@ mod tests {
     use super::*;
 
     fn nodes(v: &[(&str, u8)]) -> Vec<DiagramNode> {
-        v.iter().map(|(t, l)| DiagramNode { text: (*t).into(), level: *l, picture: None }).collect()
+        v.iter().map(|(t, l)| DiagramNode { text: (*t).into(), level: *l, picture: None, assistant: false }).collect()
     }
 
     #[test]
@@ -696,6 +733,17 @@ mod tests {
         ] {
             assert!(crate::xml::parse(&x).is_ok());
         }
+    }
+
+    #[test]
+    fn assistants_survive_the_data_model() {
+        let mut v = nodes(&[("CEO", 0), ("Aide", 1), ("CTO", 1)]);
+        v[1].assistant = true;
+        let d = Diagram { kind: "orgChart".into(), nodes: v, ..Default::default() };
+        let xml = data_xml(&d, 5, "rId1", &[]);
+        assert!(String::from_utf8(xml.clone()).unwrap().contains("type=\"asst\""));
+        let doc = crate::xml::parse(&xml).unwrap();
+        assert_eq!(outline(&doc.root), d.nodes);
     }
 
     #[test]
@@ -734,6 +782,13 @@ mod tests {
             "gridMatrix",
             "gear",
             "funnel",
+            "segmentedCycle",
+            "multidirectionalCycle",
+            "orgChart",
+            "halfCircleOrgChart",
+            "cycleMatrix",
+            "segmentedPyramid",
+            "pie",
         ] {
             assert_eq!(kind_for(layout_id(k), ""), k);
         }
@@ -744,7 +799,8 @@ mod tests {
         let xml = br#"<dgm:dataModel xmlns:dgm="d"><dgm:ptLst><dgm:pt modelId="0" type="doc"/><dgm:pt modelId="1"><dgm:t><a:p xmlns:a="a"><a:r><a:t>A</a:t></a:r></a:p></dgm:t></dgm:pt><dgm:pt modelId="2"/></dgm:ptLst><dgm:cxnLst><dgm:cxn srcId="0" destId="1"/><dgm:cxn srcId="1" destId="2"/><dgm:cxn srcId="2" destId="1"/><dgm:cxn type="presOf" srcId="0" destId="2"/></dgm:cxnLst></dgm:dataModel>"#;
         let doc = crate::xml::parse(xml).unwrap();
         assert_eq!(outline(&doc.root), nodes(&[("A", 0), ("", 1)]));
-        assert_eq!(kind_for("urn:microsoft.com/office/officeart/2005/8/layout/orgChart1", ""), "hierarchy");
+        assert_eq!(kind_for("urn:microsoft.com/office/officeart/2005/8/layout/orgChart1", ""), "orgChart");
+        assert_eq!(kind_for("urn:x/layout/NameandTitleOrganizationalChart", ""), "orgChart");
         assert_eq!(kind_for("urn:x/layout/chevron2", "process"), "chevron");
         assert_eq!(kind_for("urn:x/layout/hProcess9", "process"), "process");
         assert_eq!(kind_for("urn:x/layout/default", "list"), "blockList");
