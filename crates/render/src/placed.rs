@@ -154,3 +154,32 @@ fn run_link(body: &TextBody, para: usize, at: usize) -> Option<Hyperlink> {
     }
     None
 }
+
+/// The outlines of shape `s`'s text as drawn, in the space `m` maps shape-local points to, and
+/// the colour of its first visible run: what Merge Shapes turns letters into. Empty when the
+/// shape has no text.
+pub fn text_outline(rctx: &Ctx, s: &Shape, m: Affine) -> (kurbo::BezPath, Option<deckcraft_color::Rgba>) {
+    let mut out = kurbo::BezPath::new();
+    let Some(body) = s.text.as_ref().filter(|b| !b.is_empty()) else { return (out, None) };
+    let x = resolve::xfrm(rctx, s);
+    let tr = shape_geometry(s, x.w, x.h).text_rect;
+    let layout = deckcraft_text::layout(rctx, s, body, &Opts { rect: tr, fields: &deckcraft_text::NoFields, prompt_color: None, no_shrink: false });
+    let m = crate::text_transform(m, tr, layout.rotation);
+    let mut first = None;
+    for run in &layout.runs {
+        let k = run.size / run.face.upem.max(1.0);
+        let skew = if run.fake_italic { Affine::new([1.0, 0.0, -0.2, 1.0, 0.0, 0.0]) } else { Affine::IDENTITY };
+        for (gid, gx, gy) in &run.glyphs {
+            let path = crate::glyph(&run.face, *gid);
+            if path.elements().is_empty() {
+                continue;
+            }
+            if first.is_none() && run.color.a > 0 {
+                first = Some(run.color);
+            }
+            let at = m * crate::glyph_place(run, *gid, *gx, *gy) * skew * Affine::scale(k);
+            out.extend(path.elements().iter().map(|e| at * *e));
+        }
+    }
+    (out, first)
+}

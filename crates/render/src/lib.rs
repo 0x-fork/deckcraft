@@ -51,7 +51,7 @@ pub use extent::{Region, TILE, layout_extent, pasteboard_region, slide_extent};
 pub use images::{decode as decode_image, gif_frame};
 pub use morph_path::PathMorph;
 pub use morph_text::TextMorph;
-pub use placed::{Placed, PlacedLink, PlacedShape, PlacedText, place_slide};
+pub use placed::{Placed, PlacedLink, PlacedShape, PlacedText, place_slide, text_outline};
 pub use table::row_heights as table_row_heights;
 pub use transition::{SlideParts, composite_transition, render_transition};
 
@@ -1931,7 +1931,7 @@ thread_local! {
     static GLYPH_CACHE: std::cell::RefCell<HashMap<(u32, u32), Arc<BezPath>>> = std::cell::RefCell::new(HashMap::new());
 }
 
-fn glyph(face: &deckcraft_fonts::FontFace, gid: u32) -> Arc<BezPath> {
+pub(crate) fn glyph(face: &deckcraft_fonts::FontFace, gid: u32) -> Arc<BezPath> {
     let key = (face.id(), gid);
     if let Some(p) = GLYPH_CACHE.with(|c| c.borrow().get(&key).cloned()) {
         return p;
