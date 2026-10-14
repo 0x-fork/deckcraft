@@ -61,7 +61,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 
 | Pane / dialog | PowerPoint | DeckCraft |
 |---|---|---|
-| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line, some effects, size; no 3-D, thin picture/texture options |
+| Format Shape / Picture / Text pane (Fill & Line, Effects, Size & Properties, Picture, Text Box) | full | partial: fill, gradient editor, line (dash, compound, cap, join, begin/end arrows and sizes), some effects, size (lock aspect ratio); no 3-D, thin picture/texture options |
 | Format Background pane | yes | yes |
 | Selection Pane | front-most first, groups fold, drag to restack, Bring Forward / Send Backward arrows, Show All / Hide All, eye, padlock (Lock), rename in place | same: drag restacks among siblings (a child stays in its group), Ctrl+click toggles, Shift+click selects a run, arrows / Home / End / F2 / Esc in the list, right-click menu |
 | Animation Pane | list + advanced timeline | list, reorder, timing; no timeline |

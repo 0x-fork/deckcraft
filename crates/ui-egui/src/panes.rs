@@ -156,11 +156,18 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             }
         }
         "size" => {
+            let lock_id = egui::Id::new("fmt-lock-aspect");
+            let mut lock: bool = ui.data_mut(|d| d.get_temp(lock_id).unwrap_or(false));
+            let locked = lock;
             let mut fields = |ui: &mut Ui, label: &str, id: &str, v: f64, key: &str, cmd: &str, unit: f64| {
                 ui.horizontal(|ui| {
                     ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
                     if let Some(nv) = widgets::spinner(ui, id, v / unit, 0.1, if unit == 72.0 { "\"" } else { "°" }, 70.0) {
-                        run(app, cmd, json!({key: nv * unit}));
+                        let mut p = json!({key: nv * unit});
+                        if cmd == "shape.resize" && locked {
+                            p["lockAspect"] = json!(true);
+                        }
+                        run(app, cmd, p);
                     }
                 });
             };
@@ -168,6 +175,9 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             fields(ui, "Height", "fh", x.h, "h", "shape.resize", 72.0);
             fields(ui, "Width", "fw", x.w, "w", "shape.resize", 72.0);
             fields(ui, "Rotation", "fr", x.rot, "deg", "shape.rotate", 1.0);
+            if ui.checkbox(&mut lock, "Lock aspect ratio").changed() {
+                ui.data_mut(|d| d.insert_temp(lock_id, lock));
+            }
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Position").font(theme::bold(13.0)));
             fields(ui, "Horizontal", "fx", x.x, "x", "shape.move", 72.0);
@@ -337,6 +347,67 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 }
             });
+            line_details(app, ui, &sh);
+        }
+    }
+}
+
+/// A labelled drop-down on the Format Shape pane: picks one of `items` (label, value) and runs
+/// `shape.line` with `{key: value}`.
+fn line_choice(app: &mut SlideApp, ui: &mut Ui, label: &str, key: &str, current: &str, items: &[(&str, &str)]) {
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
+        let shown = items.iter().find(|(_, v)| *v == current).map_or(current, |(l, _)| *l);
+        egui::ComboBox::from_id_salt(("fmt-line", key)).selected_text(shown).width(120.0).show_ui(ui, |ui| {
+            for (l, v) in items {
+                if ui.selectable_label(*v == current, *l).clicked() {
+                    run(app, "shape.line", json!({key: v}));
+                }
+            }
+        });
+    });
+}
+
+/// The rest of PowerPoint's Line page: compound type, cap and join types, and the begin and end
+/// arrows with their sizes.
+fn line_details(app: &mut SlideApp, ui: &mut Ui, sh: &deckcraft_model::Shape) {
+    use deckcraft_model::style::{Compound, LineCap, LineJoin};
+    let l = sh.line.clone().unwrap_or_default();
+    let compound = match l.compound.unwrap_or_default() {
+        Compound::Single => "single",
+        Compound::Double => "double",
+        Compound::ThickThin => "thickThin",
+        Compound::ThinThick => "thinThick",
+        Compound::Triple => "triple",
+    };
+    line_choice(
+        app,
+        ui,
+        "Compound type",
+        "compound",
+        compound,
+        &[("Single", "single"), ("Double", "double"), ("Thick Thin", "thickThin"), ("Thin Thick", "thinThick"), ("Triple", "triple")],
+    );
+    let cap = match l.cap.unwrap_or_default() {
+        LineCap::Flat => "flat",
+        LineCap::Round => "round",
+        LineCap::Square => "square",
+    };
+    line_choice(app, ui, "Cap type", "cap", cap, &[("Flat", "flat"), ("Round", "round"), ("Square", "square")]);
+    let join = match l.join.unwrap_or_default() {
+        LineJoin::Round => "round",
+        LineJoin::Bevel => "bevel",
+        LineJoin::Miter => "miter",
+    };
+    line_choice(app, ui, "Join type", "join", join, &[("Round", "round"), ("Bevel", "bevel"), ("Miter", "miter")]);
+    let arrows = [("None", "none"), ("Arrow", "triangle"), ("Open Arrow", "arrow"), ("Stealth", "stealth"), ("Diamond", "diamond"), ("Oval", "oval")];
+    let sizes = [("Small", "sm"), ("Medium", "med"), ("Large", "lg")];
+    for (label, key, size_label, size_key, end) in
+        [("Begin arrow", "head", "Begin size", "headSize", &l.head), ("End arrow", "tail", "End size", "tailSize", &l.tail)]
+    {
+        line_choice(app, ui, label, key, end.as_ref().map_or("none", |e| e.kind.as_str()), &arrows);
+        if let Some(e) = end {
+            line_choice(app, ui, size_label, size_key, &e.w, &sizes);
         }
     }
 }

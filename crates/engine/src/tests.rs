@@ -1207,3 +1207,27 @@ fn pdf_options_take_paper_and_orientation() {
     assert!(cmd::file::pdf_options(&json!({"paper": "tabloid"}), 1).is_err());
     assert!(cmd::file::pdf_options(&json!({"orientation": "sideways"}), 1).is_err());
 }
+
+#[test]
+fn shape_line_sets_compound_and_arrow_sizes() {
+    // The Format Shape pane's Line page: compound type, arrowheads and their sizes.
+    use deckcraft_model::style::Compound;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "line", "rect": [100, 100, 200, 0]})).unwrap();
+    s.execute("shape.line", &json!({"compound": "thickThin", "head": "oval", "tail": "triangle", "tailSize": "lg"})).unwrap();
+    let line = |s: &Session| s.doc().unwrap().selected_shapes()[0].line.clone().unwrap();
+    let l = line(&s);
+    assert_eq!(l.compound, Some(Compound::ThickThin));
+    assert_eq!(l.head.as_ref().map(|e| (e.kind.as_str(), e.w.as_str())), Some(("oval", "med")));
+    assert_eq!(l.tail.as_ref().map(|e| (e.kind.as_str(), e.w.as_str(), e.len.as_str())), Some(("triangle", "lg", "lg")));
+    // Changing the arrow keeps its size; an unknown size is ignored; "none" removes it.
+    s.execute("shape.line", &json!({"tail": "stealth", "headSize": "huge"})).unwrap();
+    let l = line(&s);
+    assert_eq!(l.tail.as_ref().map(|e| (e.kind.as_str(), e.w.as_str())), Some(("stealth", "lg")));
+    assert_eq!(l.head.as_ref().map(|e| e.w.as_str()), Some("med"));
+    s.execute("shape.line", &json!({"head": "none", "compound": "single"})).unwrap();
+    let l = line(&s);
+    assert!(l.head.is_none());
+    assert_eq!(l.compound, Some(Compound::Single));
+}

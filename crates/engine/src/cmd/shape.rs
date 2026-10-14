@@ -51,7 +51,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Shape Outline",
             ["Shape Format", "Shape Styles"],
             None,
-            "{color?, none?, width?: pt, dash?: solid|dot|dash|lgDash|dashDot|sysDot|sysDash, cap?, join?, head?: none|triangle|stealth|diamond|oval|arrow, tail?, reset?, ids?}",
+            "{color?, none?, width?: pt, dash?: solid|dot|dash|lgDash|dashDot|sysDot|sysDash, cap?: flat|round|square, join?: round|bevel|miter, compound?: single|double|thickThin|thinThick|triple, head?: none|triangle|stealth|diamond|oval|arrow, tail?, headSize?: sm|med|lg, tailSize?, reset?, ids?}",
             has_selection,
             line
         ),
@@ -350,6 +350,15 @@ fn line(s: &mut Session, p: &Value) -> Result<Value> {
         "square" => deckcraft_model::style::LineCap::Square,
         _ => deckcraft_model::style::LineCap::Flat,
     });
+    let compound = str_param(p, "compound").map(|c| match c {
+        "double" => deckcraft_model::style::Compound::Double,
+        "thickThin" => deckcraft_model::style::Compound::ThickThin,
+        "thinThick" => deckcraft_model::style::Compound::ThinThick,
+        "triple" => deckcraft_model::style::Compound::Triple,
+        _ => deckcraft_model::style::Compound::Single,
+    });
+    let end_size = |k: &str| str_param(p, k).filter(|v| matches!(*v, "sm" | "med" | "lg")).map(str::to_string);
+    let (head_size, tail_size) = (end_size("headSize"), end_size("tailSize"));
     let join = str_param(p, "join").map(|c| match c {
         "bevel" => deckcraft_model::style::LineJoin::Bevel,
         "miter" => deckcraft_model::style::LineJoin::Miter,
@@ -376,17 +385,36 @@ fn line(s: &mut Session, p: &Value) -> Result<Value> {
         if dash.is_some() {
             l.dash.clone_from(&dash);
         }
+        let keep_size = |old: &Option<LineEnd>, new: &Option<LineEnd>| {
+            new.clone().map(|mut n| {
+                if let Some(o) = old {
+                    n.w.clone_from(&o.w);
+                    n.len.clone_from(&o.len);
+                }
+                n
+            })
+        };
         if let Some(h) = &head {
-            l.head.clone_from(h);
+            l.head = keep_size(&l.head, h);
         }
         if let Some(t) = &tail {
-            l.tail.clone_from(t);
+            l.tail = keep_size(&l.tail, t);
         }
         if cap.is_some() {
             l.cap = cap;
         }
         if join.is_some() {
             l.join = join;
+        }
+        if compound.is_some() {
+            l.compound = compound;
+        }
+        // Arrowhead size (width and length together), kept when the kind changes.
+        for (end, size) in [(&mut l.head, &head_size), (&mut l.tail, &tail_size)] {
+            if let (Some(e), Some(sz)) = (end.as_mut(), size) {
+                e.w.clone_from(sz);
+                e.len.clone_from(sz);
+            }
         }
         Ok(())
     })
