@@ -251,7 +251,7 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
         w.open0("c:catAx");
         w.val("c:axId", AX_CAT);
         w.open0("c:scaling");
-        w.val("c:orientation", "minMax");
+        w.val("c:orientation", if c.cat_reversed { "maxMin" } else { "minMax" });
         w.close("c:scaling");
         w.val("c:delete", 0);
         w.val("c:axPos", cat_pos);
@@ -478,4 +478,20 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
     }
     w.close("c:chartSpace");
     w.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::chart::{Chart, ChartType};
+
+    #[test]
+    fn reversed_category_axis_round_trips() {
+        let mut c = Chart::sample(ChartType::Bar);
+        c.cat_reversed = true;
+        let xml = super::chart_xml(&c);
+        assert!(String::from_utf8_lossy(&xml).contains(r#"<c:orientation val="maxMin"/>"#));
+        assert!(crate::read::chart::read_chart_xml(&xml).unwrap().cat_reversed);
+        c.cat_reversed = false;
+        assert!(!crate::read::chart::read_chart_xml(&super::chart_xml(&c)).unwrap().cat_reversed);
+    }
 }

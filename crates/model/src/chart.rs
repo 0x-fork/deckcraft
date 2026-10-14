@@ -178,6 +178,9 @@ pub struct Chart {
     pub y_format: Option<String>,
     /// The value axis is deleted (`c:delete`): no labels, though gridlines may stay.
     pub y_hidden: bool,
+    /// The category axis runs backwards (`c:orientation val="maxMin"`): right to left, or on a
+    /// horizontal bar chart top to bottom (the default puts the first category at the bottom).
+    pub cat_reversed: bool,
     /// A combo chart's secondary value axis: bounds, major unit and number format.
     pub y2_min: Option<f64>,
     pub y2_max: Option<f64>,
@@ -219,6 +222,7 @@ impl Default for Chart {
             y_major: None,
             y_format: None,
             y_hidden: false,
+            cat_reversed: false,
             y2_min: None,
             y2_max: None,
             y2_major: None,

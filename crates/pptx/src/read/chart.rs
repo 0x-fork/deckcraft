@@ -282,6 +282,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
         c.y_hidden = deleted(v);
     }
     if let Some(a) = cat_ax {
+        c.cat_reversed = a.child("scaling").and_then(|s| s.child_val("orientation")).is_some_and(|o| o == "maxMin");
         c.axis_titles.0 = a.child("title").map(|t| rich_text(t).unwrap_or_else(|| "Axis Title".into()));
     }
     // Text sizes as the file sets them (PowerPoint draws chart text at these sizes, not scaled to
@@ -399,6 +400,13 @@ mod tests {
         let xml = r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:val><c:numRef><c:numCache><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser><c:axId val="1"/><c:axId val="2"/></c:barChart><c:catAx><c:axId val="1"/><c:txPr><a:bodyPr/><a:p><a:pPr><a:defRPr sz="1000"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:defRPr></a:pPr></a:p></c:txPr></c:catAx><c:valAx><c:axId val="2"/></c:valAx></c:plotArea></c:chart></c:chartSpace>"#;
         let c = read_chart_xml(xml.as_bytes()).unwrap();
         assert_eq!(c.text_color, Some(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 255))));
+        assert!(!c.cat_reversed);
+        let rev = read_chart_xml(
+            xml.replace("<c:catAx><c:axId val=\"1\"/>", "<c:catAx><c:axId val=\"1\"/><c:scaling><c:orientation val=\"maxMin\"/></c:scaling>")
+                .as_bytes(),
+        )
+        .unwrap();
+        assert!(rev.cat_reversed, "maxMin reverses the category axis");
         // No c:gapWidth / c:overlap: the schema's 150 % and 0 %.
         assert_eq!((c.gap_width, c.overlap), (1.5, 0.0));
     }
