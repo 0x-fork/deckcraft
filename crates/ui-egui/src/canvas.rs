@@ -41,7 +41,8 @@ pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let (sw, sh) = (d.doc.slide_size.width as f32, d.doc.slide_size.height as f32);
     let margin = 28.0;
     let fit = ((avail.width() - margin * 2.0) / sw).min((avail.height() - margin * 2.0) / sh).max(0.05);
-    let scale = app.ui.zoom.unwrap_or(fit);
+    // A zoom from outside the editor's own controls (settings, the control protocol) is kept in range.
+    let scale = app.ui.zoom.filter(|z| z.is_finite() && *z > 0.0).map_or(fit, |z| z.clamp(*crate::ZOOM_RANGE.start(), *crate::ZOOM_RANGE.end()));
     let size = vec2(sw * scale, sh * scale);
     let mut r = Rect::from_center_size(avail.center(), size);
     if size.x > avail.width() {

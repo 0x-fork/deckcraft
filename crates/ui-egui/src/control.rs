@@ -229,7 +229,11 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
                 };
             }
             if let Some(z) = p.get("zoom") {
-                app.ui.zoom = z.as_f64().map(|v| v as f32);
+                app.ui.zoom = z
+                    .as_f64()
+                    .map(|v| v as f32)
+                    .filter(|v| v.is_finite() && *v > 0.0)
+                    .map(|v| v.clamp(*crate::ZOOM_RANGE.start(), *crate::ZOOM_RANGE.end()));
             }
             if let Some(d) = p.get("dark").and_then(Value::as_bool) {
                 let _ = app.run("view.dark", json!({"on": d}));

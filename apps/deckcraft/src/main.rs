@@ -52,24 +52,16 @@ fn config_dir() -> Option<std::path::PathBuf> {
     }
 }
 
-fn prefs_path() -> Option<std::path::PathBuf> {
-    config_dir().map(|b| b.join("ui.json"))
-}
-
 fn load_prefs(app: &mut SlideApp) {
     if std::env::var_os("DECKCRAFT_NO_PREFS").is_some() {
         return;
     }
-    if let Some(p) = prefs_path()
-        && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(ui) = serde_json::from_slice::<deckcraft_ui_egui::UiState>(&bytes)
-    {
+    let Some(dir) = config_dir() else { return };
+    let (ui, prefs) = deckcraft_ui_egui::settings::load(&dir);
+    if let Some(ui) = ui {
         app.ui = ui;
     }
-    if let Some(p) = prefs_path().map(|p| p.with_file_name("prefs.json"))
-        && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(prefs) = serde_json::from_slice::<deckcraft_engine::Prefs>(&bytes)
-    {
+    if let Some(prefs) = prefs {
         app.session.prefs = prefs;
     }
 }
@@ -78,14 +70,8 @@ fn save_prefs(app: &SlideApp) {
     if std::env::var_os("DECKCRAFT_NO_PREFS").is_some() {
         return;
     }
-    if let Some(p) = prefs_path() {
-        let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
-        if let Ok(bytes) = serde_json::to_vec_pretty(&app.ui) {
-            let _ = std::fs::write(&p, bytes);
-        }
-        if let Ok(bytes) = serde_json::to_vec_pretty(&app.session.prefs) {
-            let _ = std::fs::write(p.with_file_name("prefs.json"), bytes);
-        }
+    if let Some(dir) = config_dir() {
+        deckcraft_ui_egui::settings::save(&dir, &app.ui, &app.session.prefs);
     }
 }
 

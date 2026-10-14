@@ -116,7 +116,9 @@ impl Textures {
             Some((i, d)) if i == index => estimate.union(d),
             _ => estimate,
         };
-        let want = deckcraft_render::pasteboard_region(size, scale, reach, visible);
+        // The GPU's (or software fallback's) texture limit: a larger canvas texture panics in egui.
+        let max_side = ctx.input(|i| i.max_texture_side).max(1) as u32;
+        let want = fit_texture(deckcraft_render::pasteboard_region(size, scale, reach, visible), visible, max_side);
         let key = Key {
             slide: Arc::as_ptr(&slide) as usize,
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
@@ -142,7 +144,8 @@ impl Textures {
         // Text spilling out of its box can reach further than the boxes said. Once drawn, the
         // region it calls for is known (and is next frame's key): render again only if it shows
         // more than this render covered.
-        let key = Key { want: deckcraft_render::pasteboard_region(size, scale, estimate.union(drawn), visible), ..key };
+        let key =
+            Key { want: fit_texture(deckcraft_render::pasteboard_region(size, scale, estimate.union(drawn), visible), visible, max_side), ..key };
         if !region.contains(&key.want) {
             region = key.want;
             img = render(region).0;
@@ -211,5 +214,35 @@ impl Textures {
             }
         }
         Some(tex)
+    }
+}
+
+/// `r` cut to at most `max` pixels a side, keeping as much of `visible` as fits.
+pub(crate) fn fit_texture(mut r: Region, visible: Region, max: u32) -> Region {
+    fn axis(start: &mut i32, len: &mut u32, vis: i32, max: u32) {
+        if *len > max {
+            let hi = *start as i64 + (*len - max) as i64;
+            *start = (vis as i64).clamp(*start as i64, hi) as i32;
+            *len = max;
+        }
+    }
+    axis(&mut r.x, &mut r.w, visible.x, max);
+    axis(&mut r.y, &mut r.h, visible.y, max);
+    r
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn canvas_textures_stay_within_the_texture_limit() {
+        let r = Region { x: -100, y: -50, w: 5000, h: 1000 };
+        let f = fit_texture(r, Region { x: 300, y: 0, w: 800, h: 600 }, 2048);
+        assert_eq!((f.x, f.y, f.w, f.h), (300, -50, 2048, 1000));
+        // Visible past the far end: the cut is pinned there.
+        let f = fit_texture(r, Region { x: 4800, y: 0, w: 800, h: 600 }, 2048);
+        assert_eq!((f.x, f.w), (-100 + 5000 - 2048, 2048));
+        assert_eq!(fit_texture(r, r, 8192), r);
     }
 }
