@@ -10,6 +10,7 @@
 //! deckcraft-cli describe ID                     # one command
 //! deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]   # drive the running app
 //! deckcraft-cli mcp [--connect PORT] [--sample] # MCP server over stdio
+//! deckcraft-cli bench [FILE | --sample] [--runs N] [--json]   # time open, render, save, export
 //! deckcraft-cli links | --version
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
@@ -42,6 +43,7 @@ const USAGE: &str = "usage: deckcraft-cli info FILE
        deckcraft-cli describe COMMAND
        deckcraft-cli app [--port PORT] COMMAND [JSON] | --method METHOD [JSON]
        deckcraft-cli mcp [--connect PORT] [--sample]
+       deckcraft-cli bench [FILE | --sample] [--runs N] [--json]
        deckcraft-cli links | --version";
 
 fn main() -> ExitCode {
@@ -53,6 +55,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("info") => report(info(rest)),
+        Some("bench") => report(bench(rest)),
         Some("render") => report(render(rest)),
         Some("render-transition") => report(render_transition(rest)),
         Some("convert") => report(convert(rest)),
@@ -115,6 +118,108 @@ fn open(s: &mut Session, input: Option<&str>, sample: bool) -> Result<(), String
         Some(p) => s.execute("file.open", &json!({"path": p})).map(|_| ()).map_err(|e| e.to_string()),
         None => s.execute("file.new", &json!({})).map(|_| ()).map_err(|e| e.to_string()),
     }
+}
+
+/// Median and slowest of `runs` timings of `f`, in milliseconds.
+fn time_ms(runs: usize, mut f: impl FnMut() -> Result<(), String>) -> Result<(f64, f64), String> {
+    let mut ms = Vec::with_capacity(runs);
+    for _ in 0..runs.max(1) {
+        let t = std::time::Instant::now();
+        f()?;
+        ms.push(t.elapsed().as_secs_f64() * 1000.0);
+    }
+    ms.sort_by(f64::total_cmp);
+    let median = ms.get(ms.len() / 2).copied().unwrap_or(0.0);
+    Ok((median, ms.last().copied().unwrap_or(0.0)))
+}
+
+/// Peak resident memory of this process in MiB (Linux `VmHWM`); `None` elsewhere.
+fn peak_rss_mib() -> Option<f64> {
+    let s = std::fs::read_to_string("/proc/self/status").ok()?;
+    let kb: f64 = s.lines().find_map(|l| l.strip_prefix("VmHWM:"))?.trim().trim_end_matches("kB").trim().parse().ok()?;
+    Some(kb / 1024.0)
+}
+
+/// The performance baseline (docs/gaps.md "No baseline"): how long a deck takes to open, to
+/// render each slide, to save and to export, and the peak memory, as JSON or a table.
+fn bench(args: &[String]) -> Result<(), String> {
+    use deckcraft_engine::cmd::file::{open_presentation, save_bytes};
+    let mut input = None;
+    let mut sample = false;
+    let mut runs = 5usize;
+    let mut as_json = false;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--sample" => sample = true,
+            "--json" => as_json = true,
+            "--runs" => {
+                runs = it.next().and_then(|v| v.parse().ok()).filter(|n| (1..=1000).contains(n)).ok_or("--runs needs a number from 1 to 1000")?
+            }
+            f if !f.starts_with("--") && input.is_none() => input = Some(f.to_string()),
+            o => return Err(format!("bench: unknown argument `{o}`")),
+        }
+    }
+    if input.is_none() && !sample {
+        return Err("bench needs a FILE or --sample".into());
+    }
+    let mut s = Session::new();
+    let (name, bytes) = match &input {
+        Some(p) => (p.clone(), std::fs::read(p).map_err(|e| format!("{p}: {e}"))?),
+        None => {
+            open(&mut s, None, true)?;
+            let doc = &s.doc().map_err(|e| e.to_string())?.doc;
+            ("sample.deckcraft".to_string(), save_bytes(doc, "deckcraft").map_err(|e| e.to_string())?)
+        }
+    };
+    let e = |x: deckcraft_engine::EngineError| x.to_string();
+    let doc = open_presentation(&name, &bytes).map_err(e)?;
+    let slides = doc.slides.len();
+    let open = time_ms(runs, || open_presentation(&name, &bytes).map(|_| ()).map_err(e))?;
+    let opts = deckcraft_engine::render::RenderOpts { scale: 1.0, ..Default::default() };
+    let mut per_slide = vec![];
+    for i in 0..slides {
+        per_slide.push(time_ms(runs, || {
+            deckcraft_engine::render::render_slide(&doc, i, &opts);
+            Ok(())
+        })?);
+    }
+    let pptx = save_bytes(&doc, "pptx").map_err(e)?;
+    let mut steps = vec![
+        ("open", open),
+        ("save .deckcraft", time_ms(runs, || save_bytes(&doc, "deckcraft").map(|_| ()).map_err(e))?),
+        ("save .pptx", time_ms(runs, || save_bytes(&doc, "pptx").map(|_| ()).map_err(e))?),
+        ("open .pptx", time_ms(runs, || open_presentation("bench.pptx", &pptx).map(|_| ()).map_err(e))?),
+        ("export .pdf", time_ms(runs.min(3), || save_bytes(&doc, "pdf").map(|_| ()).map_err(e))?),
+    ];
+    let render_total: f64 = per_slide.iter().map(|m| m.0).sum();
+    let render_max = per_slide.iter().map(|m| m.1).fold(0.0, f64::max);
+    steps.insert(1, ("render all slides (1×)", (render_total, render_max)));
+    let peak = peak_rss_mib();
+    if as_json {
+        let v = json!({
+            "file": name,
+            "bytes": bytes.len(),
+            "slides": slides,
+            "runs": runs,
+            "steps": steps.iter().map(|(k, (m, x))| json!({"step": k, "medianMs": m, "maxMs": x})).collect::<Vec<_>>(),
+            "renderMsPerSlide": per_slide.iter().map(|m| m.0).collect::<Vec<_>>(),
+            "peakRssMiB": peak,
+        });
+        outln!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+    } else {
+        outln!("{name}: {slides} slides, {} KiB, median of {runs} runs", bytes.len() / 1024);
+        for (k, (m, x)) in &steps {
+            outln!("  {k:<24} {m:>9.1} ms   (slowest {x:.1} ms)");
+        }
+        if let Some((i, m)) = per_slide.iter().enumerate().max_by(|a, b| a.1.0.total_cmp(&b.1.0)) {
+            outln!("  slowest slide            {:>9.1} ms   (slide {})", m.0, i + 1);
+        }
+        if let Some(p) = peak {
+            outln!("  peak memory              {p:>9.1} MiB");
+        }
+    }
+    Ok(())
 }
 
 fn info(args: &[String]) -> Result<(), String> {

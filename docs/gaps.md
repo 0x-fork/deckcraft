@@ -296,8 +296,10 @@ Detail in [localization-parity.md](localization-parity.md).
 
 ## Performance
 
-- **No baseline.** Nothing measures open time, render time per slide, show frame rate or memory
-  against PowerPoint. 4–8 h for a benchmark suite in `xtask`.
+- **Baseline measured, not compared.** `cargo xtask bench` (and `deckcraft-cli bench FILE`) times
+  open, per-slide render, save, PPTX round trip and PDF export, and peak memory, against a saved
+  baseline; show frame rate isn't measured and there are no PowerPoint numbers to set beside it.
+  2–4 h.
 - **Morph aligns outlines every frame** (#67, PR open). 1 h.
 
 ## Ecosystem
@@ -324,6 +326,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Owned PPTX corpus round-trip (parts and text). Notes-master header and footer text is kept; the corpus gap is now a larger set and PowerPoint reference renders |
 | 2026-10-13 | minor | Owned PPTX corpus for comments, links and actions, custom shows, rotated groups and inherited placeholders. Paragraph `defRPr` and action sounds kept. Embedded fonts and #70/#74/#77 stay open |
 | 2026-10-13 | minor | Owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors. A run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, are kept. #70, #74, #77 and embedded fonts stay open |
+| 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
