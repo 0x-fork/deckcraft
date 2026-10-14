@@ -358,6 +358,78 @@ pub(crate) fn current_shapes<'a>(doc: &'a deckcraft_model::Presentation, sel: &c
     }
 }
 
+/// The command palette runs a command with `{}`. True when the params doc names a value that
+/// call would have to supply (`path`, `rows`, `path? | data`), so the palette must not offer it.
+/// A name ending in `?` is optional. Text after `→` is the result, not an input.
+pub fn needs_arguments(params: &str) -> bool {
+    let input = params.split('→').next().unwrap_or(params);
+    let Some(start) = input.find('{') else { return false };
+    let inside = input.get(start + 1..).unwrap_or("");
+    let inside = inside.split('}').next().unwrap_or(inside);
+    split_fields(inside).iter().any(|f| field_requires(f.trim()))
+}
+
+fn split_fields(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut quote = false;
+    for (i, c) in s.char_indices() {
+        if quote {
+            if c == '"' {
+                quote = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => quote = true,
+            '[' | '(' => depth += 1,
+            ']' | ')' => depth = depth.saturating_sub(1),
+            ',' if depth == 0 => {
+                out.push(s.get(start..i).unwrap_or(""));
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    out.push(s.get(start..).unwrap_or(""));
+    out
+}
+
+/// A field needs a value unless every alternative (`path? | data`) is an optional parameter.
+fn field_requires(field: &str) -> bool {
+    if field.is_empty() {
+        return false;
+    }
+    let alts: Vec<&str> = if field.contains(" | ") { field.split(" | ").map(str::trim).filter(|s| !s.is_empty()).collect() } else { vec![field] };
+    let mut saw = false;
+    let mut all_optional = true;
+    for alt in alts {
+        let Some(optional) = param_optional(alt) else { continue };
+        saw = true;
+        all_optional &= optional;
+    }
+    saw && !all_optional
+}
+
+/// `Some(true)` when `alt` starts with an optional parameter name, `Some(false)` when required.
+fn param_optional(alt: &str) -> Option<bool> {
+    let alt = alt.trim();
+    let name_end = alt.find(|c: char| !c.is_ascii_alphanumeric()).unwrap_or(alt.len());
+    let name = alt.get(..name_end).unwrap_or("");
+    if name.is_empty() || !name.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let rest = alt.get(name_end..).unwrap_or("").trim_start();
+    if rest.starts_with('?') {
+        Some(true)
+    } else if rest.is_empty() || rest.starts_with(':') {
+        Some(false)
+    } else {
+        None
+    }
+}
+
 /// Base64 (standard alphabet) for binary payloads in JSON params and results.
 pub fn base64_encode(data: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -399,4 +471,33 @@ pub fn base64_decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_palette_skips_a_command_that_needs_a_value() {
+        assert!(needs_arguments("{path}"));
+        assert!(needs_arguments("{path, format: png|jpeg|pptx, slide?: index}"));
+        assert!(needs_arguments("{path? | data: base64, name?, rect?}"));
+        assert!(needs_arguments("{rows, cols, rect?}"));
+        assert!(needs_arguments("{axis: horizontal|vertical, ids?}"));
+        assert!(needs_arguments("{percent}"));
+        assert!(!needs_arguments("{}"));
+        assert!(!needs_arguments("{on?: bool}"));
+        assert!(!needs_arguments("{theme?: name, size?: [w,h] pt, blank?: bool}"));
+        assert!(!needs_arguments("{uid?: one entry, else all}"));
+        assert!(!needs_arguments("{locked?: bool (default: toggle), ids?}"));
+        assert!(!needs_arguments("{} → [{name, label, category}]"));
+        assert!(!needs_arguments("{title?, subject?} → properties"));
+        assert!(!needs_arguments("{slides?: [index] | \"1-3,5\", includeHidden?}"));
+        let export = command_specs().iter().find(|c| c.id == "file.export").expect("export");
+        let save = command_specs().iter().find(|c| c.id == "file.save").expect("save");
+        let audio = command_specs().iter().find(|c| c.id == "insert.audio").expect("audio");
+        assert!(needs_arguments(export.params));
+        assert!(!needs_arguments(save.params));
+        assert!(needs_arguments(audio.params));
+    }
 }
