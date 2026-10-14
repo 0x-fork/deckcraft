@@ -428,11 +428,18 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
             let tp = Part::new(&pkg, &t.target, &td);
             m.theme = theme::read_theme(&mut imp, &tp, &td.root);
         }
-        if let Some(tree) = d.root.path(&["cSld", "spTree"]) {
-            m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+        if let Some(csld) = d.root.child("cSld") {
+            m.background = background(&mut imp, &part, csld);
+            if let Some(tree) = csld.child("spTree") {
+                m.shapes = shapes::sp_tree(&mut imp, &part, &mut ctx, tree, 0);
+            }
         }
         if let Some(cm) = d.root.child("clrMap") {
             m.color_map = color_map(cm);
+        }
+        // Notes text styles are the body's list style; slide masters use title/body/other instead.
+        if let Some(ns) = d.root.child("notesStyle") {
+            m.body_style = dml::list_style(&mut imp, &part, ns);
         }
         p.notes_master = Some(Arc::new(m));
     }

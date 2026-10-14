@@ -10,7 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use deckcraft_geom::Xfrm;
-use deckcraft_model::text::{Paragraph, TextBody};
+use deckcraft_model::text::{ListStyle, Paragraph, TextBody};
+use deckcraft_model::theme::Theme;
 use deckcraft_model::{
     Background, Comment, Layout, LayoutId, Master, MediaId, PhType, Placeholder, Presentation, Shape, ShapeId, Slide, SlideId, defaults,
 };
@@ -341,7 +342,42 @@ fn notes_master_shapes(size: deckcraft_geom::Size) -> Vec<Shape> {
     ]
 }
 
-fn notes_style() -> deckcraft_model::text::ListStyle {
+/// What the notes master should be on save. A master we read is written back, including its
+/// header, footer, date and slide-number text. A deck that has never had one gets the placeholders
+/// we generate.
+struct NotesMasterWrite {
+    shapes: Vec<Shape>,
+    background: Option<Background>,
+    color_map: Vec<(String, String)>,
+    style: ListStyle,
+    theme: Option<Theme>,
+}
+
+fn notes_master_write(p: &Presentation) -> Option<NotesMasterWrite> {
+    let kept = p.notes_master.as_ref().filter(|m| !m.shapes.is_empty());
+    let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
+    if !has_notes && kept.is_none() {
+        return None;
+    }
+    Some(match kept {
+        Some(m) => NotesMasterWrite {
+            shapes: m.shapes.clone(),
+            background: m.background.clone(),
+            color_map: m.color_map.clone(),
+            style: if m.body_style.is_empty() { notes_style() } else { m.body_style.clone() },
+            theme: Some(m.theme.clone()),
+        },
+        None => NotesMasterWrite {
+            shapes: notes_master_shapes(p.notes_size),
+            background: Some(Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) }),
+            color_map: vec![],
+            style: notes_style(),
+            theme: None,
+        },
+    })
+}
+
+fn notes_style() -> ListStyle {
     let mut ls = deckcraft_model::text::ListStyle::default();
     for i in 0..9u8 {
         ls.set(
@@ -479,25 +515,24 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         master_rids.push((master_id, pres.rels.add("slideMaster", &opc::relative("ppt/presentation.xml", &mname), false)));
     }
 
-    // Notes master when any slide has notes.
-    let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
+    // Notes master when a slide has notes, or the file already has one (its header and footer
+    // live on the master, not on the notes slides).
     let notes_master = "ppt/notesMasters/notesMaster1.xml";
     let mut notes_master_rid = None;
-    if has_notes {
+    if let Some(nm) = notes_master_write(p) {
         let tname = format!("ppt/theme/theme{}.xml", p.masters.len() + 1);
         let mut no = Out::new(notes_master);
         no.rels.add("theme", &opc::relative(notes_master, &tname), false);
-        let theme = p.notes_master.as_ref().map(|m| m.theme.clone()).or_else(|| p.masters.first().map(|m| m.theme.clone())).unwrap_or_default();
+        let theme = nm.theme.or_else(|| p.masters.first().map(|m| m.theme.clone())).unwrap_or_default();
         let mut to = Out::new(&tname);
         let txml = theme::theme_xml(&mut x, &mut to, &theme);
         x.pkg.xml_part(&tname, CT_THEME, txml);
         x.pkg.rels(&tname, &to.rels);
         let mut w = W::new();
         root_open(&mut w, "p:notesMaster", A::new());
-        let bg = Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) };
-        csld(&mut w, &mut x, &mut no, "", Some(&bg), &notes_master_shapes(p.notes_size));
-        clr_map(&mut w, &[]);
-        dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &notes_style());
+        csld(&mut w, &mut x, &mut no, "", nm.background.as_ref(), &nm.shapes);
+        clr_map(&mut w, &nm.color_map);
+        dml::list_style(&mut w, &mut x, &mut no, "p:notesStyle", &nm.style);
         w.close("p:notesMaster");
         x.pkg.xml_part(notes_master, CT_NOTES_MASTER, w.finish());
         x.pkg.rels(notes_master, &no.rels);
