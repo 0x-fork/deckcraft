@@ -998,7 +998,8 @@ impl Session {
                 | Hit::Adjust { id, .. }
                 | Hit::LineEnd { id, .. }
                 | Hit::Handle { id, .. }
-                | Hit::Vertex { id, .. },
+                | Hit::Vertex { id, .. }
+                | Hit::Frame { id },
             ) => Some(*id),
             None => None,
         };
