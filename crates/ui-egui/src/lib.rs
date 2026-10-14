@@ -257,6 +257,8 @@ pub struct SlideApp {
     pub selpane: selpane::State,
     /// View › New Window: a second window on one presentation. `None` when it is closed.
     pub doc_window: Option<doc_window::DocWindow>,
+    /// Slide Sorter: folded sections, inline rename, dragging a whole section.
+    pub sorter: sorter::State,
 }
 
 impl SlideApp {
@@ -300,6 +302,7 @@ impl SlideApp {
             thumb_drag: None,
             selpane: selpane::State::default(),
             doc_window: None,
+            sorter: sorter::State::default(),
         }
     }
 

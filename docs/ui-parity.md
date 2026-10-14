@@ -10,6 +10,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (View › New Window opens a second window on the same presentation; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 How DeckCraft looks and feels next to PowerPoint: the shell, the ribbon, menus, panes, dialogs,
 direct manipulation, keyboard and precision. Observations of PowerPoint are kept locally in
@@ -96,6 +97,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | WordArt transform | Transform gallery | Shape Format ▸ Text Effects ▸ Transform (`format.textWarp`): No Transform, Follow Path and the other 36 presets. No adjust handles |
 | Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
 | Drag and drop of files and between thumbnails | yes | yes |
+| Slide Sorter sections: a bar per section, add, rename in place, collapse, drag the whole section (its slides move with it) | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
 | Font menu: every installed family with its faces | yes | families yes; only Regular/Bold/Italic faces (#69) |
 
@@ -169,6 +171,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-14 | trivial | Comments pane lists every slide; Review ▸ Previous and Next walk the deck |
 | 2026-10-13 | minor | View › New Window: a second window on the same presentation, with its own slide; Arrange All is still missing |
 | 2026-10-14 | minor | File › Home and New show six original starter decks; online templates are still absent |
+| 2026-10-14 | minor | Slide Sorter draws a bar per section: Add Section, rename in place, collapse, and drag the bar to move the section and its slides |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
