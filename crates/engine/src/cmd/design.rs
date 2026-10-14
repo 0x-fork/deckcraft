@@ -60,6 +60,16 @@ pub fn specs() -> Vec<CommandSpec> {
             has_doc,
             insert_placeholder
         ),
+        cmd!("master.preserve", "Preserve", ["Slide Master", "Edit Master"], None, "{preserve?: bool}", has_doc, preserve),
+        cmd!(
+            "master.placeholders",
+            "Layout Placeholders",
+            ["Slide Master", "Edit Master"],
+            None,
+            "{title?: bool, footers?: bool}",
+            has_doc,
+            placeholders
+        ),
     ]
 }
 
@@ -432,8 +442,14 @@ pub fn civil(z: i64) -> (i64, u32, u32) {
 fn master_view(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.doc()?;
     let mi = usize_param(p, "master").unwrap_or_else(|| master_index(&st.doc, &st.selection));
-    let layout = usize_param(p, "layout")
-        .or_else(|| st.current_slide().and_then(|sl| st.doc.masters.get(mi).and_then(|m| m.layouts.iter().position(|l| l.id == sl.layout))));
+    // A master thumbnail sends `{master}` and means the master itself. `{master, layout}` selects
+    // that layout. With neither key, follow the current slide's layout.
+    let layout = if p.get("master").is_some() && p.get("layout").is_none() {
+        None
+    } else {
+        usize_param(p, "layout")
+            .or_else(|| st.current_slide().and_then(|sl| st.doc.masters.get(mi).and_then(|m| m.layouts.iter().position(|l| l.id == sl.layout))))
+    };
     let target = match layout {
         Some(l) => Target::Layout { master: mi, layout: l },
         None => Target::Master { master: mi },
@@ -556,11 +572,293 @@ fn insert_placeholder(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"id": id}))
 }
 
+fn preserve(s: &mut Session, p: &Value) -> Result<Value> {
+    let st = s.doc()?;
+    let (on_master, mi, li, current) = match st.selection.target {
+        Target::Master { master } => {
+            let on = st.doc.masters.get(master).map(|m| m.preserve).ok_or_else(|| bad("master.preserve", "no such master"))?;
+            (true, master, 0, on)
+        }
+        Target::Layout { master, layout } => {
+            let on = st
+                .doc
+                .masters
+                .get(master)
+                .and_then(|m| m.layouts.get(layout))
+                .map(|l| l.preserve)
+                .ok_or_else(|| bad("master.preserve", "no such layout"))?;
+            (false, master, layout, on)
+        }
+        Target::Slides => return Err(bad("master.preserve", "open Slide Master view")),
+    };
+    let next = bool_param(p, "preserve").unwrap_or(!current);
+    if next == current {
+        return Ok(json!({"preserve": next}));
+    }
+    s.edit(|doc, _| {
+        if on_master {
+            let m = Arc::make_mut(doc.masters.get_mut(mi).ok_or_else(|| bad("master.preserve", "no such master"))?);
+            m.preserve = next;
+        } else {
+            let l =
+                doc.masters.get_mut(mi).and_then(|m| Arc::make_mut(m).layouts.get_mut(li)).ok_or_else(|| bad("master.preserve", "no such layout"))?;
+            l.preserve = next;
+        }
+        Ok(())
+    })?;
+    Ok(json!({"preserve": next}))
+}
+
+fn placeholders(s: &mut Session, p: &Value) -> Result<Value> {
+    let title = bool_param(p, "title");
+    let footers = bool_param(p, "footers");
+    if title.is_none() && footers.is_none() {
+        return Err(bad("master.placeholders", "give title or footers"));
+    }
+    let st = s.doc()?;
+    if matches!(st.selection.target, Target::Slides) {
+        return Err(bad("master.placeholders", "open Slide Master view"));
+    }
+    let has_title = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(PhType::is_title));
+    let has_footers = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(PhType::is_footer_kind));
+    let title_changes = title.is_some_and(|want| want != has_title);
+    let footer_changes = footers.is_some_and(|want| want != has_footers);
+    if !title_changes && !footer_changes {
+        return Ok(json!({"title": has_title, "footers": has_footers}));
+    }
+    let mut add = Vec::new();
+    if title == Some(true) && !has_title {
+        add.push(PhType::Title);
+    }
+    if footers == Some(true) && !has_footers {
+        add.extend([PhType::Date, PhType::Footer, PhType::SlideNum]);
+    }
+    let size = st.doc.slide_size;
+    s.edit(|doc, sel| {
+        let mut ids = Vec::with_capacity(add.len());
+        for _ in 0..add.len() {
+            ids.push(ShapeId(doc.alloc_id()));
+        }
+        let prototypes = match sel.target {
+            Target::Master { master } | Target::Layout { master, .. } => doc.masters.get(master).map(|m| m.shapes.clone()).unwrap_or_default(),
+            Target::Slides => Vec::new(),
+        };
+        let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad("master.placeholders", "open Slide Master view"))?;
+        if title == Some(false) {
+            shapes.retain(|sh| !sh.ph_type().is_some_and(PhType::is_title));
+        }
+        if footers == Some(false) {
+            shapes.retain(|sh| !sh.ph_type().is_some_and(PhType::is_footer_kind));
+        }
+        for (kind, id) in add.into_iter().zip(ids) {
+            let idx = free_ph_idx(shapes, preferred_ph_idx(kind));
+            let proto = prototypes.iter().find(|sh| match kind {
+                PhType::Title => sh.ph_type().is_some_and(PhType::is_title),
+                other => sh.ph_type() == Some(other),
+            });
+            let shape = match proto {
+                Some(src) => retarget_placeholder(src.clone(), id, idx),
+                None => synthesized_placeholder(kind, id, idx, size),
+            };
+            shapes.push(shape);
+        }
+        Ok(())
+    })?;
+    let st = s.doc()?;
+    let title = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(PhType::is_title));
+    let footers = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(PhType::is_footer_kind));
+    Ok(json!({"title": title, "footers": footers}))
+}
+
+fn preferred_ph_idx(kind: PhType) -> u32 {
+    match kind {
+        PhType::Title | PhType::CtrTitle => 0,
+        PhType::Date => 10,
+        PhType::Footer => 11,
+        PhType::SlideNum => 12,
+        _ => 1,
+    }
+}
+
+fn free_ph_idx(shapes: &[Shape], preferred: u32) -> u32 {
+    let taken = |idx: u32| shapes.iter().any(|sh| sh.ph.as_ref().is_some_and(|p| p.idx == idx));
+    if !taken(preferred) { preferred } else { shapes.iter().filter_map(|sh| sh.ph.as_ref().map(|p| p.idx)).max().unwrap_or(0).saturating_add(1) }
+}
+
+/// A copy of a master placeholder, with a new id and index. Prompt text is cleared; a slide
+/// number keeps its `‹#›` field.
+fn retarget_placeholder(mut sh: Shape, id: ShapeId, idx: u32) -> Shape {
+    sh.id = id;
+    if let Some(ph) = sh.ph.as_mut() {
+        ph.idx = idx;
+    }
+    let slide_num = sh.ph_type() == Some(PhType::SlideNum);
+    if slide_num {
+        let paras = vec![slide_number_paragraph()];
+        if let Some(text) = sh.text.as_mut() {
+            text.paragraphs = paras;
+        } else {
+            sh.text = Some(TextBody { paragraphs: paras, ..Default::default() });
+        }
+    } else if let Some(text) = sh.text.as_mut() {
+        text.paragraphs.clear();
+    }
+    sh
+}
+
+fn synthesized_placeholder(kind: PhType, id: ShapeId, idx: u32, size: Size) -> Shape {
+    let (name, text) = match kind {
+        PhType::Date => ("Date Placeholder", TextBody::default()),
+        PhType::Footer => ("Footer Placeholder", TextBody::default()),
+        PhType::SlideNum => ("Slide Number Placeholder", TextBody { paragraphs: vec![slide_number_paragraph()], ..Default::default() }),
+        _ => ("Title", TextBody::default()),
+    };
+    Shape {
+        id,
+        name: name.into(),
+        xfrm: Some(placeholder_rect(kind, size)),
+        ph: Some(deckcraft_model::Placeholder { kind, idx, ..Default::default() }),
+        text: Some(text),
+        ..Default::default()
+    }
+}
+
+/// Standard placeholder boxes at 960×540, scaled to the slide size.
+fn placeholder_rect(kind: PhType, size: Size) -> deckcraft_geom::Xfrm {
+    let sx = size.width / 960.0;
+    let sy = size.height / 540.0;
+    let (x, y, w, h) = match kind {
+        PhType::Date => (60.0, 500.0, 216.0, 28.0),
+        PhType::Footer => (318.0, 500.0, 324.0, 28.0),
+        PhType::SlideNum => (684.0, 500.0, 216.0, 28.0),
+        _ => (60.0, 29.0, 840.0, 104.0),
+    };
+    deckcraft_geom::Xfrm::new(x * sx, y * sy, w * sx, h * sy)
+}
+
+fn slide_number_paragraph() -> deckcraft_model::Paragraph {
+    deckcraft_model::Paragraph {
+        runs: vec![Run { text: "‹#›".into(), props: Default::default(), kind: RunKind::Field { field: "slidenum".into() } }],
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use deckcraft_model::PhType;
+    use deckcraft_model::text::RunKind;
+    use serde_json::json;
+
+    use crate::{Session, Target};
+
     #[test]
     fn civil_dates() {
         assert_eq!(super::civil(0), (1970, 1, 1));
         assert_eq!(super::civil(20_734), (2026, 10, 8));
+    }
+
+    fn shapes(s: &Session) -> Vec<deckcraft_model::Shape> {
+        s.doc().unwrap().shapes().to_vec()
+    }
+
+    fn has_title(s: &Session) -> bool {
+        shapes(s).iter().any(|sh| sh.ph_type().is_some_and(PhType::is_title))
+    }
+
+    fn has_footers(s: &Session) -> bool {
+        shapes(s).iter().any(|sh| sh.ph_type().is_some_and(PhType::is_footer_kind))
+    }
+
+    #[test]
+    fn preserve_and_placeholders_edit_the_open_master_or_layout() {
+        assert_eq!(crate::command_specs().len(), 236);
+
+        let mut s = Session::with_new();
+        let blank = s.doc().unwrap().doc.masters[0].layouts.iter().position(|l| l.name == "Blank").unwrap();
+
+        s.execute("view.slideMaster", &json!({})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.target, Target::Layout { master: 0, layout: 0 });
+        s.execute("view.slideMaster", &json!({"master": 0})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.target, Target::Master { master: 0 });
+        assert!(!s.doc().unwrap().doc.masters[0].preserve);
+
+        let n = s.doc().unwrap().history.undo.len();
+        s.execute("master.preserve", &json!({"preserve": false})).unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), n, "the same value is not an undo step");
+        s.execute("master.preserve", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.masters[0].preserve);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Preserve");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(!s.doc().unwrap().doc.masters[0].preserve);
+
+        s.execute("master.placeholders", &json!({"footers": false})).unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Layout Placeholders");
+        assert!(has_title(&s));
+        assert!(!has_footers(&s));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(has_footers(&s));
+
+        s.execute("view.closeMaster", &json!({})).unwrap();
+        let n = s.doc().unwrap().history.undo.len();
+        let err = s.execute("master.preserve", &json!({})).unwrap_err();
+        assert!(err.to_string().contains("open Slide Master view"), "{err}");
+        let err = s.execute("master.placeholders", &json!({"title": true})).unwrap_err();
+        assert!(err.to_string().contains("open Slide Master view"), "{err}");
+        let err = s.execute("master.placeholders", &json!({})).unwrap_err();
+        assert!(err.to_string().contains("give title or footers"), "{err}");
+        assert_eq!(s.doc().unwrap().history.undo.len(), n);
+
+        s.execute("view.slideMaster", &json!({"master": 0, "layout": blank})).unwrap();
+        assert_eq!(s.doc().unwrap().selection.target, Target::Layout { master: 0, layout: blank });
+        assert!(s.doc().unwrap().doc.masters[0].layouts[blank].preserve);
+        assert!(!has_title(&s));
+        assert!(has_footers(&s));
+
+        let n = s.doc().unwrap().history.undo.len();
+        s.execute("master.placeholders", &json!({"title": false, "footers": true})).unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), n, "already in that state");
+
+        s.execute("master.placeholders", &json!({"title": true, "footers": false})).unwrap();
+        assert_eq!(s.doc().unwrap().history.undo.len(), n + 1, "both keys are one undo step");
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Layout Placeholders");
+        assert!(has_title(&s));
+        assert!(!has_footers(&s));
+        let title = shapes(&s).into_iter().find(|sh| sh.ph_type().is_some_and(PhType::is_title)).unwrap();
+        assert_eq!(title.name, "Title 1");
+        assert_eq!(title.ph.unwrap().idx, 0);
+        assert!(title.text.unwrap().paragraphs.iter().all(|para| para.runs.is_empty()));
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(!has_title(&s));
+        assert!(has_footers(&s));
+
+        s.execute("master.placeholders", &json!({"footers": false})).unwrap();
+        s.execute("master.placeholders", &json!({"footers": true})).unwrap();
+        let restored = shapes(&s);
+        assert!(restored.iter().any(|sh| sh.ph_type() == Some(PhType::Date)));
+        assert!(restored.iter().any(|sh| sh.ph_type() == Some(PhType::Footer)));
+        let num = restored.iter().find(|sh| sh.ph_type() == Some(PhType::SlideNum)).unwrap();
+        let run = &num.text.as_ref().unwrap().paragraphs[0].runs[0];
+        assert_eq!(run.text, "‹#›");
+        assert!(matches!(&run.kind, RunKind::Field { field } if field == "slidenum"));
+
+        assert!(s.doc().unwrap().doc.masters[0].layouts[blank].preserve);
+        s.execute("master.preserve", &json!({"preserve": false})).unwrap();
+        assert!(!s.doc().unwrap().doc.masters[0].layouts[blank].preserve);
+        assert_eq!(s.doc().unwrap().history.undo.last().unwrap().label, "Preserve");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc().unwrap().doc.masters[0].layouts[blank].preserve);
+
+        s.edit(|doc, _| {
+            let m = std::sync::Arc::make_mut(doc.masters.get_mut(0).unwrap());
+            m.shapes.retain(|sh| !sh.ph_type().is_some_and(PhType::is_title));
+            Ok(())
+        })
+        .unwrap();
+        s.execute("master.placeholders", &json!({"title": true})).unwrap();
+        let title = shapes(&s).into_iter().find(|sh| sh.ph_type() == Some(PhType::Title)).unwrap();
+        assert_eq!(title.name, "Title");
+        let box_ = title.xfrm.unwrap();
+        assert!((box_.x - 60.0).abs() < 0.01 && (box_.y - 29.0).abs() < 0.01);
+        assert!((box_.w - 840.0).abs() < 0.01 && (box_.h - 104.0).abs() < 0.01);
     }
 }

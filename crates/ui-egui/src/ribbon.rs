@@ -2372,11 +2372,41 @@ fn playback(app: &mut SlideApp, ui: &mut Ui) {
     });
 }
 
+/// Preserve, and whether the open master or layout has a title or any footer placeholder.
+fn master_checks(app: &SlideApp) -> (bool, bool, bool) {
+    let Some(st) = app.session.active() else { return (false, false, false) };
+    let preserve = match st.selection.target {
+        Target::Master { master } => st.doc.masters.get(master).is_some_and(|m| m.preserve),
+        Target::Layout { master, layout } => st.doc.masters.get(master).and_then(|m| m.layouts.get(layout)).is_some_and(|l| l.preserve),
+        Target::Slides => false,
+    };
+    let title = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(|k| k.is_title()));
+    let footers = st.shapes().iter().any(|sh| sh.ph_type().is_some_and(|k| k.is_footer_kind()));
+    (preserve, title, footers)
+}
+
 fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         big(app, ui, Icon::NewSlide, "Insert\nLayout", "master.insertLayout", json!({}));
         big(app, ui, Icon::DeleteSlide, "Delete", "master.deleteLayout", json!({}));
         big(app, ui, Icon::Layout, "Rename", "app.dialog", json!({"id": "renameLayout"}));
+    });
+    group(ui, |ui| {
+        rows(ui, |ui| {
+            let (preserve, title, footers) = master_checks(app);
+            let mut on = preserve;
+            if ui.checkbox(&mut on, "Preserve").changed() {
+                run(app, "master.preserve", json!({"preserve": on}));
+            }
+            let mut on = title;
+            if ui.checkbox(&mut on, "Title").changed() {
+                run(app, "master.placeholders", json!({"title": on}));
+            }
+            let mut on = footers;
+            if ui.checkbox(&mut on, "Footers").changed() {
+                run(app, "master.placeholders", json!({"footers": on}));
+            }
+        });
     });
     group(ui, |ui| {
         let r = big_button(ui, Icon::Table, "Insert\nPlaceholder", true);
@@ -2420,3 +2450,7 @@ fn paint_freeform_icon(p: &egui::Painter, r: Rect, name: &str, ink: Color32) {
     };
     p.add(egui::Shape::line(pts, egui::Stroke::new(1.3, ink)));
 }
+
+#[cfg(test)]
+#[path = "master_layout_tests.rs"]
+mod master_layout_tests;
