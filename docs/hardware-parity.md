@@ -1,6 +1,7 @@
 # Hardware parity with PowerPoint
 
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (PNG and JPEG slide export record 144 dpi at the default 2 pixels per point; previous: IME input, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (editor rasters on the Retina pixel grid, #184; previous: IME input, #101) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365); PowerPoint for Windows where noted
 
 What hardware PowerPoint uses and what DeckCraft uses, per platform. Dimension score: **~40%
 ready** (estimated), **25–45 h** to parity. Performance (unmeasured, ~55%) is tracked here too
@@ -15,6 +16,7 @@ because it mostly follows from hardware use.
 | Transitions and Morph frames | GPU | CPU-rendered slide images composited as textured quads on the GPU | same | same | same |
 | High-DPI / Retina | yes | yes | yes | yes | yes |
 | Picture export resolution | 2 px per point, tagged so the file is the slide's size | PNG `pHYs` and JPEG density, 144 dpi at the default 2 px per point | same | same | same |
+| High-DPI / Retina | yes | yes; editor slide rasters sit on the physical pixel grid (#184) | yes | yes | yes |
 | Wide gamut / HDR display | partly (P3 images) | no (sRGB) | no | no | no |
 | Startup on all GPUs | yes | yes | **no**: crashes in some Intel/AMD drivers (#40, #59) | not reported | n/a |
 | Software fallback when no GPU | yes (WARP on Windows) | no | no | no | no |
@@ -73,5 +75,6 @@ outlines every frame (#67, fix open), and the decoders run in software.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-14 | minor | PNG and JPEG slide export record 144 dpi at the default 2 pixels per point, so a Retina picture opens at the slide's size |
+| 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
 | 2026-10-12 | minor | IME input methods (#101) |
 | 2026-10-10 | major | Created: rendering, media, displays, input and performance against PowerPoint 16.113 |

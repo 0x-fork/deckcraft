@@ -1081,7 +1081,7 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     let key_doc = (st.uid, st.revision);
     let w = ui.available_width() - 8.0;
     let ppp = ui.ctx().pixels_per_point();
-    let px = (w * ppp).max(16.0) as u32;
+    let px = (w * ppp).round().max(16.0) as u32;
     let ideas = deckcraft_engine::cmd::ideas::ideas_for(&doc, idx);
     let themes = deckcraft_model::theme::builtin_themes();
     let cache_id = egui::Id::new("design-idea-thumbs");
@@ -1096,7 +1096,8 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
                 idx,
                 &deckcraft_render::RenderOpts { scale: px as f64 / d.slide_size.width.max(1.0), size: Some((px, h)), ..Default::default() },
             );
-            let tex = ui.ctx().load_texture(format!("idea-{name}"), crate::textures::to_color_image(&img, false), egui::TextureOptions::LINEAR);
+            let tex =
+                ui.ctx().load_texture(format!("idea-{name}"), crate::textures::to_color_image(&img, false), crate::textures::editor_texture_options());
             cache.tex.push((name, tex, px, h));
         };
         for (id, _) in &ideas {
@@ -1117,9 +1118,12 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
     let thumb = |ui: &mut Ui, name: &str, tip: &str| -> bool {
         let Some((_, tex, tw, th)) = cache.tex.iter().find(|e| e.0 == name) else { return false };
         let (r, resp) = ui.allocate_exact_size(vec2(w, w * *th as f32 / (*tw).max(1) as f32), Sense::click());
-        ui.painter().image(tex.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        // On the physical pixel grid, one texel per device pixel (#184).
+        let at = crate::textures::device_pixel_rect(r, ppp);
+        let at = Rect::from_min_size(at.min, vec2(*tw as f32 / ppp, *th as f32 / ppp));
+        ui.painter().image(tex.id(), at, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
         ui.painter().rect_stroke(
-            r,
+            at,
             CornerRadius::same(2),
             Stroke::new(if resp.hovered() { 2.5 } else { 1.0 }, if resp.hovered() { t.accent } else { t.border }),
             egui::StrokeKind::Outside,

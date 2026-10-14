@@ -23,6 +23,7 @@
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (the frame of a text box being edited moves it; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (table cells: caret, clicks between cells, border resizing; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Format Background picture and solid options; dialogs stay 27) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** trivial (editor slide rasters sit on the physical pixel grid, #184; previous: File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-14 · **Change:** minor (File › New starter decks; previous: minor, text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Sorter sections: add, rename, collapse, drag a whole section; previous: text editing keys, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
@@ -185,6 +186,11 @@ Colours, spacing, ribbon card and tab geometry follow the observations in
 and must not imitate Microsoft's. Insert › Icons places Lucide stroke icons (ISC, release 1.56.0)
 on the slide as shapes. No pixel comparison against PowerPoint screenshots has been run since
 2026-10-07. Cross-app icon consistency is open (#73, #56).
+`plan/powerpoint/01-observed-ui.md`; icons are original (~240, drawn in code or Lucide) and must not
+imitate Microsoft's. The editing canvas, thumbnails and layout previews are drawn on the physical
+pixel grid, so a Retina display does not blur them between pixels (#184). No pixel comparison
+against PowerPoint screenshots has been run since 2026-10-07. Cross-app icon consistency is open
+(#73, #56).
 
 ## Estimates
 
@@ -232,6 +238,7 @@ on the slide as shapes. No pixel comparison against PowerPoint screenshots has b
 | 2026-10-12 | minor | Dragging the frame of a text box being edited moves it, as in PowerPoint |
 | 2026-10-12 | minor | Table cells: caret and selection shown in the edited cell, clicks place the caret in the clicked cell, row and column borders drag to resize |
 | 2026-10-14 | minor | Format Background pane: solid transparency, picture transparency, tile, offset, scale, alignment, mirror, and Apply to All copying a picture. Not a new dialog; the dialog count stays 27 |
+| 2026-10-13 | trivial | Editor slide rasters sit on the physical pixel grid (#184) |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |
