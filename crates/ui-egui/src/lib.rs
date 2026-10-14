@@ -2809,6 +2809,15 @@ mod tests {
         // drawn message is a second node that mentions the name (the OS text after it varies).
         harness.get_by_label("missing.deckcraft").click();
         harness.run_steps(2);
+        // The file is read in the background (#350): wait for that read to finish.
+        for _ in 0..500 {
+            if harness.state().opening.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            harness.run_steps(1);
+        }
+        harness.run_steps(2);
         assert!(harness.state().toast.is_some(), "the open error was raised");
         assert!(harness.get_all_by_label_contains("missing.deckcraft").count() >= 2, "the open error is drawn on the page, next to the entry");
     }
