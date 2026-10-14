@@ -109,12 +109,14 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     offset.x = offset.x.clamp(0.0, overflow.x);
     offset.y = offset.y.clamp(0.0, overflow.y);
-    // On the physical pixel grid, so the slide texture is one texel per device pixel (#184).
+    // On the physical pixel grid, so the slide texture is one texel per device pixel (#184). The
+    // zoom anchor keeps the unsnapped rect, so snapping never accumulates into drift.
     let ppp = ui.ctx().pixels_per_point();
-    let slide_rect = crate::textures::device_pixel_rect(content_rect.translate(-offset), ppp);
+    let exact_rect = content_rect.translate(-offset);
+    let slide_rect = crate::textures::device_pixel_rect(exact_rect, ppp);
     ui.data_mut(|d| {
         d.insert_temp(scroll_id, offset);
-        d.insert_temp(last_id, (slide_rect, scale));
+        d.insert_temp(last_id, (exact_rect, scale));
     });
     app.slide_rect = Some(slide_rect);
     app.canvas_scale = scale;
@@ -907,8 +909,10 @@ mod tests {
         h.run_steps(30);
     }
 
+    /// Within half a slide point, plus the half device pixel the slide moves to sit on the pixel
+    /// grid (#184).
     fn assert_near(a: Pos2, b: Pos2, what: &str) {
-        assert!((a - b).length() < 0.5, "{what}: {a:?} moved to {b:?}");
+        assert!((a - b).length() < 1.25, "{what}: {a:?} moved to {b:?}");
     }
 
     /// #106: wheel and pinch zoom zoomed toward the slide's corner instead of the pointer.
