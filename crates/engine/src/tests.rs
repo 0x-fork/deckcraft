@@ -958,3 +958,80 @@ fn plain_outlines_are_unchanged() {
     let p = crate::cmd::file::open_presentation("outline.txt", MD_OUTLINE.as_bytes()).unwrap();
     assert_eq!(p.slides.first().map(|s| s.title()).as_deref(), Some("# Intro"));
 }
+
+fn text_box_xfrm(s: &Session, id: u64) -> deckcraft_geom::Xfrm {
+    let st = s.doc().unwrap();
+    cmd::xfrm_of(&st.doc, &st.selection, st.shape(deckcraft_model::ShapeId(id as u32)).unwrap())
+}
+
+fn right_click(s: &mut Session, x: f64, y: f64) -> serde_json::Value {
+    s.pointer(PointerEvent { kind: PointerKind::ContextClick, x, y, mods: Mods::default(), tol: 3.0 }).unwrap()
+}
+
+/// A blank slide with a rectangle A (100,100 200×100) and a text box B (400,100 200 wide),
+/// nothing selected.
+fn two_shapes() -> (Session, deckcraft_model::ShapeId, deckcraft_model::ShapeId) {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    let a = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100.0, 100.0, 200.0, 100.0], "text": "Shape A"})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let b = s.execute("insert.textBox", &json!({"rect": [400.0, 100.0, 200.0, 40.0], "text": "Box B"})).unwrap()["id"].as_u64().unwrap();
+    s.select(|_, sel| {
+        sel.shapes.clear();
+        sel.text = None;
+    })
+    .unwrap();
+    (s, deckcraft_model::ShapeId(a as u32), deckcraft_model::ShapeId(b as u32))
+}
+
+#[test]
+fn right_click_selects_the_shape_under_the_pointer() {
+    let (mut s, a, b) = two_shapes();
+    let undo_before = s.doc().unwrap().history.undo.len();
+    // An unselected shape: selected alone, no text editing, no drag.
+    let r = right_click(&mut s, 150.0, 150.0);
+    assert_eq!(r["selected"], json!([a]));
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.shapes, vec![a]);
+    assert!(st.selection.text.is_none());
+    assert!(!s.tool.dragging());
+    s.pointer(PointerEvent { kind: PointerKind::Drag, x: 190.0, y: 190.0, mods: Mods::default(), tol: 3.0 }).unwrap();
+    assert_eq!(text_box_xfrm(&s, a.0 as u64).x, 100.0);
+    // A text box, which a left click would start editing: only selected.
+    right_click(&mut s, 450.0, 115.0);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.shapes, vec![b]);
+    assert!(st.selection.text.is_none());
+    // A multiple selection stays when the right click lands on one of its shapes.
+    s.execute("edit.select", &json!({"ids": [a, b]})).unwrap();
+    right_click(&mut s, 450.0, 115.0);
+    assert_eq!(s.doc().unwrap().selection.shapes, vec![a, b]);
+    // Empty slide: nothing selected (the slide menu).
+    let r = right_click(&mut s, 700.0, 450.0);
+    assert!(r["hit"].is_null(), "{r}");
+    assert!(s.doc().unwrap().selection.shapes.is_empty());
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo_before);
+}
+
+#[test]
+fn right_click_in_edited_text_keeps_the_text_selection() {
+    let (mut s, a, b) = two_shapes();
+    s.execute("text.edit", &json!({"id": a, "at": [0, 0]})).unwrap();
+    s.execute("text.move", &json!({"to": "wordRight", "extend": true})).unwrap();
+    let before = s.doc().unwrap().selection.text.clone().unwrap();
+    assert!(before.is_range());
+    // Anywhere in the box, even away from the selected word.
+    let r = right_click(&mut s, 280.0, 185.0);
+    assert_eq!(r["editing"], true);
+    assert_eq!(s.doc().unwrap().selection.text.as_ref(), Some(&before));
+    // The context menu's Copy and Cut then act on the selected text.
+    assert_eq!(s.execute("edit.copy", &json!({})).unwrap()["text"].as_str().unwrap().trim(), "Shape");
+    s.execute("edit.cut", &json!({})).unwrap();
+    assert_eq!(s.execute("text.get", &json!({"id": a})).unwrap()["text"].as_str().unwrap().trim(), "A");
+    // A right click on another shape leaves editing and selects that shape.
+    right_click(&mut s, 450.0, 115.0);
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.is_none());
+    assert_eq!(st.selection.shapes, vec![b]);
+}

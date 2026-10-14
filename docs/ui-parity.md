@@ -2,6 +2,7 @@
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (Eyedropper in the colour menus (#367); previously minor: File tab / Backstage, #76; previous: off-slide objects in Normal view, #270) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (Export button in the title bar; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-12 · **Change:** minor (right click selects the shape under the pointer; previous: minor, File tab / Backstage, #76) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 > **Last reviewed:** 2026-10-12 · **Last updated:** 2026-10-12 · **Change:** minor (text editing keys observed in PowerPoint for Windows, #268) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
@@ -85,7 +86,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Text caret, selection, double/triple click, drag-select | yes | yes; Tab in text boxes ends editing (#78) |
 | Exact size/position, lock aspect | yes | yes |
 | Rulers with indent markers and tab stops | yes | rulers yes; tab stops partial |
-| Context menus on shapes, slides, text, thumbnails | yes | yes, shorter |
+| Context menus on shapes, slides, text, thumbnails | yes | yes, shorter; a right click selects the shape under the pointer first |
 | Drag and drop of files and between thumbnails | yes | yes |
 | Image paste from the clipboard | yes | macOS yes; Windows and Linux no (#53) |
 | Font menu: every installed family with its faces | yes | families yes; only Regular/Bold/Italic faces (#69) |
@@ -152,6 +153,7 @@ imitate Microsoft's. No pixel comparison against PowerPoint screenshots has been
 |---|---|---|
 | 2026-10-13 | trivial | Eyedropper in the colour menus (#367) |
 | 2026-10-12 | minor | Title bar: an Export button next to Save opens the Export dialog, a quick-access shortcut beside File › Export |
+| 2026-10-12 | minor | A right click selects the shape under the pointer before its context menu opens, as in PowerPoint; edited text keeps its selection and gets text items |
 | 2026-10-12 | minor | File tab (Backstage) observed in PowerPoint for Windows and matched (#76); the start screen is File › Home |
 | 2026-10-12 | minor | Off-slide objects drawn and editable around the slide in Normal view (#270) |
 | 2026-10-12 | minor | Selection Pane matched to PowerPoint (#133): drag and drop, arrows, groups, eye, Lock |

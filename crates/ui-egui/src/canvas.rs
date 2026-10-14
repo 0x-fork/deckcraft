@@ -394,7 +394,11 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     if resp.hovered() && !app.session.tool.dragging() {
         let _ = app.session.pointer(ev(PointerKind::Move));
     }
-    let r = if resp.triple_clicked() {
+    let secondary = resp.hovered() && ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary));
+    let r = if secondary && !app.session.tool.dragging() {
+        // Select what's under the pointer before the context menu opens (on release).
+        app.session.pointer(ev(PointerKind::ContextClick))
+    } else if resp.triple_clicked() {
         app.session.pointer(ev(PointerKind::TripleClick))
     } else if resp.double_clicked() {
         app.session.pointer(ev(PointerKind::DoubleClick))
@@ -648,7 +652,29 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
             }
         }
         ui.separator();
-        if has_sel {
+        // Right-clicking the text being edited keeps it (`PointerKind::ContextClick`): text items.
+        let editing = app.session.active().is_some_and(|d| d.selection.text.as_ref().is_some_and(|t| !t.notes));
+        if editing {
+            if ui.button("Paragraph…").clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("paragraph"));
+                ui.close();
+            }
+            for (l, id) in [("Bullets", "format.bullets"), ("Numbering", "format.numbering")] {
+                if ui.add_enabled(crate::ribbon::enabled(app, id), egui::Button::new(l)).clicked() {
+                    let _ = app.run(id, json!({}));
+                    ui.close();
+                }
+            }
+            if ui.button("Link…").clicked() {
+                app.dialog = Some(crate::dialogs::Dialog::new("hyperlink"));
+                ui.close();
+            }
+            ui.separator();
+            if ui.button("Format Shape…").clicked() {
+                let _ = app.run("view.pane", json!({"pane": "format"}));
+                ui.close();
+            }
+        } else if has_sel {
             if ui.button("Edit Text").clicked() {
                 let _ = app.run("text.edit", json!({}));
                 ui.close();
