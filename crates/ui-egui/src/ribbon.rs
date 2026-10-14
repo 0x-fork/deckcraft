@@ -12,6 +12,28 @@ use crate::widgets::{self, RIBBON_H, big_button, big_button_ex, color_split, dro
 
 pub const TITLE_H: f32 = 38.0;
 
+/// macOS draws the window into the title bar (`with_fullsize_content_view`) and AppKit paints the
+/// traffic lights itself, 16 pt from the top of the window on macOS 27. Moving them would take
+/// AppKit calls (`unsafe`, forbidden here), so on macOS the title bar is the band they are centred
+/// in, with the controls beside them (#71). Up to macOS 15 the lights are smaller and centred 14 pt
+/// from the top, about 2 pt above this bar's centre.
+pub const MAC_TITLE_BAR: f32 = 32.0;
+/// The traffic lights as AppKit lays them out, measured on macOS 27: button diameter,
+/// centre-to-centre pitch and the first button's left edge.
+const MAC_LIGHT: f32 = 14.0;
+const MAC_LIGHT_PITCH: f32 = 23.0;
+const MAC_LIGHTS_LEFT: f32 = 9.0;
+/// Where title-bar content starts on macOS: the end of the three lights plus the gap the lights
+/// keep from the top of the window.
+pub const MAC_CONTENT_LEFT: f32 = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT + (MAC_TITLE_BAR - MAC_LIGHT) / 2.0;
+
+/// The title bar's height, the left edge of its content and the height of its tallest control.
+/// With the integrated title bar (macOS) the bar is shorter, so the controls shrink to keep a
+/// margin above and below them.
+fn title_geometry(integrated: bool) -> (f32, f32, f32) {
+    if integrated { (MAC_TITLE_BAR, MAC_CONTENT_LEFT, 22.0) } else { (TITLE_H, 10.0, 26.0) }
+}
+
 /// Is engine command `id` enabled right now?
 pub fn enabled(app: &SlideApp, id: &str) -> bool {
     match deckcraft_engine::find_command(id) {
@@ -27,7 +49,8 @@ fn run(app: &mut SlideApp, id: &str, p: Value) {
 /// The window's title row: traffic-light space, quick access, centred title, actions.
 pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    egui::Panel::top("title_bar").exact_size(TITLE_H).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
+    let (height, left, control_h) = title_geometry(app.integrated_titlebar);
+    egui::Panel::top("title_bar").exact_size(height).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let rect = ui.max_rect();
         // Dragging the empty title bar moves the window.
         let drag = ui.interact(rect, ui.id().with("titledrag"), Sense::click_and_drag());
@@ -38,7 +61,6 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
             let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
         }
-        let left = if app.integrated_titlebar { 84.0 } else { 10.0 };
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(Rect::from_min_max(pos2(rect.min.x + left, rect.min.y), pos2(rect.min.x + 420.0, rect.max.y)))
@@ -81,8 +103,8 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         let share = right.add(
             egui::Button::new(egui::RichText::new("  Present  ").color(t.accent_text).font(theme::bold(13.0)))
                 .fill(t.accent)
-                .corner_radius(CornerRadius::same(13))
-                .min_size(vec2(84.0, 26.0)),
+                .corner_radius(control_h / 2.0)
+                .min_size(vec2(84.0, control_h)),
         );
         if share.clicked() && has_doc {
             let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
@@ -3281,3 +3303,22 @@ mod effects_tests;
 #[cfg(test)]
 #[path = "master_layout_tests.rs"]
 mod master_layout_tests;
+
+#[cfg(test)]
+mod title_bar_tests {
+    use super::*;
+
+    #[test]
+    fn mac_title_bar_centres_and_clears_the_traffic_lights() {
+        let (h, left, control) = title_geometry(true);
+        // AppKit centres the lights in its own band, so the bar is that band.
+        assert_eq!(h, MAC_TITLE_BAR);
+        // Content keeps the same gap after the lights as the lights keep from the top.
+        let lights_end = MAC_LIGHTS_LEFT + 2.0 * MAC_LIGHT_PITCH + MAC_LIGHT;
+        assert_eq!(left - lights_end, (h - MAC_LIGHT) / 2.0);
+        // The tallest controls keep at least 4 pt above and below.
+        assert!(control <= h - 8.0);
+        // Other platforms keep their system frame and the original bar.
+        assert_eq!(title_geometry(false), (TITLE_H, 10.0, 26.0));
+    }
+}
