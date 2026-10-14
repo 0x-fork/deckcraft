@@ -744,3 +744,31 @@ fn a_3d_shapes_face_is_lit_even_without_a_bevel() {
     let img = render(vec![shape(r#"<a:scene3d><a:camera prst="orthographicFront"/><a:lightRig rig="threePt" dir="t"/></a:scene3d>"#)]);
     assert!(close(img.pixel(175, 150), base, 1));
 }
+
+#[test]
+fn a_tiny_dash_on_a_huge_shape_draws_without_running_out_of_memory() {
+    // Found by fuzzing the pptx round trip: a 1 EMU `custDash` on a 2147483647 EMU square asked
+    // the stroker for hundreds of thousands of dashes and aborted on a 7.5 GB allocation.
+    let sh = Shape {
+        id: ShapeId(12),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 169_093.0, 169_093.0)),
+        geom: Geom::preset("rect"),
+        line: Some(Line {
+            fill: solid(RED),
+            width: Some(0.0001),
+            dash: Some(deckcraft_model::style::Dash::Custom { pattern: vec![(1.0, 1.0)] }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 0.25, ..Default::default() });
+    assert!(img.width > 0);
+    // The pattern is scaled up only past the limit; ordinary lines keep theirs.
+    let mut p = BezPath::new();
+    p.move_to((0.0, 0.0));
+    p.line_to((100.0, 0.0));
+    assert_eq!(limit_dash_count(&p, vec![1.0, 1.0]), vec![1.0, 1.0]);
+    p.line_to((4.0e6, 0.0));
+    let pat = limit_dash_count(&p, vec![1.0, 1.0]);
+    assert!((4.0e6 / (pat[0] + pat[1]) - MAX_DASHES).abs() < 1.0, "{pat:?}");
+}
