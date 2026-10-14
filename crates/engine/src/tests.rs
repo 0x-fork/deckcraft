@@ -237,7 +237,8 @@ fn writable_format_for_path_rejects_formats_deckcraft_does_not_write() {
     assert_eq!(f("a.pdf"), Some("pdf"));
     assert_eq!(f("a.jpg"), Some("jpeg"));
     assert_eq!(f("a.txt"), Some("outline"));
-    for path in ["a.odp", "a.gif", "a.svg", "a.outline", "a", "dir.v2/a"] {
+    assert_eq!(f("a.gif"), Some("gif"));
+    for path in ["a.odp", "a.bmp", "a.svg", "a.outline", "a", "dir.v2/a"] {
         assert_eq!(f(path), None, "{path}");
     }
 }

@@ -506,6 +506,7 @@ impl SlideApp {
             "pptx" => ("pptx", "pptx", false),
             "outline" | "txt" => ("txt", "outline", false),
             "deckcraft" => ("deckcraft", "deckcraft", false),
+            "gif" => ("gif", "gif", false),
             other => {
                 self.set_status(format!("DeckCraft can't export “{other}”"));
                 return false;
@@ -535,6 +536,7 @@ impl SlideApp {
                 Ok(if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) })
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
+            "gif" => deckcraft_engine::cmd::file::gif_bytes(&doc, &extra),
             other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
         };
         self.download(&suggested, bytes)

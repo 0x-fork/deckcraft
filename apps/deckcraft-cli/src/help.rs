@@ -50,19 +50,22 @@ OUT-t0.250.png and so on. Prints each image's path, size, transition and time.
         usage: "convert IN OUT",
         summary: "save a presentation in the format OUT's extension names",
         details: "Opens IN (.deckcraft or .pptx) and writes it to OUT, in the format OUT's extension names:
-.deckcraft, .pptx, .pdf, .txt or .md for the outline, .png or .jpg for the first slide. Any other
-extension is written as .deckcraft. Prints OUT.
+.deckcraft, .pptx, .pdf, .txt or .md for the outline, .png or .jpg for the first slide, .gif for an
+animated GIF with one frame per slide. Other extensions are refused. Prints OUT.
 
   deckcraft-cli convert deck.deckcraft deck.pptx",
     },
     Subcommand {
         name: "run",
-        usage: "run [--in FILE | --sample] [--cmd COMMAND[=PARAMS]]... [--save OUT] [--export OUT] [--print]",
+        usage: "run [--in FILE | --sample] [--cmd COMMAND[=PARAMS]]... [--save OUT] [--export OUT [--export-params JSON]] [--print]",
         summary: "run commands on a presentation, then save or export it",
         details: "Runs commands, in order, on one presentation: FILE with --in, the sample presentation with --sample,
 else a new one with an empty title slide. Then --save writes the presentation: .deckcraft keeps
 everything; .pptx, .pdf and .md (the outline) are written as convert writes them. --export writes the
-current slide as .png or .jpg, or the presentation as .pdf or .pptx.
+current slide as .png or .jpg, or the presentation as .pdf, .pptx or an animated .gif (one frame per
+slide). --export-params passes file.export options as one JSON object, such as
+'{\"width\": \"large\", \"secondsPerSlide\": 3, \"loop\": false, \"slides\": [0, 1, 2]}' for a GIF
+(`deckcraft-cli describe file.export` lists them).
 
 Each --cmd is one command: COMMAND is a command id, then `=`, then the command's parameters as one
 JSON object. Quote it for the shell. A command that needs no parameters is just its id.
