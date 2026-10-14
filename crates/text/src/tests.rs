@@ -186,24 +186,36 @@ fn saved_shrink_scale_is_drawn() {
     // A file saved with fontScale 62.5% and lnSpcReduction 20% draws at that scale even though
     // the text would fit at full size, as PowerPoint draws it.
     let (p, mut sh) = setup("Short", 600.0, 300.0);
-    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.625, line_reduction: 0.2 });
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: Some(0.625), line_reduction: 0.2 });
     let l = lay(&p, &sh, 600.0, 300.0);
     assert_eq!((l.font_scale, l.line_reduction), (0.625, 0.2));
     // Text our metrics find overflowing at the saved scale is still drawn at it, as PowerPoint
     // draws it until the text changes; with no saved scale it shrinks to fit.
     let text = (0..30).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n");
     let (p, mut sh) = setup(&text, 600.0, 200.0);
-    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 0.9, line_reduction: 0.1 });
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: Some(0.9), line_reduction: 0.1 });
     let l = lay(&p, &sh, 600.0, 200.0);
     assert_eq!((l.font_scale, l.line_reduction), (0.9, 0.1));
-    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: 1.0, line_reduction: 0.0 });
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: Some(1.0), line_reduction: 0.0 });
     let l = lay(&p, &sh, 600.0, 200.0);
     assert!(l.font_scale < 0.9, "{}", l.font_scale);
     // Nonsense saved values are ignored.
     let (p, mut sh) = setup("Short", 600.0, 300.0);
-    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: f64::NAN, line_reduction: 5.0 });
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: Some(f64::NAN), line_reduction: 5.0 });
     let l = lay(&p, &sh, 600.0, 300.0);
     assert_eq!((l.font_scale, l.line_reduction), (1.0, 0.2));
+}
+
+/// A body whose file has `<a:normAutofit/>` with no `fontScale` is the schema default 100 %:
+/// PowerPoint draws it as it is, even overflowing. DeckCraft draws it the same (#724).
+#[test]
+fn bare_normautofit_draws_at_full_size() {
+    let text = (0..30).map(|i| format!("Line number {i}")).collect::<Vec<_>>().join("\n");
+    let (p, mut sh) = setup(&text, 600.0, 200.0);
+    sh.text.as_mut().unwrap().body.autofit = Some(AutoFit::Shrink { font_scale: None, line_reduction: 0.0 });
+    let l = lay(&p, &sh, 600.0, 200.0);
+    assert_eq!(l.font_scale, 1.0, "a body with no saved fontScale draws at 100%");
+    assert!(l.overflow, "it overflows, as PowerPoint draws it");
 }
 
 #[test]

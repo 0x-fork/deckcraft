@@ -1549,18 +1549,21 @@ pub fn layout(ctx: &Ctx, shape: &Shape, body: &TextBody, opts: &Opts) -> TextLay
     let autofit = bp.autofit.unwrap_or(AutoFit::None);
     // Shrink on overflow starts from the scale the file was saved with (`fontScale`,
     // `lnSpcReduction`), which is what PowerPoint draws; editing the text resets it.
-    let (scale0, reduce0) = match (autofit, opts.no_shrink) {
+    let (scale0, reduce0, no_saved_scale) = match (autofit, opts.no_shrink) {
         (AutoFit::Shrink { font_scale, line_reduction }, false) => (
-            if font_scale.is_finite() { font_scale.clamp(0.1, 1.0) } else { 1.0 },
+            font_scale.filter(|s| s.is_finite()).map(|s| s.clamp(0.1, 1.0)).unwrap_or(1.0),
             if line_reduction.is_finite() { line_reduction.clamp(0.0, 0.2) } else { 0.0 },
+            font_scale.is_none(),
         ),
-        _ => (1.0, 0.0),
+        _ => (1.0, 0.0, false),
     };
     let mut l = layout_scaled(ctx, shape, body, &bp, opts, scale0, reduce0);
     // A scale PowerPoint saved is drawn as it is: PowerPoint fits the text again only when it
     // changes (and editing resets the saved scale), not when a file opens, even where our
     // metrics would call it overflowing (trailing empty paragraphs, substituted fonts).
-    let saved = scale0 < 1.0 || reduce0 > 0.0;
+    // A body whose file has no `fontScale` at all (`<a:normAutofit/>`) is the schema default
+    // 100 % and is drawn as it is too, not refitted on open (#724).
+    let saved = no_saved_scale || scale0 < 1.0 || reduce0 > 0.0;
     if let (AutoFit::Shrink { .. }, false) = (autofit, opts.no_shrink)
         && l.overflow
         && !saved
