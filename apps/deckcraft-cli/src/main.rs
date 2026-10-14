@@ -57,6 +57,14 @@ fn main() -> ExitCode {
         Some("render-transition") => report(render_transition(rest)),
         Some("convert") => report(convert(rest)),
         Some("run") => report(run(rest)),
+        Some("--help" | "-h" | "help") => {
+            outln!("{USAGE}");
+            ExitCode::SUCCESS
+        }
+        Some("commands") if rest.first().is_some_and(|a| is_help(a)) => {
+            outln!("{USAGE}");
+            ExitCode::SUCCESS
+        }
         Some("commands") => {
             let s = Session::new();
             let f = rest.first().map(|x| x.to_lowercase());
@@ -85,6 +93,10 @@ fn main() -> ExitCode {
     }
 }
 
+fn is_help(arg: &str) -> bool {
+    matches!(arg, "--help" | "-h")
+}
+
 fn report(r: Result<(), String>) -> ExitCode {
     match r {
         Ok(()) => ExitCode::SUCCESS,
@@ -106,6 +118,10 @@ fn open(s: &mut Session, input: Option<&str>, sample: bool) -> Result<(), String
 }
 
 fn info(args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|a| is_help(a)) {
+        outln!("{USAGE}");
+        return Ok(());
+    }
     let path = args.first().ok_or("info needs a FILE")?;
     let mut s = Session::new();
     open(&mut s, Some(path), false)?;
@@ -130,6 +146,11 @@ fn render(args: &[String]) -> Result<(), String> {
             "--all" => all = true,
             "--edit" => edit = true,
             "--scale" => scale = it.next().and_then(|v| v.parse().ok()).ok_or("--scale needs a number")?,
+            "--help" | "-h" => {
+                outln!("{USAGE}");
+                return Ok(());
+            }
+            other if other.starts_with('-') => return Err(format!("unknown option `{other}`")),
             other
                 if input.is_none()
                     && !sample
@@ -239,6 +260,10 @@ fn render_transition(args: &[String]) -> Result<(), String> {
 }
 
 fn convert(args: &[String]) -> Result<(), String> {
+    if args.first().is_some_and(|a| is_help(a)) {
+        outln!("{USAGE}");
+        return Ok(());
+    }
     let (Some(input), Some(out)) = (args.first(), args.get(1)) else { return Err("convert needs IN and OUT".into()) };
     let fmt = output_format(out)?;
     let mut s = Session::new();
@@ -279,6 +304,10 @@ fn run(args: &[String]) -> Result<(), String> {
             "--save" => save = Some(it.next().cloned().ok_or("--save needs a path")?),
             "--export" => export = Some(it.next().cloned().ok_or("--export needs a path")?),
             "--print" => print = true,
+            "--help" | "-h" => {
+                outln!("{USAGE}");
+                return Ok(());
+            }
             other => return Err(format!("unknown option `{other}`")),
         }
     }
@@ -307,6 +336,10 @@ fn run(args: &[String]) -> Result<(), String> {
 }
 
 fn describe(id: Option<&str>) -> Result<(), String> {
+    if id.is_some_and(is_help) {
+        outln!("{USAGE}");
+        return Ok(());
+    }
     let id = id.ok_or("describe needs a command id")?;
     let c = deckcraft_engine::find_command(id).ok_or_else(|| format!("unknown command `{id}`"))?;
     outln!("{}  —  {}\n  where:    {}\n  shortcut: {}\n  params:   {}", c.id, c.label, c.menu.join(" ▸ "), c.shortcut.unwrap_or("—"), c.params);
@@ -323,6 +356,10 @@ fn app(args: &[String]) -> Result<(), String> {
         match a.as_str() {
             "--port" => port = it.next().cloned().ok_or("--port needs a value")?,
             "--method" => method = Some(it.next().cloned().ok_or("--method needs a name")?),
+            "--help" | "-h" => {
+                outln!("{USAGE}");
+                return Ok(());
+            }
             other => rest.push(other.to_string()),
         }
     }
@@ -351,6 +388,10 @@ fn mcp(args: &[String]) -> Result<(), String> {
         match a.as_str() {
             "--connect" => connect = Some(it.next().cloned().ok_or("--connect needs a port or host:port")?),
             "--sample" => sample = true,
+            "--help" | "-h" => {
+                outln!("{USAGE}");
+                return Ok(());
+            }
             other => return Err(format!("unknown mcp option `{other}`")),
         }
     }
@@ -367,4 +408,36 @@ fn mcp(args: &[String]) -> Result<(), String> {
     let mut server = Server::new(backend);
     let stdin = std::io::stdin();
     server.serve(stdin.lock(), std::io::stdout()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn render_help_prints_usage_and_writes_nothing() {
+        assert!(render(&args(&["--help"])).is_ok());
+        assert!(render(&args(&["-h"])).is_ok());
+        assert!(!std::path::Path::new("--help").exists());
+    }
+
+    #[test]
+    fn render_rejects_unknown_flag() {
+        let err = render(&args(&["--sample", "--scael", "2", "out.png"])).unwrap_err();
+        assert_eq!(err, "unknown option `--scael`");
+        assert!(!std::path::Path::new("--scael").exists());
+    }
+
+    #[test]
+    fn other_subcommands_accept_help() {
+        assert!(info(&args(&["--help"])).is_ok());
+        assert!(convert(&args(&["-h"])).is_ok());
+        assert!(run(&args(&["--help"])).is_ok());
+        assert!(describe(Some("--help")).is_ok());
+        assert!(mcp(&args(&["-h"])).is_ok());
+    }
 }
