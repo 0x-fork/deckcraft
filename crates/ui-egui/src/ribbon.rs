@@ -2615,6 +2615,13 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
                 run(app, "smartArt.demote", json!({"id": gid, "index": at}));
             }
         });
+        let pictures = kind.starts_with("picture");
+        if small_button(ui, Icon::Picture, "Insert Picture", pictures && n > 0, false)
+            .on_hover_text("Put a picture in the selected node's picture placeholder")
+            .clicked()
+        {
+            run(app, "app.smartArtPictureDialog", json!({"id": gid, "index": at}));
+        }
     });
     group(ui, |ui| {
         let (r, _) = small_button_ex(ui, Icon::Layout, "Layouts", gid.is_some(), false, true);
@@ -2630,6 +2637,9 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
         let (r, _) = small_button_ex(ui, Icon::ChangeChartType, "Change Colors", gid.is_some(), false, true);
         egui::Popup::menu(&r).show(|ui| {
             for (k, label) in deckcraft_engine::cmd::smartart::COLORS {
+                if matches!(k, "range23" | "accent1" | "accent1Grad") {
+                    ui.separator();
+                }
                 let on = colors == k || (colors.is_empty() && k == "colorful");
                 if ui.selectable_label(on, label).clicked() {
                     run(app, "smartArt.colors", json!({"id": gid, "colors": k}));
@@ -2639,6 +2649,10 @@ fn smartart_design(app: &mut SlideApp, ui: &mut Ui) {
         let (r, _) = small_button_ex(ui, Icon::SmartArt, "SmartArt Styles", gid.is_some(), false, true);
         egui::Popup::menu(&r).show(|ui| {
             for (k, label) in deckcraft_engine::cmd::smartart::STYLES {
+                if k == "polished" {
+                    ui.separator();
+                    ui.label("3-D");
+                }
                 let on = style == k || (style.is_empty() && k == "flat");
                 if ui.selectable_label(on, label).clicked() {
                     run(app, "smartArt.style", json!({"id": gid, "style": k}));
