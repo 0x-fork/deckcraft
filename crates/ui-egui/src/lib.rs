@@ -11,6 +11,7 @@ pub mod canvas;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+pub mod eyedropper;
 pub mod fillui;
 pub mod icons;
 pub mod media;
@@ -197,6 +198,8 @@ pub struct SlideApp {
     pub synthetic: Vec<egui::Event>,
     /// Canvas screen rect and points-per-slide-point scale (for control & tests).
     pub canvas_rect: Option<egui::Rect>,
+    /// The Eyedropper is waiting for a click on the slide.
+    pub eyedropper: Option<eyedropper::State>,
     pub canvas_scale: f32,
     pub slide_rect: Option<egui::Rect>,
     /// Where the canvas texture (the slide and the pasteboard drawn around it) is on screen.
@@ -247,6 +250,7 @@ impl SlideApp {
             perf: Perf { frame_ms: 0.0, render_ms: 0.0, fps: 0.0 },
             synthetic: vec![],
             canvas_rect: None,
+            eyedropper: None,
             canvas_scale: 1.0,
             slide_rect: None,
             canvas_region: None,
@@ -935,6 +939,7 @@ impl SlideApp {
         let t0 = now_ms();
         let t = theme::Tokens::get(&ctx);
         self.tick_media(&ctx);
+        eyedropper::tick(self, &ctx);
         if self.show.is_some() {
             show::ui(self, ui);
             self.perf.frame_ms = now_ms() - t0;
@@ -1127,6 +1132,8 @@ fn js_now() -> f64 {
     js_sys::Date::now()
 }
 
+#[cfg(test)]
+mod eyedropper_tests;
 #[cfg(test)]
 mod ime_tests;
 

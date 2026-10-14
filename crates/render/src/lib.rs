@@ -78,6 +78,19 @@ impl Image {
         }
         out
     }
+    /// One pixel as straight (unpremultiplied) RGBA; `None` outside the image.
+    pub fn straight_at(&self, x: u32, y: u32) -> Option<[u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let i = (y as usize).checked_mul(self.width as usize)?.checked_add(x as usize)?.checked_mul(4)?;
+        let [r, g, b, a] = <[u8; 4]>::try_from(self.pixels.get(i..i.checked_add(4)?)?).ok()?;
+        if a == 0 || a == 255 {
+            return Some([r, g, b, a]);
+        }
+        let unpremultiply = |c: u8| ((c as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8;
+        Some([unpremultiply(r), unpremultiply(g), unpremultiply(b), a])
+    }
     pub fn to_png(&self) -> Vec<u8> {
         let mut px = self.to_straight();
         px.resize(self.width as usize * self.height as usize * 4, 0);
