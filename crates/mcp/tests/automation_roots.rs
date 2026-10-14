@@ -134,7 +134,7 @@ fn every_writing_command_is_refused_outside_the_write_root() {
     refused(&mut server, "export", json!({"path": outside("x.png")}), "outside the write root");
     refused(&mut server, "export", json!({"path": outside("x.txt")}), "outside the write root");
     refused(&mut server, "export", json!({"path": outside("all.png"), "all": true}), "outside the write root");
-    refused(&mut server, "render_slide", json!({"path": outside("r.png")}), "outside the write root");
+    refused(&mut server, "call_app", json!({"method": "ui.render", "params": {"path": outside("r.png")}}), "outside the write root");
     refused(&mut server, "call_app", json!({"method": "app.save", "params": {"path": outside("y.deckcraft")}}), "outside the write root");
     refused(&mut server, "call_app", json!({"method": "app.export", "params": {"path": outside("y.pdf")}}), "outside the write root");
     for command in ["file.save", "file.saveAs", "file.export"] {
@@ -162,7 +162,7 @@ fn every_writing_command_is_refused_outside_the_write_root() {
     ok(&mut server, "export", json!({"path": inside("x.pptx")}));
     ok(&mut server, "export", json!({"path": inside("x.pdf")}));
     ok(&mut server, "export", json!({"path": inside("all.png"), "all": true}));
-    ok(&mut server, "render_slide", json!({"path": inside("r.png")}));
+    ok(&mut server, "call_app", json!({"method": "ui.render", "params": {"path": inside("r.png")}}));
     for f in ["x.deckcraft", "x.pptx", "x.pdf", "all1.png", "all2.png", "r.png"] {
         assert!(base.join("out").join(f).exists(), "{f}");
     }
@@ -176,7 +176,7 @@ fn one_root_grants_only_its_own_access() {
     ok(&mut read_only, "open_presentation", json!({"path": s(&base.join("in/a.txt"))}));
     refused(&mut read_only, "save_presentation", json!({"path": s(&base.join("out/x.deckcraft"))}), "write authority is absent");
     refused(&mut read_only, "export", json!({"path": s(&base.join("out/x.pdf"))}), "write authority is absent");
-    refused(&mut read_only, "render_slide", json!({"path": s(&base.join("out/r.png"))}), "write authority is absent");
+    refused(&mut read_only, "call_app", json!({"method": "ui.render", "params": {"path": s(&base.join("out/r.png"))}}), "write authority is absent");
     // Calls that return bytes instead of writing a path keep working.
     let (error, _) = call(&mut read_only, "render_slide", json!({"scale": 0.25}));
     assert!(!error);

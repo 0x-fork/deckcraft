@@ -476,7 +476,7 @@ fn info(s: &mut Session, _p: &Value) -> Result<Value> {
     let st = s.doc()?;
     let doc = &st.doc;
     #[cfg(not(target_arch = "wasm32"))]
-    let bytes = st.path.as_ref().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len());
+    let bytes = st.path.as_deref().and_then(crate::io::file_len);
     #[cfg(target_arch = "wasm32")]
     let bytes: Option<u64> = None;
     Ok(json!({

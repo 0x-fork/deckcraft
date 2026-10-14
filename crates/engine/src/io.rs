@@ -33,3 +33,16 @@ pub fn write_file(path: &str, bytes: &[u8]) -> Result<(), String> {
 pub fn write_file(path: &str, _bytes: &[u8]) -> Result<(), String> {
     Err(format!("{path}: saving to a path is not available in the browser"))
 }
+
+/// The size in bytes of the file at `path`; `None` when it can't be read (or is outside the
+/// automation read root, so File › Info doesn't reveal files the agent may not read).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn file_len(path: &str) -> Option<u64> {
+    crate::file_access::check_read(path).ok()?;
+    std::fs::metadata(path).ok().map(|m| m.len())
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn file_len(_path: &str) -> Option<u64> {
+    None
+}
