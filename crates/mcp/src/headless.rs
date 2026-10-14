@@ -90,7 +90,8 @@ impl Headless {
             let x = e.get("x").and_then(Value::as_f64).ok_or("pointer event needs `x`")?;
             let y = e.get("y").and_then(Value::as_f64).ok_or("pointer event needs `y`")?;
             let mods = e.get("mods").map(mods_from).unwrap_or(base);
-            last = self.session.pointer(PointerEvent { kind, x, y, mods, tol: 3.0 }).map_err(|e| e.to_string())?;
+            let pressure = e.get("pressure").and_then(Value::as_f64).map(|v| v as f32);
+            last = self.session.pointer(PointerEvent { kind, x, y, mods, tol: 3.0, pressure }).map_err(|e| e.to_string())?;
         }
         self.session.ui_requests.clear();
         Ok(json!({"result": last, "selection": self.session.active().map(|d| serde_json::to_value(&d.selection).unwrap_or_default())}))

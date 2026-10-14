@@ -230,7 +230,7 @@ fn align_and_distribute() {
 fn pointer_draw_move_resize() {
     let mut s = session();
     s.set_tool(ToolKind::Shape { preset: "rect".into() });
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::Down, 100.0, 100.0)).unwrap();
     s.pointer(ev(PointerKind::Drag, 200.0, 180.0)).unwrap();
     let r = s.pointer(ev(PointerKind::Up, 200.0, 180.0)).unwrap();
@@ -261,7 +261,7 @@ fn pointer_draw_move_resize() {
 #[test]
 fn click_into_placeholder_starts_editing() {
     let mut s = session();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::Down, 480.0, 200.0)).unwrap();
     s.pointer(ev(PointerKind::Up, 480.0, 200.0)).unwrap();
     assert!(s.doc().unwrap().selection.text.is_some());
@@ -440,7 +440,7 @@ fn drawing_a_line_between_shapes_glues_it() {
     let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 100, 100, 100]})).unwrap()["id"].as_u64().unwrap();
     s.execute("edit.deselect", &json!({})).unwrap();
     s.tool.kind = tools::ToolKind::Shape { preset: "straightConnector1".into() };
-    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0 };
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0, pressure: None };
     // Right site of the ellipse (200,150) → left site of the rect (400,150), a little off.
     s.pointer(ev(tools::PointerKind::Down, 202.0, 151.0)).unwrap();
     s.pointer(ev(tools::PointerKind::Drag, 300.0, 150.0)).unwrap();
@@ -473,7 +473,7 @@ fn freeform_tools_and_command() {
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().shapes().len(), before + 1);
 
-    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 3.0 };
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 3.0, pressure: None };
     // Polygon: click, click, click, click on the start → closed, filled.
     s.set_tool(tools::ToolKind::Shape { preset: "freeform".into() });
     for (x, y) in [(300.0, 300.0), (400.0, 300.0), (400.0, 400.0)] {
@@ -526,7 +526,7 @@ fn double_click_in_table_uses_grown_row_heights() {
     for row in 0..3 {
         s.execute("table.rowHeight", &json!({"id": id, "row": row, "height": 4.0})).unwrap();
     }
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     s.pointer(ev(PointerKind::DoubleClick, 120.0, 106.0)).unwrap();
     assert_eq!(s.doc().unwrap().selection.text.as_ref().and_then(|t| t.cell), Some((0, 0)));
 }
@@ -541,7 +541,7 @@ fn double_click_edits_text_inside_group() {
     let b = s.execute("shape.insert", &json!({"preset": "rect", "rect": [300.0, 200.0, 50.0, 50.0]})).unwrap()["id"].as_u64().unwrap();
     s.execute("edit.select", &json!({"ids": [a, b]})).unwrap();
     s.execute("arrange.group", &json!({})).unwrap();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     // Double-click the grouped text box: it becomes editable and targets that member.
     s.pointer(ev(PointerKind::DoubleClick, 160.0, 125.0)).unwrap();
     assert_eq!(s.doc().unwrap().selection.text.as_ref().map(|t| t.shape.0 as u64), Some(a));
@@ -780,7 +780,7 @@ fn shapes_off_the_slide_can_be_selected_and_moved() {
     // Inserting off the slide keeps the box where it was asked for.
     assert_eq!(s.execute("shape.inspect", &json!({"id": off})).unwrap()["box"]["x"], 1000.0);
     s.execute("edit.select", &json!({"ids": []})).unwrap();
-    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0 };
+    let ev = |kind, x, y| PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure: None };
     // Hover and click wholly off the slide.
     assert!(matches!(s.hit_test(deckcraft_geom::Point::new(1060.0, 140.0), 3.0), Some(tools::Hit::Shape { id, .. }) if id.0 as u64 == off));
     s.pointer(ev(PointerKind::Down, 1060.0, 140.0)).unwrap();
@@ -898,9 +898,9 @@ fn ime_composition_is_kept_by_a_key_a_click_or_another_command() {
     assert_eq!(s.doc().unwrap().history.undo.len(), undo0 + 1);
 
     s.compose_text("녕", None).unwrap();
-    s.pointer(PointerEvent { kind: PointerKind::Move, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Move, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
     assert!(s.doc().unwrap().composition.is_some(), "hovering keeps composing");
-    s.pointer(PointerEvent { kind: PointerKind::Down, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Down, x: 5.0, y: 5.0, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
     assert!(s.doc().unwrap().composition.is_none(), "a click settles it");
     assert_eq!(title_text(&s), "안녕");
 
@@ -1146,7 +1146,7 @@ fn text_box_xfrm(s: &Session, id: u64) -> deckcraft_geom::Xfrm {
 }
 
 fn right_click(s: &mut Session, x: f64, y: f64) -> serde_json::Value {
-    s.pointer(PointerEvent { kind: PointerKind::ContextClick, x, y, mods: Mods::default(), tol: 3.0 }).unwrap()
+    s.pointer(PointerEvent { kind: PointerKind::ContextClick, x, y, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap()
 }
 
 /// A blank slide with a rectangle A (100,100 200×100) and a text box B (400,100 200 wide),
@@ -1177,7 +1177,7 @@ fn right_click_selects_the_shape_under_the_pointer() {
     assert_eq!(st.selection.shapes, vec![a]);
     assert!(st.selection.text.is_none());
     assert!(!s.tool.dragging());
-    s.pointer(PointerEvent { kind: PointerKind::Drag, x: 190.0, y: 190.0, mods: Mods::default(), tol: 3.0 }).unwrap();
+    s.pointer(PointerEvent { kind: PointerKind::Drag, x: 190.0, y: 190.0, mods: Mods::default(), tol: 3.0, pressure: None }).unwrap();
     assert_eq!(text_box_xfrm(&s, a.0 as u64).x, 100.0);
     // A text box, which a left click would start editing: only selected.
     right_click(&mut s, 450.0, 115.0);
@@ -2586,7 +2586,7 @@ fn wordart_adjust_handle_drags_and_undoes() {
         (at, deckcraft_geom::Point::new(x.center().x, x.y))
     };
     assert!(matches!(s.hit_test(at, 4.0), Some(tools::Hit::Warp { index: 0, .. })));
-    let ev = |kind, p: deckcraft_geom::Point| PointerEvent { kind, x: p.x, y: p.y, mods: Mods::default(), tol: 4.0 };
+    let ev = |kind, p: deckcraft_geom::Point| PointerEvent { kind, x: p.x, y: p.y, mods: Mods::default(), tol: 4.0, pressure: None };
     s.pointer(ev(PointerKind::Down, at)).unwrap();
     s.pointer(ev(PointerKind::Drag, top)).unwrap();
     s.pointer(ev(PointerKind::Up, top)).unwrap();
@@ -2663,4 +2663,29 @@ fn find_and_replace_across_shapes_and_notes() {
     assert!(s.execute("text.replace", &json!({"text": "zebra", "with": "x"})).is_err());
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+}
+
+#[test]
+fn pen_pressure_is_kept_and_a_mouse_draws_at_full_width() {
+    let mut s = session();
+    s.set_tool(tools::ToolKind::Ink { mode: "pen".into(), color: deckcraft_model::Rgba::rgb(20, 20, 20), width: 4.0 });
+    let ev = |kind, x, y, pressure| tools::PointerEvent { kind, x, y, mods: Mods::default(), tol: 3.0, pressure };
+    s.pointer(ev(PointerKind::Down, 40.0, 80.0, Some(0.2))).unwrap();
+    s.pointer(ev(PointerKind::Drag, 80.0, 80.0, Some(1.0))).unwrap();
+    s.pointer(ev(PointerKind::Drag, 120.0, 80.0, Some(0.4))).unwrap();
+    s.pointer(ev(PointerKind::Up, 120.0, 80.0, Some(0.4))).unwrap();
+    s.pointer(ev(PointerKind::Down, 40.0, 160.0, None)).unwrap();
+    s.pointer(ev(PointerKind::Drag, 100.0, 160.0, Some(f32::NAN))).unwrap();
+    s.pointer(ev(PointerKind::Up, 100.0, 160.0, None)).unwrap();
+    let got = ink_pressures(&s);
+    assert_eq!(got, vec![vec![0.2, 1.0, 0.4], vec![1.0, 1.0]]);
+}
+
+fn ink_pressures(s: &Session) -> Vec<Vec<f32>> {
+    let st = s.doc().unwrap();
+    let Some(sh) = st.shapes().iter().rev().find(|sh| matches!(sh.kind, deckcraft_model::ShapeKind::Ink { .. })) else {
+        return vec![];
+    };
+    let deckcraft_model::ShapeKind::Ink { strokes } = &sh.kind else { return vec![] };
+    strokes.iter().map(|stroke| stroke.points.iter().map(|p| p.2).collect()).collect()
 }

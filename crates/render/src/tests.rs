@@ -52,6 +52,49 @@ fn render_shapes_draws_the_selection_on_a_transparent_canvas() {
 }
 
 #[test]
+fn ink_pressure_tapers_the_stroke_and_a_flat_half_stays_full_width() {
+    let opts = RenderOpts { scale: 1.0, ..Default::default() };
+    let tapered = render_slide(&ink_line(1.0, 0.12), 0, &opts);
+    let flat = render_slide(&ink_line(0.5, 0.5), 0, &opts);
+    let full = render_slide(&ink_line(1.0, 1.0), 0, &opts);
+    let heavy = dark_in(&tapered, 50, 140, 70, 130);
+    let light = dark_in(&tapered, 280, 360, 70, 130);
+    assert!(heavy > light * 3, "a firm point covers more of the slide than a light one ({heavy} vs {light})");
+    let (a, b) = (dark_in(&flat, 40, 370, 70, 130), dark_in(&full, 40, 370, 70, 130));
+    assert!(a > 100 && (a as i32 - b as i32).unsigned_abs() * 10 < a as u32, "the old constant 0.5 still draws at the pen width ({a} vs {b})");
+}
+
+fn ink_line(left: f32, right: f32) -> Presentation {
+    let points = (0..=40)
+        .map(|i| {
+            let pressure = if i < 20 { left } else { right };
+            (40.0 + f64::from(i) * 8.0, 100.0, pressure)
+        })
+        .collect();
+    let sh = Shape {
+        id: ShapeId(7),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+        kind: ShapeKind::Ink {
+            strokes: vec![deckcraft_model::InkStroke { points, color: deckcraft_color::Rgba::rgb(0, 0, 0), width: 24.0, highlighter: false }],
+        },
+        ..Default::default()
+    };
+    deck_with(vec![sh])
+}
+
+fn dark_in(img: &Image, x0: u32, x1: u32, y0: u32, y1: u32) -> usize {
+    let mut n = 0;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            if img.pixel(x, y)[0] < 200 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+#[test]
 fn text_draws_ink() {
     let mut sh = Shape { id: ShapeId(501), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), text_box: true, ..Default::default() };
     let mut t = TextBody::from_text("HELLO WORLD");

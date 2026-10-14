@@ -3,8 +3,8 @@
 //! Methods (JSON lines over the host's transport, see `docs/control-protocol.md`):
 //! - `engine.execute {command, params}` / `ui.menu.invoke {command, params}`: run any command (engine or UI)
 //! - `engine.commands`: engine + UI commands with enablement; `document.inspect`; `ui.inspect`
-//! - `ui.pointer {events:[{kind: down|drag|up|move|doubleclick, x, y}], mods}`: drive the active tool in
-//!   slide points (same path as the mouse)
+//! - `ui.pointer {events:[{kind: down|drag|up|move|doubleclick, x, y, pressure?}], mods}`: drive the active tool in
+//!   slide points (same path as the mouse; `pressure` is `0..=1` when a pen reported one)
 //! - `ui.key {key, shift?, alt?, cmd?}` / `ui.text {text}`: keyboard through the engine
 //! - `ui.tool.select {tool, preset?}`
 //! - `ui.click {x, y, button?, count?}` / `ui.move {x, y}` / `ui.drag {x, y, toX, toY, steps?}`: real egui pointer
@@ -133,7 +133,8 @@ pub fn handle(app: &mut SlideApp, ctx: &egui::Context, req: &ControlRequest) -> 
                     return err("pointer events need x and y");
                 };
                 let mods = e.get("mods").map(mods_from).unwrap_or(base);
-                match app.session.pointer(PointerEvent { kind, x, y, mods, tol: (4.0 / app.canvas_scale.max(0.05)) as f64 }) {
+                let pressure = e.get("pressure").and_then(Value::as_f64).map(|v| v as f32);
+                match app.session.pointer(PointerEvent { kind, x, y, mods, tol: (4.0 / app.canvas_scale.max(0.05)) as f64, pressure }) {
                     Ok(v) => last = v,
                     Err(e) => return err(e),
                 }

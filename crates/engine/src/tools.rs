@@ -43,6 +43,10 @@ pub struct PointerEvent {
     pub mods: Mods,
     /// Hit tolerance in points (≈ 4 screen px at the current zoom).
     pub tol: f64,
+    /// Pen pressure `0..=1` when the device reported one. `None` is a mouse: the stroke
+    /// is stored at full pen width.
+    #[serde(default)]
+    pub pressure: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -238,6 +242,8 @@ pub struct ToolState {
     pub guide_drag: Option<(usize, f64)>,
     /// The drawing guide under the pointer, for the cursor.
     pub guide_hover: Option<usize>,
+    /// Pressure from the pointer event being handled, if the device reported one.
+    pressure: Option<f32>,
 }
 
 impl ToolState {
@@ -393,6 +399,7 @@ impl Session {
     pub fn pointer(&mut self, ev: PointerEvent) -> Result<Value> {
         let tol = if ev.tol > 0.0 { ev.tol } else { 4.0 };
         let p = Point::new(ev.x, ev.y);
+        self.tool.pressure = ev.pressure.filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 1.0));
         if !(p.x.is_finite() && p.y.is_finite()) {
             return Ok(Value::Null);
         }
@@ -496,8 +503,9 @@ impl Session {
                 if mode == "eraser" {
                     return self.erase_at(p, tol);
                 }
-                self.tool.drag = Some(Drag::Ink { points: vec![(p.x, p.y, 0.5)] });
-                self.tool.ink_preview = vec![(p.x, p.y, 0.5)];
+                let sample = self.ink_sample(p);
+                self.tool.drag = Some(Drag::Ink { points: vec![sample] });
+                self.tool.ink_preview = vec![sample];
                 return Ok(Value::Null);
             }
             ToolKind::Select => {}
@@ -889,7 +897,7 @@ impl Session {
                 self.tool.drag = Some(Drag::Freeform { mode, points, pressed });
             }
             Drag::Ink { mut points } => {
-                points.push((p.x, p.y, 0.5));
+                points.push(self.ink_sample(p));
                 self.tool.ink_preview = points.clone();
                 self.tool.drag = Some(Drag::Ink { points });
             }
@@ -1395,6 +1403,15 @@ impl Session {
         nx.h = nx.h.max(0.0);
         self.tool.guides = guides;
         nx
+    }
+
+    /// One ink sample. No device reading is full pen width (`1`), not the old placeholder `0.5`.
+    fn ink_sample(&self, p: Point) -> (f64, f64, f32) {
+        let pressure = match self.tool.pressure {
+            Some(v) if v.is_finite() => v.clamp(0.0, 1.0),
+            _ => 1.0,
+        };
+        (p.x, p.y, pressure)
     }
 
     fn add_ink(&mut self, points: Vec<(f64, f64, f32)>) -> Result<Value> {

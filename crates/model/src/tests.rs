@@ -238,3 +238,16 @@ fn sibling_lists_and_parents_reach_into_groups() {
     assert_eq!(sibling_list_mut(&mut tree, ShapeId(5)).map(|v| ids(v)), Some(vec![5]));
     assert!(sibling_list_mut(&mut tree, ShapeId(9)).is_none());
 }
+
+#[test]
+fn ink_width_follows_pressure_and_keeps_the_old_placeholder() {
+    assert!(ink_pressure_is_legacy(&[(0.0, 0.0, 0.5), (1.0, 1.0, 0.5)]));
+    assert!(!ink_pressure_is_legacy(&[(0.0, 0.0, 0.5), (1.0, 1.0, 1.0)]));
+    assert!(!ink_pressure_is_legacy(&[]));
+    assert!((ink_sample_width(8.0, 0.5, true) - 8.0).abs() < 1e-9);
+    assert!((ink_sample_width(8.0, 1.0, false) - 8.0).abs() < 1e-9);
+    assert!((ink_sample_width(8.0, 0.25, false) - 2.0).abs() < 1e-9);
+    let floor = ink_sample_width(8.0, 0.0, false);
+    assert!((floor - 0.64).abs() < 1e-4, "a light touch stays visible, got {floor}");
+    assert!((ink_sample_width(8.0, f32::NAN, false) - 8.0).abs() < 1e-9);
+}

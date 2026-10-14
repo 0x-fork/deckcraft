@@ -7,7 +7,7 @@ use crate::Session;
 use crate::tools::{Mods, PointerEvent, PointerKind};
 
 fn ev(s: &mut Session, kind: PointerKind, x: f64, y: f64) {
-    s.pointer(PointerEvent { kind, x, y, mods: Mods::default(), tol: 4.0 }).unwrap();
+    s.pointer(PointerEvent { kind, x, y, mods: Mods::default(), tol: 4.0, pressure: None }).unwrap();
 }
 
 #[test]

@@ -919,24 +919,46 @@ impl Renderer {
             }
             ShapeKind::Ink { strokes } => {
                 for sk in strokes {
-                    let w = if sk.width.is_finite() { sk.width.abs() } else { 0.0 };
-                    for (px, py, _) in &sk.points {
+                    let legacy = deckcraft_model::ink_pressure_is_legacy(&sk.points);
+                    let pen = if sk.width.is_finite() { sk.width.abs() } else { 0.0 };
+                    for (px, py, pr) in &sk.points {
+                        let w = deckcraft_model::ink_sample_width(pen, *pr, legacy);
                         self.track(parent, Rect::new(*px, *py, *px, *py).inflate(w, w));
                     }
-                    let mut bp = BezPath::new();
-                    for (i, (px, py, _)) in sk.points.iter().enumerate() {
-                        if i == 0 {
-                            bp.move_to((*px, *py));
-                        } else {
-                            bp.line_to((*px, *py));
-                        }
+                    let pts: Vec<(f64, f64, f32)> = sk.points.iter().copied().filter(|p| p.0.is_finite() && p.1.is_finite()).collect();
+                    if pts.len() < 2 {
+                        continue;
                     }
                     let (base, rel) = self.line_space(parent, depth);
-                    bp.apply_affine(rel);
                     ctx.set_transform(base);
                     ctx.set_paint(color(sk.color, if sk.highlighter { 0.4 } else { 1.0 }));
-                    ctx.set_stroke(kurbo::Stroke::new(sk.width.max(0.1)).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round));
-                    ctx.stroke_path(&bp);
+                    // Uniform-width and highlighter strokes are one path: segments drawn one by one
+                    // overlap at the joins, which darkens see-through highlighter ink in beads.
+                    if legacy || sk.highlighter {
+                        let mut bp = BezPath::new();
+                        for (i, (px, py, _)) in pts.iter().enumerate() {
+                            if i == 0 {
+                                bp.move_to((*px, *py));
+                            } else {
+                                bp.line_to((*px, *py));
+                            }
+                        }
+                        bp.apply_affine(rel);
+                        ctx.set_stroke(kurbo::Stroke::new(pen.max(0.1)).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round));
+                        ctx.stroke_path(&bp);
+                        continue;
+                    }
+                    for pair in pts.windows(2) {
+                        let [p0, p1] = pair else { continue };
+                        let mut bp = BezPath::new();
+                        bp.move_to((p0.0, p0.1));
+                        bp.line_to((p1.0, p1.1));
+                        bp.apply_affine(rel);
+                        let a = deckcraft_model::ink_sample_width(pen, p0.2, legacy);
+                        let b = deckcraft_model::ink_sample_width(pen, p1.2, legacy);
+                        ctx.set_stroke(kurbo::Stroke::new(((a + b) * 0.5).max(0.1)).with_caps(kurbo::Cap::Round).with_join(kurbo::Join::Round));
+                        ctx.stroke_path(&bp);
+                    }
                 }
             }
             _ => self.geometry_shape(ctx, f, rctx, s, m, x.w, x.h, &st, depth),
