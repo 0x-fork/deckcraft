@@ -1749,22 +1749,22 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                     });
                 });
                 ui.horizontal(|ui| {
-                    if ui.button(if paused { "Resume" } else { "Pause" }).clicked() {
+                    if button(ui, if paused { "Resume" } else { "Pause" }).clicked() {
                         show.timer.toggle(now);
                     }
-                    if ui.button("Reset").clicked() {
+                    if button(ui, "Reset").clicked() {
                         show.timer.reset(now);
                     }
-                    if ui.button(if show.blank == Some(Color32::BLACK) { "Black on" } else { "Black" }).clicked() {
+                    if button(ui, if show.blank == Some(Color32::BLACK) { "Black on" } else { "Black" }).clicked() {
                         toggle_blank(show, Color32::BLACK);
                     }
-                    if ui.button(if show.blank == Some(Color32::WHITE) { "White on" } else { "White" }).clicked() {
+                    if button(ui, if show.blank == Some(Color32::WHITE) { "White on" } else { "White" }).clicked() {
                         toggle_blank(show, Color32::WHITE);
                     }
-                    if ui.button(if show.grid { "All slides on" } else { "All slides" }).clicked() {
+                    if button(ui, if show.grid { "All slides on" } else { "All slides" }).clicked() {
                         show.grid = !show.grid;
                     }
-                    if ui.button(show.zoom_label()).clicked() {
+                    if button(ui, show.zoom_label()).clicked() {
                         show.zoom_key();
                     }
                 });
