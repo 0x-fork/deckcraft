@@ -991,3 +991,56 @@ fn transition_defaults_read_like_powerpoint() {
         assert_eq!((t.kind.as_str(), t.option.as_str(), t.duration_ms), (*kind, *option, 2000), "{el}");
     }
 }
+
+/// Replace `from` with `to` in every slide part of an exported deck.
+fn patch_slides(bytes: Vec<u8>, from: &str, to: &str) -> Vec<u8> {
+    use std::io::{Read, Write};
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).expect("entry");
+        let name = f.name().to_string();
+        let mut data = vec![];
+        f.read_to_end(&mut data).expect("read");
+        if name.starts_with("ppt/slides/slide") && name.ends_with(".xml") {
+            data = String::from_utf8(data).expect("utf8").replace(from, to).into_bytes();
+        }
+        out.start_file(name, zip::write::SimpleFileOptions::default()).expect("start");
+        out.write_all(&data).expect("write");
+    }
+    out.finish().expect("finish").into_inner()
+}
+
+fn runs_of(p: &Presentation, needle: &str) -> Vec<(RunKind, String)> {
+    for s in &p.slides {
+        for sh in &s.shapes {
+            let Some(t) = &sh.text else { continue };
+            for para in &t.paragraphs {
+                if para.runs.iter().any(|r| r.text.contains(needle)) {
+                    return para.runs.iter().map(|r| (r.kind.clone(), r.text.clone())).collect();
+                }
+            }
+        }
+    }
+    panic!("no paragraph with {needle}");
+}
+
+#[test]
+fn literal_line_ends_in_run_text_read_as_breaks_and_survive_save() {
+    let mut p = defaults::new_presentation(None);
+    let mut s = shape(&mut p, "Code", 10.0, 10.0, 400.0, 100.0);
+    s.text = Some(TextBody::from_text("CRLFHERE"));
+    let first = p.slides[0].id;
+    p.slide_mut(first).expect("slide").shapes.push(s);
+    let bytes = patch_slides(deckcraft_pptx::export(&p).expect("export"), "CRLFHERE", "one\r\n   two\rthree");
+    let a = deckcraft_pptx::import(&bytes).expect("import");
+    let want = vec![
+        (RunKind::Text, "one".to_string()),
+        (RunKind::Break, String::new()),
+        (RunKind::Text, "   two".to_string()),
+        (RunKind::Break, String::new()),
+        (RunKind::Text, "three".to_string()),
+    ];
+    assert_eq!(runs_of(&a, "one"), want);
+    assert_eq!(runs_of(&round(&a), "one"), want, "save and reopen keep the runs");
+}
