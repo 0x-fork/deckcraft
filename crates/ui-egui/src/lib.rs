@@ -212,6 +212,8 @@ pub struct SlideApp {
     /// creating or closing a presentation leaves it.
     pub backstage: Option<backstage::Backstage>,
     pending_urls: Vec<String>,
+    /// Text for the system clipboard from a Copy or Cut command, handed over on the next frame.
+    pending_copy: Option<String>,
     shot_token: u64,
     queued_shots: Vec<(u64, f64, u32)>,
     pending_shots: Vec<(u64, Option<String>, Sender<ControlResponse>, f64)>,
@@ -258,6 +260,7 @@ impl SlideApp {
             integrated_titlebar: false,
             backstage: None,
             pending_urls: vec![],
+            pending_copy: None,
             shot_token: 0,
             queued_shots: vec![],
             pending_shots: vec![],
@@ -291,8 +294,16 @@ impl SlideApp {
         } else {
             self.session.execute(id, &params).map_err(|e| e.to_string())
         };
-        if let Err(e) = &r {
-            self.set_status(e.clone());
+        match &r {
+            // Copy and Cut from the ribbon, menus, the slide's context menu or the control channel
+            // put the text on the system clipboard, as Ctrl+C and Ctrl+X do (#431).
+            Ok(v) if matches!(id, "edit.copy" | "edit.cut") => {
+                if let Some(t) = v.get("text").and_then(Value::as_str) {
+                    self.pending_copy = Some(t.to_string());
+                }
+            }
+            Ok(_) => {}
+            Err(e) => self.set_status(e.clone()),
         }
         self.drain_requests();
         r
@@ -990,6 +1001,9 @@ impl SlideApp {
         for url in std::mem::take(&mut self.pending_urls) {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
+        if let Some(t) = self.pending_copy.take() {
+            ctx.copy_text(t);
+        }
         self.drain_requests();
         self.perf.frame_ms = now_ms() - t0;
     }
@@ -1414,5 +1428,43 @@ mod tests {
         let n = app.textures.canvas_renders;
         harness.run_steps(3);
         assert_eq!(harness.state().textures.canvas_renders, n, "an unchanged slide isn't rendered again");
+    }
+
+    /// #431: the ribbon's Copy and Cut, the slide's context menu, the menus and the control
+    /// channel all run the commands; they put the text on the system clipboard, as Ctrl+C and
+    /// Ctrl+X do.
+    #[test]
+    fn copy_and_cut_commands_reach_the_system_clipboard() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let copied = |h: &egui_kittest::Harness<'_, SlideApp>| {
+            h.output().platform_output.commands.iter().find_map(|c| match c {
+                egui::OutputCommand::CopyText(t) => Some(t.clone()),
+                _ => None,
+            })
+        };
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.state_mut().session.type_text("Aurora").unwrap();
+        harness.state_mut().session.key("Escape", Mods::default()).unwrap();
+        harness.run_steps(1);
+        assert_eq!(copied(&harness), None);
+
+        harness.state_mut().run("edit.copy", json!({})).unwrap();
+        harness.run_steps(1);
+        assert_eq!(copied(&harness).as_deref(), Some("Aurora"), "Copy puts the text on the clipboard");
+        harness.run_steps(1);
+        assert_eq!(copied(&harness), None, "only once");
+
+        harness.state_mut().run("edit.cut", json!({})).unwrap();
+        harness.run_steps(1);
+        assert_eq!(copied(&harness).as_deref(), Some("Aurora"), "Cut does too");
+        assert!(harness.state().session.active().unwrap().doc.slides[0].shapes.iter().all(|s| s.id.0 != title), "and removes the shape");
     }
 }
