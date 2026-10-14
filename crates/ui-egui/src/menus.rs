@@ -12,7 +12,7 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
     use egui::Key::*;
     let id = match (key, m.cmd, m.shift, m.alt) {
         (F5, _, false, _) => {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             return true;
         }
         (F5, _, true, _) | (Enter, true, false, false) => {
@@ -21,7 +21,7 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
             return true;
         }
         (Enter, true, true, _) => {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             return true;
         }
         (S, true, false, false) => {

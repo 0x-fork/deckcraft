@@ -7,6 +7,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (Show Media Controls hides the show's playback bar and GIF button; breadth stays 66%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (See All Slides and zoom during the show; black and white from the presenter window; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (presenter timer pause/reset, clock and notes size; previous: minor, See All Slides and zoom) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (custom show playback; previous: minor, presenter timer pause/reset) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -29,6 +30,7 @@ ready** (estimated), **10–16 h** to parity.
 | A shape with a triggered animation plays it when clicked; shapes an animation has hidden cannot be clicked; a shape without an action on top of one with an action blocks it; the pointer is a hand over what can be clicked | yes | yes | Click boxes are bounding boxes; "play sound" actions (`ppaction://media`) do nothing yet |
 | A slide the show returns to (link, arrow keys) looks as it was left; a triggered animation goes on where it stopped | yes | yes | A main-sequence step still playing when the show leaves is finished |
 | "Advance on click" off: a click never leaves the slide (animation steps still play, keys still move on) | yes | yes | |
+| Hyperlinks and action settings followed (slides, web, mail, End Show, Last Viewed, Custom Show) | yes | yes | Only `http(s)` and `mailto` open outside the show, by design (`safe_url`). A Custom Show action plays that show |
 | Media playback with controls, play across slides, full-screen video | yes | yes | WMA/WMV not decodable |
 | Media playback with controls, play across slides, full-screen video | yes | yes | Seeks and loops preserve new-generation video frames and end-of-stream; queue regression and repeated seeks across H.264/HEVC/VP9/AV1 in `crates/media`. WMA/WMV not decodable |
 | Media playback with controls, play across slides, full-screen video, Play/Pause/Stop in the click sequence | yes | yes | WMA/WMV not decodable; click sequence since #116 |
@@ -42,7 +44,7 @@ ready** (estimated), **10–16 h** to parity.
 | Pen and highlighter ink | yes | pen only (Cmd+P pen, Cmd+A arrow, E erases all ink) | No highlighter, per-stroke eraser, ink colours, or keep/discard annotations prompt |
 | Laser pointer | yes | yes in the show | Cmd/Ctrl+L and the on-screen button draw the show's laser colour and leave no ink. The presenter window does not move that dot |
 | Subtitles and live captions | yes (cloud speech) | no | AI dimension |
-| Custom shows | yes | yes | |
+| Custom shows | yes | yes: Show plays that list in order and does not change Set Up; Set Up Slide Show can keep one for Play from Start | Hidden slides in the list are skipped |
 | Set Up Show: loop until Esc, kiosk (browsed at a kiosk), show without animation/narration, pen colour, slides range | yes | yes, most options | |
 | Use rehearsed timings | yes | yes | |
 
@@ -100,6 +102,7 @@ Reading View in a window with navigation: present (checklist row done).
 | 2026-10-11 | minor | Media effects (Play, Pause, Stop) in the click sequence play with their step (#116) |
 | 2026-10-13 | minor | The show has a laser pointer (Cmd/Ctrl+L, the show's laser colour, no ink). Presenter view still does not drive it |
 | 2026-10-14 | trivial | Show Media Controls hides the show's playback bar and GIF button |
+| 2026-10-14 | minor | A custom show plays only its slides, from the Custom Shows dialog, from Set Up Slide Show, or from a click action. Checklist breadth stays 66% |
 | 2026-10-14 | minor | Presenter view pauses and resets its timer (T, R) and changes notes size (A-/A+, brackets). The clock shows local time. Second-display placement and swap stay with #433. Checklist breadth stays 66% |
 | 2026-10-14 | minor | See All Slides (G) and click-to-zoom (Z) during the show. Presenter view opens that grid and sets black, white and zoom. Checklist breadth stays 66% |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |

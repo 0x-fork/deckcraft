@@ -180,6 +180,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | Playback stays with its document and its clip (#415): switching decks or closing the last one stops the previous sound, replacing a clip plays the new one, and the duration and decode caches keep the bytes they are keyed by |
 | 2026-10-13 | Slide show: a laser pointer (Cmd/Ctrl+L, the show's laser colour, no ink). Checklist row Partial; weighted breadth stays 79%, P2 summary 39%, slide show area 68%. The presenter window does not move the dot |
 | 2026-10-14 | Slide Show: Show Media Controls writes the show setting and hides the playback bar and GIF button during the show |
+| 2026-10-14 | A custom show plays only its slides: Show in the Custom Shows dialog, Set Up Slide Show, or a click action. Breadth stays 79% |
 | 2026-10-14 | Presenter view pauses and resets its timer (T, R) and changes notes size (A-/A+, brackets). The clock shows local time. Second-display placement stays with #433. Breadth stays 79% |
 | 2026-10-14 | See All Slides and zoom during a show: a thumbnail grid (G, or All), click to jump, and click-to-zoom at 2× (Z). Presenter view has Black, White, All slides and Zoom. Breadth stays 79% |
 | 2026-10-13 | Slide transitions like PowerPoint: every transition and option measured frame by frame against PowerPoint's video export and retuned (curves, directions, soft edges, 3-D perspective, contents moving over backgrounds); PowerPoint's own XML elements and defaults read and written (diagonal Wipe, Zoom, Shape In/Out, Glitter Hexagons, Shred In/Out, Page Curl Single); `deckcraft-cli render-transition` renders frames headless |
@@ -230,6 +231,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | trivial | Progress log: media playback follows the open document and clip (#415) |
 | 2026-10-13 | trivial | Progress log: laser pointer. Headline P2 36% → 39% to match the checklist (the row moves P2 unweighted 38% → 39%; breadth stays 79%) |
 | 2026-10-14 | trivial | Progress log: Show Media Controls |
+| 2026-10-14 | trivial | Progress log: custom show playback. Breadth stays 79% |
 | 2026-10-14 | trivial | Progress log: presenter timer pause/reset, clock and notes size. Breadth stays 79% |
 | 2026-10-14 | trivial | Progress log: See All Slides and zoom during a show. Breadth stays 79% |
 | 2026-10-13 | trivial | Progress log: wild text cases |

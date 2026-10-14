@@ -63,7 +63,7 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
             run(app, "edit.redo", json!({}));
         }
         if icon_toggle(&mut child, Icon::PlayFromStart, "Play from Start (F5)", has_doc, false).clicked() {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
         }
         let title =
             app.session.active().map(|d| format!("{}{}", d.title(), if dirty { " — Edited" } else { "" })).unwrap_or_else(|| "DeckCraft".into());
@@ -1825,7 +1825,7 @@ pub fn paint_anim_tile(p: &egui::Painter, r: Rect, label: &str, class: AnimClass
 fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         if big_button(ui, Icon::PlayFromStart, "Play from\nStart", true).clicked() {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
         }
         if big_button(ui, Icon::PlayFromCurrent, "Play from\nCurrent Slide", true).clicked() {
             let i = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
@@ -1846,7 +1846,7 @@ fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
     });
     group(ui, |ui| {
         if big_button(ui, Icon::RehearseTimings, "Rehearse\nTimings", true).clicked() {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             if let Some(s) = app.show.as_mut() {
                 s.rehearse = true;
             }
@@ -1877,7 +1877,7 @@ fn record(app: &mut SlideApp, ui: &mut Ui) {
         let r = big_button(ui, Icon::Cameo, "Cameo", false);
         let _ = r.on_hover_text("Camera capture is not available yet");
         if big_button(ui, Icon::PlayFromStart, "From\nBeginning", true).clicked() {
-            app.start_show(0, false);
+            app.start_show(app.show_start_index(), false);
             if let Some(s) = app.show.as_mut() {
                 s.rehearse = true;
             }

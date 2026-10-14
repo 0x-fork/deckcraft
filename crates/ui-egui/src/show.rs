@@ -455,8 +455,16 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
                 P if m.command => show.set_pen(!show.pen),
                 L if m.command => show.set_laser(!show.laser),
                 A if m.command => show.arrow(),
-                Home => actions.push(show.state.goto(doc, 0)),
-                End => actions.push(show.state.goto(doc, doc.slides.len().saturating_sub(1))),
+                Home => {
+                    if let Some(i) = show.state.first_index(doc) {
+                        actions.push(show.state.goto(doc, i));
+                    }
+                }
+                End => {
+                    if let Some(i) = show.state.last_index(doc) {
+                        actions.push(show.state.goto(doc, i));
+                    }
+                }
                 B | Period => toggle_blank(show, Color32::BLACK),
                 W | Comma => toggle_blank(show, Color32::WHITE),
                 E => show.strokes.clear(),
@@ -1318,6 +1326,7 @@ impl Show {
             "presenterPaused": self.timer.paused(),
             "presenterSecs": self.timer.elapsed(now),
             "notesPx": self.notes_px,
+            "custom": self.state.custom_name(),
         });
         if self.grid {
             let slides = grid_indices(n_slides);
@@ -1623,7 +1632,7 @@ fn render_thumb(ctx: &egui::Context, show: &mut Show, doc: &Presentation, i: usi
 
 fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, keep: &mut bool) {
     let cur = show.state.slide;
-    let next = deckcraft_anim::show_order(doc).into_iter().find(|i| *i > cur);
+    let next = show.state.peek_next(doc);
     let cur_tex = show.tex.as_ref().map(|(_, t)| t.clone());
     if let Some(n) = next
         && show.next_tex.as_ref().is_none_or(|(k, _)| *k != n)
