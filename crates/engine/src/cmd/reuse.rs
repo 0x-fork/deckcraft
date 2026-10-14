@@ -20,7 +20,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Reuse Slides…",
         ["Home", "Slides", "New Slide"],
         None,
-        "{path? | data: base64, name?; slides?: [index] (0-based, default all); keepFormatting?: bool (default false: use the destination theme); at?: index (default after the current slide)}",
+        "{path? | data: base64, name?, slides?: [index] (0-based, default all), keepFormatting?: bool (default false: use the destination theme), at?: index (default after the current slide)}",
         has_doc,
         reuse
     )]
