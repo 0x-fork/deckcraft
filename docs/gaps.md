@@ -244,9 +244,8 @@ Detail in [file-format-parity.md](file-format-parity.md).
   moving average, with forecast and the equation and R² label. A moving average is drawn with
   neither label. A combo chart's secondary value axis is read (`y2_*`,
   `Series.secondary_axis`) and is not written back when the chart is rebuilt.
-  chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, box &
-  whisker) aren't read. An unchanged chart's embedded workbook now survives save (#335); editing
-  the chart still drops it rather than writing a stale spreadsheet.
+  An unchanged chart's embedded workbook now survives save (#335); editing the chart still
+  drops it rather than writing a stale spreadsheet.
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
 

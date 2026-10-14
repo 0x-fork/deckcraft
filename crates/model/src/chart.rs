@@ -404,6 +404,10 @@ pub struct ChartRel {
     pub id: String,
     pub rel_type: String,
     pub target: String,
+    /// Absolute name of the part an internal relationship reaches (matches a `ChartPart::name`
+    /// up to case); empty for external ones. The writer renames kept parts and uses this to
+    /// point the relationship at the new name.
+    pub part: String,
     pub external: bool,
 }
 

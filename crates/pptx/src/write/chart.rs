@@ -512,10 +512,15 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
 }
 
 /// The `chartEx` part of an Office 2016 chart (waterfall, funnel…): the kept part when the chart
-/// is unchanged since it was read (without its workbook link), else one written from the model.
-/// `None` for other chart types.
+/// is unchanged since it was read, else one written from the model. `None` for other chart types.
+#[cfg(test)]
 pub fn chartex_xml(c: &Chart) -> Option<Vec<u8>> {
-    kept_chartex(c).or_else(|| c.kind.is_chartex().then(|| build_chartex(c)))
+    chartex_part(c).map(|(x, _)| x)
+}
+
+/// [`chartex_xml`], and whether it is the original part (so its kept relationships still apply).
+pub fn chartex_part(c: &Chart) -> Option<(Vec<u8>, bool)> {
+    kept_chartex(c).map(|x| (x, true)).or_else(|| c.kind.is_chartex().then(|| (build_chartex(c), false)))
 }
 
 fn kept_chartex(c: &Chart) -> Option<Vec<u8>> {
@@ -525,11 +530,14 @@ fn kept_chartex(c: &Chart) -> Option<Vec<u8>> {
     crate::read::resolve_mc(&mut root, 0);
     let mut back = crate::read::chartex_from(&root)?;
     back.raw = c.raw.clone();
+    // The sidecar is not modelled chart state.
+    back.kept = c.kept.clone();
     if &back != c {
         return None;
     }
     let mut keep = doc.root;
-    keep.remove_all(&["externalData"]);
+    // The workbook link stays only when its part is written back.
+    drop_unkept_refs(&mut keep, c);
     let mut w = W::new();
     w.raw(&keep.to_xml());
     Some(w.finish())
@@ -553,9 +561,7 @@ pub fn chart_xml(c: &Chart) -> (Vec<u8>, bool) {
             if back == me {
                 let mut keep = doc.root;
                 // Without the parts those elements point at, PowerPoint repairs the file.
-                if c.kept.rels.is_empty() {
-                    keep.remove_all(&["externalData", "userShapes"]);
-                }
+                drop_unkept_refs(&mut keep, c);
                 let mut w = W::new();
                 w.raw(&keep.to_xml());
                 return (w.finish(), true);
@@ -660,31 +666,106 @@ pub fn chart_xml(c: &Chart) -> (Vec<u8>, bool) {
     (w.finish(), false)
 }
 
-/// Write the chart's own relationships and the parts they reach.
-pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart) {
-    if c.kept.rels.is_empty() && c.kept.parts.is_empty() {
+/// The relationship ids of an unchanged chart that [`write_kept`] writes back: external ones, and
+/// internal ones whose part was kept.
+fn kept_rel_ids(c: &Chart) -> std::collections::HashSet<&str> {
+    let parts: std::collections::HashSet<String> = c.kept.parts.iter().filter(|p| kept_payload(&p.name)).map(|p| crate::opc::norm(&p.name)).collect();
+    c.kept.rels.iter().filter(|r| r.external || parts.contains(&crate::opc::norm(&r.part))).map(|r| r.id.as_str()).collect()
+}
+
+/// A kept part that is written as a part of its own (rels parts are rewritten instead).
+fn kept_payload(name: &str) -> bool {
+    !name.to_ascii_lowercase().ends_with(".rels") && crate::opc::sidecar_part(name)
+}
+
+/// Drop `c:externalData` / `c:userShapes` (and the `cx:` ones) that point at a relationship that
+/// is not written back: without the part PowerPoint repairs the file.
+fn drop_unkept_refs(root: &mut crate::xml::El, c: &Chart) {
+    let ids = kept_rel_ids(c);
+    fn rec(e: &mut crate::xml::El, ids: &std::collections::HashSet<&str>, depth: usize) {
+        if depth > crate::xml::MAX_DEPTH {
+            return;
+        }
+        e.children.retain(|n| match n {
+            crate::xml::Node::El(x) if x.is("externalData") || x.is("userShapes") => x.attr("r:id").is_some_and(|id| ids.contains(id)),
+            _ => true,
+        });
+        for ch in e.elements_mut() {
+            rec(ch, ids, depth + 1);
+        }
+    }
+    rec(root, &ids, 0);
+}
+
+/// A fresh name for a kept part: `ppt/<folder>/keptN.<ext>`. The writer generates no `kept…`
+/// names and `n` is unique within the package, so a kept part never lands on (or duplicates) a
+/// part the writer makes, whatever the source file called it.
+fn kept_name(original: &str, n: u32) -> String {
+    let norm = crate::opc::norm(original);
+    let area = norm.split('/').nth(1).unwrap_or("embeddings");
+    let area = if matches!(area, "embeddings" | "charts" | "drawings" | "media") { area } else { "embeddings" };
+    let file = crate::opc::file_of(&norm);
+    let ext = file
+        .rsplit_once('.')
+        .map(|(_, e)| e)
+        .filter(|e| !e.is_empty() && e.len() <= 8 && e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or("bin");
+    format!("ppt/{area}/kept{n}.{ext}")
+}
+
+/// Write an unchanged chart's own relationships and the parts they reach. Each kept part is
+/// written under a fresh name ([`kept_name`]) and the relationships between kept parts are
+/// rewritten to those names; a relationship to anything that was not kept is dropped.
+/// `n_kept` numbers kept parts across the package.
+pub fn write_kept(pkg: &mut crate::opc::PackageOut, chart_name: &str, c: &Chart, n_kept: &mut u32) {
+    use std::collections::HashMap;
+
+    use crate::opc::{RelsOut, norm, relative, rels_path};
+
+    if c.kept.rels.is_empty() {
         return;
     }
-    let mut rels = crate::opc::RelsOut::default();
-    for r in &c.kept.rels {
-        rels.items.push((r.id.clone(), r.rel_type.clone(), r.target.clone(), r.external));
-    }
-    pkg.rels(chart_name, &rels);
-    for p in &c.kept.parts {
-        match pkg.part_data(&p.name) {
-            Some(existing) if existing != p.bytes.as_slice() => {
-                log::warn!("pptx: chart part {} already written with different bytes; keeping the first", p.name);
-                continue;
-            }
-            Some(_) => continue,
-            None => {}
-        }
-        if !crate::opc::sidecar_part(&p.name) {
-            log::warn!("pptx: not writing chart part {}", p.name);
+    // Original part name (normalized) → the name written.
+    let mut names: HashMap<String, String> = HashMap::new();
+    for p in c.kept.parts.iter().filter(|p| kept_payload(&p.name)) {
+        let key = norm(&p.name);
+        if names.contains_key(&key) {
             continue;
         }
+        *n_kept += 1;
+        let new = kept_name(&p.name, *n_kept);
         let ct = if !p.content_type.is_empty() { p.content_type.clone() } else { crate::mime_for(&p.name).to_string() };
-        pkg.binary(&p.name, &ct, p.bytes.clone());
+        // An override per part: a kept part never sets the package-wide default for its extension.
+        pkg.xml_part(&new, &ct, p.bytes.clone());
+        names.insert(key, new);
+    }
+    let mut rels = RelsOut::default();
+    for r in &c.kept.rels {
+        if r.external {
+            rels.items.push((r.id.clone(), r.rel_type.clone(), r.target.clone(), true));
+        } else if let Some(new) = names.get(&norm(&r.part)) {
+            rels.items.push((r.id.clone(), r.rel_type.clone(), relative(chart_name, new), false));
+        } else {
+            log::warn!("pptx: chart relationship {} has no kept part; dropped", r.id);
+        }
+    }
+    pkg.rels(chart_name, &rels);
+    // The kept parts' own relationships, pointed at the new names.
+    for p in c.kept.parts.iter().filter(|p| kept_payload(&p.name)) {
+        let Some(new_source) = names.get(&norm(&p.name)) else { continue };
+        let rp = norm(&rels_path(&p.name));
+        let Some(rels_part) = c.kept.parts.iter().find(|q| norm(&q.name) == rp) else { continue };
+        let mut out = RelsOut::default();
+        for r in crate::opc::rels_from_bytes(&rels_part.bytes, &p.name).items {
+            if r.external {
+                out.items.push((r.id, r.ty, r.target_raw, true));
+            } else if let Some(new) = names.get(&norm(&r.target)) {
+                out.items.push((r.id, r.ty, relative(new_source, new), false));
+            } else {
+                log::warn!("pptx: relationship {} of kept chart part {} has no kept target; dropped", r.id, p.name);
+            }
+        }
+        pkg.rels(new_source, &out);
     }
 }
 

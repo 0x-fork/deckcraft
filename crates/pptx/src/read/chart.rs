@@ -421,11 +421,11 @@ pub(crate) fn capture_kept(pkg: &crate::opc::Package, chart_part: &str) -> deckc
             continue;
         }
         if r.external {
-            kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, external: true });
+            kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, part: String::new(), external: true });
             continue;
         }
         if copy_part(pkg, &r.target, &mut kept.parts, &mut seen, 0) {
-            kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, external: false });
+            kept.rels.push(ChartRel { id: r.id, rel_type: r.ty, target: r.target_raw, part: r.target, external: false });
         }
     }
     kept

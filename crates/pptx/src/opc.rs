@@ -127,23 +127,7 @@ impl Package {
     pub fn rels(&self, part: &str) -> Rels {
         let rp = rels_path(part);
         let Some(doc) = self.xml(&rp) else { return Rels::default() };
-        let base = dir_of(part);
-        let mut out = Rels::default();
-        for r in doc.root.children_named("Relationship") {
-            let (Some(id), Some(ty), Some(target)) = (r.attr("Id"), r.attr("Type"), r.attr("Target")) else { continue };
-            let external = r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("external"));
-            let target_raw = target.to_string();
-            let target = if external { target_raw.clone() } else { resolve(&base, target) };
-            out.items.push(Rel {
-                id: id.to_string(),
-                kind: ty.rsplit('/').next().unwrap_or(ty).to_string(),
-                ty: ty.to_string(),
-                target_raw,
-                target,
-                external,
-            });
-        }
-        out
+        rels_of(&doc, part)
     }
     /// Content types: (extension defaults, part overrides).
     pub fn content_type(&self, part: &str) -> Option<String> {
@@ -162,6 +146,38 @@ impl Package {
     }
     pub fn original_name(&self, name: &str) -> Option<&str> {
         self.parts.get(&norm(name)).map(|(n, _)| n.as_str())
+    }
+}
+
+/// The relationships in a parsed rels part, with internal targets resolved against `part`'s folder.
+fn rels_of(doc: &xml::Doc, part: &str) -> Rels {
+    let base = dir_of(part);
+    let mut out = Rels::default();
+    for r in doc.root.children_named("Relationship") {
+        let (Some(id), Some(ty), Some(target)) = (r.attr("Id"), r.attr("Type"), r.attr("Target")) else { continue };
+        let external = r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("external"));
+        let target_raw = target.to_string();
+        let target = if external { target_raw.clone() } else { resolve(&base, target) };
+        out.items.push(Rel {
+            id: id.to_string(),
+            kind: ty.rsplit('/').next().unwrap_or(ty).to_string(),
+            ty: ty.to_string(),
+            target_raw,
+            target,
+            external,
+        });
+    }
+    out
+}
+
+/// The relationships of `part` from the bytes of its rels part (kept parts carried by a chart).
+pub fn rels_from_bytes(bytes: &[u8], part: &str) -> Rels {
+    match xml::parse(bytes) {
+        Ok(doc) => rels_of(&doc, part),
+        Err(e) => {
+            log::warn!("pptx: relationships of {part}: {e}");
+            Rels::default()
+        }
     }
 }
 
@@ -377,10 +393,6 @@ impl PackageOut {
     pub fn raw(&mut self, name: &str, data: Vec<u8>) {
         self.files.push((name.to_string(), data, true));
     }
-    pub fn part_data(&self, name: &str) -> Option<&[u8]> {
-        let n = norm(name);
-        self.files.iter().find(|(f, _, _)| norm(f) == n).map(|(_, d, _)| d.as_slice())
-    }
     /// Add a binary part; its extension gets a Default content type.
     pub fn binary(&mut self, name: &str, content_type: &str, data: Vec<u8>) {
         let ext = name.rsplit('.').next().unwrap_or("bin").to_ascii_lowercase();
@@ -407,7 +419,14 @@ impl PackageOut {
         let err = |e: &dyn std::fmt::Display| PptxError::Write(e.to_string());
         zw.start_file("[Content_Types].xml", deflate).map_err(|e| err(&e))?;
         zw.write_all(&ct.finish()).map_err(|e| err(&e))?;
+        let mut written = std::collections::HashSet::new();
         for (name, data, compress) in &self.files {
+            // Zip entry names must be unique: a second part under a name already written is
+            // dropped rather than producing a package readers reject or resolve differently.
+            if !written.insert(norm(name)) {
+                log::warn!("pptx: part {name} written twice; keeping the first");
+                continue;
+            }
             let large = data.len() as u64 >= u32::MAX as u64 / 2;
             let opts = if *compress { deflate } else { stored }.large_file(large);
             zw.start_file(name.as_str(), opts).map_err(|e| err(&e))?;
