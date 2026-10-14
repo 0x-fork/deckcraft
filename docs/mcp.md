@@ -30,6 +30,8 @@ deck.
 | `screenshot` | The whole window, UI included (connected mode) |
 | `call_app` | Any [control protocol](control-protocol.md) method (connected mode) |
 
+A tool refuses an argument that is not in its schema (`insert_chart: unknown argument "data" (expected: categories, series, title, type)`). Keys inside `run_command`'s `params` are that command's parameters.
+
 Useful commands for building decks: `slide.new {layout, title, body}`, `shape.insert {preset,
 rect, text}`, `shape.connect {from, to, preset}`, `shape.freeform {points, closed, smooth}`,
 `shape.merge {op, ids}`, `format.*`, `design.theme`, `transition.set`, `animation.set`,
