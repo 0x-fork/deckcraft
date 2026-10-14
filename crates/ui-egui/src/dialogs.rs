@@ -2605,6 +2605,22 @@ mod alt_text_tests {
     }
 }
 
+/// Images for the browser download: the current slide, or every slide (named `<name>1.png`, `<name>2.png`... like the native export) when `all`.
+fn web_image_files(doc: &deckcraft_model::Presentation, current: usize, all: bool, name: &str, ext: &str) -> Vec<(String, Vec<u8>)> {
+    let slides: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![current] };
+    let single = slides.len() == 1;
+    slides
+        .into_iter()
+        .enumerate()
+        .map(|(k, i)| {
+            let img = deckcraft_render::render_slide(doc, i, &deckcraft_render::RenderOpts { scale: 2.0, ..Default::default() });
+            let bytes = if ext == "png" { img.to_png() } else { img.to_jpeg(92) };
+            let file = if single { format!("{name}.{ext}") } else { format!("{name}{}.{ext}", k + 1) };
+            (file, bytes)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use deckcraft_model::text::{Action, Hyperlink, Run, TextBody};
