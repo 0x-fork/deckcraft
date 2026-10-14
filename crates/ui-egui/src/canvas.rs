@@ -35,6 +35,33 @@ fn mods(ui: &Ui) -> Mods {
     ui.input(|i| Mods { shift: i.modifiers.shift, alt: i.modifiers.alt, cmd: i.modifiers.command || i.modifiers.ctrl })
 }
 
+/// A two-finger twist on the trackpad. macOS delivers it as [`egui::Event::Rotate`];
+/// other platforms leave the delta at zero.
+///
+/// The selected shapes turn with the fingers. The whole twist is one undo step. Pinch-zoom
+/// and two-finger scrolling are left as they are.
+pub(crate) fn trackpad_twist(app: &mut SlideApp, ctx: &egui::Context) {
+    let delta = ctx.input(|i| i.rotation_delta());
+    let delta = if delta.is_finite() { delta.clamp(-std::f32::consts::PI, std::f32::consts::PI) } else { 0.0 };
+    let turning = delta.abs() > 1e-4;
+    let blocked = app.show.is_some()
+        || app.backstage_open()
+        || app.dialog.as_ref().is_some_and(|d| d.modal())
+        || app.palette.is_some()
+        || app.session.tool.dragging();
+    let over = app.canvas_rect.is_some_and(|r| ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p)));
+    let rotatable = app.session.active().is_some_and(|d| {
+        d.selection.text.is_none() && d.selection.shapes.iter().any(|id| d.shape(*id).is_some_and(|sh| !sh.locked && sh.xfrm.is_some()))
+    });
+    if !blocked && turning && rotatable && (app.twisting || over) {
+        let _ = app.run("shape.rotate", json!({"by": f64::from(delta.to_degrees()), "gesture": "move"}));
+        app.twisting = true;
+    } else if app.twisting {
+        let _ = app.run("shape.rotate", json!({"gesture": "end", "ids": []}));
+        app.twisting = false;
+    }
+}
+
 /// The slide's rect on screen for the current zoom.
 pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     let Some(d) = app.session.active() else { return (avail, 1.0) };
