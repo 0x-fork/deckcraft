@@ -1907,6 +1907,105 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
 
 // ---------- contextual tabs ----------
 
+/// Shape Format ▸ Text Effects ▸ Transform: No Transform, Follow Path, then the other presets.
+fn transform_gallery(app: &mut SlideApp, ui: &mut Ui) {
+    let current = selected_warp(app);
+    ui.label(egui::RichText::new("Transform").font(theme::bold(12.0)));
+    ui.label("Follow Path");
+    let mut picked = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+        for p in deckcraft_geom::warp::CATALOG.iter().filter(|p| deckcraft_geom::warp::is_follow(p.id)) {
+            if warp_tile(ui, p.id, p.label, current.as_deref() == Some(p.id)) {
+                run(app, "format.textWarp", json!({"preset": p.id}));
+                picked = true;
+            }
+        }
+    });
+    ui.label("Warp");
+    egui::ScrollArea::vertical().max_height(220.0).id_salt("text_warp_gallery").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
+            if warp_tile(ui, "", "No Transform", current.is_none()) {
+                run(app, "format.textWarp", json!({"preset": "none"}));
+                picked = true;
+            }
+            for p in deckcraft_geom::warp::CATALOG.iter().filter(|p| !deckcraft_geom::warp::is_follow(p.id)) {
+                if warp_tile(ui, p.id, p.label, current.as_deref() == Some(p.id)) {
+                    run(app, "format.textWarp", json!({"preset": p.id}));
+                    picked = true;
+                }
+            }
+        });
+    });
+    if picked {
+        ui.close();
+    }
+}
+
+fn selected_warp(app: &SlideApp) -> Option<String> {
+    let doc = app.session.active()?;
+    let id = doc.selection.text.as_ref().map(|t| t.shape).or_else(|| doc.selection.shapes.first().copied())?;
+    doc.shape(id)?.text.as_ref()?.body.warp.clone()
+}
+
+fn warp_tile(ui: &mut Ui, preset: &str, label: &str, selected: bool) -> bool {
+    let t = Tokens::get(ui.ctx());
+    let (rect, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
+    if selected {
+        ui.painter().rect_filled(rect, CornerRadius::same(3), t.selected);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, CornerRadius::same(3), t.hover);
+    }
+    paint_warp_icon(ui.painter(), rect.shrink(4.0), (!preset.is_empty()).then_some(preset), t.text);
+    resp.on_hover_text(label).clicked()
+}
+
+/// The preset's guides, or two straight lines for No Transform.
+fn paint_warp_icon(p: &egui::Painter, r: Rect, name: Option<&str>, color: Color32) {
+    let Some(name) = name else {
+        let y0 = r.min.y + r.height() * 0.32;
+        let y1 = r.min.y + r.height() * 0.68;
+        p.line_segment([pos2(r.min.x, y0), pos2(r.max.x, y0)], Stroke::new(1.0, color));
+        p.line_segment([pos2(r.min.x, y1), pos2(r.max.x, y1)], Stroke::new(1.0, color));
+        return;
+    };
+    let rect = deckcraft_geom::Rect::new((r.min.x + 1.0) as f64, (r.min.y + 1.0) as f64, (r.max.x - 1.0) as f64, (r.max.y - 1.0) as f64);
+    let Some(w) = deckcraft_geom::warp::warp(name, &[], rect) else { return };
+    for band in &w.bands {
+        match band {
+            deckcraft_geom::warp::Band::Fill { top, bottom } => {
+                stroke_guide(p, top, color);
+                stroke_guide(p, bottom, color);
+            }
+            deckcraft_geom::warp::Band::Follow { path, .. } => stroke_guide(p, path, color),
+        }
+    }
+}
+
+fn stroke_guide(p: &egui::Painter, g: &deckcraft_geom::warp::Guide, color: Color32) {
+    let len = g.length();
+    if !(len.is_finite() && len > 1.0) {
+        return;
+    }
+    let n = 20i32;
+    let mut pts = Vec::with_capacity((n + 1) as usize);
+    for i in 0..=n {
+        let (q, _) = g.at(len * f64::from(i) / f64::from(n));
+        if q.x.is_finite() && q.y.is_finite() {
+            pts.push(pos2(q.x as f32, q.y as f32));
+        }
+    }
+    if pts.len() >= 2 {
+        p.add(egui::Shape::Path(egui::epaint::PathShape {
+            points: pts,
+            closed: false,
+            fill: Color32::TRANSPARENT,
+            stroke: Stroke::new(1.0, color).into(),
+        }));
+    }
+}
+
 fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
     let sc = scheme(app);
     let sel = enabled(app, "shape.fill");
@@ -1991,10 +2090,13 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
                 });
             }
             let r = small_button(ui, Icon::TextEffects, "Text Effects", sel, false);
-            egui::Popup::menu(&r).show(|ui| {
+            egui::Popup::menu(&r).width(312.0).show(|ui| {
                 if ui.button("Shadow").clicked() {
                     run(app, "format.textShadow", json!({}));
+                    ui.close();
                 }
+                ui.separator();
+                transform_gallery(app, ui);
             });
         });
     });

@@ -1,48 +1,5 @@
 use super::*;
 
-const ALL: &[&str] = &[
-    "textPlain",
-    "textStop",
-    "textTriangle",
-    "textTriangleInverted",
-    "textChevron",
-    "textChevronInverted",
-    "textRingInside",
-    "textRingOutside",
-    "textArchUp",
-    "textArchDown",
-    "textCircle",
-    "textButton",
-    "textArchUpPour",
-    "textArchDownPour",
-    "textCirclePour",
-    "textButtonPour",
-    "textCurveUp",
-    "textCurveDown",
-    "textCanUp",
-    "textCanDown",
-    "textWave1",
-    "textWave2",
-    "textDoubleWave1",
-    "textWave4",
-    "textInflate",
-    "textDeflate",
-    "textInflateBottom",
-    "textDeflateBottom",
-    "textInflateTop",
-    "textDeflateTop",
-    "textDeflateInflate",
-    "textDeflateInflateDeflate",
-    "textFadeRight",
-    "textFadeLeft",
-    "textFadeUp",
-    "textFadeDown",
-    "textSlantUp",
-    "textSlantDown",
-    "textCascadeUp",
-    "textCascadeDown",
-];
-
 const W: f64 = 420.0;
 const H: f64 = 200.0;
 
@@ -78,8 +35,21 @@ fn corners(name: &str, adj: &[f64], tl: (f64, f64), tr: (f64, f64), bl: (f64, f6
 }
 
 #[test]
+fn catalog_is_the_forty_drawn_presets() {
+    assert_eq!(CATALOG.len(), 40);
+    let mut seen = std::collections::BTreeSet::new();
+    for p in CATALOG {
+        assert!(seen.insert(p.id), "duplicate {}", p.id);
+        assert!(!p.label.is_empty(), "{}", p.id);
+        assert!(is_supported(p.id), "{}", p.id);
+        assert_eq!(is_follow(p.id), matches!(p.id, "textArchUp" | "textArchDown" | "textCircle" | "textButton"), "{}", p.id);
+    }
+}
+
+#[test]
 fn every_preset_builds_finite_guides() {
-    for name in ALL {
+    for p in CATALOG {
+        let name = p.id;
         assert!(is_supported(name), "{name}");
         let w = warp(name, &[], rect()).unwrap_or_else(|| panic!("{name}"));
         assert!(!w.bands.is_empty(), "{name}");
@@ -281,7 +251,7 @@ fn hostile_adjusts_and_boxes_stay_finite() {
         WarpLine { ink: None, extent: (5.0, 5.0), ref_y: 3.0 },
         WarpLine { ink: Some(Rect::new(-1e6, -5.0, 1e6, 5.0)), extent: (-1e6, 1e6), ref_y: 4.0 },
     ];
-    for name in ALL {
+    for name in CATALOG.iter().map(|p| p.id) {
         for adj in adjs {
             for r in rects {
                 let Some(w) = warp(name, adj, r) else { panic!("{name} {adj:?} {r:?}") };

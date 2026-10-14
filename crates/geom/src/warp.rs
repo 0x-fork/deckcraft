@@ -234,6 +234,58 @@ pub fn is_supported(name: &str) -> bool {
     !adjust_defaults(name).is_empty()
 }
 
+/// One DrawingML text-warp preset, in gallery order.
+pub struct Preset {
+    /// `prstTxWarp` value, e.g. `textArchUp`.
+    pub id: &'static str,
+    /// Name shown on the Transform gallery tile.
+    pub label: &'static str,
+}
+
+/// The 40 presets DeckCraft draws, Follow Path first, then Warp.
+pub const CATALOG: &[Preset] = &[
+    Preset { id: "textArchUp", label: "Arch Up" },
+    Preset { id: "textArchDown", label: "Arch Down" },
+    Preset { id: "textCircle", label: "Circle" },
+    Preset { id: "textButton", label: "Button" },
+    Preset { id: "textPlain", label: "Plain" },
+    Preset { id: "textStop", label: "Stop" },
+    Preset { id: "textTriangle", label: "Triangle" },
+    Preset { id: "textTriangleInverted", label: "Inverted Triangle" },
+    Preset { id: "textChevron", label: "Chevron" },
+    Preset { id: "textChevronInverted", label: "Inverted Chevron" },
+    Preset { id: "textRingInside", label: "Ring Inside" },
+    Preset { id: "textRingOutside", label: "Ring Outside" },
+    Preset { id: "textArchUpPour", label: "Arch Up Pour" },
+    Preset { id: "textArchDownPour", label: "Arch Down Pour" },
+    Preset { id: "textCirclePour", label: "Circle Pour" },
+    Preset { id: "textButtonPour", label: "Button Pour" },
+    Preset { id: "textCurveUp", label: "Curve Up" },
+    Preset { id: "textCurveDown", label: "Curve Down" },
+    Preset { id: "textCanUp", label: "Can Up" },
+    Preset { id: "textCanDown", label: "Can Down" },
+    Preset { id: "textWave1", label: "Wave 1" },
+    Preset { id: "textWave2", label: "Wave 2" },
+    Preset { id: "textDoubleWave1", label: "Double Wave 1" },
+    Preset { id: "textWave4", label: "Wave 4" },
+    Preset { id: "textInflate", label: "Inflate" },
+    Preset { id: "textDeflate", label: "Deflate" },
+    Preset { id: "textInflateBottom", label: "Inflate Bottom" },
+    Preset { id: "textDeflateBottom", label: "Deflate Bottom" },
+    Preset { id: "textInflateTop", label: "Inflate Top" },
+    Preset { id: "textDeflateTop", label: "Deflate Top" },
+    Preset { id: "textDeflateInflate", label: "Deflate Inflate" },
+    Preset { id: "textDeflateInflateDeflate", label: "Deflate Inflate Deflate" },
+    Preset { id: "textFadeRight", label: "Fade Right" },
+    Preset { id: "textFadeLeft", label: "Fade Left" },
+    Preset { id: "textFadeUp", label: "Fade Up" },
+    Preset { id: "textFadeDown", label: "Fade Down" },
+    Preset { id: "textSlantUp", label: "Slant Up" },
+    Preset { id: "textSlantDown", label: "Slant Down" },
+    Preset { id: "textCascadeUp", label: "Cascade Up" },
+    Preset { id: "textCascadeDown", label: "Cascade Down" },
+];
+
 /// Segments of a guide in unit coordinates (x, y in 0..1 over the text rectangle).
 #[derive(Clone, Copy, Debug)]
 enum Seg {

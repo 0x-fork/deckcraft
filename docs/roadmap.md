@@ -1,6 +1,7 @@
 # DeckCraft roadmap: milestones and what's next
 
 > **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-13 · **Change:** trivial (embedded fonts leave the beta list except MicroType Express subsets; previous: minor, core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (M9 text warps narrowed to adjust handles; the Transform gallery applies a preset) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -79,7 +80,7 @@ From the local execution plan (`plan/execution-plan.md`, gitignored). Status as 
 | M6 | Transitions and animations | mostly | Animation Pane timeline, remaining effects, transition sounds |
 | M7 | Slide show | mostly | second-display placement, laser, record |
 | M8 | Tables and charts | partly | chart data grid, elements, chartex types, draw table |
-| M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), text warps |
+| M9 | SmartArt, equations, WordArt | partly | SmartArt text pane and layouts, equations (PR #55), warp adjust handles |
 | M10 | Views | done | grid options, New Window |
 | M11 | Output | partly | vector PDF, SVG, GIF, MP4, print |
 | M12 | Review | partly | dictionaries, AutoCorrect, find/replace dialog, compare |
@@ -110,5 +111,6 @@ plan above.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-13 | trivial | Beta item 3: embedded fonts are in, except MicroType Express subsets |
+| 2026-10-13 | minor | M9: the WordArt Transform gallery applies a text warp; adjust handles stay open |
 | 2026-10-10 | minor | Added the alpha gate (six core workflows): all pass, two with partial depth; stage stays alpha |
 | 2026-10-10 | major | Created: current focus, ranked beta plan with hours, milestones M0–M14 with status, the old alpha checklist as history |

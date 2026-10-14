@@ -26,6 +26,34 @@ fn new_presentation_and_slides() {
 }
 
 #[test]
+fn text_transform_sets_and_clears_a_warp() {
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 420.0, 160.0], "text": "ARCH"})).unwrap();
+    let id = r["id"].as_u64().unwrap();
+    let body = |s: &mut Session| s.execute("shape.inspect", &json!({"id": id})).unwrap()["shape"]["text"]["body"].clone();
+    assert!(s.execute("format.textWarp", &json!({})).is_err());
+    assert!(s.execute("format.textWarp", &json!({"preset": "notAWarp"})).is_err());
+    assert!(s.execute("format.textWarp", &json!({"preset": "textArchUp", "adj": "wide"})).is_err());
+    assert!(s.execute("format.textWarp", &json!({"preset": "textArchUp", "adj": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]})).is_err());
+    assert!(s.execute("format.textWarp", &json!({"preset": "textArchUp", "adj": [null]})).is_err());
+    assert!(body(&mut s)["warp"].is_null());
+    s.execute("format.textWarp", &json!({"preset": "textArchUp"})).unwrap();
+    assert_eq!(body(&mut s)["warp"], "textArchUp");
+    assert!(body(&mut s).get("warpAdj").is_none());
+    s.execute("format.textWarp", &json!({"preset": "textInflate", "adj": [20_000.0]})).unwrap();
+    let b = body(&mut s);
+    assert_eq!(b["warp"], "textInflate");
+    assert_eq!(b["warpAdj"], json!([20_000.0]));
+    s.execute("format.textWarp", &json!({"preset": "none"})).unwrap();
+    assert!(body(&mut s)["warp"].is_null());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(body(&mut s)["warp"], "textInflate");
+    s.execute("text.edit", &json!({"id": id})).unwrap();
+    s.execute("format.textWarp", &json!({"preset": "textCircle"})).unwrap();
+    assert_eq!(body(&mut s)["warp"], "textCircle");
+}
+
+#[test]
 fn insert_shape_and_format() {
     let mut s = session();
     let r = s.execute("shape.insert", &json!({"preset": "roundRect", "rect": [100, 100, 200, 100], "text": "Hi"})).unwrap();
