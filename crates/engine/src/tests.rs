@@ -2415,3 +2415,17 @@ fn resize_handles_beat_the_frame_of_edited_text() {
     assert!((sized.w - (x.w + 40.0)).abs() < 1e-9, "{sized:?}");
     assert_eq!((sized.x, sized.y), (x.x, x.y));
 }
+
+#[test]
+fn format_language_marks_the_selected_text() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Hola mundo"})).unwrap();
+    s.execute("text.move", &json!({"to": "wordLeft", "extend": true})).unwrap();
+    s.execute("format.language", &json!({"lang": "es-ES"})).unwrap();
+    assert_eq!(s.execute("format.state", &json!({})).unwrap()["lang"], "es-ES");
+    let body = s.doc().unwrap().current_slide().unwrap().shapes[0].text.clone().unwrap();
+    let langs: Vec<_> = body.paragraphs[0].runs.iter().map(|r| (r.text.as_str(), r.props.lang.as_deref())).collect();
+    assert_eq!(langs, vec![("Hola ", None), ("mundo", Some("es-ES"))]);
+}

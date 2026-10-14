@@ -1735,21 +1735,32 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         }
         "language" => {
             ui.label("Mark selected text as:");
-            for l in [
-                "English (United States)",
-                "English (United Kingdom)",
-                "Español",
-                "Français",
-                "Deutsch",
-                "Italiano",
-                "Português",
-                "日本語",
-                "中文",
-                "العربية",
-            ] {
-                let _ = ui.selectable_label(l.starts_with("English (United States)"), l);
+            if !d.fields.contains_key("lang") {
+                let cur = app.session.execute("format.state", &json!({})).ok().and_then(|v| v.get("lang").and_then(Value::as_str).map(String::from));
+                d.fields.insert("lang".into(), cur.unwrap_or_else(|| "en-US".into()));
             }
+            let mut lang = d.get("lang", "en-US");
+            for (tag, name) in [
+                ("en-US", "English (United States)"),
+                ("en-GB", "English (United Kingdom)"),
+                ("es-ES", "Español"),
+                ("fr-FR", "Français"),
+                ("de-DE", "Deutsch"),
+                ("it-IT", "Italiano"),
+                ("pt-PT", "Português"),
+                ("ja-JP", "日本語"),
+                ("zh-CN", "中文"),
+                ("ar-SA", "العربية"),
+            ] {
+                if ui.selectable_label(lang.eq_ignore_ascii_case(tag), name).clicked() {
+                    lang = tag.to_string();
+                }
+            }
+            d.fields.insert("lang".into(), lang.clone());
             let (ok, cancel) = buttons(ui, "OK");
+            if ok {
+                run(app, "format.language", json!({"lang": lang}));
+            }
             ok || cancel
         }
         "customShow" => {

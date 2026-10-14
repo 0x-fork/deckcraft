@@ -71,6 +71,15 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!("format.caps", "Caps", [], None, "{caps: none|small|all}", has_text_or_shapes, caps),
         cmd!(
+            "format.language",
+            "Language",
+            ["Review", "Language"],
+            None,
+            "{lang: BCP 47 tag (en-US, fr-FR…)} — the proofing language of the selected text",
+            has_text_or_shapes,
+            language
+        ),
+        cmd!(
             "format.spacing",
             "Character Spacing",
             ["Home", "Font"],
@@ -351,6 +360,14 @@ fn text_transparency(s: &mut Session, p: &Value) -> Result<Value> {
 fn highlight(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color");
     format_run(s, &move |r| r.highlight = c.clone())
+}
+fn language(s: &mut Session, p: &Value) -> Result<Value> {
+    let l = str_param(p, "lang")
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && l.len() <= 35)
+        .ok_or_else(|| bad("format.language", "missing or invalid `lang`"))?
+        .to_string();
+    format_run(s, &move |r| r.lang = Some(l.clone()))
 }
 fn caps(s: &mut Session, p: &Value) -> Result<Value> {
     let c = match str_param(p, "caps").unwrap_or("none") {
@@ -771,6 +788,7 @@ fn state(s: &mut Session, _p: &Value) -> Result<Value> {
         "align": pp.align.map(|a| a.xml()),
         "bullets": matches!(pp.bullet, Some(Bullet::Char { .. })),
         "numbering": matches!(pp.bullet, Some(Bullet::AutoNum { .. })),
+        "lang": r.lang,
         "lineSpacing": serde_json::to_value(pp.line_spacing).unwrap_or_default(),
         "painter": s.painter.is_some(),
     }))
