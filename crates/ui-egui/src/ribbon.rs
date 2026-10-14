@@ -111,6 +111,8 @@ fn contextual(app: &SlideApp) -> Vec<&'static str> {
     let Some(st) = app.session.active() else { return v };
     if st.selection.target == Target::Handout {
         v.push("Handout Master");
+    } else if st.selection.target == Target::NotesMaster {
+        v.push("Notes Master");
     } else if st.selection.target != Target::Slides {
         v.push("Slide Master");
     }
@@ -228,6 +230,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             "Playback" => playback(app, ui),
             "Slide Master" => slide_master(app, ui),
             "Handout Master" => handout_master(app, ui),
+            "Notes Master" => notes_master(app, ui),
             _ => {}
         }
     });
@@ -1962,8 +1965,10 @@ fn view(app: &mut SlideApp, ui: &mut Ui) {
         if big_button_ex(ui, Icon::HandoutMaster, "Handout\nMaster", true, false, in_handout).0.clicked() {
             let _ = app.run(if in_handout { "view.closeMaster" } else { "view.handoutMaster" }, json!({}));
         }
-        let r = big_button(ui, Icon::NotesMaster, "Notes\nMaster", false);
-        let _ = r.on_hover_text("Notes Master (coming soon)");
+        let in_notes = app.session.active().is_some_and(|d| d.selection.target == Target::NotesMaster);
+        if big_button_ex(ui, Icon::NotesMaster, "Notes\nMaster", true, false, in_notes).0.clicked() {
+            let _ = app.run(if in_notes { "view.closeMaster" } else { "view.notesMaster" }, json!({}));
+        }
     });
     group(ui, |ui| {
         rows(ui, |ui| {
@@ -2676,6 +2681,36 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
                 }
             }
         });
+        big(app, ui, Icon::FormatBackground, "Background\nStyles", "view.pane", json!({"pane": "background"}));
+    });
+    group(ui, |ui| {
+        if big_button(ui, Icon::Close, "Close\nMaster View", true).clicked() {
+            run(app, "view.closeMaster", json!({}));
+        }
+    });
+}
+
+fn notes_master(app: &mut SlideApp, ui: &mut Ui) {
+    group(ui, |ui| {
+        use deckcraft_model::PhType;
+        let shown = |app: &SlideApp, k: PhType| {
+            app.session.active().and_then(|d| d.doc.notes_master.as_ref()).is_some_and(|m| m.shapes.iter().any(|s| s.ph_type() == Some(k)))
+        };
+        for col in [
+            [("Header", "header", PhType::Header), ("Slide Image", "slideImage", PhType::SlideImage), ("Footer", "footer", PhType::Footer)],
+            [("Date", "date", PhType::Date), ("Body", "body", PhType::Body), ("Page Number", "pageNumber", PhType::SlideNum)],
+        ] {
+            rows(ui, |ui| {
+                for (label, key, k) in col {
+                    let mut on = shown(app, k);
+                    if ui.checkbox(&mut on, label).changed() {
+                        run(app, "notes.placeholders", json!({ key: on }));
+                    }
+                }
+            });
+        }
+    });
+    group(ui, |ui| {
         big(app, ui, Icon::FormatBackground, "Background\nStyles", "view.pane", json!({"pane": "background"}));
     });
     group(ui, |ui| {

@@ -1760,7 +1760,7 @@ fn handout_master_view_edits_and_round_trips() {
     s.execute("shape.insert", &json!({"preset": "rect", "rect": [20, 300, 100, 40]})).unwrap();
     assert_eq!(s.doc().unwrap().doc.handout_master.as_ref().unwrap().shapes.len(), 4);
     assert_eq!(s.doc().unwrap().doc.slides[0].shapes.len(), slide_shapes);
-    assert!(crate::handout_page(&s.doc().unwrap().doc).is_some_and(|p| p.masters.len() == 1 && p.slide_size == p.notes_size));
+    assert!(crate::master_page(&s.doc().unwrap().doc, Target::Handout).is_some_and(|p| p.masters.len() == 1 && p.slide_size == p.notes_size));
     s.execute("view.closeMaster", &json!({})).unwrap();
     assert_eq!(s.doc().unwrap().selection.target, Target::Slides);
     // Reopening doesn't make a second master, and it survives PPTX.
@@ -1770,4 +1770,34 @@ fn handout_master_view_edits_and_round_trips() {
     let hm = back.handout_master.expect("handout master kept");
     assert_eq!(hm.shapes.len(), 4);
     assert!(hm.shapes.iter().any(|x| x.ph_type() == Some(PhType::SlideNum)));
+}
+
+#[test]
+fn notes_master_view_edits_and_saves() {
+    use deckcraft_model::PhType;
+    let mut s = Session::with_new();
+    assert!(s.execute("notes.placeholders", &json!({"header": false})).is_err(), "only in the view");
+    assert_eq!(s.execute("view.notesMaster", &json!({})).unwrap()["created"], true);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.target, Target::NotesMaster);
+    assert_eq!(crate::page_size(st), st.doc.notes_size);
+    let kinds: Vec<_> = st.shapes().iter().filter_map(|x| x.ph_type()).collect();
+    assert_eq!(kinds, [PhType::Header, PhType::Date, PhType::SlideImage, PhType::Body, PhType::Footer, PhType::SlideNum]);
+    let r = s.execute("notes.placeholders", &json!({"header": false, "date": false})).unwrap();
+    assert_eq!((r["header"].as_bool(), r["body"].as_bool()), (Some(false), Some(true)));
+    assert_eq!(s.doc().unwrap().shapes().len(), 4);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().shapes().len(), 6);
+    s.execute("notes.placeholders", &json!({"header": false})).unwrap();
+    // A shape added in the view is on the notes master and is saved, even with no notes in the deck.
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [20, 20, 60, 60]})).unwrap();
+    assert!(s.doc().unwrap().doc.slides.iter().all(|sl| sl.notes.is_empty()));
+    assert!(crate::master_page(&s.doc().unwrap().doc, Target::NotesMaster).is_some());
+    let bytes = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+    let back = deckcraft_pptx::import(&bytes).unwrap();
+    let nm = back.notes_master.expect("notes master written");
+    assert_eq!(nm.shapes.len(), 6, "{:?}", nm.shapes.iter().map(|x| &x.name).collect::<Vec<_>>());
+    assert!(!nm.shapes.iter().any(|x| x.ph_type() == Some(PhType::Header)));
+    s.execute("view.closeMaster", &json!({})).unwrap();
+    assert_eq!(s.execute("view.notesMaster", &json!({})).unwrap()["created"], false);
 }

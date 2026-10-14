@@ -291,7 +291,9 @@ fn ctx_xfrm(doc: &deckcraft_model::Presentation, sel: &crate::Selection, shape: 
     match sel.target {
         crate::Target::Slides => doc.slides.get(sel.slide).and_then(|s| Ctx::for_slide(doc, s)).map(|c| resolve::xfrm(&c, shape)),
         crate::Target::Master { master } => doc.masters.get(master).map(|m| resolve::xfrm(&Ctx::for_master(doc, m), shape)),
-        crate::Target::Handout => doc.handout_master.as_ref().map(|m| resolve::xfrm(&Ctx::for_master(doc, m), shape)),
+        t @ (crate::Target::Handout | crate::Target::NotesMaster) => {
+            crate::page_master(doc, t).map(|m| resolve::xfrm(&Ctx::for_master(doc, m), shape))
+        }
         crate::Target::Layout { master, layout } => {
             doc.masters.get(master).and_then(|m| m.layouts.get(layout).map(|l| resolve::xfrm(&Ctx::for_layout(doc, m, l), shape)))
         }
@@ -345,7 +347,7 @@ pub(crate) fn current_shapes<'a>(doc: &'a deckcraft_model::Presentation, sel: &c
     match sel.target {
         crate::Target::Slides => doc.slides.get(sel.slide).map(|s| &s.shapes),
         crate::Target::Master { master } => doc.masters.get(master).map(|m| &m.shapes),
-        crate::Target::Handout => doc.handout_master.as_ref().map(|m| &m.shapes),
+        t @ (crate::Target::Handout | crate::Target::NotesMaster) => crate::page_master(doc, t).map(|m| &m.shapes),
         crate::Target::Layout { master, layout } => doc.masters.get(master).and_then(|m| m.layouts.get(layout)).map(|l| &l.shapes),
     }
 }

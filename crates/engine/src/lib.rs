@@ -106,6 +106,32 @@ pub enum Target {
     },
     /// The handout master (View ▸ Handout Master), a page at the notes size.
     Handout,
+    /// The notes master (View ▸ Notes Master), a page at the notes size.
+    NotesMaster,
+}
+
+impl Target {
+    /// A notes-size master page (Handout or Notes Master view).
+    pub fn is_page_master(self) -> bool {
+        matches!(self, Target::Handout | Target::NotesMaster)
+    }
+}
+
+/// The handout or notes master edited in that view.
+pub fn page_master(doc: &Presentation, t: Target) -> Option<&Arc<deckcraft_model::Master>> {
+    match t {
+        Target::Handout => doc.handout_master.as_ref(),
+        Target::NotesMaster => doc.notes_master.as_ref(),
+        _ => None,
+    }
+}
+
+pub fn page_master_mut(doc: &mut Presentation, t: Target) -> Option<&mut Arc<deckcraft_model::Master>> {
+    match t {
+        Target::Handout => doc.handout_master.as_mut(),
+        Target::NotesMaster => doc.notes_master.as_mut(),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -231,7 +257,7 @@ impl DocState {
         match self.selection.target {
             Target::Slides => self.current_slide().map(|s| s.shapes.as_slice()).unwrap_or(&[]),
             Target::Master { master } => self.doc.masters.get(master).map(|m| m.shapes.as_slice()).unwrap_or(&[]),
-            Target::Handout => self.doc.handout_master.as_ref().map(|m| m.shapes.as_slice()).unwrap_or(&[]),
+            Target::Handout | Target::NotesMaster => page_master(&self.doc, self.selection.target).map(|m| m.shapes.as_slice()).unwrap_or(&[]),
             Target::Layout { master, layout } => {
                 self.doc.masters.get(master).and_then(|m| m.layouts.get(layout)).map(|l| l.shapes.as_slice()).unwrap_or(&[])
             }
@@ -247,13 +273,13 @@ impl DocState {
 
 /// The page being edited: the slide size, or the notes size in Handout Master view.
 pub fn page_size(st: &DocState) -> deckcraft_geom::Size {
-    if st.selection.target == Target::Handout { st.doc.notes_size } else { st.doc.slide_size }
+    if st.selection.target.is_page_master() { st.doc.notes_size } else { st.doc.slide_size }
 }
 
-/// The handout master as a one-master presentation at the handout page size, for drawing it with
-/// the layout renderer.
-pub fn handout_page(doc: &Presentation) -> Option<Presentation> {
-    let m = doc.handout_master.clone()?;
+/// The handout or notes master as a one-master presentation at the notes page size, for drawing
+/// it with the layout renderer.
+pub fn master_page(doc: &Presentation, t: Target) -> Option<Presentation> {
+    let m = page_master(doc, t)?.clone();
     let mut p = doc.clone();
     p.slide_size = doc.notes_size;
     p.masters = vec![m];
@@ -266,7 +292,7 @@ pub fn shapes_mut<'a>(doc: &'a mut Presentation, sel: &Selection) -> Option<&'a 
     match sel.target {
         Target::Slides => doc.slides.get_mut(sel.slide).map(|s| &mut Arc::make_mut(s).shapes),
         Target::Master { master } => doc.masters.get_mut(master).map(|m| &mut Arc::make_mut(m).shapes),
-        Target::Handout => doc.handout_master.as_mut().map(|m| &mut Arc::make_mut(m).shapes),
+        t @ (Target::Handout | Target::NotesMaster) => page_master_mut(doc, t).map(|m| &mut Arc::make_mut(m).shapes),
         Target::Layout { master, layout } => {
             doc.masters.get_mut(master).and_then(|m| Arc::make_mut(m).layouts.get_mut(layout)).map(|l| &mut l.shapes)
         }
@@ -601,7 +627,7 @@ fn clamp_selection(st: &mut DocState) {
     st.selection.slides = slides;
     match st.selection.target {
         Target::Master { master } if master >= st.doc.masters.len() => st.selection.target = Target::Slides,
-        Target::Handout if st.doc.handout_master.is_none() => st.selection.target = Target::Slides,
+        t @ (Target::Handout | Target::NotesMaster) if page_master(&st.doc, t).is_none() => st.selection.target = Target::Slides,
         Target::Layout { master, layout } if st.doc.masters.get(master).is_none_or(|m| layout >= m.layouts.len()) => {
             st.selection.target = Target::Slides
         }
