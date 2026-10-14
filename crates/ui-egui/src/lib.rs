@@ -96,6 +96,8 @@ enum FilePlace {
         master: MasterId,
         layout: LayoutId,
     },
+    /// The handout or notes master (one per presentation, so no id is needed).
+    NotesPage(Target),
     /// The document was open but had no current slide, master or layout.
     Unspecified,
 }
@@ -1169,6 +1171,7 @@ impl SlideApp {
                 },
                 None => FilePlace::Unspecified,
             },
+            t @ (Target::Handout | Target::NotesMaster) => FilePlace::NotesPage(t),
         };
         FileTarget::Document { doc: d.uid, place }
     }
@@ -1189,6 +1192,7 @@ impl SlideApp {
                 matches!(d.selection.target, Target::Layout { master: mi, layout: li }
                     if d.doc.masters.get(mi).is_some_and(|m| m.id == *master && m.layouts.get(li).is_some_and(|l| l.id == *layout)))
             }
+            FilePlace::NotesPage(t) => d.selection.target == *t,
             FilePlace::Unspecified => false,
         }
     }
@@ -1293,6 +1297,7 @@ impl SlideApp {
                     .ok_or_else(|| "the layout it was chosen for was deleted".to_string())?;
                 Ok(LocatedPlace { target: Target::Layout { master: mi, layout: li }, slide: None })
             }
+            FilePlace::NotesPage(t) => Ok(LocatedPlace { target: *t, slide: None }),
             FilePlace::Unspecified => Err("there was no slide to put it on".into()),
         }
     }
