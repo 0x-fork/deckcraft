@@ -21,6 +21,7 @@ struct Key {
     extra: u64,
     /// The pasteboard region the slide's drawing calls for (canvas only).
     want: Region,
+    skip_text: Option<ShapeId>,
 }
 
 struct Entry {
@@ -135,7 +136,8 @@ impl Textures {
     /// The canvas texture for slide `index`, the slide being `size` pixels, and the region it
     /// covers: the slide, grown over the pasteboard to show what reaches off the slide within
     /// `visible` (the canvas, in pixels from the slide's top-left corner). `extra` changes with the
-    /// GIF frames.
+    /// GIF frames. `skip_text` leaves out one shape's text (the prompt of a placeholder being typed
+    /// into).
     #[allow(clippy::too_many_arguments)]
     pub fn slide(
         &mut self,
@@ -148,6 +150,7 @@ impl Textures {
         extra: u64,
         grayscale: bool,
         gif_times: &[(ShapeId, f64)],
+        skip_text: Option<ShapeId>,
     ) -> Option<(TextureHandle, Region)> {
         let slide = p.slides.get(index)?.clone();
         let master = master_of(p, &slide);
@@ -172,6 +175,7 @@ impl Textures {
             edit,
             extra: extra ^ grayscale as u64,
             want,
+            skip_text,
         };
         if let Some(e) = &self.canvas
             && e.key == key
@@ -181,7 +185,16 @@ impl Textures {
         let t0 = crate::now_ms();
         let render = |region: Region| {
             let opts =
-                RenderOpts { scale, edit, gif_times, threads: threads(), offset: region.offset(), size: Some(region.size()), ..Default::default() };
+                RenderOpts {
+                scale,
+                edit,
+                gif_times,
+                skip_text,
+                threads: threads(),
+                offset: region.offset(),
+                size: Some(region.size()),
+                ..Default::default()
+            };
             deckcraft_render::render_slide_drawn(p, index, &opts)
         };
         let (mut img, drawn) = render(want);
@@ -236,6 +249,7 @@ impl Textures {
             edit: false,
             extra: 0,
             want: Region::slide(width_px, h),
+            skip_text: None,
         };
         self.clock += 1;
         let clock = self.clock;
