@@ -26,7 +26,7 @@ fn simple_line(sp: Option<&El>) -> Option<deckcraft_model::Line> {
     Some(l)
 }
 
-fn rich_text(t: &El) -> Option<String> {
+pub(crate) fn rich_text(t: &El) -> Option<String> {
     let tx = t.child("tx")?;
     if let Some(r) = tx.child("rich") {
         let s = r.children_named("p").map(|p| p.text()).collect::<Vec<_>>().join("\n");
