@@ -1,8 +1,9 @@
-//! Office 2016 chart layouts the bar renderer can't draw: funnel, treemap and sunburst
-//! (waterfall bars are drawn by [`crate::chart`]).
+//! Office 2016 chart layouts the bar renderer can't draw: funnel, treemap, sunburst and the
+//! boxes of a box and whisker chart (waterfall bars are drawn by [`crate::chart`], histograms as
+//! the column chart of their bins).
 
 use deckcraft_color::Rgba;
-use deckcraft_model::chart::{Chart, ChartType};
+use deckcraft_model::chart::{BoxStats, Chart, ChartType};
 use deckcraft_model::resolve::Ctx;
 use deckcraft_model::text::{Align, Anchor};
 use kurbo::{Affine, BezPath, Point, Rect, Shape as _};
@@ -185,6 +186,102 @@ fn sunburst(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rec
             );
         }
         a0 = a1;
+    }
+}
+
+/// A box chart's summaries: per series, per group.
+pub struct Boxes {
+    pub stats: Vec<Vec<Option<BoxStats>>>,
+}
+
+/// A box and whisker chart as the frame the bar renderer draws (value axis, gridlines, one
+/// category per group, legend by series), and the boxes to draw in it. The frame's values are
+/// each group's extremes, so the value axis covers every whisker and outlier.
+pub fn box_view(c: &Chart) -> (Chart, Boxes) {
+    let (groups, stats) = c.box_groups();
+    let mut v = c.clone();
+    v.kind = ChartType::Column;
+    v.categories = groups;
+    v.raw = None;
+    let ext = |b: &BoxStats, hi: bool| {
+        let o = b.outliers.iter().copied();
+        if hi { o.fold(b.high, f64::max) } else { o.fold(b.low, f64::min) }
+    };
+    let lowest = stats.iter().flatten().flatten().map(|b| ext(b, false)).fold(f64::INFINITY, f64::min);
+    for (s, st) in v.series.iter_mut().zip(&stats) {
+        s.values = st.iter().map(|b| b.as_ref().map(|b| ext(b, true))).collect();
+    }
+    if lowest.is_finite() && lowest < 0.0 && v.y_min.is_none() {
+        // The frame's values are the highs; below zero the axis must reach the lowest point too.
+        let mag = 10f64.powf(lowest.abs().log10().floor());
+        v.y_min = Some((lowest / mag).floor() * mag);
+    }
+    (v, Boxes { stats })
+}
+
+/// Boxes from the first to the third quartile with the median line and a mean marker, whiskers
+/// to the furthest points within 1.5 IQR, and outliers as dots; series side by side in each
+/// group's band.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_boxes(
+    ctx: &mut RenderContext,
+    rctx: &Ctx,
+    c: &Chart,
+    b: &Boxes,
+    m: Affine,
+    plot: Rect,
+    band: f64,
+    horiz: bool,
+    to_v: &dyn Fn(f64) -> f64,
+) {
+    let ns = b.stats.len().max(1);
+    let group = band / (1.0 + c.gap_width.clamp(0.0, 5.0));
+    let w = group / ns as f64;
+    let line = Rgba::rgb(0x40, 0x40, 0x40);
+    for (si, per) in b.stats.iter().enumerate() {
+        let fill = series_color(rctx, c, si);
+        for (gi, st) in per.iter().enumerate() {
+            let Some(st) = st else { continue };
+            let c0 = if horiz { plot.y0 } else { plot.x0 } + band * gi as f64 + (band - group) / 2.0 + w * si as f64;
+            let (a, z) = (c0 + w * 0.1, c0 + w * 0.9);
+            let mid = (a + z) / 2.0;
+            // Along the category axis `a..z`, along the value axis `to_v`.
+            let rect = |p: f64, q: f64, u: f64, v: f64| if horiz { Rect::new(u.min(v), p, u.max(v), q) } else { Rect::new(p, u.min(v), q, u.max(v)) };
+            let pt = |along: f64, val: f64| if horiz { Point::new(val, along) } else { Point::new(along, val) };
+            ctx.set_transform(m);
+            ctx.set_paint(color(fill, 1.0));
+            let bx = rect(a, z, to_v(st.q1), to_v(st.q3));
+            ctx.fill_rect(&bx);
+            let mut p = BezPath::new();
+            // Whiskers with caps, and the median.
+            for (from, to) in [(st.q3, st.high), (st.q1, st.low)] {
+                p.move_to(pt(mid, to_v(from)));
+                p.line_to(pt(mid, to_v(to)));
+                p.move_to(pt(mid - w * 0.2, to_v(to)));
+                p.line_to(pt(mid + w * 0.2, to_v(to)));
+            }
+            p.move_to(pt(a, to_v(st.median)));
+            p.line_to(pt(z, to_v(st.median)));
+            ctx.set_paint(color(line, 1.0));
+            ctx.set_stroke(kurbo::Stroke::new(1.25));
+            ctx.stroke_path(&p);
+            ctx.stroke_path(&bx.to_path(0.1));
+            // The mean as an x.
+            let (mx, r) = (pt(mid, to_v(st.mean)), (w * 0.08).clamp(1.5, 5.0));
+            let mut x = BezPath::new();
+            x.move_to((mx.x - r, mx.y - r));
+            x.line_to((mx.x + r, mx.y + r));
+            x.move_to((mx.x - r, mx.y + r));
+            x.line_to((mx.x + r, mx.y - r));
+            ctx.stroke_path(&x);
+            for o in &st.outliers {
+                let q = pt(mid, to_v(*o));
+                ctx.set_paint(color(fill, 1.0));
+                ctx.fill_path(&kurbo::Circle::new(q, r).to_path(0.1));
+                ctx.set_paint(color(line, 1.0));
+                ctx.stroke_path(&kurbo::Circle::new(q, r).to_path(0.1));
+            }
+        }
     }
 }
 

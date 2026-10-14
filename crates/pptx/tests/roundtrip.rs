@@ -1479,7 +1479,8 @@ fn chartex_waterfall_reads_and_round_trips() {
     let again = deckcraft_pptx::import(&out).unwrap();
     assert_eq!(chart(&again).map(|c| (c.kind, c.categories, c.series.len())), Some((ChartType::Waterfall, c.categories.clone(), 1)));
 
-    // Edited: the kept part no longer matches, so only a plain chart is written.
+    // Edited: the kept part no longer matches, so a chartEx part is written from the model,
+    // still a waterfall with the new value.
     let mut edited = doc.clone();
     for sl in &mut edited.slides {
         for sh in &mut Arc::make_mut(sl).shapes {
@@ -1489,6 +1490,57 @@ fn chartex_waterfall_reads_and_round_trips() {
         }
     }
     let out = deckcraft_pptx::export(&edited).unwrap();
-    assert!(pkg_part(&out, "ppt/charts/chartEx1.xml").is_none());
-    assert!(!String::from_utf8(pkg_part(&out, &slide).unwrap()).unwrap().contains("cx1"));
+    let ex = String::from_utf8(pkg_part(&out, "ppt/charts/chartEx1.xml").expect("a written chartEx part")).unwrap();
+    assert!(ex.contains(r#"layoutId="waterfall""#), "{ex}");
+    assert!(String::from_utf8(pkg_part(&out, &slide).unwrap()).unwrap().contains("cx1"));
+    let again = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+    assert_eq!(again.kind, ChartType::Waterfall);
+    assert_eq!(again.series[0].values[1], Some(55.0));
+    assert_eq!(again.subtotals, c.subtotals);
+}
+
+/// New Office 2016 charts made in DeckCraft are written as chartEx parts that read back as the
+/// same type, data and options.
+#[test]
+fn chartex_new_charts_save_as_their_own_type() {
+    use deckcraft_engine::Session;
+    for (ty, kind) in [
+        ("waterfall", ChartType::Waterfall),
+        ("funnel", ChartType::Funnel),
+        ("treemap", ChartType::Treemap),
+        ("sunburst", ChartType::Sunburst),
+        ("histogram", ChartType::Histogram),
+        ("pareto", ChartType::Pareto),
+        ("boxwhisker", ChartType::BoxWhisker),
+    ] {
+        let chart = |d: &Presentation| -> Option<Chart> {
+            d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+                ShapeKind::Chart(c) => Some((**c).clone()),
+                _ => None,
+            })
+        };
+        let mut s = Session::with_new();
+        s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+        s.execute("insert.chart", &serde_json::json!({"type": ty})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0].0;
+        let opts = match kind {
+            ChartType::Histogram | ChartType::Pareto => serde_json::json!({"id": id, "binCount": 4, "title": "T"}),
+            ChartType::Waterfall => serde_json::json!({"id": id, "subtotals": [3], "title": "T"}),
+            _ => serde_json::json!({"id": id, "title": "T"}),
+        };
+        s.execute("chart.options", &opts).unwrap();
+        let doc = &s.doc().unwrap().doc;
+        let before = chart(doc).unwrap();
+        let out = deckcraft_pptx::export(doc).unwrap();
+        assert!(pkg_part(&out, "ppt/charts/chartEx1.xml").is_some(), "{ty}: no chartEx part");
+        assert!(pkg_part(&out, "ppt/charts/chart1.xml").is_some(), "{ty}: no fallback chart");
+        let after = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(after.kind, kind, "{ty}");
+        assert_eq!(after.title.as_deref(), Some("T"), "{ty}");
+        assert_eq!(after.categories, before.categories, "{ty}");
+        let n = if matches!(kind, ChartType::BoxWhisker) { before.series.len() } else { 1 };
+        assert_eq!(after.series.len(), n, "{ty}");
+        assert_eq!(after.series[0].values, before.series[0].values, "{ty}");
+        assert_eq!((after.bin_count, after.subtotals.clone()), (before.bin_count, before.subtotals.clone()), "{ty}");
+    }
 }

@@ -130,6 +130,19 @@ fn legend_layout(pos: &str, size: (f64, f64), area: Rect, base: f64, overlay: bo
 }
 
 pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h: f64) {
+    match c.kind {
+        // Histograms and Pareto charts are drawn as the column (and line) chart of their bins.
+        ChartType::Histogram | ChartType::Pareto => draw_inner(ctx, rctx, &c.histogram_view(), m, w, h, None),
+        ChartType::BoxWhisker => {
+            let (view, boxes) = crate::chartex::box_view(c);
+            draw_inner(ctx, rctx, &view, m, w, h, Some(&boxes));
+        }
+        _ => draw_inner(ctx, rctx, c, m, w, h, None),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h: f64, boxes: Option<&crate::chartex::Boxes>) {
     let text_col = c.text_color.as_ref().map(|t| rctx.color(t, None)).unwrap_or(Rgba::rgb(0x59, 0x59, 0x59));
     let grid_col = Rgba::rgb(0xD9, 0xD9, 0xD9);
     if let Some(f) = &c.chart_fill {
@@ -417,6 +430,10 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
                 false,
             );
         }
+    }
+    if let Some(b) = boxes {
+        crate::chartex::draw_boxes(ctx, rctx, c, b, m, plot, band, horiz, &to_v);
+        return;
     }
     let zero = to_v(clamp_soft(0.0, min, max));
     if let Some(bk) = bar_kind {

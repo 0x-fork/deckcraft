@@ -1991,3 +1991,34 @@ fn office_2016_charts_draw_their_own_layouts() {
         assert!(covered > 1000, "{kind:?}: {covered} samples inked");
     }
 }
+
+/// Histograms draw touching columns of their bins, Pareto charts add the cumulative line, and
+/// box and whisker charts draw a box per group and series.
+#[test]
+fn histogram_pareto_and_box_charts_draw() {
+    let shot = |c: Chart| {
+        let sh = Shape { id: ShapeId(622), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let inked = |img: &crate::Image| {
+        (0..540)
+            .step_by(6)
+            .flat_map(|y| (0..960).step_by(6).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = img.pixel(x, y);
+                p[0] < 200 || p[1] < 200 || p[2] < 200
+            })
+            .count()
+    };
+    let mut empty = Chart::sample(ChartType::Histogram);
+    empty.series[0].values.clear();
+    let blank = inked(&shot(empty));
+    for kind in [ChartType::Histogram, ChartType::Pareto, ChartType::BoxWhisker] {
+        let img = shot(Chart::sample(kind));
+        if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+            let _ = std::fs::write(format!("{dir}/{kind:?}.png"), img.to_png());
+        }
+        let n = inked(&img);
+        assert!(n > blank + 400, "{kind:?}: {n} inked samples (blank {blank})");
+    }
+}

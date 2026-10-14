@@ -38,6 +38,22 @@ pub enum ChartType {
 }
 
 impl ChartType {
+    /// The Office 2016 (`chartEx`) types, offered after [`ChartType::MAIN`] in chart menus.
+    pub const OFFICE_2016: [ChartType; 7] = [
+        ChartType::Waterfall,
+        ChartType::Funnel,
+        ChartType::Histogram,
+        ChartType::Pareto,
+        ChartType::BoxWhisker,
+        ChartType::Treemap,
+        ChartType::Sunburst,
+    ];
+
+    /// Whether the type is saved as a `chartEx` part (with a plain chart as the fallback).
+    pub fn is_chartex(self) -> bool {
+        Self::OFFICE_2016.contains(&self)
+    }
+
     pub const MAIN: [ChartType; 12] = [
         ChartType::Column,
         ChartType::Bar,
@@ -274,6 +290,13 @@ pub struct Chart {
     /// the running total, instead of floating.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subtotals: Vec<usize>,
+    /// A histogram's bin count (`cx:binCount`); with neither this nor `bin_size` the bins are
+    /// automatic (Scott's rule, as Excel does).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin_count: Option<u32>,
+    /// A histogram's bin width (`cx:binSize`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin_size: Option<f64>,
     /// Original chart XML part kept for round-trip of unmodelled options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
@@ -314,6 +337,8 @@ impl Default for Chart {
             y2_hidden: false,
             lang: None,
             subtotals: vec![],
+            bin_count: None,
+            bin_size: None,
             raw: None,
         }
     }
@@ -325,6 +350,27 @@ impl Chart {
         let cats = ["Q1", "Q2", "Q3", "Q4"];
         let data = [[4.2, 2.6, 2.1], [2.8, 4.1, 2.4], [3.6, 1.9, 3.3], [4.7, 3.0, 5.1]];
         let mut c = Chart { kind, categories: cats.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+        if matches!(kind, ChartType::Histogram | ChartType::Pareto | ChartType::BoxWhisker) {
+            // These plot raw observations: a histogram bins one series, a box chart summarises
+            // each category's points.
+            let obs = [12.0, 15.0, 17.0, 18.0, 21.0, 22.0, 22.0, 24.0, 25.0, 27.0, 28.0, 31.0, 33.0, 36.0, 41.0, 48.0];
+            let n_series = if kind == ChartType::BoxWhisker { 2 } else { 1 };
+            c.categories = if kind == ChartType::BoxWhisker {
+                (0..obs.len()).map(|i| if i % 2 == 0 { "Group A" } else { "Group B" }.to_string()).collect()
+            } else {
+                vec![]
+            };
+            for s in 0..n_series {
+                c.series.push(Series {
+                    name: format!("Series {}", s + 1),
+                    values: obs.iter().map(|v| Some(v + s as f64 * 6.0)).collect(),
+                    ..Default::default()
+                });
+            }
+            c.gridlines = true;
+            c.legend = (kind == ChartType::BoxWhisker).then(|| "b".to_string());
+            return c;
+        }
         let n_series =
             if matches!(kind, ChartType::Pie | ChartType::Doughnut | ChartType::Funnel | ChartType::Waterfall | ChartType::Treemap) { 1 } else { 3 };
         for s in 0..n_series {
@@ -788,5 +834,264 @@ mod tests {
         let (_, hi) = c.value_range();
         assert!(hi > 10.0);
         assert_eq!(Chart::sample(ChartType::Pie).series.len(), 1);
+    }
+}
+
+/// One histogram bin: `[lo, hi]` (the first bin is closed on both sides, later ones open on the
+/// left, as Excel bins) and how many observations fall in it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bin {
+    pub lo: f64,
+    pub hi: f64,
+    pub count: usize,
+}
+
+/// Bins a histogram has at most (a hostile bin size cannot make millions).
+pub const MAX_BINS: usize = 1000;
+
+/// A box and whisker summary of one group: quartiles by Excel's exclusive method, whiskers at
+/// the furthest points within 1.5 IQR of the box, and the points beyond them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoxStats {
+    pub low: f64,
+    pub q1: f64,
+    pub median: f64,
+    pub q3: f64,
+    pub high: f64,
+    pub mean: f64,
+    pub outliers: Vec<f64>,
+}
+
+impl Chart {
+    /// The first series' finite observations.
+    fn observations(&self) -> Vec<f64> {
+        self.series.first().map(|s| s.values.iter().flatten().copied().filter(|v| v.is_finite()).collect()).unwrap_or_default()
+    }
+
+    /// The histogram's bins over the first series: by `bin_size`, else `bin_count`, else
+    /// Scott's rule (3.49·σ·n^(-1/3)). Empty without observations.
+    pub fn histogram_bins(&self) -> Vec<Bin> {
+        let mut v = self.observations();
+        if v.is_empty() {
+            return vec![];
+        }
+        v.sort_by(f64::total_cmp);
+        let (lo, hi) = (v[0], v[v.len() - 1]);
+        let span = hi - lo;
+        let n = v.len() as f64;
+        let width = if let Some(w) = self.bin_size.filter(|w| w.is_finite() && *w > 0.0) {
+            w
+        } else if let Some(k) = self.bin_count.filter(|k| *k > 0) {
+            span / f64::from(k)
+        } else {
+            let mean = v.iter().sum::<f64>() / n;
+            let sd = (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+            3.49 * sd / n.cbrt()
+        };
+        let count = if span <= 0.0 || !width.is_finite() || width <= 0.0 { 1 } else { ((span / width).ceil() as usize).clamp(1, MAX_BINS) };
+        let width = if count == 1 && (span <= 0.0 || !width.is_finite() || width <= 0.0) { span.max(1.0) } else { width.max(span / MAX_BINS as f64) };
+        let mut bins: Vec<Bin> = (0..count).map(|i| Bin { lo: lo + width * i as f64, hi: lo + width * (i + 1) as f64, count: 0 }).collect();
+        for x in v {
+            // (lo, hi] bins, the first one also holding the minimum.
+            let i = (((x - lo) / width).ceil() as usize).saturating_sub(1).min(count - 1);
+            if let Some(b) = bins.get_mut(i) {
+                b.count += 1;
+            }
+        }
+        bins
+    }
+
+    /// A histogram (or Pareto) as the chart that draws it: a column chart of the bin counts with
+    /// touching columns, labelled by bin range. A Pareto sorts the bins by count and adds the
+    /// cumulative percentage as a line on a 0–100 % secondary axis.
+    pub fn histogram_view(&self) -> Chart {
+        let mut bins = self.histogram_bins();
+        let pareto = self.kind == ChartType::Pareto;
+        if pareto {
+            bins.sort_by_key(|b| std::cmp::Reverse(b.count));
+        }
+        let fmt = |v: f64| {
+            let r = (v * 100.0).round() / 100.0;
+            if (r - r.round()).abs() < 1e-9 { format!("{}", r.round() as i64) } else { format!("{r}") }
+        };
+        let first_lo = bins.iter().map(|b| b.lo).fold(f64::INFINITY, f64::min);
+        let mut v = Chart {
+            kind: if pareto { ChartType::Combo } else { ChartType::Column },
+            categories: bins
+                .iter()
+                .map(|b| if b.lo <= first_lo { format!("[{}, {}]", fmt(b.lo), fmt(b.hi)) } else { format!("({}, {}]", fmt(b.lo), fmt(b.hi)) })
+                .collect(),
+            series: vec![],
+            gap_width: 0.0,
+            raw: None,
+            subtotals: vec![],
+            ..self.clone()
+        };
+        let name = self.series.first().map(|s| s.name.clone()).unwrap_or_default();
+        let base = self.series.first().cloned().unwrap_or_default();
+        v.series.push(Series {
+            name,
+            values: bins.iter().map(|b| Some(b.count as f64)).collect(),
+            kind: pareto.then_some(ChartType::Column),
+            number_format: None,
+            ..base
+        });
+        if pareto {
+            let total = bins.iter().map(|b| b.count).sum::<usize>().max(1) as f64;
+            let mut run = 0.0;
+            v.series.push(Series {
+                name: "Cumulative %".into(),
+                values: bins
+                    .iter()
+                    .map(|b| {
+                        run += b.count as f64;
+                        Some(run / total)
+                    })
+                    .collect(),
+                kind: Some(ChartType::Line),
+                secondary_axis: true,
+                ..Default::default()
+            });
+            v.y2_min = Some(0.0);
+            v.y2_max = Some(1.0);
+            v.y2_major = Some(0.2);
+            v.y2_format = Some("0%".into());
+        }
+        v.vary_colors = false;
+        v
+    }
+
+    /// The box chart's groups (distinct category labels in order of appearance; one unnamed
+    /// group without categories) and, per series, each group's summary (None when it has no
+    /// points).
+    pub fn box_groups(&self) -> (Vec<String>, Vec<Vec<Option<BoxStats>>>) {
+        let mut groups: Vec<String> = Vec::new();
+        for c in &self.categories {
+            if !groups.contains(c) {
+                groups.push(c.clone());
+            }
+        }
+        if groups.is_empty() {
+            groups.push(String::new());
+        }
+        let stats = self
+            .series
+            .iter()
+            .map(|s| {
+                groups
+                    .iter()
+                    .map(|g| {
+                        let pts: Vec<f64> = s
+                            .values
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| self.categories.get(*i).map_or(g.is_empty() || self.categories.is_empty(), |c| c == g))
+                            .filter_map(|(_, v)| *v)
+                            .filter(|v| v.is_finite())
+                            .collect();
+                        box_stats(pts)
+                    })
+                    .collect()
+            })
+            .collect();
+        (groups, stats)
+    }
+}
+
+/// Excel's QUARTILE.EXC position `p·(n+1)` (1-based) on sorted data, clamped to the ends.
+fn quantile_exc(v: &[f64], p: f64) -> f64 {
+    let n = v.len();
+    let pos = (p * (n as f64 + 1.0)).clamp(1.0, n as f64);
+    let i = pos.floor() as usize;
+    let frac = pos - i as f64;
+    let a = v[i.saturating_sub(1).min(n - 1)];
+    let b = v[i.min(n - 1)];
+    a + (b - a) * frac
+}
+
+/// The summary of one group's points.
+pub fn box_stats(mut pts: Vec<f64>) -> Option<BoxStats> {
+    if pts.is_empty() {
+        return None;
+    }
+    pts.sort_by(f64::total_cmp);
+    let (q1, median, q3) = (quantile_exc(&pts, 0.25), quantile_exc(&pts, 0.5), quantile_exc(&pts, 0.75));
+    let iqr = q3 - q1;
+    let (lo_fence, hi_fence) = (q1 - 1.5 * iqr, q3 + 1.5 * iqr);
+    let inside: Vec<f64> = pts.iter().copied().filter(|v| *v >= lo_fence && *v <= hi_fence).collect();
+    let low = inside.first().copied().unwrap_or(q1).min(q1);
+    let high = inside.last().copied().unwrap_or(q3).max(q3);
+    let mean = pts.iter().sum::<f64>() / pts.len() as f64;
+    let outliers = pts.iter().copied().filter(|v| *v < lo_fence || *v > hi_fence).collect();
+    Some(BoxStats { low, q1, median, q3, high, mean, outliers })
+}
+
+#[cfg(test)]
+mod chartex_tests {
+    use super::*;
+
+    fn obs(v: &[f64]) -> Chart {
+        Chart {
+            kind: ChartType::Histogram,
+            series: vec![Series { values: v.iter().map(|x| Some(*x)).collect(), ..Default::default() }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn histogram_bins_by_count_size_and_scott() {
+        let mut c = obs(&[1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 9.0]);
+        c.bin_count = Some(4);
+        let b = c.histogram_bins();
+        assert_eq!(b.len(), 4);
+        assert_eq!((b[0].lo, b[0].hi), (1.0, 3.0));
+        // (lo, hi] bins with the minimum in the first: 1, 2, 2, 3 | 4, 5 | - | 9.
+        assert_eq!(b.iter().map(|b| b.count).collect::<Vec<_>>(), vec![4, 2, 0, 1]);
+        c.bin_count = None;
+        c.bin_size = Some(5.0);
+        assert_eq!(c.histogram_bins().iter().map(|b| b.count).collect::<Vec<_>>(), vec![6, 1]);
+        c.bin_size = None;
+        let auto = c.histogram_bins();
+        assert!(!auto.is_empty() && auto.iter().map(|b| b.count).sum::<usize>() == 7);
+        // A tiny bin size is capped; one value gives one bin.
+        c.bin_size = Some(1e-12);
+        assert!(c.histogram_bins().len() <= MAX_BINS);
+        assert_eq!(obs(&[3.0]).histogram_bins(), vec![Bin { lo: 3.0, hi: 4.0, count: 1 }]);
+        assert!(obs(&[]).histogram_bins().is_empty());
+    }
+
+    #[test]
+    fn pareto_view_sorts_bins_and_adds_the_cumulative_line() {
+        let mut c = obs(&[1.0, 5.0, 5.0, 5.0, 9.0, 9.0]);
+        c.kind = ChartType::Pareto;
+        c.bin_count = Some(3);
+        let v = c.histogram_view();
+        assert_eq!(v.kind, ChartType::Combo);
+        assert_eq!(v.series[0].values, vec![Some(3.0), Some(2.0), Some(1.0)]);
+        let cum = &v.series[1];
+        assert!(cum.secondary_axis && cum.kind == Some(ChartType::Line));
+        assert_eq!(cum.values.last(), Some(&Some(1.0)));
+        assert_eq!(v.categories[0], "(3.67, 6.33]");
+    }
+
+    #[test]
+    fn box_stats_use_exclusive_quartiles_and_fence_outliers() {
+        let b = box_stats(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0]).unwrap();
+        // QUARTILE.EXC on 8 points: positions 2.25, 4.5, 6.75.
+        assert_eq!((b.q1, b.median, b.q3), (2.25, 4.5, 6.75));
+        assert_eq!(b.outliers, vec![100.0]);
+        assert_eq!((b.low, b.high), (1.0, 7.0));
+        assert!(box_stats(vec![]).is_none());
+        let one = box_stats(vec![5.0]).unwrap();
+        assert_eq!((one.low, one.q1, one.median, one.q3, one.high), (5.0, 5.0, 5.0, 5.0, 5.0));
+    }
+
+    #[test]
+    fn box_groups_follow_category_labels() {
+        let c = Chart::sample(ChartType::BoxWhisker);
+        let (groups, stats) = c.box_groups();
+        assert_eq!(groups, vec!["Group A".to_string(), "Group B".to_string()]);
+        assert_eq!(stats.len(), 2);
+        assert!(stats.iter().all(|s| s.len() == 2 && s.iter().all(Option::is_some)));
     }
 }

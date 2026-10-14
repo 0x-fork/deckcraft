@@ -419,9 +419,14 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
     w.close(tag);
 }
 
-/// The kept `chartEx` part of an Office 2016 chart (waterfall, funnel…) that is unchanged since
-/// it was read, without its workbook link; `None` when it was edited or isn't one.
+/// The `chartEx` part of an Office 2016 chart (waterfall, funnel…): the kept part when the chart
+/// is unchanged since it was read (without its workbook link), else one written from the model.
+/// `None` for other chart types.
 pub fn chartex_xml(c: &Chart) -> Option<Vec<u8>> {
+    kept_chartex(c).or_else(|| c.kind.is_chartex().then(|| build_chartex(c)))
+}
+
+fn kept_chartex(c: &Chart) -> Option<Vec<u8>> {
     let raw = c.raw.as_ref()?;
     let doc = crate::xml::parse(raw.as_bytes()).ok()?;
     let mut root = doc.root.clone();
@@ -554,5 +559,147 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
         sp_pr(&mut w, Some(f), None);
     }
     w.close("c:chartSpace");
+    w.finish()
+}
+
+/// A `cx:tx` holding plain text.
+fn cx_text(w: &mut W, t: &str) {
+    w.open0("cx:tx");
+    w.open0("cx:txData");
+    w.open0("cx:v");
+    w.text(t);
+    w.close("cx:v");
+    w.close("cx:txData");
+    w.close("cx:tx");
+}
+
+/// A `cx:lvl` of points.
+fn cx_level(w: &mut W, pts: &[String], format: Option<&str>) {
+    let mut a = A::new().a("ptCount", pts.len());
+    if let Some(f) = format {
+        a = a.a("formatCode", f);
+    }
+    w.open("cx:lvl", a);
+    for (i, p) in pts.iter().enumerate() {
+        w.open("cx:pt", A::new().a("idx", i));
+        w.text(p);
+        w.close("cx:pt");
+    }
+    w.close("cx:lvl");
+}
+
+/// Writes an Office 2016 chart from the model, as PowerPoint lays the part out: one `cx:data`
+/// per series (categories and values), then the plot area with each series' layout, the axes
+/// the layout uses, the title and the legend.
+pub fn build_chartex(c: &Chart) -> Vec<u8> {
+    let mut w = W::new();
+    w.open("cx:chartSpace", A::new().a("xmlns:a", NS_A).a("xmlns:r", NS_R).a("xmlns:cx", NS_CX));
+    w.open0("cx:chartData");
+    for (i, s) in c.series.iter().enumerate() {
+        w.open("cx:data", A::new().a("id", i));
+        if !c.categories.is_empty() {
+            w.open("cx:strDim", A::new().a("type", "cat"));
+            cx_level(&mut w, &c.categories, None);
+            w.close("cx:strDim");
+        }
+        let ty = if matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) { "size" } else { "val" };
+        w.open("cx:numDim", A::new().a("type", ty));
+        let vals: Vec<String> = s.values.iter().map(|v| v.map(fmt_num).unwrap_or_default()).collect();
+        cx_level(&mut w, &vals, Some(s.number_format.as_deref().unwrap_or("General")));
+        w.close("cx:numDim");
+        w.close("cx:data");
+    }
+    w.close("cx:chartData");
+    w.open0("cx:chart");
+    if let Some(t) = &c.title {
+        w.open("cx:title", A::new().a("pos", "t").a("align", "ctr").a("overlay", "0"));
+        cx_text(&mut w, t);
+        w.close("cx:title");
+    }
+    w.open0("cx:plotArea");
+    w.open0("cx:plotAreaRegion");
+    let layout = match c.kind {
+        ChartType::Waterfall => "waterfall",
+        ChartType::Funnel => "funnel",
+        ChartType::Treemap => "treemap",
+        ChartType::Sunburst => "sunburst",
+        ChartType::BoxWhisker => "boxWhisker",
+        _ => "clusteredColumn",
+    };
+    let one = !matches!(c.kind, ChartType::BoxWhisker);
+    for (i, s) in c.series.iter().enumerate().take(if one { 1 } else { usize::MAX }) {
+        w.open("cx:series", A::new().a("layoutId", layout).a("uniqueId", format!("{{DC00000{i}-0000-4000-8000-000000000000}}")));
+        cx_text(&mut w, &s.name);
+        if s.data_labels.unwrap_or(c.data_labels) {
+            w.open("cx:dataLabels", A::new().a("pos", if c.kind == ChartType::Funnel { "ctr" } else { "outEnd" }));
+            w.empty("cx:visibility", A::new().a("seriesName", "0").a("categoryName", "0").a("value", "1"));
+            w.close("cx:dataLabels");
+        }
+        w.empty("cx:dataId", A::new().a("val", i));
+        match c.kind {
+            ChartType::Waterfall if !c.subtotals.is_empty() => {
+                w.open0("cx:layoutPr");
+                w.open0("cx:subtotals");
+                for t in &c.subtotals {
+                    w.empty("cx:idx", A::new().a("val", t));
+                }
+                w.close("cx:subtotals");
+                w.close("cx:layoutPr");
+            }
+            ChartType::Histogram | ChartType::Pareto => {
+                w.open0("cx:layoutPr");
+                w.open("cx:binning", A::new().a("intervalClosed", "r"));
+                if let Some(size) = c.bin_size {
+                    w.empty("cx:binSize", A::new().a("val", fmt_num(size)));
+                } else if let Some(n) = c.bin_count {
+                    w.empty("cx:binCount", A::new().a("val", n));
+                }
+                w.close("cx:binning");
+                w.close("cx:layoutPr");
+            }
+            ChartType::BoxWhisker => {
+                w.open0("cx:layoutPr");
+                w.empty("cx:visibility", A::new().a("meanLine", "0").a("meanMarker", "1").a("nonoutliers", "0").a("outliers", "1"));
+                w.empty("cx:statistics", A::new().a("quartileMethod", "exclusive"));
+                w.close("cx:layoutPr");
+            }
+            _ => {}
+        }
+        w.close("cx:series");
+    }
+    if c.kind == ChartType::Pareto {
+        w.open("cx:series", A::new().a("layoutId", "paretoLine").a("ownerIdx", "0").a("uniqueId", "{DC0000FF-0000-4000-8000-000000000000}"));
+        w.empty("cx:axisId", A::new().a("val", "2"));
+        w.close("cx:series");
+    }
+    w.close("cx:plotAreaRegion");
+    if !matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) {
+        w.open("cx:axis", A::new().a("id", "0"));
+        w.empty("cx:catScaling", A::new().a("gapWidth", if matches!(c.kind, ChartType::Histogram | ChartType::Pareto) { "0" } else { "0.5" }));
+        w.empty0("cx:tickLabels");
+        w.close("cx:axis");
+        if c.kind != ChartType::Funnel {
+            w.open("cx:axis", A::new().a("id", "1"));
+            w.empty0("cx:valScaling");
+            if c.gridlines {
+                w.empty0("cx:majorGridlines");
+            }
+            w.empty0("cx:tickLabels");
+            w.close("cx:axis");
+        }
+        if c.kind == ChartType::Pareto {
+            w.open("cx:axis", A::new().a("id", "2"));
+            w.empty("cx:valScaling", A::new().a("max", "1").a("min", "0"));
+            w.empty0("cx:units");
+            w.empty0("cx:tickLabels");
+            w.close("cx:axis");
+        }
+    }
+    w.close("cx:plotArea");
+    if let Some(pos) = &c.legend {
+        w.empty("cx:legend", A::new().a("pos", pos.as_str()).a("align", "ctr").a("overlay", "0"));
+    }
+    w.close("cx:chart");
+    w.close("cx:chartSpace");
     w.finish()
 }

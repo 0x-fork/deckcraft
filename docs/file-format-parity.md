@@ -92,6 +92,10 @@ the round trip even though DeckCraft doesn't model it.
 | Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, box) | no | no | |
 | SmartArt (`dgm`) | drawing part only, as a group; text laid out on its `dsp:txXfrm` rectangle | as shapes | Diagram data model lost on save |
 | SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save. A diagram with no relationship parts keeps its XML; the drawing and data parts are still dropped (#203) |
+| Tables with styles | yes | yes | |
+| Charts (`c:chartSpace`) | yes | yes | Original XML kept in `Chart.raw` |
+| Charts (`cx:` chartex: waterfall, funnel, treemap, sunburst, histogram, Pareto, box) | yes | yes | Unchanged parts kept; edited and new ones written from the model with a plain-chart fallback. Only the innermost hierarchy level; no region maps |
+| SmartArt (`dgm`) | drawing part only, as a group | as shapes | Diagram data model lost on save |
 | Equations (OMML, `a14:m`) | no | no | PR #55 open |
 | Audio / video (`p14:media`, trim, fades, bookmarks) | yes | partly | Playback options lost on save (#74) |
 | Ink (`contentPart`) | yes | as a group of freeform lines | PowerPoint sees shapes, not ink |
