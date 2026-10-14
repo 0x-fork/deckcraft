@@ -32,7 +32,7 @@ impl SlideApp {
         #[cfg(target_arch = "wasm32")]
         {
             if let Err(e) = self.open_path(path) {
-                self.set_status(e);
+                self.notify(e);
             }
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -47,7 +47,7 @@ impl SlideApp {
                 Ok(_) => self.opening = Some(Opening { path: path.to_string(), started_ms: crate::now_ms(), rx }),
                 Err(_) => {
                     if let Err(e) = self.open_path(path) {
-                        self.set_status(e);
+                        self.notify(e);
                     }
                 }
             }
@@ -76,10 +76,11 @@ impl SlideApp {
                 let token = self.session.stage_loaded(f);
                 match self.session.execute("file.adopt", &serde_json::json!({"path": o.path, "token": token})) {
                     Ok(_) => self.note_recent(&o.path),
-                    Err(e) => self.set_status(e.to_string()),
+                    Err(e) => self.notify(e.to_string()),
                 }
             }
-            Err(e) => self.set_status(e),
+            // Over the start screen too, like a failed file.open (#346).
+            Err(e) => self.notify(e),
         }
     }
 
@@ -167,14 +168,14 @@ mod tests {
     }
 
     #[test]
-    fn errors_show_in_the_status_bar_and_a_second_open_waits() {
+    fn errors_are_shown_and_a_second_open_waits() {
         let mut app = SlideApp::new(Session::new(), crate::Services::default());
         app.open_path_in_background("/nonexistent/deckcraft/missing.pptx");
         app.open_path_in_background("/nonexistent/deckcraft/other.pptx");
         assert!(app.status.as_ref().is_some_and(|(m, _)| m.starts_with("Still opening missing.pptx")));
         wait(&mut app);
         assert!(app.session.documents().is_empty());
-        assert!(app.status.as_ref().is_some_and(|(m, _)| m.contains("missing.pptx")), "{:?}", app.status);
+        assert!(app.toast.as_ref().is_some_and(|t| t.text.contains("missing.pptx")), "the reason is shown");
     }
 
     #[test]

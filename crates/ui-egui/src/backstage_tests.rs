@@ -444,6 +444,15 @@ fn a_file_that_cant_be_opened_says_why() {
     h.run_steps(2);
     h.get_by_label("Browse").click();
     h.run_steps(3);
+    // The file is read in the background (#350): wait for it.
+    for _ in 0..500 {
+        if h.state().opening.is_none() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        h.run_steps(1);
+    }
+    h.run_steps(2);
     assert!(h.state().session.documents().is_empty());
     assert!(h.query_by_label_contains("not a presentation DeckCraft can read").is_some(), "the error is on screen");
     let _ = std::fs::remove_dir_all(&dir);
