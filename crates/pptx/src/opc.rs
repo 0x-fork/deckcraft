@@ -132,8 +132,16 @@ impl Package {
         for r in doc.root.children_named("Relationship") {
             let (Some(id), Some(ty), Some(target)) = (r.attr("Id"), r.attr("Type"), r.attr("Target")) else { continue };
             let external = r.attr("TargetMode").is_some_and(|m| m.eq_ignore_ascii_case("external"));
-            let target = if external { target.to_string() } else { resolve(&base, target) };
-            out.items.push(Rel { id: id.to_string(), kind: ty.rsplit('/').next().unwrap_or(ty).to_string(), target, external });
+            let target_raw = target.to_string();
+            let target = if external { target_raw.clone() } else { resolve(&base, target) };
+            out.items.push(Rel {
+                id: id.to_string(),
+                kind: ty.rsplit('/').next().unwrap_or(ty).to_string(),
+                ty: ty.to_string(),
+                target_raw,
+                target,
+                external,
+            });
         }
         out
     }
@@ -162,6 +170,10 @@ pub struct Rel {
     pub id: String,
     /// Last segment of the relationship type (`slide`, `image`, `media`…).
     pub kind: String,
+    /// Full relationship type URI.
+    pub ty: String,
+    /// `Target` as written in the rels part (relative path or URL).
+    pub target_raw: String,
     /// Absolute part name for internal targets; the URL for external ones.
     pub target: String,
     pub external: bool,
@@ -189,6 +201,28 @@ impl Rels {
 
 pub fn norm(name: &str) -> String {
     name.trim_start_matches('/').replace('\\', "/").to_ascii_lowercase()
+}
+
+/// A part a chart may carry along beside its own `chartN.xml` (workbook, style, drawing, picture).
+/// Chart documents themselves are rewritten, and nothing outside these folders is copied: a relationship
+/// must not be able to replace `ppt/slides/slide1.xml` on save.
+pub fn sidecar_part(name: &str) -> bool {
+    let n = norm(name);
+    let segs: Vec<&str> = n.split('/').filter(|s| !s.is_empty()).collect();
+    if segs.iter().any(|s| *s == "." || *s == "..") {
+        return false;
+    }
+    let (Some(root), Some(area)) = (segs.first().copied(), segs.get(1).copied()) else { return false };
+    if root != "ppt" || !matches!(area, "embeddings" | "charts" | "drawings" | "media") {
+        return false;
+    }
+    let file = segs.last().copied().unwrap_or("");
+    let stem = file.strip_prefix("chart").unwrap_or("");
+    let num = stem.strip_suffix(".xml.rels").or_else(|| stem.strip_suffix(".xml")).unwrap_or("");
+    if stem != file && !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    true
 }
 
 pub fn dir_of(part: &str) -> String {
@@ -343,6 +377,10 @@ impl PackageOut {
     pub fn raw(&mut self, name: &str, data: Vec<u8>) {
         self.files.push((name.to_string(), data, true));
     }
+    pub fn part_data(&self, name: &str) -> Option<&[u8]> {
+        let n = norm(name);
+        self.files.iter().find(|(f, _, _)| norm(f) == n).map(|(_, d, _)| d.as_slice())
+    }
     /// Add a binary part; its extension gets a Default content type.
     pub fn binary(&mut self, name: &str, content_type: &str, data: Vec<u8>) {
         let ext = name.rsplit('.').next().unwrap_or("bin").to_ascii_lowercase();
@@ -428,5 +466,18 @@ mod tests {
         assert_eq!(relative("ppt/slides/slide1.xml", "ppt/media/image1.png"), "../media/image1.png");
         assert_eq!(relative("ppt/presentation.xml", "ppt/slides/slide1.xml"), "slides/slide1.xml");
         assert_eq!(relative("ppt/slides/slide1.xml", "ppt/slides/slide2.xml"), "slide2.xml");
+    }
+
+    #[test]
+    fn sidecar_parts_stay_inside_chart_folders() {
+        assert!(sidecar_part("ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx"));
+        assert!(sidecar_part("ppt/charts/style1.xml"));
+        assert!(sidecar_part("ppt/drawings/chartDrawing1.xml"));
+        assert!(sidecar_part("ppt/media/image1.png"));
+        assert!(!sidecar_part("ppt/charts/chart1.xml"));
+        assert!(!sidecar_part("ppt/charts/_rels/chart1.xml.rels"));
+        assert!(!sidecar_part("ppt/slides/slide1.xml"));
+        assert!(!sidecar_part("ppt/embeddings/../../ppt/slides/slide1.xml"));
+        assert!(!sidecar_part("/etc/passwd"));
     }
 }

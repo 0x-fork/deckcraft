@@ -205,7 +205,13 @@ impl Exp<'_> {
     pub fn chart_rel(&mut self, o: &mut Out, c: &deckcraft_model::Chart) -> String {
         self.n_chart += 1;
         let name = format!("ppt/charts/chart{}.xml", self.n_chart);
-        self.pkg.xml_part(&name, CT_CHART, chart::chart_xml(c));
+        let (xml, preserved) = chart::chart_xml(c);
+        self.pkg.xml_part(&name, CT_CHART, xml);
+        if preserved {
+            chart::write_kept(&mut self.pkg, &name, c);
+        } else if !c.kept.parts.is_empty() {
+            log::warn!("pptx: chart data changed; the embedded workbook was not written back");
+        }
         o.rels.add_new("chart", &opc::relative(&o.name, &name), false)
     }
 }
