@@ -1844,6 +1844,8 @@ fn smartart_converts_to_and_from_text_and_shapes() {
     let tb = st.doc.slides[1].shapes.iter().find(|x| x.id.0 as u64 == tid).unwrap();
     assert!(tb.diagram.is_none());
     assert_eq!(tb.text.as_ref().unwrap().paragraphs.len(), 3);
+    // The text keeps the size it had in the graphic.
+    assert!(tb.text.as_ref().unwrap().paragraphs.iter().all(|p| p.runs.iter().all(|r| r.props.size.is_some_and(|z| z > 10.0))));
 
     s.execute("edit.undo", &json!({})).unwrap();
     s.execute("smartArt.toShapes", &json!({"id": gid})).unwrap();

@@ -551,6 +551,41 @@ pub fn cref_param(c: &deckcraft_model::ColorRef) -> Value {
     }
 }
 
+/// Convert to SmartArt: the layouts by category, three to a row; a click converts the selected
+/// text.
+fn smartart_gallery(app: &mut SlideApp, ui: &mut Ui) {
+    use deckcraft_engine::cmd::smartart::{LAYOUTS, category};
+    ui.set_min_width(420.0);
+    for (cat, title) in [
+        ("list", "List"),
+        ("process", "Process"),
+        ("cycle", "Cycle"),
+        ("hierarchy", "Hierarchy"),
+        ("relationship", "Relationship"),
+        ("matrix", "Matrix"),
+        ("pyramid", "Pyramid"),
+        ("picture", "Picture"),
+    ] {
+        let kinds: Vec<(&str, &str)> = LAYOUTS.iter().copied().filter(|(k, _)| category(k) == cat).collect();
+        if kinds.is_empty() {
+            continue;
+        }
+        ui.label(egui::RichText::new(title).strong());
+        egui::Grid::new(("smartart_gallery", cat)).num_columns(3).spacing([6.0, 2.0]).show(ui, |ui| {
+            for (i, (k, label)) in kinds.iter().enumerate() {
+                if ui.add_sized([136.0, 22.0], egui::Button::new(*label)).clicked() {
+                    run(app, "smartArt.fromText", json!({"kind": k}));
+                    ui.close();
+                }
+                if i % 3 == 2 {
+                    ui.end_row();
+                }
+            }
+        });
+        ui.separator();
+    }
+}
+
 fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
     let en = enabled(app, "format.bullets");
     group(ui, |ui| {
@@ -661,6 +696,8 @@ fn paragraph_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                         }
                     }
                 });
+                let r = icon_toggle(ui, Icon::SmartArt, "Convert to SmartArt", enabled(app, "smartArt.fromText"), false);
+                egui::Popup::menu(&r).show(|ui| smartart_gallery(app, ui));
             });
         });
     });

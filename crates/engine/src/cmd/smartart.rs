@@ -103,6 +103,29 @@ pub const COLORS: [(&str, &str); 17] = [
     ("accent6Grad", "Gradient Range - Accent 6"),
 ];
 
+/// The gallery category a layout is shown under in Convert to SmartArt and Change Layout.
+pub fn category(kind: &str) -> &'static str {
+    match kind {
+        "pictureList" | "pictureCaption" | "pictureProcess" | "pictureHList" => "picture",
+        "process"
+        | "chevron"
+        | "verticalProcess"
+        | "stepUp"
+        | "timeline"
+        | "gear"
+        | "funnel"
+        | "accentProcess"
+        | "continuousBlockProcess"
+        | "bendingProcess" => "process",
+        "cycle" | "blockCycle" | "textCycle" | "continuousCycle" | "segmentedCycle" | "multidirectionalCycle" | "pie" => "cycle",
+        "hierarchy" | "horizontalHierarchy" | "orgChart" | "halfCircleOrgChart" | "nameTitleOrgChart" => "hierarchy",
+        "radial" | "venn" | "target" | "linearVenn" | "stackedVenn" | "nestedTarget" => "relationship",
+        "matrix" | "titledMatrix" | "gridMatrix" | "cycleMatrix" => "matrix",
+        "pyramid" | "invertedPyramid" | "segmentedPyramid" => "pyramid",
+        _ => "list",
+    }
+}
+
 pub fn is_kind(k: &str) -> bool {
     LAYOUTS.iter().any(|(id, _)| *id == k)
 }
@@ -1833,6 +1856,13 @@ fn to_text(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "smartArt.toText";
     let gid = target_group(s, p, CMD)?;
     let (_, d) = selected_for(s, gid).ok_or_else(|| bad(CMD, "select a SmartArt graphic"))?;
+    // The sizes the graphic's text shows at: its titles' and its bullets' (shrunk to fit included).
+    let (title_pt, bullet_pt) = {
+        let st = s.doc()?;
+        let shapes = current_shapes(&st.doc, &st.selection).ok_or_else(|| bad(CMD, "no slide"))?;
+        let g = diagram_group(shapes, gid).ok_or_else(|| bad(CMD, "select a SmartArt graphic"))?;
+        text_sizes(g.children())
+    };
     let new = s.edit(|doc, sel| {
         let shapes = crate::shapes_mut(doc, sel).ok_or_else(|| bad(CMD, "no slide"))?;
         let at = shapes.iter().position(|x| x.id == gid).ok_or_else(|| bad(CMD, "the graphic isn't at the top of the slide"))?;
@@ -1841,6 +1871,11 @@ fn to_text(s: &mut Session, p: &Value) -> Result<Value> {
         for n in &d.nodes {
             let mut para = Paragraph::new(&n.text);
             para.level = n.level.min(MAX_LEVEL);
+            let size = if n.level == 0 { title_pt } else { bullet_pt };
+            for r in &mut para.runs {
+                r.props.size = Some(size);
+            }
+            para.end_props.size = Some(size);
             para.props.bullet = Some(deckcraft_model::text::Bullet::Char { char: "•".into() });
             para.props.margin_left = Some(18.0 * (para.level as f64 + 1.0));
             para.props.indent = Some(-14.0);
@@ -1876,6 +1911,33 @@ fn to_shapes(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     Ok(Value::Null)
+}
+
+/// The most common title and bullet font sizes in a diagram's shapes (20 and 14 pt when none).
+fn text_sizes(children: &[Shape]) -> (f64, f64) {
+    let mut titles: Vec<f64> = vec![];
+    let mut bullets: Vec<f64> = vec![];
+    for c in children {
+        let Some(b) = &c.text else { continue };
+        for p in &b.paragraphs {
+            let Some(sz) = p.runs.iter().find_map(|r| r.props.size) else { continue };
+            if p.props.bullet.is_some() { bullets.push(sz) } else { titles.push(sz) }
+        }
+    }
+    let mode = |v: &mut Vec<f64>, d: f64| {
+        v.sort_by(|a, b| a.total_cmp(b));
+        let mut best = (d, 0usize);
+        let mut k = 0;
+        while k < v.len() {
+            let j = v[k..].iter().take_while(|x| (**x - v[k]).abs() < 1e-9).count();
+            if j > best.1 {
+                best = (v[k], j);
+            }
+            k += j;
+        }
+        best.0
+    };
+    (mode(&mut titles, 20.0), mode(&mut bullets, 14.0))
 }
 
 /// The graphic `gid` with its outline (typed text synced).
