@@ -34,6 +34,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Trim Media dialog follows the selection; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: chart trendlines are drawn; previous: trivial, chart trendlines round-trip; hours to ~95% per audience added; ready ~55%; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Font dialog; previous: minor, hours to ~95% per audience added; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Paragraph dialog; previous: trivial, Font dialog; ready stays ~55%; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -210,6 +211,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-14 | Design ▸ Effects: named effect schemes (DeckCraft, Soft, Crisp, Lift, Glow, Plain) replace the theme's fills, lines and effects and leave colours and fonts. `design.effects` |
 | 2026-10-14 | Slide Master: Preserve on the open master or layout, and Title and Footers placeholder checkboxes. Two commands (`master.preserve`, `master.placeholders`); dialogs stay 27; breadth stays 79% |
 | 2026-10-14 | Trim Media: start, end and fades open from the selected clip, so OK no longer resets them to zero |
+| 2026-10-14 | Paragraph dialog (Home › Paragraph launcher): alignment, first-line and hanging indents, spacing before and after, line spacing, and a Tabs dialog, each applied in one undo step. Breadth stays 79% |
 | 2026-10-14 | Font dialog (Home › Font, the shape menu, Cmd+T): family, size, bold, italic, underline, colour, strikethrough, baseline, caps and character spacing, applied in one undo step. Breadth stays 79% |
 | 2026-10-13 | Slide transitions like PowerPoint: every transition and option measured frame by frame against PowerPoint's video export and retuned (curves, directions, soft edges, 3-D perspective, contents moving over backgrounds); PowerPoint's own XML elements and defaults read and written (diagonal Wipe, Zoom, Shape In/Out, Glitter Hexagons, Shred In/Out, Page Curl Single); `deckcraft-cli render-transition` renders frames headless |
 | 2026-10-13 | Wild text cases measured against PowerPoint (102 synthetic slides): bidi by run language, East Asian vertical text upright, mongolianVert/wordArtVert/wordArtVertRtl, underline styles and strikethrough at the font's metrics, centre/right/decimal tabs, East Asian, Thai, Hindi, Arabic and Hebrew numbering, small caps, all-caps "ß", transparent text, soft hyphens, kinsoku, rtlCol and just/dist anchoring, emoji presentation, fallback faces that no longer move the baseline |
@@ -277,6 +279,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-14 | trivial | Progress log: Design ▸ Effects |
 | 2026-10-14 | trivial | Progress log: Slide Master Preserve and Title/Footers placeholders. Percentages unchanged |
 | 2026-10-14 | trivial | Progress log: Trim Media dialog follows the selection |
+| 2026-10-14 | trivial | Progress log: Paragraph dialog |
 | 2026-10-14 | trivial | Progress log: Font dialog |
 | 2026-10-13 | trivial | Progress log: wild text cases |
 | 2026-10-13 | trivial | Progress log: slide show for interactive decks |

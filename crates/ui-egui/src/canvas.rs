@@ -993,6 +993,10 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 let _ = app.run("format.fontDialog", json!({}));
                 ui.close();
             }
+            if ui.button("Paragraph…").clicked() {
+                let _ = app.run("format.paragraphDialog", json!({}));
+                ui.close();
+            }
             ui.menu_button("Bring to Front", |ui| {
                 crate::ribbon::menu_item(app, ui, crate::icons::Icon::BringToFront, "Bring to Front", "arrange.bringToFront", json!({}));
                 crate::ribbon::menu_item(app, ui, crate::icons::Icon::BringForward, "Bring Forward", "arrange.bringForward", json!({}));
