@@ -27,7 +27,7 @@ The summary between `<!-- SUMMARY -->
 | Tables | 89% |
 | Charts | 65% |
 | SmartArt | 33% |
-| Pictures | 48% |
+| Pictures | 52% |
 | Media | 67% |
 | Transitions | 92% |
 | Animations | 79% |
@@ -186,7 +186,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Pictures | Corrections, colour, transparency | P1 | P |
 | Pictures | Artistic effects | P2 | M |
 | Pictures | Remove background | P2 | M |
-| Pictures | Picture styles and borders | P1 | P |
+| Pictures | Picture styles and borders | P1 | D |
 | Pictures | Change / reset picture | P1 | D |
 | Pictures | Compress pictures | P2 | M |
 | Pictures | Paste image from clipboard (fails on Windows and Linux, #53) | P0 | P |
