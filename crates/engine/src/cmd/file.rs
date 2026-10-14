@@ -254,9 +254,18 @@ fn save_bytes_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Render slide `index` (current when absent) to PNG bytes.
 pub fn render_png(doc: &Presentation, index: usize, scale: f64, edit: bool) -> (Vec<u8>, u32, u32) {
-    let img =
-        deckcraft_render::render_slide(doc, index, &deckcraft_render::RenderOpts { scale: scale.clamp(0.01, 16.0), edit, ..Default::default() });
-    (img.to_png(), img.width, img.height)
+    let scale = finite_scale(scale);
+    let img = deckcraft_render::render_slide(doc, index, &deckcraft_render::RenderOpts { scale, edit, ..Default::default() });
+    (img.to_png_at(deckcraft_render::dpi_for_scale(scale)), img.width, img.height)
+}
+
+fn finite_scale(scale: f64) -> f64 {
+    if scale.is_finite() { scale.clamp(0.01, 16.0) } else { 1.0 }
+}
+
+fn picture_bytes(img: &deckcraft_render::Image, format: &str, scale: f64) -> Vec<u8> {
+    let dpi = deckcraft_render::dpi_for_scale(scale);
+    if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) }
 }
 
 fn render(s: &mut Session, p: &Value) -> Result<Value> {
@@ -273,7 +282,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.export", "missing `path`"))?.to_string();
     let format = str_param(p, "format").unwrap_or(format_for_path(&path)).to_string();
     let st = s.doc()?;
-    let scale = f64_or(p, "scale", 2.0);
+    let scale = finite_scale(f64_or(p, "scale", 2.0));
     match format.as_str() {
         "png" | "jpeg" | "jpg" => {
             let slides: Vec<usize> = match usize_param(p, "slide") {
@@ -286,12 +295,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                 if *i >= st.doc.slides.len() {
                     return Err(bad("file.export", format!("no slide {i}")));
                 }
-                let img = deckcraft_render::render_slide(
-                    &st.doc,
-                    *i,
-                    &deckcraft_render::RenderOpts { scale: scale.clamp(0.01, 16.0), ..Default::default() },
-                );
-                let bytes = if format == "png" { img.to_png() } else { img.to_jpeg(92) };
+                let img = deckcraft_render::render_slide(&st.doc, *i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+                let bytes = picture_bytes(&img, &format, scale);
                 let out = if slides.len() == 1 {
                     path.clone()
                 } else {

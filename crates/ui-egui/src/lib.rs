@@ -388,8 +388,10 @@ impl SlideApp {
         let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
         let bytes = match format {
             "png" | "jpeg" => {
-                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale: 2.0, ..Default::default() });
-                Ok(if format == "png" { img.to_png() } else { img.to_jpeg(92) })
+                let scale = 2.0;
+                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+                let dpi = deckcraft_render::dpi_for_scale(scale);
+                Ok(if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) })
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
             other => deckcraft_engine::cmd::file::save_bytes(&doc, other),
