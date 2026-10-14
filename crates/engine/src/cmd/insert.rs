@@ -83,7 +83,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Chart Elements",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, id?}",
+            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, upDownBars?: bool, id?}",
             has_selection,
             chart_options
         ),
@@ -784,6 +784,10 @@ fn chart_options(s: &mut Session, p: &Value) -> Result<Value> {
             t.sort_unstable();
             t.dedup();
             c.subtotals = t;
+        }
+        if let Some(b) = p.get("upDownBars").and_then(Value::as_bool) {
+            c.up_down_bars = b;
+            c.raw = None;
         }
         if let Some(q) = p.get("quartiles").and_then(Value::as_str) {
             c.inclusive_quartiles = q.eq_ignore_ascii_case("inclusive");

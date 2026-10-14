@@ -188,7 +188,10 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
                     ChartType::Radar
                 }
             }
-            "stockChart" => ChartType::Stock,
+            "stockChart" => {
+                c.up_down_bars = g.child("upDownBars").is_some();
+                ChartType::Stock
+            }
             "surfaceChart" | "surface3DChart" => ChartType::Surface,
             _ => continue,
         };

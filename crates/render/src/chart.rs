@@ -29,7 +29,7 @@ pub fn series_color(ctx: &Ctx, c: &Chart, i: usize) -> Rgba {
     }
 }
 
-fn series_fill(ctx: &Ctx, c: &Chart, i: usize, s: Option<&deckcraft_model::chart::Series>) -> Rgba {
+pub(crate) fn series_fill(ctx: &Ctx, c: &Chart, i: usize, s: Option<&deckcraft_model::chart::Series>) -> Rgba {
     match s.and_then(|s| s.fill.as_ref()) {
         Some(Fill::Solid { color: cc }) => ctx.color(cc, None),
         _ => series_color(ctx, c, i),
@@ -38,7 +38,7 @@ fn series_fill(ctx: &Ctx, c: &Chart, i: usize, s: Option<&deckcraft_model::chart
 
 /// A line series' colour: its line's own (where PowerPoint keeps it), else its fill's, else the
 /// palette's.
-fn series_line(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series) -> Rgba {
+pub(crate) fn series_line(ctx: &Ctx, c: &Chart, i: usize, s: &deckcraft_model::chart::Series) -> Rgba {
     match s.line.as_ref().and_then(|l| l.fill.as_ref()) {
         Some(Fill::Solid { color: cc }) => ctx.color(cc, None),
         _ => series_fill(ctx, c, i, Some(s)),
@@ -273,6 +273,10 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     }
     if matches!(c.kind, ChartType::Funnel | ChartType::Treemap | ChartType::Sunburst | ChartType::RegionMap) {
         crate::chartex::draw(ctx, rctx, c, m, area, base, text_col);
+        return;
+    }
+    if matches!(c.kind, ChartType::Radar | ChartType::FilledRadar) {
+        crate::radar::draw(ctx, rctx, c, m, area, base, text_col);
         return;
     }
     let combo = c.kind == ChartType::Combo;
@@ -528,11 +532,17 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             }
         }
     }
-    // Lines, areas, scatter, radar (drawn as lines): the series that aren't bars.
+    // A stock chart's high-low lines and up/down bars (or close dashes) stand in for its series.
+    if c.kind == ChartType::Stock {
+        for i in 0..ncat {
+            crate::radar::stock_marks(ctx, rctx, c, m, plot.x0 + band * (i as f64 + 0.5), band, i, &|v| to_axis(false, v));
+        }
+    }
+    // Lines, areas, scatter: the series that aren't bars.
     let mut acc = vec![0.0; ncat];
     for (si, s) in c.series.iter().enumerate() {
         let kind = c.series_kind(s);
-        if kind.is_bar_like() {
+        if kind.is_bar_like() || kind == ChartType::Stock {
             continue;
         }
         let sec = c.on_secondary(s);

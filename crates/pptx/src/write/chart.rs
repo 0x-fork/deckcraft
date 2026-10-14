@@ -121,11 +121,13 @@ enum Group {
     Scatter,
     Radar,
     Bubble,
+    Stock,
 }
 
 fn group_of(k: ChartType) -> Group {
     match k {
-        ChartType::Line | ChartType::LineMarkers | ChartType::StackedLine | ChartType::Stock => Group::Line,
+        ChartType::Line | ChartType::LineMarkers | ChartType::StackedLine => Group::Line,
+        ChartType::Stock => Group::Stock,
         ChartType::Area | ChartType::StackedArea | ChartType::Surface => Group::Area,
         ChartType::Pie => Group::Pie,
         ChartType::Doughnut | ChartType::Sunburst => Group::Doughnut,
@@ -143,7 +145,32 @@ fn series(w: &mut W, c: &Chart, s: &Series, i: usize, kind: ChartType, g: Group)
     w.open0("c:tx");
     str_cache(w, &format!("Sheet1!${}$1", col(i + 1)), std::slice::from_ref(&s.name));
     w.close("c:tx");
-    sp_pr(w, s.fill.as_ref(), s.line.as_ref());
+    if g == Group::Stock && s.line.is_none() {
+        // A stock chart's series are points joined by the high-low lines, not lines of their own.
+        w.open0("c:spPr");
+        w.open("a:ln", A::new().a("w", 19050));
+        w.empty0("a:noFill");
+        w.close("a:ln");
+        w.close("c:spPr");
+    } else {
+        sp_pr(w, s.fill.as_ref(), s.line.as_ref());
+    }
+    if g == Group::Stock {
+        // High-low-close: the close is a dash on the high-low line; with up/down bars (or a set
+        // marker) the series keep their own.
+        let close = !c.up_down_bars && i + 1 == c.series.len() && c.series.len() == 3;
+        let sym = s.marker.as_deref().filter(|m| !m.is_empty() && m.chars().all(|ch| ch.is_ascii_alphanumeric())).unwrap_or(if close {
+            "dash"
+        } else {
+            "none"
+        });
+        w.open0("c:marker");
+        w.val("c:symbol", sym);
+        if sym != "none" {
+            w.val("c:size", 7);
+        }
+        w.close("c:marker");
+    }
     if g == Group::Bar {
         w.val("c:invertIfNegative", 0);
     }
@@ -377,6 +404,7 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
         Group::Scatter => "c:scatterChart",
         Group::Radar => "c:radarChart",
         Group::Bubble => "c:bubbleChart",
+        Group::Stock => "c:stockChart",
     };
     w.open0(tag);
     match g {
@@ -389,7 +417,10 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
         Group::Radar => w.val("c:radarStyle", if kind == ChartType::FilledRadar { "filled" } else { "marker" }),
         _ => {}
     }
-    w.val("c:varyColors", vary);
+    // `c:stockChart` has no `c:varyColors`.
+    if g != Group::Stock {
+        w.val("c:varyColors", vary);
+    }
     for (i, s) in list {
         series(w, c, s, *i, kind, g);
     }
@@ -405,6 +436,24 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
             }
         }
         Group::Line => w.val("c:marker", 1),
+        Group::Stock => {
+            w.open0("c:hiLowLines");
+            w.open0("c:spPr");
+            w.open("a:ln", A::new().a("w", 9525));
+            w.open0("a:solidFill");
+            w.empty("a:schemeClr", A::new().a("val", "tx1"));
+            w.close("a:solidFill");
+            w.close("a:ln");
+            w.close("c:spPr");
+            w.close("c:hiLowLines");
+            if c.up_down_bars {
+                w.open0("c:upDownBars");
+                w.val("c:gapWidth", 150);
+                w.empty0("c:upBars");
+                w.empty0("c:downBars");
+                w.close("c:upDownBars");
+            }
+        }
         Group::Pie => w.val("c:firstSliceAng", 0),
         Group::Doughnut => {
             w.val("c:firstSliceAng", 0);
@@ -529,6 +578,7 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
                 | ChartType::Bubble
                 | ChartType::Radar
                 | ChartType::FilledRadar
+                | ChartType::Stock
         ) {
             log::warn!("pptx: {} chart written as a column chart", c.kind.label());
         }

@@ -2079,3 +2079,52 @@ fn region_map_draws_tiles_on_its_colour_scale() {
     }
     assert!(seen.len() >= 5, "{} colours", seen.len());
 }
+
+/// Radar charts are polar, stock charts draw high-low lines (and up/down bars), and a combo
+/// chart draws its line series over its columns.
+#[test]
+fn radar_stock_and_combo_draw_their_own_layouts() {
+    let mut ohlc = Chart::sample(ChartType::Stock);
+    ohlc.series.insert(
+        0,
+        deckcraft_model::chart::Series {
+            name: "Open".into(),
+            values: [44.0, 25.0, 38.0, 50.0, 35.0].iter().map(|v| Some(*v)).collect(),
+            ..Default::default()
+        },
+    );
+    ohlc.up_down_bars = true;
+    let charts = [
+        ("Radar", Chart::sample(ChartType::Radar)),
+        ("FilledRadar", Chart::sample(ChartType::FilledRadar)),
+        ("Stock", Chart::sample(ChartType::Stock)),
+        ("StockOHLC", ohlc),
+        ("Combo", Chart::sample(ChartType::Combo)),
+    ];
+    for (name, c) in charts {
+        let sh = Shape {
+            id: ShapeId(625),
+            xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+            kind: ShapeKind::Chart(Box::new(c.clone())),
+            ..Default::default()
+        };
+        let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+            let _ = std::fs::write(format!("{dir}/{name}.png"), img.to_png());
+        }
+        let ink = |x: u32, y: u32| img.pixel(x, y)[..3] != [255, 255, 255];
+        match name {
+            // The radar's top spoke runs straight up from the centre; a line chart has nothing there.
+            "Radar" | "FilledRadar" => assert!((150..260).any(|y| ink(480, y)), "{name}"),
+            // No series lines: well right of the first category there is only gridline grey.
+            "Stock" | "StockOHLC" => {
+                let coloured = (60..480).step_by(2).flat_map(|y| (40..920).step_by(4).map(move |x| (x, y))).any(|(x, y)| {
+                    let p = img.pixel(x, y);
+                    p[2] > p[0].saturating_add(60)
+                });
+                assert!(!coloured || name == "Stock", "{name}: series drawn as lines");
+            }
+            _ => {}
+        }
+    }
+}

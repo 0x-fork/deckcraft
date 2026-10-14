@@ -26,6 +26,7 @@ mod pattern;
 
 mod pathgrad;
 mod placed;
+mod radar;
 mod ramp;
 mod table;
 mod transition;

@@ -1581,3 +1581,37 @@ fn chartex_levels_and_quartiles_round_trip() {
         assert_eq!(chart(&deckcraft_pptx::import(&again).unwrap()).unwrap().category_levels, before.category_levels, "{ty}");
     }
 }
+
+/// Radar, stock (with and without up/down bars) and combo charts keep their own plot groups
+/// through a save and reopen, written as PowerPoint writes them.
+#[test]
+fn radar_stock_and_combo_round_trip() {
+    use deckcraft_engine::Session;
+    let chart = |d: &Presentation| -> Option<Chart> {
+        d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+            ShapeKind::Chart(c) => Some((**c).clone()),
+            _ => None,
+        })
+    };
+    for (ty, bars) in [("radar", false), ("filledradar", false), ("stock", false), ("stock", true), ("combo", false)] {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+        s.execute("insert.chart", &serde_json::json!({"type": ty})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0].0;
+        if bars {
+            s.execute("chart.options", &serde_json::json!({"id": id, "upDownBars": true})).unwrap();
+        }
+        let before = chart(&s.doc().unwrap().doc).unwrap();
+        let out = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+        let after = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(after.kind, before.kind, "{ty}");
+        assert_eq!(after.up_down_bars, bars, "{ty}");
+        assert_eq!(after.series.len(), before.series.len(), "{ty}");
+        let kinds: Vec<_> = after.series.iter().map(|x| after.series_kind(x)).collect();
+        let want: Vec<_> = before.series.iter().map(|x| before.series_kind(x)).collect();
+        assert_eq!(kinds, want, "{ty}");
+        for (a, b) in after.series.iter().zip(&before.series) {
+            assert_eq!(a.values, b.values, "{ty}");
+        }
+    }
+}
