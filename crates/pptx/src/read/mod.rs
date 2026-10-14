@@ -284,6 +284,7 @@ pub fn import_theme(bytes: &[u8]) -> Result<(deckcraft_model::theme::Theme, Vec<
         slide_by_part: HashMap::new(),
         custom_show_names: HashMap::new(),
         table_style_ids: Vec::new(),
+        vml_previews: HashMap::new(),
     };
     let part = Part::new(&pkg, &theme_path, &doc);
     let theme = theme::read_theme(&mut imp, &part, &doc.root);
