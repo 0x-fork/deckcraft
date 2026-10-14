@@ -29,6 +29,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_slide,
             freeform
         ),
+        cmd!(
+            "draw.inkToShape",
+            "Ink to Shape",
+            ["Draw", "Convert"],
+            None,
+            "{} → {shapes: [ids], kept: n} turns recognisable ink strokes on the slide into lines, rectangles, ellipses and triangles",
+            has_slide,
+            ink_to_shape
+        ),
         cmd!(query "shape.sites", "Connection Sites", [], None, "{id} → [[x, y]] connection sites in slide points", has_slide, sites),
         cmd!("shape.move", "Move", [], None, "{dx?, dy?: pt (relative) | x?, y?: pt (absolute), ids?}", has_selection, move_by),
         cmd!("shape.resize", "Size", ["Shape Format", "Size"], None, "{w?, h?: pt, lockAspect?: bool, ids?}", has_selection, resize),
@@ -1245,4 +1254,80 @@ mod size_position_tests {
         let err = s.execute("shape.sizePosition", &json!({})).unwrap_err();
         assert!(err.to_string().contains("nothing selected"), "{err}");
     }
+}
+
+/// Draw › Ink to Shape: each recognisable stroke of the slide's ink becomes a preset shape
+/// outlined in the stroke's colour and width; the rest stays ink. One undo step.
+fn ink_to_shape(s: &mut Session, _p: &Value) -> Result<Value> {
+    use crate::inkshape::{Recognized, recognize};
+    use deckcraft_model::{Shape, ShapeId, ShapeKind};
+    let shapes = s.doc()?.shapes();
+    let Some(ink) = shapes.iter().find(|sh| matches!(sh.kind, ShapeKind::Ink { .. })) else {
+        return Ok(json!({"shapes": [], "kept": 0}));
+    };
+    let (ink_id, off) = (ink.id, ink.xfrm.map(|x| (x.x, x.y)).unwrap_or((0.0, 0.0)));
+    let ShapeKind::Ink { strokes } = &ink.kind else { return Ok(json!({"shapes": [], "kept": 0})) };
+    let found: Vec<Option<Recognized>> = strokes
+        .iter()
+        .map(|st| if st.highlighter { None } else { recognize(&st.points.iter().map(|(x, y, _)| (x + off.0, y + off.1)).collect::<Vec<_>>()) })
+        .collect();
+    if found.iter().all(Option::is_none) {
+        return Ok(json!({"shapes": [], "kept": strokes.len()}));
+    }
+    s.edit(|doc, sel| {
+        let mut new = vec![];
+        let list = crate::shapes_mut(doc, sel).ok_or_else(|| bad("draw.inkToShape", "no slide"))?;
+        let Some(pos) = list.iter().position(|sh| sh.id == ink_id) else { return Err(bad("draw.inkToShape", "ink gone")) };
+        let ShapeKind::Ink { strokes } = &mut list[pos].kind else { return Err(bad("draw.inkToShape", "not ink")) };
+        let all = std::mem::take(strokes);
+        let mut kept = vec![];
+        let mut made = vec![];
+        for (st, r) in all.into_iter().zip(found.iter()) {
+            let Some(r) = r else {
+                kept.push(st);
+                continue;
+            };
+            let (preset, xfrm) = match *r {
+                Recognized::Line { x0, y0, x1, y1 } => {
+                    ("line", crate::tools::line_xfrm(deckcraft_geom::Point::new(x0, y0), deckcraft_geom::Point::new(x1, y1), 0.0))
+                }
+                Recognized::Rect { x, y, w, h } => ("rect", deckcraft_geom::Xfrm::new(x, y, w, h)),
+                Recognized::Ellipse { x, y, w, h } => ("ellipse", deckcraft_geom::Xfrm::new(x, y, w, h)),
+                Recognized::Triangle { x, y, w, h, flip_v } => ("triangle", deckcraft_geom::Xfrm { flip_v, ..deckcraft_geom::Xfrm::new(x, y, w, h) }),
+            };
+            made.push((preset, xfrm, st.color, st.width));
+        }
+        let remaining = kept.len();
+        *strokes = kept;
+        if remaining == 0 {
+            list.remove(pos);
+        }
+        for (preset, xfrm, color, width) in made {
+            let id = ShapeId(doc.alloc_id());
+            let name = format!(
+                "{} {}",
+                match preset {
+                    "line" => "Straight Connector",
+                    "rect" => "Rectangle",
+                    "ellipse" => "Oval",
+                    _ => "Isosceles Triangle",
+                },
+                id.0
+            );
+            let list = crate::shapes_mut(doc, sel).ok_or_else(|| bad("draw.inkToShape", "no slide"))?;
+            list.push(Shape {
+                id,
+                name,
+                xfrm: Some(xfrm),
+                geom: Geom::preset(preset),
+                fill: Some(Fill::None),
+                line: Some(Line::solid(ColorRef::rgb(color), width.clamp(0.25, 100.0))),
+                kind: ShapeKind::Shape,
+                ..Default::default()
+            });
+            new.push(id);
+        }
+        sel.shapes = new.clone();
+        Ok(json!({"shapes": new.iter().map(|i| i.0).collect::<Vec<_>>(), "kept": remaining}))
+    })
 }
