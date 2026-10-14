@@ -12,7 +12,9 @@ fn text_of(s: &Shape) -> String {
 
 /// Pairs of (shape on `a`, shape on `b`) that Morph animates from one to the other: first by
 /// `!!name` (forced match), then by exact name, then by the same kind and text, then by the same
-/// kind and preset geometry. Each shape is used once; top-level shapes only (groups move whole).
+/// kind and preset geometry if neither carries text. A text box with neither a name nor its text on
+/// the other slide stays unpaired and fades in place, as in PowerPoint (#119). Each shape is used
+/// once; top-level shapes only (groups move whole).
 pub fn morph_pairs(a: &Slide, b: &Slide) -> Vec<(ShapeId, ShapeId)> {
     let mut pairs: Vec<(ShapeId, ShapeId)> = Vec::new();
     let mut used_a = vec![false; a.shapes.len()];
@@ -31,7 +33,8 @@ pub fn morph_pairs(a: &Slide, b: &Slide) -> Vec<(ShapeId, ShapeId)> {
             x.kind_name() == y.kind_name()
                 && x.geom.preset_name().is_some()
                 && x.geom.preset_name() == y.geom.preset_name()
-                && text_of(x).trim().is_empty() == text_of(y).trim().is_empty()
+                && text_of(x).trim().is_empty()
+                && text_of(y).trim().is_empty()
         },
     ];
     for pass in passes {

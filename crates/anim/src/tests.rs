@@ -530,6 +530,26 @@ fn morph_pairs_by_name_text_and_geometry() {
 }
 
 #[test]
+fn morph_pairs_leaves_unrelated_text_boxes_alone() {
+    // A text box that leaves and an unrelated one that arrives fade in place (#119).
+    let p = deckcraft_model::defaults::new_presentation(None);
+    let mut a = Slide::default();
+    let mut b = Slide::default();
+    let tb = |id, name, x, text| Shape { xfrm: Some(Xfrm::new(x, 100.0, 200.0, 100.0)), text: Some(TextBody::from_text(text)), ..shape(id, name) };
+    a.shapes = vec![tb(1, "TextBox 1", 0.0, "Gone")];
+    b.shapes = vec![tb(2, "TextBox 2", 400.0, "New")];
+    assert!(morph_pairs(&a, &b).is_empty());
+    let f = morph_frame(&p, &a, &b, 0.5, &|_| false);
+    let xs: Vec<(&str, f64)> = f.shapes.iter().map(|(s, _)| (s.name.as_str(), s.xfrm.map_or(f64::NAN, |x| x.x))).collect();
+    assert_eq!(xs, [("TextBox 1", 0.0), ("TextBox 2", 400.0)]);
+    // Empty shapes of one kind and geometry still pair, and a named text box keeps its partner.
+    a.shapes.push(shape(3, "Rect A"));
+    b.shapes.push(shape(4, "Rect B"));
+    b.shapes[0].name = "TextBox 1".into();
+    assert_eq!(morph_pairs(&a, &b), [(ShapeId(1), ShapeId(2)), (ShapeId(3), ShapeId(4))]);
+}
+
+#[test]
 fn morph_xfrm_interpolates() {
     let a = Xfrm { rot: 350.0, ..Xfrm::new(0.0, 0.0, 100.0, 100.0) };
     let b = Xfrm { rot: 10.0, ..Xfrm::new(100.0, 50.0, 200.0, 100.0) };
