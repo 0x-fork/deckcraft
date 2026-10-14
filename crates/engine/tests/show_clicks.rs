@@ -20,7 +20,7 @@ fn shape(p: &mut Presentation, name: &str, text: &str, x: f64, y: f64, w: f64, h
 }
 
 fn link_to(slide: SlideId) -> Option<Hyperlink> {
-    Some(Hyperlink { action: Action::Slide { slide }, tooltip: String::new(), highlight_click: false })
+    Some(Hyperlink { action: Action::Slide { slide }, tooltip: String::new(), highlight_click: false, sound: None, stop_sound: false })
 }
 
 /// Clicking `trigger` makes `target` disappear.

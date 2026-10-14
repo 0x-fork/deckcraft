@@ -972,7 +972,15 @@ impl Session {
         }
         let hit = self.hit_test(p, tol);
         let id = match &hit {
-            Some(Hit::Shape { id, .. } | Hit::Resize { id, .. } | Hit::Rotate { id } | Hit::Adjust { id, .. } | Hit::LineEnd { id, .. }) => Some(*id),
+            Some(
+                Hit::Shape { id, .. }
+                | Hit::Resize { id, .. }
+                | Hit::Rotate { id }
+                | Hit::Adjust { id, .. }
+                | Hit::LineEnd { id, .. }
+                | Hit::Handle { id, .. }
+                | Hit::Vertex { id, .. },
+            ) => Some(*id),
             None => None,
         };
         if !id.is_some_and(|id| st.selection.shapes.contains(&id)) {

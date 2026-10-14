@@ -62,6 +62,8 @@ fn talk() -> Presentation {
                                     action: Action::Url { url: "https://example.org/north?q=1&x=2".into() },
                                     tooltip: "Open the report".into(),
                                     highlight_click: false,
+                                    sound: None,
+                                    stop_sound: false,
                                 }),
                                 ..Default::default()
                             },
