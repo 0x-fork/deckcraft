@@ -162,6 +162,11 @@ impl Textures {
         Some((tex, region))
     }
 
+    /// Cached thumbnails (bounded; soak tests check it).
+    pub fn thumb_count(&self) -> usize {
+        self.thumbs.len()
+    }
+
     /// Force the canvas to re-render next time (fonts loaded, theme changed in place…).
     pub fn invalidate(&mut self) {
         self.canvas = None;

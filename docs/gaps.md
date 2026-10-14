@@ -60,6 +60,14 @@ revision history.
   that blanked whole slides. Still missing: UI-level (kittest) soak, memory and timing budgets.
 - **Impact:** long-session crash rate is now sampled in CI; slowdowns are not measured.
 - **Estimate:** 2–4 h left.
+### Soak testing is new
+- **Evidence:** `crates/ui-egui/src/ui_soak_tests.rs` drives the whole window with seeded random
+  clicks, drags, keys (plain, Ctrl, Shift), typing and scrolling over the sample deck, checking
+  document validity, bounded undo/journal/thumbnail/texture caches, zero caught command and
+  render panics (`Session::panics_caught`, `deckcraft_render::panics_caught`) and a mean frame
+  under 250 ms; 4 × 3000-action runs are clean. Engine-level command soak: PR #502.
+- **Impact:** long-session crash rate is sampled in CI; RSS is not measured directly.
+- **Estimate:** 1–2 h (RSS sampling per platform).
 
 ## File formats
 

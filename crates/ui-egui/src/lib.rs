@@ -1189,6 +1189,8 @@ fn js_now() -> f64 {
 mod eyedropper_tests;
 #[cfg(test)]
 mod ime_tests;
+#[cfg(test)]
+mod ui_soak_tests;
 
 #[cfg(test)]
 mod tests {
