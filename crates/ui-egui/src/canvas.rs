@@ -84,6 +84,17 @@ pub fn layout(app: &SlideApp, avail: Rect) -> (Rect, f32) {
     (r, scale)
 }
 
+/// A trackpad flick or mouse-wheel notch that should turn the page.
+///
+/// The stronger axis wins, so a sideways swipe is not read as a vertical scroll. Negative
+/// movement — the content moves left or up, which is a swipe left or up with natural scrolling —
+/// is the next slide. A nudge under 18 points is ignored so a resting finger does not change slides.
+pub(crate) fn page_flick(wheel: egui::Vec2) -> Option<bool> {
+    const MIN_FLICK: f32 = 18.0;
+    let along = if wheel.x.abs() > wheel.y.abs() { wheel.x } else { wheel.y };
+    (along.abs() > MIN_FLICK).then_some(along < 0.0)
+}
+
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let avail = ui.available_rect_before_wrap();
@@ -123,15 +134,20 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     if resp.hovered() && !zooming {
         if overflow != egui::Vec2::ZERO {
             offset -= wheel;
-        } else if wheel.y.abs() > 18.0 && !app.anim_preview_active() && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
-            // Wheel over a fitted slide pages through slides (like PowerPoint).
-            let id = if wheel.y < 0.0 { "slide.next" } else { "slide.previous" };
+        } else if !app.anim_preview_active()
+            && app.session.tool.marquee.is_none()
+            && !app.session.tool.dragging()
+            && let Some(next) = page_flick(wheel)
+        {
+            // A fitted slide: the mouse wheel and a trackpad swipe turn the page. Pinch zoom is
+            // the branch above and is left alone.
             let gate = ui.id().with("wheel_gate");
-            let last: f64 = ui.data_mut(|d| d.get_temp(gate).unwrap_or(0.0));
+            // No previous flick yet: the first one must turn the page, not wait out the gap.
+            let last: f64 = ui.data_mut(|d| d.get_temp(gate).unwrap_or(f64::NEG_INFINITY));
             let now = ui.input(|i| i.time);
             if now - last > 0.35 {
                 ui.data_mut(|d| d.insert_temp(gate, now));
-                let _ = app.run(id, json!({}));
+                let _ = app.run(if next { "slide.next" } else { "slide.previous" }, json!({}));
             }
         }
     }

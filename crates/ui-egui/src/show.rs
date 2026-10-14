@@ -53,6 +53,8 @@ pub struct Show {
     notes_px: f32,
     timings: Vec<(usize, f64)>,
     last_move: f64,
+    /// The last trackpad flick or mouse-wheel notch, so one gesture turns one page.
+    last_swipe: f64,
     pub ended: bool,
     /// The slide whose media was last started (auto-play runs once per visit).
     media_slide: Option<usize>,
@@ -199,6 +201,7 @@ impl Show {
             notes_px: NOTES_DEFAULT,
             timings: vec![],
             last_move: 0.0,
+            last_swipe: f64::NEG_INFINITY,
             ended: false,
             media_slide: None,
             last_viewed: None,
@@ -612,6 +615,24 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     if secondary && !show.ended && !show.grid && show.zoom.is_none() && !show.zoom_arm {
         actions.push(show.state.prev(&doc));
+    }
+    // A trackpad swipe (and the mouse wheel) turns the page. The pen is drawing, so a flick
+    // there stays on the slide. Pinch zoom is not a show gesture.
+    if !show.pen
+        && let Some(next) = crate::canvas::page_flick(ctx.input(|i| i.smooth_scroll_delta))
+        && now - show.last_swipe > 0.35
+    {
+        show.last_swipe = now;
+        if next {
+            if show.ended {
+                keep = false;
+            } else {
+                actions.push(show.state.next(&doc));
+            }
+        } else {
+            show.ended = false;
+            actions.push(show.state.prev(&doc));
+        }
     }
     // Apply input first: a step started by this click must restart the clock before it is read.
     for a in actions.drain(..) {
