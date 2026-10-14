@@ -643,6 +643,8 @@ mod color_at_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::write_file;
 
     fn scratch(name: &str) -> std::path::PathBuf {

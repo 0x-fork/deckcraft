@@ -1096,8 +1096,11 @@ fn designer(app: &mut SlideApp, ui: &mut Ui) {
                 idx,
                 &deckcraft_render::RenderOpts { scale: px as f64 / d.slide_size.width.max(1.0), size: Some((px, h)), ..Default::default() },
             );
-            let tex =
-                ui.ctx().load_texture(format!("idea-{name}"), crate::textures::to_color_image(&img, false), crate::textures::editor_texture_options());
+            let tex = ui.ctx().load_texture(
+                format!("idea-{name}"),
+                crate::textures::to_color_image(&img, false),
+                crate::textures::editor_texture_options(),
+            );
             cache.tex.push((name, tex, px, h));
         };
         for (id, _) in &ideas {

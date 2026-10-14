@@ -6,9 +6,9 @@ use deckcraft_model::{Presentation, SlideId};
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, Ui, WidgetInfo, WidgetType, pos2, vec2};
 use serde_json::json;
 
+use crate::SlideApp;
 use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens};
-use crate::SlideApp;
 
 /// Sorter-only state. Nothing here is part of the document.
 #[derive(Debug, Default)]

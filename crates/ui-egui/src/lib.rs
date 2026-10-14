@@ -1943,10 +1943,7 @@ mod tests {
         harness.get_by_label("missing.deckcraft").click();
         harness.run_steps(2);
         assert!(harness.state().toast.is_some(), "the open error was raised");
-        assert!(
-            harness.get_all_by_label_contains("missing.deckcraft").count() >= 2,
-            "the open error is drawn on the page, next to the entry"
-        );
+        assert!(harness.get_all_by_label_contains("missing.deckcraft").count() >= 2, "the open error is drawn on the page, next to the entry");
     }
 
     /// #172: a Recent entry can be removed from the list.
