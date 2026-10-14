@@ -440,6 +440,12 @@ fn font_group(app: &mut SlideApp, ui: &mut Ui, st: &Value) {
                             ui.separator();
                         }
                     }
+                    ui.separator();
+                    // Fonts installed while DeckCraft runs (e.g. into ~/.local/share/fonts).
+                    if ui.button("Rescan Installed Fonts").clicked() {
+                        run(app, "font.rescan", json!({}));
+                        ui.close();
+                    }
                 });
                 let size_text = size.map(|s| widgets::fmt_num(s, "")).unwrap_or_default();
                 dropdown(ui, "size", &size_text, 52.0, en, |ui| {

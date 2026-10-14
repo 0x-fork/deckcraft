@@ -13,6 +13,8 @@ use crate::{Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        cmd!(noundo "font.add", "Add Font", [], None, "{data: base64 TTF/OTF/TTC} → {faces} added for this session", always, font_add),
+        cmd!(noundo "font.rescan", "Rescan Installed Fonts", ["Home", "Font"], None, "{} → {faces, families} (fonts installed since start-up)", always, font_rescan),
         cmd!("format.bold", "Bold", ["Home", "Font"], Some("Cmd+B"), "{on?: bool}", has_text_or_shapes, bold),
         cmd!("format.italic", "Italic", ["Home", "Font"], Some("Cmd+I"), "{on?: bool}", has_text_or_shapes, italic),
         cmd!(
@@ -681,4 +683,27 @@ fn state(s: &mut Session, _p: &Value) -> Result<Value> {
         "lineSpacing": serde_json::to_value(pp.line_spacing).unwrap_or_default(),
         "painter": s.painter.is_some(),
     }))
+}
+
+/// Add a font from its bytes for this session (it then shows in the font menu and draws).
+fn font_add(_s: &mut Session, p: &Value) -> Result<Value> {
+    let data = str_param(p, "data").and_then(base64_decode).ok_or_else(|| bad("font.add", "missing or invalid base64 `data`"))?;
+    if data.len() > 64 << 20 {
+        return Err(bad("font.add", "font file larger than 64 MB"));
+    }
+    let faces = deckcraft_fonts::FontDb::global().add_font(data);
+    if faces == 0 {
+        return Err(bad("font.add", "not a font DeckCraft can read (or already added)"));
+    }
+    Ok(json!({"faces": faces}))
+}
+
+/// Catalog the installed fonts again, so fonts installed while DeckCraft runs appear.
+fn font_rescan(_s: &mut Session, _p: &Value) -> Result<Value> {
+    let db = deckcraft_fonts::FontDb::global();
+    #[cfg(not(target_arch = "wasm32"))]
+    let faces = db.load_system_fonts();
+    #[cfg(target_arch = "wasm32")]
+    let faces = 0usize;
+    Ok(json!({"faces": faces, "families": db.families().len()}))
 }

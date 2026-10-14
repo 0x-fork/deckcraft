@@ -503,8 +503,85 @@ pub fn system_font_dirs() -> Vec<std::path::PathBuf> {
             dirs.push(h.join(".fonts"));
             dirs.push(h.join(".local/share/fonts"));
         }
+        let env = |k: &str| std::env::var_os(k).map(|v| v.to_string_lossy().into_owned());
+        dirs.extend(xdg_font_dirs(env("XDG_DATA_HOME").as_deref(), env("XDG_DATA_DIRS").as_deref(), home.as_deref()));
+        // Inside Flatpak the host's fonts are mounted here.
+        dirs.extend(["/run/host/fonts", "/run/host/local-fonts", "/run/host/user-fonts"].map(Into::into));
+        // Folders fontconfig is configured with (NixOS, Guix, custom setups).
+        for conf in fontconfig_files() {
+            if let Ok(text) = std::fs::read_to_string(&conf) {
+                dirs.extend(fontconfig_dirs(&text, env("XDG_DATA_HOME").as_deref(), home.as_deref()));
+            }
+        }
     }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|d| seen.insert(d.clone()));
     dirs
+}
+
+/// `<data dir>/fonts` for `XDG_DATA_HOME` (default `~/.local/share`) and each `XDG_DATA_DIRS`
+/// entry (default `/usr/local/share:/usr/share`).
+fn xdg_font_dirs(data_home: Option<&str>, data_dirs: Option<&str>, home: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut v = vec![];
+    match data_home.filter(|d| !d.is_empty()) {
+        Some(d) => v.push(std::path::Path::new(d).join("fonts")),
+        None => {
+            if let Some(h) = home {
+                v.push(h.join(".local/share/fonts"));
+            }
+        }
+    }
+    let dirs = data_dirs.filter(|d| !d.is_empty()).unwrap_or("/usr/local/share:/usr/share");
+    v.extend(dirs.split(':').filter(|d| d.starts_with('/')).take(64).map(|d| std::path::Path::new(d).join("fonts")));
+    v
+}
+
+/// The fontconfig configuration files: `/etc/fonts/fonts.conf` and `/etc/fonts/conf.d/*.conf`.
+fn fontconfig_files() -> Vec<std::path::PathBuf> {
+    let mut v = vec![std::path::PathBuf::from("/etc/fonts/fonts.conf"), std::path::PathBuf::from("/etc/fonts/local.conf")];
+    if let Ok(entries) = std::fs::read_dir("/etc/fonts/conf.d") {
+        let mut files: Vec<_> = entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "conf")).collect();
+        files.sort();
+        files.truncate(512);
+        v.extend(files);
+    }
+    v
+}
+
+/// The `<dir>` folders of a fontconfig file (`prefix="xdg"` is under `XDG_DATA_HOME`, a leading
+/// `~` under home; relative and `cachedir` entries are skipped).
+fn fontconfig_dirs(text: &str, data_home: Option<&str>, home: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
+    let mut v = vec![];
+    let mut rest = text;
+    while let Some(start) = rest.find("<dir") {
+        let after = &rest[start + 4..];
+        // `<dir>` or `<dir …>`, not `<dirname>`.
+        if !(after.starts_with('>') || after.starts_with(' ')) {
+            rest = after;
+            continue;
+        }
+        let Some(gt) = after.find('>') else { break };
+        let attrs = &after[..gt];
+        let body = &after[gt + 1..];
+        let Some(end) = body.find("</dir>") else { break };
+        let path = body[..end].trim();
+        rest = &body[end..];
+        if attrs.trim_end().ends_with('/') || path.is_empty() || v.len() >= 64 {
+            continue;
+        }
+        let p = if attrs.contains("prefix=\"xdg\"") {
+            let base = data_home.filter(|d| !d.is_empty()).map(std::path::PathBuf::from).or_else(|| home.map(|h| h.join(".local/share")));
+            base.map(|b| b.join(path))
+        } else if let Some(r) = path.strip_prefix("~/") {
+            home.map(|h| h.join(r))
+        } else if path.starts_with('/') {
+            Some(std::path::PathBuf::from(path))
+        } else {
+            None
+        };
+        v.extend(p);
+    }
+    v
 }
 
 /// One face found in a font file: index, family, style and (variable fonts) the named instance's
@@ -1290,5 +1367,55 @@ impl OutlinePen for FlipPen {
     }
     fn close(&mut self) {
         self.0.close_path();
+    }
+}
+
+#[cfg(test)]
+mod font_dir_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+
+    #[test]
+    fn xdg_data_dirs_contribute_their_fonts_folders() {
+        let home = Path::new("/home/ann");
+        assert_eq!(
+            xdg_font_dirs(None, None, Some(home)),
+            [home.join(".local/share/fonts"), "/usr/local/share/fonts".into(), "/usr/share/fonts".into()]
+        );
+        let v = xdg_font_dirs(Some("/data/ann"), Some("/nix/profile/share:relative:/var/lib/flatpak/exports/share"), Some(home));
+        assert_eq!(v, [PathBuf::from("/data/ann/fonts"), "/nix/profile/share/fonts".into(), "/var/lib/flatpak/exports/share/fonts".into()]);
+    }
+
+    #[test]
+    fn fontconfig_dir_entries_are_read() {
+        let conf = r#"<?xml version="1.0"?>
+<fontconfig>
+  <dir>/usr/share/fonts</dir>
+  <dir prefix="xdg">fonts</dir>
+  <dir>~/.fonts</dir>
+  <dir>relative/fonts</dir>
+  <cachedir>/var/cache/fontconfig</cachedir>
+  <dirname>ignored</dirname>
+  <dir>/nix/store/abc-fonts/share/fonts</dir>
+</fontconfig>"#;
+        let home = Path::new("/home/ann");
+        let v = fontconfig_dirs(conf, None, Some(home));
+        assert_eq!(
+            v,
+            [PathBuf::from("/usr/share/fonts"), home.join(".local/share/fonts"), home.join(".fonts"), "/nix/store/abc-fonts/share/fonts".into()]
+        );
+        assert!(fontconfig_dirs("<dir>/never closed", None, Some(home)).is_empty());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn linux_dirs_include_flatpak_host_fonts_without_duplicates() {
+        let d = system_font_dirs();
+        assert!(d.contains(&PathBuf::from("/run/host/user-fonts")));
+        let mut u = d.clone();
+        u.sort();
+        u.dedup();
+        assert_eq!(u.len(), d.len());
     }
 }
