@@ -2816,6 +2816,18 @@ fn table_design(app: &mut SlideApp, ui: &mut Ui) {
             });
         });
     });
+    // Draw Borders: the pencil splits cells along a line, the eraser merges across a border.
+    group(ui, |ui| {
+        use deckcraft_engine::ToolKind;
+        use deckcraft_engine::tools::{DRAW_TABLE, TABLE_ERASER};
+        let cur = app.session.tool.kind.clone();
+        for (icon, label, preset) in [(Icon::Pencil, "Draw Table", DRAW_TABLE), (Icon::Eraser, "Table Eraser", TABLE_ERASER)] {
+            let on = matches!(&cur, ToolKind::Shape { preset: p } if p == preset);
+            if big_button_ex(ui, icon, label, true, false, on).0.clicked() {
+                app.session.set_tool(if on { ToolKind::Select } else { ToolKind::Shape { preset: preset.into() } });
+            }
+        }
+    });
 }
 
 /// A Picture Styles gallery tile: a landscape "picture" in the style's shape and frame.
@@ -2887,18 +2899,6 @@ fn paint_recolor(p: &egui::Painter, r: Rect, id: &str, sc: &deckcraft_color::Col
         p.rect_filled(Rect::from_min_size(pos2(r.left() + k as f32 * w, r.top()), vec2(w + 0.5, r.height())), CornerRadius::ZERO, c);
     }
     p.rect_stroke(r, CornerRadius::ZERO, Stroke::new(0.5, Color32::from_gray(160)), egui::StrokeKind::Outside);
-    // Draw Borders: the pencil splits cells along a line, the eraser merges across a border.
-    group(ui, |ui| {
-        use deckcraft_engine::ToolKind;
-        use deckcraft_engine::tools::{DRAW_TABLE, TABLE_ERASER};
-        let cur = app.session.tool.kind.clone();
-        for (icon, label, preset) in [(Icon::Pencil, "Draw Table", DRAW_TABLE), (Icon::Eraser, "Table Eraser", TABLE_ERASER)] {
-            let on = matches!(&cur, ToolKind::Shape { preset: p } if p == preset);
-            if big_button_ex(ui, icon, label, true, false, on).0.clicked() {
-                app.session.set_tool(if on { ToolKind::Select } else { ToolKind::Shape { preset: preset.into() } });
-            }
-        }
-    });
 }
 
 pub fn paint_table_style(p: &egui::Painter, r: Rect, id: &str, sc: &deckcraft_color::ColorScheme) {
