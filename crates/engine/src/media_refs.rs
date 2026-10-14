@@ -4,7 +4,7 @@
 //! rewrites them in place. It covers pictures (and their artistic-effect originals), picture fills
 //! wherever a fill can sit (shapes, lines, text runs, table cells and styles, chart series and
 //! points, backgrounds, theme format schemes), media clips and their posters, 3-D models, OLE and
-//! SmartArt previews, SmartArt node pictures, picture bullets, hyperlink, transition and
+//! SmartArt previews and kept parts, SmartArt node pictures, picture bullets, hyperlink, transition and
 //! animation sounds, and embedded font faces. Adding a `MediaId` field to the model means adding
 //! it here; the shape kinds are matched exhaustively so a new kind can't be missed.
 
@@ -164,9 +164,14 @@ macro_rules! walkers {
                         f(p);
                     }
                 }
-                ShapeKind::Opaque { preview, .. } => {
+                // Every field named, so a new one can't slip past.
+                ShapeKind::Opaque { xml: _, preview, label: _, parts } => {
                     if let Some(p) = preview {
                         f(p);
+                    }
+                    // SmartArt data, OLE embeddings… kept as media items (#209).
+                    for (_, _, id) in parts {
+                        f(id);
                     }
                 }
             }
@@ -386,5 +391,20 @@ mod tests {
         let mut got = slide_media(&s);
         got.sort();
         assert_eq!(got, (9101..=9108).map(MediaId).collect::<Vec<_>>());
+    }
+
+    /// SmartArt and OLE objects keep their parts as media items (#209); those count as used.
+    #[test]
+    fn kept_parts_of_unmodelled_objects_are_references() {
+        let opaque = Shape {
+            kind: ShapeKind::Opaque {
+                xml: String::new(),
+                preview: Some(MediaId(9101)),
+                label: "object".into(),
+                parts: vec![("rId2".into(), "oleObject".into(), MediaId(9102))],
+            },
+            ..Default::default()
+        };
+        assert_eq!(shapes_media(std::slice::from_ref(&opaque)), vec![MediaId(9101), MediaId(9102)]);
     }
 }
