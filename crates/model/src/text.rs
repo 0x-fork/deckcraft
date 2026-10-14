@@ -370,6 +370,8 @@ pub struct RunProps {
     pub outline: Option<Line>,
     pub highlight: Option<ColorRef>,
     pub link: Option<Hyperlink>,
+    /// Action on mouse over (Insert ▸ Action ▸ Mouse Over on selected text, `a:hlinkMouseOver`).
+    pub hover: Option<Hyperlink>,
     pub lang: Option<String>,
     pub shadow: Option<crate::style::Shadow>,
     /// `a:innerShdw` on the run. Outer shadow stays in `shadow`.
@@ -406,6 +408,7 @@ impl RunProps {
             outline,
             highlight,
             link,
+            hover,
             lang,
             shadow,
             inner_shadow,

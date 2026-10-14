@@ -522,6 +522,7 @@ pub fn rpr(imp: &mut Imp, part: &Part, r: &El) -> RunProps {
             "cs" => p.font_cs = e.attr("typeface").filter(|t| !t.is_empty()).map(String::from),
             "sym" => p.font_sym = e.attr("typeface").filter(|t| !t.is_empty()).map(String::from),
             "hlinkClick" => p.link = hyperlink(imp, part, e),
+            "hlinkMouseOver" => p.hover = hyperlink(imp, part, e),
             _ => {}
         }
     }

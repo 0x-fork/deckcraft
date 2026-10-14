@@ -108,6 +108,11 @@ Detail in [file-format-parity.md](file-format-parity.md).
   video bookmarks and trims, a section holding a hidden slide, slide-number and date fields, ink
   (saved as freeform lines), `.glb` 3-D models, and animation repeat, bounce end and triggers.
   Playback options (#74) and rewind (#77) are still lost.
+- **Evidence:** every PPTX test (`crates/pptx/tests`, 30 tests) uses decks DeckCraft generates;
+  the 2026-10-07 alpha checklist already listed this as open. No reference renders from PowerPoint
+  exist to compare against. `crates/pptx/tests/corpus_themes.rs` starts on PowerPoint-shaped XML:
+  themes and two masters with their layouts, shadow/glow/soft-edge/reflection effects, and text
+  and shape hyperlinks and actions (text Mouse Over actions were dropped; now kept).
 - **Impact:** the main reason to switch is "open my PowerPoint decks". Fidelity on real decks
   (corporate templates, SmartArt, `chartex` charts, embedded fonts, EMF) is still mostly unknown.
 - **Estimate:** 20–35 h: grow the owned corpus in `storytold/photocraft-corpus` style (craftrules
@@ -336,6 +341,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-13 | minor | Owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors. A run's inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML, are kept. #70, #74, #77 and embedded fonts stay open |
 | 2026-10-13 | minor | Benchmark suite (`cargo xtask bench`, `deckcraft-cli bench`): the performance gap is now frame rate and a PowerPoint comparison |
 | 2026-10-14 | minor | Owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end now round-trip. The real-deck corpus and #70/#74/#77 stay open |
+| 2026-10-14 | trivial | Corpus slice: themes, masters, effects and links; text Mouse Over actions round-trip |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
