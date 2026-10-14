@@ -35,19 +35,34 @@ fn rich_text(t: &El) -> Option<String> {
     tx.find("v").map(|v| v.text())
 }
 
-/// String values from `c:cat`/`c:tx` (str or num refs, caches or literals).
-fn strings(e: &El) -> Vec<String> {
+/// Most category/value/size slots one chart may decode across all its series and caches, so
+/// sparse `ptCount`/`idx` declarations can't expand far beyond the XML they came from.
+pub(crate) const MAX_CHART_POINTS: usize = 1_000_000;
+
+/// Most slots one cache may hold.
+const MAX_CACHE_POINTS: usize = 100_000;
+
+/// String values from `c:cat`/`c:tx` (str or num refs, caches or literals). Every slot returned
+/// is taken from `budget`; once it runs out the values are cut short.
+fn strings(e: &El, budget: &mut usize) -> Vec<String> {
+    let cap = MAX_CACHE_POINTS.min(*budget);
+    let out = strings_capped(e, cap);
+    *budget = budget.saturating_sub(out.len());
+    out
+}
+
+fn strings_capped(e: &El, cap: usize) -> Vec<String> {
     let cache = e.find("strCache").or_else(|| e.find("numCache")).or_else(|| e.find("strLit")).or_else(|| e.find("numLit"));
     if let Some(c) = cache {
-        let n = c.child("ptCount").and_then(|p| p.u32("val")).unwrap_or(0).min(100_000) as usize;
+        let n = (c.child("ptCount").and_then(|p| p.u32("val")).unwrap_or(0) as usize).min(cap);
         let mut out = vec![String::new(); n];
-        for pt in c.children_named("pt").take(100_000) {
+        for pt in c.children_named("pt").take(MAX_CACHE_POINTS) {
             let i = pt.u32("idx").unwrap_or(0) as usize;
+            if i >= cap {
+                continue;
+            }
             let v = pt.child("v").map(|v| v.text()).unwrap_or_default();
             if i >= out.len() {
-                if i >= 100_000 {
-                    continue;
-                }
                 out.resize(i + 1, String::new());
             }
             if let Some(s) = out.get_mut(i) {
@@ -59,17 +74,19 @@ fn strings(e: &El) -> Vec<String> {
     if let Some(ml) = e.find("multiLvlStrCache") {
         // Use the innermost level.
         if let Some(l) = ml.child("lvl") {
-            return l.children_named("pt").map(|p| p.child("v").map(|v| v.text()).unwrap_or_default()).collect();
+            return l.children_named("pt").take(cap).map(|p| p.child("v").map(|v| v.text()).unwrap_or_default()).collect();
         }
     }
-    if let Some(v) = e.child("v") {
+    if cap > 0
+        && let Some(v) = e.child("v")
+    {
         return vec![v.text()];
     }
     vec![]
 }
 
-fn numbers(e: &El) -> Vec<Option<f64>> {
-    strings(e).into_iter().map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite())).collect()
+fn numbers(e: &El, budget: &mut usize) -> Vec<Option<f64>> {
+    strings(e, budget).into_iter().map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite())).collect()
 }
 
 /// Parse a chart part. Returns `None` for something that isn't a chart we can read.
@@ -86,6 +103,11 @@ pub fn read_chart_xml(bytes: &[u8]) -> Option<Chart> {
 }
 
 pub(crate) fn chart_from(root: &El) -> Option<Chart> {
+    chart_within(root, MAX_CHART_POINTS)
+}
+
+/// [`chart_from`] decoding at most `budget` data slots in all.
+fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
     let ch = root.child("chart")?;
     let pa = ch.child("plotArea")?;
     let mut c = Chart { categories: vec![], series: vec![], title: None, legend: None, gridlines: false, ..Default::default() };
@@ -190,7 +212,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
         let secondary = val_axis.is_some() && val_axis != primary_val;
         for s in g.children_named("ser").take(1000) {
             let mut ser = Series {
-                name: s.child("tx").map(strings).and_then(|v| v.into_iter().next()).unwrap_or_default(),
+                name: s.child("tx").map(|t| strings(t, &mut budget)).and_then(|v| v.into_iter().next()).unwrap_or_default(),
                 fill: simple_fill(s.child("spPr")),
                 line: simple_line(s.child("spPr")),
                 smooth: s.child("smooth").and_then(|v| v.bool("val")).unwrap_or(false),
@@ -218,7 +240,7 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
                 }
             }
             if let Some(cat) = s.child("cat").or_else(|| s.child("xVal")) {
-                let cats = strings(cat);
+                let cats = strings(cat, &mut budget);
                 if matches!(kind, ChartType::Scatter | ChartType::Bubble) {
                     ser.x_values = cats.iter().map(|v| v.trim().parse::<f64>().ok()).collect();
                 }
@@ -227,10 +249,10 @@ pub(crate) fn chart_from(root: &El) -> Option<Chart> {
                 }
             }
             if let Some(v) = s.child("val").or_else(|| s.child("yVal")) {
-                ser.values = numbers(v);
+                ser.values = numbers(v, &mut budget);
             }
             if let Some(b) = s.child("bubbleSize") {
-                ser.sizes = numbers(b);
+                ser.sizes = numbers(b, &mut budget);
             }
             c.series.push(ser);
         }
@@ -309,6 +331,32 @@ fn text_size(e: Option<&El>) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sparse_caches_share_one_chart_wide_budget() {
+        // Every series declares 100000 points but writes one: without a chart-wide budget each
+        // would expand to the full count.
+        let ser = |n: usize| {
+            format!(
+                r#"<c:ser><c:idx val="{n}"/><c:val><c:numRef><c:numCache><c:ptCount val="100000"/><c:pt idx="0"><c:v>{n}</c:v></c:pt></c:numCache></c:numRef></c:val></c:ser>"#
+            )
+        };
+        let sers: String = (0..5).map(ser).collect();
+        let xml = format!(
+            r#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/>{sers}</c:barChart></c:plotArea></c:chart></c:chartSpace>"#
+        );
+        let doc = crate::xml::parse(xml.as_bytes()).unwrap();
+        let c = chart_within(&doc.root, 250_000).unwrap();
+        let total: usize = c.series.iter().map(|s| s.values.len()).sum();
+        assert!(total <= 250_000, "{total}");
+        assert_eq!(c.series.len(), 5);
+        assert_eq!(c.series[0].values.len(), 100_000);
+        assert_eq!(c.series[0].values[0], Some(0.0));
+        assert!(c.series[4].values.is_empty(), "the budget ran out before the last series");
+        // A small chart is untouched by the default budget.
+        let c = chart_from(&doc.root).unwrap();
+        assert!(c.series.iter().all(|s| s.values.len() == 100_000));
+    }
 
     #[test]
     fn legend_position_and_overlay_are_read() {

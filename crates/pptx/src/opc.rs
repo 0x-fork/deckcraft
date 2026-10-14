@@ -12,6 +12,9 @@ pub const MAX_PART: u64 = 512 * 1024 * 1024;
 pub const MAX_XML_PART: usize = 96 * 1024 * 1024;
 /// Total decompressed bytes accepted for one package.
 pub const MAX_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
+/// Total bytes we are willing to decompress for one package, counting parts we then discard
+/// (too large, or failing part-way): bounds inflate work, not just what is kept.
+pub const MAX_INFLATE_WORK: u64 = 2 * MAX_TOTAL;
 /// Maximum number of zip entries.
 pub const MAX_ENTRIES: usize = 50_000;
 
@@ -38,13 +41,22 @@ pub struct Package {
 
 impl Package {
     pub fn open(bytes: &[u8]) -> Result<Self, PptxError> {
+        Self::open_within(bytes, MAX_PART, MAX_TOTAL, MAX_INFLATE_WORK)
+    }
+    /// [`Package::open`] with explicit limits: per part, kept in total, and inflated in total.
+    fn open_within(bytes: &[u8], max_part: u64, max_total: u64, max_work: u64) -> Result<Self, PptxError> {
         let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| PptxError::NotPptx(format!("{e}")))?;
         if zip.len() > MAX_ENTRIES {
             return Err(PptxError::NotPptx(format!("too many entries ({})", zip.len())));
         }
         let mut parts = HashMap::new();
         let mut total: u64 = 0;
+        let mut work: u64 = 0;
         for i in 0..zip.len() {
+            if work >= max_work {
+                log::warn!("pptx: decompression budget spent; skipping the remaining {} entries", zip.len() - i);
+                break;
+            }
             let mut f = match zip.by_index(i) {
                 Ok(f) => f,
                 Err(e) => {
@@ -57,13 +69,16 @@ impl Package {
             }
             let name = f.name().trim_start_matches('/').to_string();
             let declared = f.size();
-            if declared > MAX_PART {
+            if declared > max_part {
                 log::warn!("pptx: skipping oversized part {name} ({declared} bytes)");
                 continue;
             }
             let mut data = Vec::with_capacity(declared.min(16 * 1024 * 1024) as usize);
-            let cap = MAX_PART.min(MAX_TOTAL.saturating_sub(total));
-            match (&mut f).take(cap.saturating_add(1)).read_to_end(&mut data) {
+            let cap = max_part.min(max_total.saturating_sub(total)).min(max_work.saturating_sub(work));
+            let read = (&mut f).take(cap.saturating_add(1)).read_to_end(&mut data);
+            // Charge what was inflated whether or not the part is kept.
+            work = work.saturating_add(data.len() as u64);
+            match read {
                 Ok(_) if data.len() as u64 > cap => {
                     log::warn!("pptx: part {name} exceeds size limits; skipped");
                     continue;
@@ -81,6 +96,15 @@ impl Package {
     }
     pub fn get(&self, name: &str) -> Option<&[u8]> {
         self.parts.get(&norm(name)).map(|(_, d)| d.as_slice())
+    }
+    /// An XML part's bytes, when it is within the XML size limit.
+    pub fn xml_bytes(&self, name: &str) -> Option<&[u8]> {
+        let b = self.get(name)?;
+        if b.len() > MAX_XML_PART {
+            log::warn!("pptx: XML part {name} too large");
+            return None;
+        }
+        Some(b)
     }
     /// Parse an XML part.
     pub fn xml(&self, name: &str) -> Option<xml::Doc> {
@@ -353,6 +377,39 @@ impl PackageOut {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn zip_of(entries: &[(&str, usize)]) -> Vec<u8> {
+        let mut zw = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let o = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        for (name, len) in entries {
+            zw.start_file(*name, o).unwrap();
+            zw.write_all(&vec![b'x'; *len]).unwrap();
+        }
+        zw.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn discarded_parts_count_against_the_inflate_budget() {
+        // Kept bytes cap at 100: b, c and d are inflated past what's left and discarded. That
+        // work is charged, so after d the budget (130) is spent and e is not read, although it
+        // would have fit.
+        let z = zip_of(&[("a", 80), ("b", 80), ("c", 80), ("d", 80), ("e", 5)]);
+        let p = Package::open_within(&z, 1000, 100, 130).unwrap();
+        assert!(p.get("a").is_some());
+        assert!(p.get("b").is_none() && p.get("d").is_none());
+        assert!(p.get("e").is_none(), "the inflate budget stops reading");
+        // With room to spare the same small part is kept.
+        let p = Package::open_within(&z, 1000, 100, 10_000).unwrap();
+        assert!(p.get("e").is_some());
+    }
+
+    #[test]
+    fn xml_bytes_applies_the_xml_limit() {
+        let z = zip_of(&[("small.xml", 10)]);
+        let p = Package::open(&z).unwrap();
+        assert_eq!(p.xml_bytes("small.xml").map(<[u8]>::len), Some(10));
+        assert!(p.xml_bytes("missing.xml").is_none());
+    }
 
     #[test]
     fn path_resolution() {

@@ -367,7 +367,7 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
         }
         if let Some(c) = gd.child("chart")
             && let Some(rel) = part.rels.get(c.attr("r:id").unwrap_or(""))
-            && let Some(bytes) = imp.pkg.get(&rel.target)
+            && let Some(bytes) = imp.pkg.xml_bytes(&rel.target)
             && let Some(chart) = super::read_chart_xml(bytes)
         {
             s.kind = ShapeKind::Chart(Box::new(chart));
@@ -403,15 +403,37 @@ fn frame(imp: &mut Imp, part: &Part, ctx: &mut IdCtx, e: &El, depth: usize) -> S
 /// `v:imagedata` of the legacy VML drawing shape with that id, as PowerPoint 2007 wrote them.
 fn vml_preview(imp: &mut Imp, part: &Part, spid: &str) -> Option<deckcraft_model::MediaId> {
     for rel in part.rels.items.iter().filter(|r| r.kind == "vmlDrawing" && !r.external) {
-        let Some(doc) = imp.pkg.xml(&rel.target) else { continue };
-        let mut shapes = vec![];
-        doc.root.find_all("shape", &mut shapes);
-        let Some(img) = shapes.into_iter().find(|s| s.attr("id") == Some(spid)).and_then(|s| s.find("imagedata")) else { continue };
-        let Some(id) = img.attr("o:relid").or(img.attr("r:id")) else { continue };
-        let target = imp.pkg.rels(&rel.target).get(id).filter(|r| !r.external).map(|r| r.target.clone())?;
+        let key = crate::opc::norm(&rel.target);
+        if !imp.vml_previews.contains_key(&key) {
+            let index = vml_index(imp.pkg, &rel.target);
+            imp.vml_previews.insert(key.clone(), index);
+        }
+        let Some(target) = imp.vml_previews.get(&key).and_then(|m| m.get(spid)).cloned() else { continue };
         return imp.media_for(&target);
     }
     None
+}
+
+/// Every shape id in a VML drawing with a picture, mapped to that picture's part: parsed once per
+/// drawing however many objects look it up.
+fn vml_index(pkg: &crate::opc::Package, vml: &str) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let Some(doc) = pkg.xml(vml) else { return out };
+    let rels = pkg.rels(vml);
+    let mut shapes = vec![];
+    doc.root.find_all("shape", &mut shapes);
+    for s in shapes {
+        let Some(id) = s.attr("id") else { continue };
+        if out.contains_key(id) {
+            continue; // the first shape with an id wins, as the old lookup did
+        }
+        let Some(img) = s.find("imagedata") else { continue };
+        let Some(rid) = img.attr("o:relid").or(img.attr("r:id")) else { continue };
+        if let Some(r) = rels.get(rid).filter(|r| !r.external) {
+            out.insert(id.to_string(), r.target.clone());
+        }
+    }
+    out
 }
 
 /// SmartArt: read the pre-drawn shapes of its drawing part as a group.
