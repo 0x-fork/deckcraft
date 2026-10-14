@@ -106,6 +106,18 @@ fn field(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: &str) {
     d.fields.insert(key.into(), v);
 }
 
+/// "Mark as decorative" starts checked when every selected shape is already decorative.
+fn alt_text_starts_decorative(decorative: impl IntoIterator<Item = bool>) -> bool {
+    let mut any = false;
+    for on in decorative {
+        if !on {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
 fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> bool {
     let mut v = d.get(key, if default { "1" } else { "0" }) == "1";
     ui.checkbox(&mut v, label);
@@ -345,12 +357,21 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok || cancel
         }
         "altText" => {
-            let cur = app.session.active().and_then(|s| s.selected_shapes().first().map(|x| x.descr.clone())).unwrap_or_default();
+            let (cur, deco_now) = app
+                .session
+                .active()
+                .map(|s| {
+                    let shapes = s.selected_shapes();
+                    let cur = shapes.first().map(|x| x.descr.clone()).unwrap_or_default();
+                    let deco = alt_text_starts_decorative(shapes.iter().map(|x| x.decorative));
+                    (cur, deco)
+                })
+                .unwrap_or_default();
             ui.label("How would you describe this object and its context to someone who is blind or has low vision?");
             let mut v = d.get("text", &cur);
             ui.add(egui::TextEdit::multiline(&mut v).desired_rows(4).desired_width(340.0));
             d.fields.insert("text".into(), v.clone());
-            let deco = check(ui, d, "Mark as decorative", "deco", false);
+            let deco = check(ui, d, "Mark as decorative", "deco", deco_now);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
                 run(app, "shape.altText", json!({"text": v, "decorative": deco}));
@@ -828,4 +849,18 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
         Color32::WHITE,
         Stroke::NONE,
     ));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::alt_text_starts_decorative;
+
+    #[test]
+    fn decorative_starts_checked_only_when_every_shape_is() {
+        assert!(!alt_text_starts_decorative([]));
+        assert!(!alt_text_starts_decorative([false]));
+        assert!(alt_text_starts_decorative([true]));
+        assert!(alt_text_starts_decorative([true, true]));
+        assert!(!alt_text_starts_decorative([true, false]));
+    }
 }
