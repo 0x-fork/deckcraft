@@ -505,6 +505,19 @@ fn rtl_left_and_center_alignment() {
 }
 
 #[test]
+fn layout_auto_detects_rtl_from_first_strong_character() {
+    let (p, mut sh) = bidi_setup(vec![Run::new("من ناوم هێڤاره")], 400.0, false, Align::Left);
+    // Leave props.rtl as None and props.align as None (unassigned)
+    sh.text.as_mut().unwrap().paragraphs[0].props.rtl = None;
+    sh.text.as_mut().unwrap().paragraphs[0].props.align = None;
+    let l = lay(&p, &sh, 400.0, 300.0);
+    let line = &l.lines[0];
+    assert!(line.rtl, "line should auto-detect as RTL");
+    // Line aligns to the right edge
+    assert!(line.extent.1 > 350.0, "extent right: {}", line.extent.1);
+}
+
+#[test]
 fn bidi_caret_stops_round_trip_through_hit_testing() {
     for rtl in [true, false] {
         let (p, sh) = bidi_setup(vec![Run::new(MIXED)], 2000.0, rtl, if rtl { Align::Right } else { Align::Left });

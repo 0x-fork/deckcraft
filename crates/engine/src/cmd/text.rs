@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use deckcraft_model::edit::{self as ed, Pos};
 use deckcraft_model::resolve::{self, Ctx};
-use deckcraft_model::text::{AutoFit, Hyperlink, Run, RunKind, RunProps, TextBody};
+use deckcraft_model::text::{Align, AutoFit, Hyperlink, Run, RunKind, RunProps, TextBody};
 use deckcraft_model::{Presentation, ShapeId, ShapeKind};
 use serde_json::{Value, json};
 
@@ -322,10 +322,24 @@ pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) 
         let c = ed::insert(body, at, &text, props);
         t.anchor = c;
         t.caret = c;
+        for pi in at.0..=c.0 {
+            if let Some(para) = body.paragraphs.get_mut(pi) {
+                promote_rtl_if_needed(para);
+            }
+        }
         c
     })?;
     autocorrect(s, text.chars().count() == 1)?;
     Ok(json!({"caret": [pos.0, pos.1]}))
+}
+
+fn promote_rtl_if_needed(para: &mut deckcraft_model::text::Paragraph) {
+    if para.props.rtl.is_none() && deckcraft_model::bidi::first_strong_is_rtl(&para.text()) {
+        para.props.rtl = Some(true);
+        if para.props.align.is_none() {
+            para.props.align = Some(Align::Right);
+        }
+    }
 }
 
 /// Typing right after a hyperlink doesn't extend it (as in PowerPoint): at the end of a linked
@@ -604,6 +618,11 @@ pub(crate) fn paste_body(s: &mut Session, src: &TextBody) -> Result<Value> {
         let c = ed::insert_body(body, at, src);
         t.anchor = c;
         t.caret = c;
+        for pi in at.0..=c.0 {
+            if let Some(para) = body.paragraphs.get_mut(pi) {
+                promote_rtl_if_needed(para);
+            }
+        }
         c
     })?;
     Ok(json!({"caret": [pos.0, pos.1]}))
@@ -1055,6 +1074,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
                 para.level = *lv;
                 para.props = pp.clone();
             }
+            promote_rtl_if_needed(para);
             for r in &mut para.runs {
                 r.props = keep.clone();
             }
