@@ -2022,3 +2022,29 @@ fn histogram_pareto_and_box_charts_draw() {
         assert!(n > blank + 400, "{kind:?}: {n} inked samples (blank {blank})");
     }
 }
+
+/// Multi-level treemaps and sunbursts draw their groups: the treemap's group banners and the
+/// sunburst's inner ring of groups, coloured by top-level group.
+#[test]
+fn multilevel_treemap_and_sunburst_draw_their_groups() {
+    for kind in [ChartType::Treemap, ChartType::Sunburst] {
+        let c = Chart::sample(kind);
+        let sh = Shape { id: ShapeId(623), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+            let _ = std::fs::write(format!("{dir}/{kind:?}-levels.png"), img.to_png());
+        }
+        // Distinct colours: one hue per top-level group plus lighter children.
+        let mut seen: Vec<[u8; 3]> = Vec::new();
+        for y in (60..520).step_by(8) {
+            for x in (40..920).step_by(8) {
+                let p = img.pixel(x, y);
+                let c = [p[0] / 16, p[1] / 16, p[2] / 16];
+                if c != [15, 15, 15] && !seen.contains(&c) {
+                    seen.push(c);
+                }
+            }
+        }
+        assert!(seen.len() >= 6, "{kind:?}: {} colours", seen.len());
+    }
+}

@@ -600,6 +600,9 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
         if !c.categories.is_empty() {
             w.open("cx:strDim", A::new().a("type", "cat"));
             cx_level(&mut w, &c.categories, None);
+            for lv in &c.category_levels {
+                cx_level(&mut w, lv, None);
+            }
             w.close("cx:strDim");
         }
         let ty = if matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) { "size" } else { "val" };
@@ -660,7 +663,7 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
             ChartType::BoxWhisker => {
                 w.open0("cx:layoutPr");
                 w.empty("cx:visibility", A::new().a("meanLine", "0").a("meanMarker", "1").a("nonoutliers", "0").a("outliers", "1"));
-                w.empty("cx:statistics", A::new().a("quartileMethod", "exclusive"));
+                w.empty("cx:statistics", A::new().a("quartileMethod", if c.inclusive_quartiles { "inclusive" } else { "exclusive" }));
                 w.close("cx:layoutPr");
             }
             _ => {}

@@ -14,6 +14,8 @@ const MAX_POINTS: usize = 100_000;
 #[derive(Default)]
 struct Data {
     categories: Vec<String>,
+    /// Outer category levels, innermost first.
+    levels: Vec<Vec<String>>,
     numbers: HashMap<String, (Vec<Option<f64>>, Option<String>)>,
 }
 
@@ -45,6 +47,8 @@ fn data(d: &El) -> Data {
         if dim.is("strDim") || (dim.is("numDim") && ty == "cat") {
             if ty == "cat" || out.categories.is_empty() {
                 out.categories = points(lvl);
+                // Further levels are the hierarchy's parents, innermost first.
+                out.levels = dim.children_named("lvl").skip(1).take(deckcraft_model::chart::MAX_LEVELS).map(points).collect();
             }
         } else if dim.is("numDim") {
             let vals = points(lvl).into_iter().map(|s| s.trim().parse::<f64>().ok().filter(|v| v.is_finite())).collect();
@@ -109,6 +113,10 @@ pub(crate) fn chartex_from(root: &El) -> Option<Chart> {
             ["val", "size"].iter().find_map(|t| d.numbers.get(*t)).or_else(|| d.numbers.values().next()).cloned().unwrap_or_default();
         if c.categories.is_empty() {
             c.categories = d.categories.clone();
+            c.category_levels = d.levels.clone();
+        }
+        if let Some(st) = s.child("layoutPr").and_then(|l| l.child("statistics")) {
+            c.inclusive_quartiles = st.attr("quartileMethod") == Some("inclusive");
         }
         if let Some(b) = s.child("layoutPr").and_then(|l| l.child("binning")) {
             c.bin_count = b.child("binCount").and_then(|n| n.u32("val")).filter(|n| *n > 0);

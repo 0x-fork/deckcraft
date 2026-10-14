@@ -174,7 +174,8 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     let legend_items: Vec<(String, Rgba)> = if waterfall {
         ["Increase", "Decrease", "Total"].iter().enumerate().map(|(i, n)| (n.to_string(), series_color(rctx, c, i))).collect()
     } else if matches!(c.kind, ChartType::Treemap | ChartType::Sunburst) {
-        c.categories.iter().enumerate().map(|(i, n)| (n.clone(), series_color(rctx, c, i))).collect()
+        // A hierarchy's legend names its top-level groups.
+        c.category_tree().iter().enumerate().map(|(i, n)| (n.name.clone(), series_color(rctx, c, i))).collect()
     } else if c.kind == ChartType::Funnel {
         vec![]
     } else if pie {

@@ -3,7 +3,7 @@
 //! the column chart of their bins).
 
 use deckcraft_color::Rgba;
-use deckcraft_model::chart::{BoxStats, Chart, ChartType};
+use deckcraft_model::chart::{BoxStats, Chart, ChartType, TreeNode};
 use deckcraft_model::resolve::Ctx;
 use deckcraft_model::text::{Align, Anchor};
 use kurbo::{Affine, BezPath, Point, Rect, Shape as _};
@@ -23,7 +23,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rec
     let labels = c.data_labels || c.kind == ChartType::Funnel;
     match c.kind {
         ChartType::Funnel => funnel(ctx, rctx, c, m, area, base, text_col, &vals, &value_label),
+        ChartType::Treemap if !c.category_levels.is_empty() => tree_treemap(ctx, rctx, c, m, area, base, labels.then_some(&value_label)),
         ChartType::Treemap => treemap(ctx, rctx, c, m, area, base, &vals, labels.then_some(&value_label)),
+        _ if !c.category_levels.is_empty() => tree_sunburst(ctx, rctx, c, m, area, base),
         _ => sunburst(ctx, rctx, c, m, area, base, &vals),
     }
 }
@@ -187,6 +189,162 @@ fn sunburst(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rec
         }
         a0 = a1;
     }
+}
+
+/// `col` mixed toward white by `k` (0..1): deeper hierarchy levels are lighter.
+fn lighten(col: Rgba, k: f64) -> Rgba {
+    let k = k.clamp(0.0, 0.8);
+    let f = |v: u8| (f64::from(v) + (255.0 - f64::from(v)) * k).round() as u8;
+    Rgba::rgb(f(col.r), f(col.g), f(col.b))
+}
+
+/// A multi-level treemap: top-level groups squarified by their totals, each with its label in
+/// a banner along the top, and their children squarified inside, down to the leaves. A group
+/// and everything in it take the group's colour.
+#[allow(clippy::too_many_arguments)]
+fn tree_treemap(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rect, base: f64, value_label: Option<&dyn Fn(f64) -> String>) {
+    let tree = c.category_tree();
+    #[allow(clippy::too_many_arguments)]
+    fn place(
+        ctx: &mut RenderContext,
+        rctx: &Ctx,
+        m: Affine,
+        nodes: &[TreeNode],
+        r: Rect,
+        base: f64,
+        col: &dyn Fn(usize) -> Rgba,
+        value_label: Option<&dyn Fn(f64) -> String>,
+        depth: usize,
+    ) {
+        let vals: Vec<f64> = nodes.iter().map(|n| n.value).collect();
+        for (i, (n, t)) in nodes.iter().zip(squarify(&vals, r)).enumerate() {
+            if t.area() <= 0.0 {
+                continue;
+            }
+            let fill = col(i);
+            if n.children.is_empty() {
+                ctx.set_transform(m);
+                ctx.set_paint(color(fill, 1.0));
+                ctx.fill_rect(&t);
+                ctx.set_paint(color(Rgba::WHITE, 1.0));
+                ctx.set_stroke(kurbo::Stroke::new(1.0));
+                ctx.stroke_path(&t.to_path(0.1));
+                let mut text = n.name.clone();
+                if let Some(f) = value_label {
+                    text = format!("{text}\n{}", f(n.value));
+                }
+                let inner = t.inset(-base * 0.3);
+                if inner.width() > base && inner.height() > base {
+                    label(ctx, rctx, m, &text, inner, base * 0.9, Align::Left, Anchor::Top, Rgba::WHITE, false);
+                }
+                continue;
+            }
+            // A group: its banner, then its children below it.
+            let banner = (base * 1.5).min(t.height() * 0.3);
+            ctx.set_transform(m);
+            ctx.set_paint(color(fill, 1.0));
+            ctx.fill_rect(&t);
+            if t.width() > base * 2.0 && banner > base * 0.8 {
+                let head = Rect::new(t.x0 + base * 0.3, t.y0, t.x1 - base * 0.3, t.y0 + banner);
+                label(ctx, rctx, m, &n.name, head, base, Align::Left, Anchor::Middle, Rgba::WHITE, true);
+            }
+            let inner = Rect::new(t.x0 + 1.0, t.y0 + banner, t.x1 - 1.0, t.y1 - 1.0);
+            let k = lighten(fill, 0.12 * (depth + 1) as f64);
+            place(ctx, rctx, m, &n.children, inner, base, &|_| k, value_label, depth + 1);
+            ctx.set_transform(m);
+            ctx.set_paint(color(Rgba::WHITE, 1.0));
+            ctx.set_stroke(kurbo::Stroke::new(2.0));
+            ctx.stroke_path(&t.to_path(0.1));
+        }
+    }
+    place(ctx, rctx, m, &tree, area, base, &|i| series_color(rctx, c, i), value_label, 0);
+}
+
+/// A multi-level sunburst: the top level as the inner ring, each deeper level in the next ring
+/// out within its parent's angle, coloured by top-level group and lighter further out.
+fn tree_sunburst(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rect, base: f64) {
+    let tree = c.category_tree();
+    fn depth(n: &[TreeNode]) -> usize {
+        n.iter().map(|c| 1 + depth(&c.children)).max().unwrap_or(0)
+    }
+    let levels = depth(&tree).max(1);
+    let total: f64 = tree.iter().map(|n| n.value).sum();
+    if total <= 0.0 {
+        return;
+    }
+    let r = area.width().min(area.height()) / 2.0 * 0.95;
+    let hole = r * 0.2;
+    let ring = (r - hole) / levels as f64;
+    let cen = area.center();
+    #[allow(clippy::too_many_arguments)]
+    fn ring_of(
+        ctx: &mut RenderContext,
+        rctx: &Ctx,
+        m: Affine,
+        nodes: &[TreeNode],
+        a0: f64,
+        span: f64,
+        d: usize,
+        geo: (Point, f64, f64, f64),
+        base: f64,
+        col: &dyn Fn(usize) -> Rgba,
+    ) {
+        let (cen, hole, ring, total) = geo;
+        let sum: f64 = nodes.iter().map(|n| n.value).sum();
+        if sum <= 0.0 {
+            return;
+        }
+        let (ri, ro) = (hole + ring * d as f64, hole + ring * (d + 1) as f64);
+        let mut a = a0;
+        for (i, n) in nodes.iter().enumerate() {
+            let sweep = n.value / sum * span;
+            if sweep <= 0.0 {
+                continue;
+            }
+            let fill = col(i);
+            let mut p = BezPath::new();
+            p.move_to(Point::new(cen.x + ri * a.cos(), cen.y + ri * a.sin()));
+            p.line_to(Point::new(cen.x + ro * a.cos(), cen.y + ro * a.sin()));
+            p.extend(kurbo::Arc::new(cen, (ro, ro), a, sweep, 0.0).append_iter(0.1));
+            let a1 = a + sweep;
+            p.line_to(Point::new(cen.x + ri * a1.cos(), cen.y + ri * a1.sin()));
+            p.extend(kurbo::Arc::new(cen, (ri, ri), a1, -sweep, 0.0).append_iter(0.1));
+            p.close_path();
+            ctx.set_transform(m);
+            ctx.set_paint(color(fill, 1.0));
+            ctx.fill_path(&p);
+            ctx.set_paint(color(Rgba::WHITE, 1.0));
+            ctx.set_stroke(kurbo::Stroke::new(1.5));
+            ctx.stroke_path(&p);
+            // Labels where the segment has room for them.
+            let mid = a + sweep / 2.0;
+            let rr = (ri + ro) / 2.0;
+            if sweep * rr > base * 2.5 && !n.name.is_empty() {
+                let lp = Point::new(cen.x + rr * mid.cos(), cen.y + rr * mid.sin());
+                let half = (ring * 0.48).max(base);
+                label(
+                    ctx,
+                    rctx,
+                    m,
+                    &n.name,
+                    Rect::new(lp.x - half, lp.y - base, lp.x + half, lp.y + base),
+                    base * 0.9,
+                    Align::Center,
+                    Anchor::Middle,
+                    Rgba::WHITE,
+                    false,
+                );
+            }
+            if !n.children.is_empty() {
+                let k = lighten(fill, 0.15);
+                ring_of(ctx, rctx, m, &n.children, a, sweep, d + 1, (cen, hole, ring, total), base, &|_| k);
+            }
+            a = a1;
+        }
+    }
+    ring_of(ctx, rctx, m, &tree, -std::f64::consts::FRAC_PI_2, std::f64::consts::TAU, 0, (cen, hole, ring, total), base, &|i| {
+        series_color(rctx, c, i)
+    });
 }
 
 /// A box chart's summaries: per series, per group.
