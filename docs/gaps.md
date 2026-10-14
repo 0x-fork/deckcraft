@@ -248,9 +248,10 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 - **Evidence:** View ▸ Handout Master and View ▸ Notes Master edit both masters (placeholders,
   background, a slides-per-page preview for handouts) and PPTX keeps them. Notes pages (view and
   PDF) place the slide and notes where the notes master does and print its header, date, footer
-  and page number; PDF handouts print the handout master's. Left: the master's slide image is an
-  empty frame rather than a slide preview, and master text prints in one plain style.
-- **Estimate:** 1–2 h.
+  and page number in their own fonts, sizes and colours; PDF handouts print the handout master's.
+  Notes Master view previews the slide in its slide-image placeholder. Left: master text is one
+  line per placeholder (no wrapping, no mixed formatting within it).
+- **Estimate:** 1 h.
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -385,6 +386,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Size and Position dialog landed (position, size, rotation, scale, lock aspect, one undo). The dialog gap remains Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object and the rest of the ~60 |
 | 2026-10-14 | minor | File › New has six original starter decks; a large template gallery is still open |
 | 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
+| 2026-10-14 | trivial | Notes Master slide preview; master header/footer text keeps its formatting |
 | 2026-10-14 | minor | Notes pages and PDF handouts follow the notes and handout masters |
 | 2026-10-14 | minor | Notes Master view: the masters gap is now notes pages and PDF handouts following the masters |
 | 2026-10-14 | minor | Handout Master view: the masters gap is now the Notes Master view and handout text in PDF |

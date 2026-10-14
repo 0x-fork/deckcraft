@@ -378,10 +378,11 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     let srect = to_screen((slide_box.x0, slide_box.y0, slide_box.x1, slide_box.y1));
     let sw = srect.width();
     if let Some(m) = doc.notes_master.as_deref() {
-        for (r, text, right) in deckcraft_engine::pdf::master_texts(&doc, m, paper, idx + 1) {
+        for (r, text, right, st) in deckcraft_engine::pdf::master_texts(&doc, m, paper, idx + 1) {
             let r = to_screen((r.x0, r.y0, r.x1, r.y1));
             let (at, align) = if right { (r.right_center(), egui::Align2::RIGHT_CENTER) } else { (r.left_center(), egui::Align2::LEFT_CENTER) };
-            ui.painter().text(at, align, text.lines().next().unwrap_or(""), theme::font(9.0 * k.max(0.8)), Color32::from_gray(96));
+            let c = Color32::from_rgba_unmultiplied(st.color.r, st.color.g, st.color.b, st.color.a);
+            ui.painter().text(at, align, text.lines().next().unwrap_or(""), theme::font((st.size as f32 * k).max(6.0)), c);
         }
     }
     let ppp = ui.ctx().pixels_per_point();

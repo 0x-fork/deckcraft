@@ -233,10 +233,37 @@ pub fn notes_frames(pres: &Presentation, paper: (f64, f64)) -> (Rect, Rect) {
     (slide, notes)
 }
 
-/// The header, date, footer and page-number text a master puts on page `n`, with where it goes
-/// and whether it's right-aligned. Placeholders with no text are left out; the page number is
-/// always `n`.
-pub fn master_texts(pres: &Presentation, m: &deckcraft_model::Master, paper: (f64, f64), n: usize) -> Vec<(Rect, String, bool)> {
+/// How a master's header, date, footer or page number is printed: its own resolved formatting.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextStyle {
+    pub family: String,
+    /// Points, before scaling to the paper.
+    pub size: f64,
+    pub bold: bool,
+    pub italic: bool,
+    pub color: deckcraft_model::Rgba,
+}
+
+/// The resolved style of placeholder `sh`'s first run (or its paragraph's end properties) on
+/// master `m`: run, list style, master text styles, theme fonts and colours.
+pub fn master_text_style(pres: &Presentation, m: &deckcraft_model::Master, sh: &deckcraft_model::Shape) -> TextStyle {
+    use deckcraft_model::resolve::{self, Ctx};
+    let ctx = Ctx::for_master(pres, m);
+    let para = sh.text.as_ref().and_then(|t| t.paragraphs.first()).cloned().unwrap_or_default();
+    let own = para.runs.first().map(|r| r.props.clone()).unwrap_or_else(|| para.end_props.clone());
+    let r = resolve::run(&ctx, sh, &para, &own);
+    let family = r.font.as_deref().map(|f| if f.starts_with('+') { m.theme.font(f) } else { f.to_string() }).unwrap_or_default();
+    let color = match &r.fill {
+        Some(deckcraft_model::Fill::Solid { color }) => ctx.color(color, None),
+        _ => deckcraft_model::Rgba::rgb(0x60, 0x60, 0x60),
+    };
+    TextStyle { family, size: r.size.unwrap_or(12.0).clamp(1.0, 400.0), bold: r.bold == Some(true), italic: r.italic == Some(true), color }
+}
+
+/// The header, date, footer and page-number text a master puts on page `n`, with where it goes,
+/// whether it's right-aligned and its style. Placeholders with no text are left out; the page
+/// number is always `n`.
+pub fn master_texts(pres: &Presentation, m: &deckcraft_model::Master, paper: (f64, f64), n: usize) -> Vec<(Rect, String, bool, TextStyle)> {
     use deckcraft_model::PhType;
     let mut out = vec![];
     for kind in [PhType::Header, PhType::Date, PhType::Footer, PhType::SlideNum] {
@@ -252,7 +279,10 @@ pub fn master_texts(pres: &Presentation, m: &deckcraft_model::Master, paper: (f6
             .and_then(|t| t.paragraphs.first())
             .and_then(|p| p.props.align)
             .map_or(matches!(kind, PhType::Date | PhType::SlideNum), |a| a == deckcraft_model::text::Align::Right);
-        out.push((r, text, right));
+        let mut style = master_text_style(pres, m, sh);
+        // Sizes scale with the page, as the placeholders do.
+        style.size *= paper.1 / pres.notes_size.height.max(1.0);
+        out.push((r, text, right, style));
     }
     out
 }
@@ -500,18 +530,31 @@ impl Exporter<'_> {
     /// page number when the deck has no such master.
     fn page_texts(&mut self, s: &mut Surface, master: Option<&deckcraft_model::Master>, pw: f64, ph: f64, n: usize) {
         let Some(m) = master else { return self.footer(s, pw, ph, n) };
-        let Some((font, face)) = self.ui_font() else { return };
-        let size = 9.0;
-        let k = size / face.upem.max(1.0);
-        s.set_fill(Some(grey(0x60, 1.0)));
-        for (r, text, right) in master_texts(self.pres, m, (pw, ph), n) {
+        for (r, text, right, st) in master_texts(self.pres, m, (pw, ph), n) {
+            let style = match (st.bold, st.italic) {
+                (true, true) => "Bold Italic",
+                (true, false) => "Bold",
+                (false, true) => "Italic",
+                _ => "Regular",
+            };
+            let family = if st.family.is_empty() { deckcraft_fonts::DEFAULT_FAMILY } else { st.family.as_str() };
+            let face = FontDb::global().face(family, style);
+            let Some(font) = self.font(&face) else { continue };
+            let size = st.size;
+            let k = size / face.upem.max(1.0);
             let line = text.lines().next().unwrap_or("");
             let w: f64 = line.chars().map(|c| face.advance(face.glyph_for(c)) * k).sum();
             let x = if right { r.x1 - w } else { r.x0 };
             let y = r.y0 + (r.height() + size * 0.7) / 2.0;
-            s.draw_text(Point::from_xy(x as f32, y as f32), font.clone(), size as f32, line, false, TextDirection::Auto);
+            let c = st.color;
+            s.set_fill(Some(Fill {
+                paint: krilla::color::rgb::Color::new(c.r, c.g, c.b).into(),
+                opacity: NormalizedF32::new(f32::from(c.a) / 255.0).unwrap_or(NormalizedF32::ONE),
+                ..Default::default()
+            }));
+            s.draw_text(Point::from_xy(x as f32, y as f32), font, size as f32, line, false, TextDirection::Auto);
+            s.set_fill(None);
         }
-        s.set_fill(None);
     }
     fn footer(&mut self, s: &mut Surface, pw: f64, ph: f64, n: usize) {
         let Some((font, _)) = self.ui_font() else { return };

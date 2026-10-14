@@ -135,7 +135,7 @@ fn notes_pages_and_handouts_follow_their_masters() {
     assert!(((slide.width() / slide.height()) - p.slide_size.width / p.slide_size.height).abs() < 1e-6);
     assert_eq!(notes, Rect::new(50.0, 50.0, 550.0, 350.0));
     let texts = master_texts(&p, p.notes_master.as_deref().unwrap(), paper, 7);
-    let got: Vec<(&str, bool)> = texts.iter().map(|(_, t, r)| (t.as_str(), *r)).collect();
+    let got: Vec<(&str, bool)> = texts.iter().map(|(_, t, r, _)| (t.as_str(), *r)).collect();
     assert_eq!(got, [("Q3 review", false), ("7", true)], "empty date left out, number is the page");
     // Notes pages and handouts export with the masters.
     for layout in [PageLayout::Notes, PageLayout::Handouts { per_page: 3 }] {
@@ -148,4 +148,33 @@ fn notes_pages_and_handouts_follow_their_masters() {
         let bytes = export(&p, &PdfOptions { layout, ..Default::default() }).unwrap();
         assert!(bytes.starts_with(b"%PDF"));
     }
+}
+
+#[test]
+fn master_text_keeps_its_own_formatting() {
+    use deckcraft_model::text::RunProps;
+    use deckcraft_model::{ColorRef, Fill, PhType, Rgba};
+    let mut p = deck(1);
+    p.notes_size = deckcraft_model::Size::new(612.0, 792.0);
+    let mut header = ph(PhType::Header, 0.0, 0.0, 300.0, 30.0, "Board pack");
+    if let Some(run) = header.text.as_mut().and_then(|t| t.paragraphs.first_mut()).and_then(|p| p.runs.first_mut()) {
+        run.props = RunProps {
+            size: Some(20.0),
+            bold: Some(true),
+            fill: Some(Fill::solid(ColorRef::rgb(Rgba::rgb(200, 0, 0)))),
+            font: Some("+mj-lt".into()),
+            ..Default::default()
+        };
+    }
+    let m = deckcraft_model::Master { shapes: vec![header, ph(PhType::Footer, 0.0, 760.0, 300.0, 30.0, "plain")], ..Default::default() };
+    let texts = master_texts(&p, &m, (612.0, 792.0), 1);
+    let st = &texts[0].3;
+    assert_eq!((st.size, st.bold, st.italic, st.color), (20.0, true, false, Rgba::rgb(200, 0, 0)));
+    assert_eq!(st.family, m.theme.font("+mj-lt"), "theme font resolved");
+    // Unstyled text falls back through the master's styles; sizes scale with the paper.
+    let half = master_texts(&p, &m, (306.0, 396.0), 1);
+    assert!((half[0].3.size - 10.0).abs() < 1e-9);
+    assert!(texts[1].3.size > 0.0 && !texts[1].3.bold);
+    p.notes_master = Some(Arc::new(m));
+    assert!(export(&p, &PdfOptions { layout: PageLayout::Notes, ..Default::default() }).unwrap().starts_with(b"%PDF"));
 }
