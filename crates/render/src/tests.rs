@@ -1,5 +1,5 @@
 use super::*;
-use deckcraft_model::chart::ChartType;
+use deckcraft_model::chart::{ChartType, Trendline, TrendlineType};
 use deckcraft_model::style::ColorRef;
 use deckcraft_model::text::TextBody;
 use deckcraft_model::{Chart, Geom, Presentation, Shape, ShapeId, ShapeKind, ShapeStyle, Table, Xfrm};
@@ -155,6 +155,110 @@ fn combo_chart_draws_columns_and_a_line_on_its_own_axis() {
     assert!(col[0] < 250 || col[1] < 250 || col[2] < 250, "no column: {col:?}");
 }
 
+fn trend_chart(title: &str, kind: ChartType, ys: &[f64], trend: Trendline, y_max: f64) -> Chart {
+    let mut c = Chart::sample(kind);
+    c.title = Some(title.into());
+    c.legend = None;
+    c.categories = vec!["A".into(), "B".into(), "C".into(), "D".into()];
+    c.series.truncate(1);
+    c.series[0].name = "Data".into();
+    c.series[0].values = ys.iter().copied().map(Some).collect();
+    c.y_min = Some(0.0);
+    c.y_max = Some(y_max);
+    c.series[0].trendlines = vec![trend];
+    c
+}
+
+fn trend_line(kind: TrendlineType) -> Trendline {
+    Trendline { kind, disp_eq: true, disp_r_sqr: true, ..Default::default() }
+}
+
+/// Six charts, one trendline type each. `draw` drops the trendlines. `forecast` extends the linear fit.
+fn trend_gallery(draw: bool, forecast: bool) -> Image {
+    let mut linear = trend_line(TrendlineType::Linear);
+    if forecast {
+        linear.forward = Some(1.0);
+        linear.backward = Some(0.5);
+    }
+    let mut poly = trend_line(TrendlineType::Poly);
+    poly.order = Some(2);
+    let mut ma = trend_line(TrendlineType::MovingAvg);
+    ma.period = Some(2);
+    let mut charts = vec![
+        trend_chart("Linear", ChartType::Column, &[3.0, 5.0, 7.0, 9.0], linear, 12.0),
+        trend_chart("Exponential", ChartType::LineMarkers, &[1.0, 2.0, 4.0, 8.0], trend_line(TrendlineType::Exp), 10.0),
+        trend_chart(
+            "Logarithmic",
+            ChartType::LineMarkers,
+            &[1.0_f64.ln(), 2.0_f64.ln(), 3.0_f64.ln(), 4.0_f64.ln()],
+            trend_line(TrendlineType::Log),
+            2.0,
+        ),
+        trend_chart("Polynomial", ChartType::LineMarkers, &[1.0, 4.0, 9.0, 16.0], poly, 18.0),
+        trend_chart("Power", ChartType::LineMarkers, &[2.0, 2.0 * 2.0_f64.sqrt(), 2.0 * 3.0_f64.sqrt(), 4.0], trend_line(TrendlineType::Power), 6.0),
+        trend_chart("Moving average", ChartType::LineMarkers, &[2.0, 8.0, 4.0, 10.0], ma, 12.0),
+    ];
+    if !draw {
+        for c in &mut charts {
+            c.series[0].trendlines.clear();
+        }
+    }
+    let shapes = charts
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| Shape {
+            id: ShapeId(800 + i as u32),
+            xfrm: Some(Xfrm::new(12.0 + (i % 3) as f64 * 316.0, 12.0 + (i / 3) as f64 * 264.0, 304.0, 252.0)),
+            kind: ShapeKind::Chart(Box::new(c)),
+            ..Default::default()
+        })
+        .collect();
+    render_slide(&deck_with(shapes), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+}
+
+#[test]
+fn trendlines_draw_through_the_points_with_a_label() {
+    let on = trend_gallery(true, false);
+    let off = trend_gallery(false, false);
+    assert_eq!((on.width, on.height), (960, 540));
+    let dark = on
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(off.pixels.as_chunks::<4>().0)
+        .filter(|(a, b)| a[0] < 50 && a[1] < 50 && a[2] < 50 && b[0] as i32 - a[0] as i32 > 20)
+        .count();
+    assert!(dark > 40, "dashed trendline ink {dark}");
+    // A scatter fit uses the real x values and still paints the dash.
+    let mut scatter = trend_chart("Scatter", ChartType::Scatter, &[2.0, 4.0, 6.0, 8.0], trend_line(TrendlineType::Linear), 10.0);
+    scatter.series[0].x_values = (1..=4).map(|x| Some(x as f64)).collect();
+    let sh = Shape {
+        id: ShapeId(810),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 480.0, 360.0)),
+        kind: ShapeKind::Chart(Box::new(scatter.clone())),
+        ..Default::default()
+    };
+    let with = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    scatter.series[0].trendlines.clear();
+    let sh =
+        Shape { id: ShapeId(810), xfrm: Some(Xfrm::new(0.0, 0.0, 480.0, 360.0)), kind: ShapeKind::Chart(Box::new(scatter)), ..Default::default() };
+    let without = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let scatter_dark = with
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(without.pixels.as_chunks::<4>().0)
+        .filter(|(a, b)| a[0] < 50 && a[1] < 50 && a[2] < 50 && b[0] as i32 - a[0] as i32 > 20)
+        .count();
+    assert!(scatter_dark > 20, "scatter trendline ink {scatter_dark}");
+    if std::env::var_os("DECKCRAFT_TREND_SHOT").is_some() {
+        let png = trend_gallery(true, true).to_png();
+        std::fs::write("/tmp/deckcraft-trendlines.png", &png).expect("write trendline screenshot");
+    }
+}
+
 #[test]
 fn chart_axis_titles_are_drawn() {
     let draw = |titles: (Option<String>, Option<String>)| {
@@ -175,6 +279,69 @@ fn chart_axis_titles_are_drawn() {
     let bottom = (380, 490, 580, 520);
     assert!(ink(&titled, left) > ink(&bare, left) + 30, "value axis title");
     assert!(ink(&titled, bottom) > ink(&bare, bottom) + 30, "category axis title");
+}
+
+#[test]
+fn column_points_take_their_own_fill_and_smooth_lines_curve() {
+    // One column series where only the middle point is given a red c:dPt fill.
+    let mut c = Chart::sample(ChartType::Column);
+    c.title = None;
+    c.legend = None;
+    c.series.truncate(1);
+    c.categories = vec!["A".into(), "B".into(), "C".into()];
+    c.series[0].values = vec![Some(10.0), Some(10.0), Some(10.0)];
+    c.series[0].point_fills = vec![(1, deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))))];
+    let sh = Shape { id: ShapeId(621), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let red = |x: u32| (300..500).any(|y| img.pixel(x, y)[..3] == [255, 0, 0]);
+    assert!(red(480), "the middle column takes its point's fill");
+    assert!(!red(200) && !red(760), "the others keep the series colour");
+
+    // Two series, gap 150 %, no overlap: each bar is a band / 3.5 wide (PowerPoint's and
+    // LibreOffice's geometry), not band / 2.5 split in two.
+    let mut c = Chart::sample(ChartType::Column);
+    c.title = None;
+    c.legend = None;
+    c.series.truncate(2);
+    c.categories = vec!["A".into()];
+    c.series[0].values = vec![Some(10.0)];
+    c.series[1].values = vec![Some(10.0)];
+    c.series[0].fill = Some(deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))));
+    (c.gap_width, c.overlap) = (1.5, 0.0);
+    let sh = Shape { id: ShapeId(622), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let y = (0..540).rev().find(|y| (0..960).any(|x| img.pixel(x, *y)[..3] == [255, 0, 0])).unwrap() - 5;
+    let reds = (0..960).filter(|x| img.pixel(*x, y)[..3] == [255, 0, 0]).count() as f64;
+    // The plot is ~850 px wide with one category: a bar is ~240 px (it was ~170 when the band
+    // was split as 1 + gap and then shared between the series).
+    assert!((200.0..280.0).contains(&reds), "bar {reds} px");
+
+    // A smoothed line through a peak overshoots no point but leaves the straight chord.
+    let pts = [kurbo::Point::new(0.0, 0.0), kurbo::Point::new(10.0, 10.0), kurbo::Point::new(20.0, 0.0)];
+    let p = crate::chart::smooth_path(&pts);
+    assert_eq!(p.elements().len(), 3, "a cubic per segment");
+    let mid = kurbo::ParamCurve::eval(&p.segments().next().unwrap(), 0.5);
+    assert!(mid.y > mid.x, "the first half bows towards the peak instead of following the chord: {mid:?}");
+}
+
+#[test]
+fn horizontal_bars_list_the_first_category_at_the_bottom_unless_reversed() {
+    let draw = |reversed: bool| {
+        let mut c = Chart::sample(ChartType::Bar);
+        c.title = None;
+        c.legend = None;
+        c.series.truncate(1);
+        c.categories = vec!["A".into(), "B".into(), "C".into()];
+        c.series[0].values = vec![Some(10.0), Some(10.0), Some(10.0)];
+        c.series[0].point_fills = vec![(0, deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))))];
+        c.cat_reversed = reversed;
+        let sh = Shape { id: ShapeId(623), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        let rows: Vec<u32> = (0..540).filter(|y| (0..960).any(|x| img.pixel(x, *y)[..3] == [255, 0, 0])).collect();
+        (rows[0] + rows[rows.len() - 1]) / 2
+    };
+    assert!(draw(false) > 360, "first category at the bottom: {}", draw(false));
+    assert!(draw(true) < 180, "reversed: first category at the top: {}", draw(true));
 }
 
 #[test]
@@ -1974,4 +2141,239 @@ fn table_rows_below_the_slide_are_not_laid_out_and_the_slide_looks_the_same() {
     assert_eq!((big.width, big.height), (small.width, small.height));
     let diff = (0..big.height).flat_map(|y| (0..big.width).map(move |x| (x, y))).filter(|&(x, y)| big.pixel(x, y) != small.pixel(x, y)).count();
     assert_eq!(diff, 0);
+}
+
+#[test]
+fn office_2016_charts_draw_their_own_layouts() {
+    let chart = |kind: ChartType, vals: &[f64], subtotals: Vec<usize>| {
+        let c = Chart {
+            kind,
+            title: None,
+            legend: None,
+            gridlines: false,
+            subtotals,
+            categories: (0..vals.len()).map(|i| format!("C{i}")).collect(),
+            series: vec![deckcraft_model::chart::Series { values: vals.iter().map(|v| Some(*v)).collect(), ..Default::default() }],
+            ..Default::default()
+        };
+        let sh = Shape { id: ShapeId(621), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let ink = |img: &crate::Image, x: u32, y: u32| {
+        let p = img.pixel(x, y);
+        p[0] < 235 || p[1] < 235 || p[2] < 235
+    };
+    // Waterfall: the decrease floats (nothing under it near the axis), the total stands on it.
+    let img = chart(ChartType::Waterfall, &[100.0, 40.0, -25.0, 115.0], vec![3]);
+    let plot_bottom = (300..530).rev().find(|&y| ink(&img, 120, y)).unwrap_or(500);
+    let band = |i: f64| (80.0 + (900.0 - 80.0) * (i + 0.5) / 4.0) as u32;
+    assert!(!ink(&img, band(2.0), plot_bottom - 20), "the decrease bar reaches the axis");
+    assert!(ink(&img, band(3.0), plot_bottom - 20), "the total bar doesn't stand on the axis");
+    assert!(ink(&img, band(1.0), 100), "the increase bar is missing");
+    // Funnel, treemap and sunburst fill the middle of the chart.
+    for kind in [ChartType::Funnel, ChartType::Treemap, ChartType::Sunburst] {
+        let img = chart(kind, &[50.0, 30.0, 20.0], vec![]);
+        let covered = (0..540).step_by(10).flat_map(|y| (0..960).step_by(10).map(move |x| (x, y))).filter(|&(x, y)| ink(&img, x, y)).count();
+        assert!(covered > 1000, "{kind:?}: {covered} samples inked");
+    }
+}
+
+/// Histograms draw touching columns of their bins, Pareto charts add the cumulative line, and
+/// box and whisker charts draw a box per group and series.
+#[test]
+fn histogram_pareto_and_box_charts_draw() {
+    let shot = |c: Chart| {
+        let sh = Shape { id: ShapeId(622), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let inked = |img: &crate::Image| {
+        (0..540)
+            .step_by(6)
+            .flat_map(|y| (0..960).step_by(6).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = img.pixel(x, y);
+                p[0] < 200 || p[1] < 200 || p[2] < 200
+            })
+            .count()
+    };
+    let mut empty = Chart::sample(ChartType::Histogram);
+    empty.series[0].values.clear();
+    let blank = inked(&shot(empty));
+    for kind in [ChartType::Histogram, ChartType::Pareto, ChartType::BoxWhisker] {
+        let img = shot(Chart::sample(kind));
+        if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+            let _ = std::fs::write(format!("{dir}/{kind:?}.png"), img.to_png());
+        }
+        let n = inked(&img);
+        assert!(n > blank + 400, "{kind:?}: {n} inked samples (blank {blank})");
+    }
+}
+
+/// Multi-level treemaps and sunbursts draw their groups: the treemap's group banners and the
+/// sunburst's inner ring of groups, coloured by top-level group.
+#[test]
+fn multilevel_treemap_and_sunburst_draw_their_groups() {
+    for kind in [ChartType::Treemap, ChartType::Sunburst] {
+        let c = Chart::sample(kind);
+        let sh = Shape { id: ShapeId(623), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+            let _ = std::fs::write(format!("{dir}/{kind:?}-levels.png"), img.to_png());
+        }
+        // Distinct colours: one hue per top-level group plus lighter children.
+        let mut seen: Vec<[u8; 3]> = Vec::new();
+        for y in (60..520).step_by(8) {
+            for x in (40..920).step_by(8) {
+                let p = img.pixel(x, y);
+                let c = [p[0] / 16, p[1] / 16, p[2] / 16];
+                if c != [15, 15, 15] && !seen.contains(&c) {
+                    seen.push(c);
+                }
+            }
+        }
+        assert!(seen.len() >= 6, "{kind:?}: {} colours", seen.len());
+    }
+}
+
+/// A region map without drawable geography falls back to coloured tiles on the value scale.
+#[test]
+fn region_map_draws_tiles_on_its_colour_scale() {
+    let names = ["Brest", "Vitebsk", "Gomel", "Grodno", "Minsk", "Mogilev", "Minsk City"];
+    let vals = [3.1, 2.2, 2.9, 4.8, 6.0, 1.4, 9.5];
+    let c = Chart {
+        kind: ChartType::RegionMap,
+        title: Some("Sales by region".into()),
+        categories: names.iter().map(|s| s.to_string()).collect(),
+        series: vec![deckcraft_model::chart::Series { name: "Sales".into(), values: vals.iter().map(|v| Some(*v)).collect(), ..Default::default() }],
+        data_labels: true,
+        ..Default::default()
+    };
+    let sh = Shape { id: ShapeId(624), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+        let _ = std::fs::write(format!("{dir}/RegionMap-tiles.png"), img.to_png());
+    }
+    let mut seen: Vec<[u8; 3]> = Vec::new();
+    for y in (60..520).step_by(6) {
+        for x in (40..920).step_by(6) {
+            let p = img.pixel(x, y);
+            let c = [p[0] / 16, p[1] / 16, p[2] / 16];
+            if c != [15, 15, 15] && !seen.contains(&c) {
+                seen.push(c);
+            }
+        }
+    }
+    assert!(seen.len() >= 5, "{} colours", seen.len());
+}
+
+/// Radar charts are polar, stock charts draw high-low lines (and up/down bars), and a combo
+/// chart draws its line series over its columns.
+#[test]
+fn radar_stock_and_combo_draw_their_own_layouts() {
+    let mut ohlc = Chart::sample(ChartType::Stock);
+    ohlc.series.insert(
+        0,
+        deckcraft_model::chart::Series {
+            name: "Open".into(),
+            values: [44.0, 25.0, 38.0, 50.0, 35.0].iter().map(|v| Some(*v)).collect(),
+            ..Default::default()
+        },
+    );
+    ohlc.up_down_bars = true;
+    let charts = [
+        ("Radar", Chart::sample(ChartType::Radar)),
+        ("FilledRadar", Chart::sample(ChartType::FilledRadar)),
+        ("Stock", Chart::sample(ChartType::Stock)),
+        ("StockOHLC", ohlc),
+        ("Combo", Chart::sample(ChartType::Combo)),
+    ];
+    for (name, c) in charts {
+        let sh = Shape {
+            id: ShapeId(625),
+            xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+            kind: ShapeKind::Chart(Box::new(c.clone())),
+            ..Default::default()
+        };
+        let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        if let Ok(dir) = std::env::var("DECKCRAFT_CHART_SHOTS") {
+            let _ = std::fs::write(format!("{dir}/{name}.png"), img.to_png());
+        }
+        let ink = |x: u32, y: u32| img.pixel(x, y)[..3] != [255, 255, 255];
+        match name {
+            // The radar's top spoke runs straight up from the centre; a line chart has nothing there.
+            "Radar" | "FilledRadar" => assert!((150..260).any(|y| ink(480, y)), "{name}"),
+            // No series lines: well right of the first category there is only gridline grey.
+            "Stock" | "StockOHLC" => {
+                let coloured = (60..480).step_by(2).flat_map(|y| (40..920).step_by(4).map(move |x| (x, y))).any(|(x, y)| {
+                    let p = img.pixel(x, y);
+                    p[2] > p[0].saturating_add(60)
+                });
+                assert!(!coloured || name == "Stock", "{name}: series drawn as lines");
+            }
+            _ => {}
+        }
+    }
+}
+
+#[test]
+fn charts_in_degenerate_frames_draw_without_panicking() {
+    // A chart frame squashed to no width (cx="0" in a generated file) made the value labels'
+    // gutter clamp panic (its upper bound, a share of the width, fell below its lower bound).
+    // Every chart type and legend position must survive any frame size.
+    let p = Presentation::default();
+    let rctx = Ctx::for_slide(&p, &p.slides[0]).unwrap();
+    let kinds = [
+        ChartType::Column,
+        ChartType::StackedColumn,
+        ChartType::PercentColumn,
+        ChartType::Bar,
+        ChartType::StackedBar,
+        ChartType::PercentBar,
+        ChartType::Line,
+        ChartType::LineMarkers,
+        ChartType::StackedLine,
+        ChartType::Area,
+        ChartType::StackedArea,
+        ChartType::Pie,
+        ChartType::Doughnut,
+        ChartType::Scatter,
+        ChartType::Bubble,
+        ChartType::Radar,
+        ChartType::FilledRadar,
+        ChartType::Stock,
+        ChartType::Surface,
+        ChartType::Histogram,
+        ChartType::Pareto,
+        ChartType::BoxWhisker,
+        ChartType::Waterfall,
+        ChartType::Funnel,
+        ChartType::Treemap,
+        ChartType::Sunburst,
+        ChartType::Combo,
+    ];
+    let mut ctx = vello_cpu::RenderContext::new(64, 64);
+    for k in kinds {
+        for (w, h) in [(0.0, 403.0), (403.0, 0.0), (0.0, 0.0), (2.0, 400.0), (400.0, 2.0), (12.0, 12.0)] {
+            for legend in [None, Some("b"), Some("t"), Some("r"), Some("l"), Some("tr")] {
+                let mut c = Chart::sample(k);
+                c.legend = legend.map(String::from);
+                crate::chart::draw(&mut ctx, &rctx, &c, kurbo::Affine::IDENTITY, w, h);
+            }
+        }
+    }
+}
+
+/// Renders the EMF at `$DECKCRAFT_EMF_IN` to `$DECKCRAFT_EMF_PNG` (a look-at helper; does nothing
+/// without them).
+#[test]
+fn render_an_emf_file_to_look_at() {
+    let (Ok(src), Ok(out)) = (std::env::var("DECKCRAFT_EMF_IN"), std::env::var("DECKCRAFT_EMF_PNG")) else { return };
+    let Ok(bytes) = std::fs::read(&src) else { return };
+    let mut p = Presentation::default();
+    let media = p.add_media("image1.emf", "image/x-emf", bytes);
+    let fill = deckcraft_model::style::PictureFill { media, ..Default::default() };
+    let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(40.0, 40.0, 840.0, 400.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let _ = std::fs::write(out, img.to_png());
 }

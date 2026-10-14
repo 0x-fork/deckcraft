@@ -1410,3 +1410,243 @@ fn notes_master_placeholders_and_colour_map_survive_save() {
     assert_eq!(sh.text.as_ref().map(|t| t.text()), Some("Company confidential".to_string()));
     assert_eq!(nm.color_map, map);
 }
+
+/// A part's bytes, if the package has it.
+fn pkg_part(pkg: &[u8], name: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(pkg)).unwrap();
+    let mut f = z.by_name(name).ok()?;
+    let mut v = vec![];
+    f.read_to_end(&mut v).unwrap();
+    Some(v)
+}
+
+/// Rewrite a package's parts with `edit`, then add `extra` parts.
+fn repack(pkg: &[u8], edit: impl Fn(&str, String) -> String, extra: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::{Read, Write};
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(pkg)).unwrap();
+    let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        let name = f.name().to_string();
+        let mut data = vec![];
+        f.read_to_end(&mut data).unwrap();
+        if name.ends_with(".xml") || name.ends_with(".rels") {
+            data = edit(&name, String::from_utf8(data).unwrap()).into_bytes();
+        }
+        out.start_file(name, opts).unwrap();
+        out.write_all(&data).unwrap();
+    }
+    for (name, data) in extra {
+        out.start_file(*name, opts).unwrap();
+        out.write_all(data).unwrap();
+    }
+    out.finish().unwrap().into_inner()
+}
+
+const WATERFALL_CX: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cx:chartSpace xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chartData><cx:externalData r:id="rId1" cx:autoUpdate="0"/><cx:data id="0"><cx:strDim type="cat"><cx:f>Sheet1!$A$2:$A$5</cx:f><cx:lvl ptCount="4"><cx:pt idx="0">Start</cx:pt><cx:pt idx="1">Sales</cx:pt><cx:pt idx="2">Costs</cx:pt><cx:pt idx="3">End</cx:pt></cx:lvl></cx:strDim><cx:numDim type="val"><cx:f>Sheet1!$B$2:$B$5</cx:f><cx:lvl ptCount="4" formatCode="General"><cx:pt idx="0">100</cx:pt><cx:pt idx="1">40</cx:pt><cx:pt idx="2">-25</cx:pt><cx:pt idx="3">115</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData><cx:chart><cx:title pos="t" align="ctr" overlay="0"><cx:tx><cx:txData><cx:v>Cash flow</cx:v></cx:txData></cx:tx></cx:title><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="waterfall" uniqueId="{1}"><cx:tx><cx:txData><cx:f>Sheet1!$B$1</cx:f><cx:v>Amount</cx:v></cx:txData></cx:tx><cx:dataLabels pos="outEnd"><cx:visibility seriesName="0" categoryName="0" value="1"/></cx:dataLabels><cx:dataId val="0"/><cx:layoutPr><cx:subtotals><cx:idx val="0"/><cx:idx val="3"/></cx:subtotals></cx:layoutPr></cx:series></cx:plotAreaRegion><cx:axis id="0"><cx:catScaling gapWidth="0.5"/><cx:tickLabels/></cx:axis><cx:axis id="1"><cx:valScaling/><cx:majorGridlines/><cx:tickLabels/></cx:axis></cx:plotArea><cx:legend pos="b" align="ctr" overlay="0"/></cx:chart></cx:chartSpace>"#;
+
+/// A waterfall frame as PowerPoint writes it: the chart in a `cx1` choice, a text box fallback.
+const WATERFALL_FRAME: &str = r#"<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:cx1="http://schemas.microsoft.com/office/drawing/2015/9/8/chartex" Requires="cx1"><p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="90" name="Waterfall 1"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="914400" y="914400"/><a:ext cx="6096000" cy="4064000"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chart xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex" r:id="rIdCx"/></a:graphicData></a:graphic></p:graphicFrame></mc:Choice><mc:Fallback><p:sp><p:nvSpPr><p:cNvPr id="90" name="Waterfall 1"/><p:cNvSpPr><a:spLocks noTextEdit="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="914400"/><a:ext cx="6096000" cy="4064000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:t>This chart isn't available in your version of PowerPoint.</a:t></a:r></a:p></p:txBody></p:sp></mc:Fallback></mc:AlternateContent>"#;
+
+/// Office 2016 charts (`chartEx`): a waterfall reads as a waterfall chart with its data, not as
+/// the "isn't available" fallback text, and an unchanged one is written back as itself with a
+/// plain chart fallback; an edited one is written as a plain chart.
+#[test]
+fn chartex_waterfall_reads_and_round_trips() {
+    use deckcraft_engine::Session;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+    let base = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+    let slide = (1..=9).map(|i| format!("ppt/slides/slide{i}.xml")).find(|n| pkg_part(&base, n).is_some()).unwrap();
+    let slide_rels = slide.replace("slides/", "slides/_rels/") + ".rels";
+    let cx_rels = r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/package" Target="../embeddings/Microsoft_Excel_Worksheet.xlsx"/></Relationships>"#;
+    let pptx = repack(
+        &base,
+        |name, x| {
+            if name == slide {
+                x.replacen("</p:spTree>", &format!("{WATERFALL_FRAME}</p:spTree>"), 1)
+            } else if name == slide_rels {
+                x.replace("</Relationships>", r#"<Relationship Id="rIdCx" Type="http://schemas.microsoft.com/office/2014/relationships/chartEx" Target="../charts/chartEx1.xml"/></Relationships>"#)
+            } else if name == "[Content_Types].xml" {
+                x.replace(
+                    "</Types>",
+                    r#"<Override PartName="/ppt/charts/chartEx1.xml" ContentType="application/vnd.ms-office.chartex+xml"/></Types>"#,
+                )
+            } else {
+                x
+            }
+        },
+        &[("ppt/charts/chartEx1.xml", WATERFALL_CX.as_bytes()), ("ppt/charts/_rels/chartEx1.xml.rels", cx_rels.as_bytes())],
+    );
+    let doc = deckcraft_pptx::import(&pptx).unwrap();
+    let chart = |d: &Presentation| -> Option<Chart> {
+        d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+            ShapeKind::Chart(c) => Some((**c).clone()),
+            _ => None,
+        })
+    };
+    let c = chart(&doc).expect("the waterfall is a chart, not the fallback text");
+    assert_eq!(c.kind, ChartType::Waterfall);
+    assert_eq!(c.title.as_deref(), Some("Cash flow"));
+    assert_eq!(c.categories, ["Start", "Sales", "Costs", "End"]);
+    assert_eq!(c.series.len(), 1);
+    assert_eq!(c.series[0].name, "Amount");
+    assert_eq!(c.series[0].values, [Some(100.0), Some(40.0), Some(-25.0), Some(115.0)]);
+    assert!(c.data_labels);
+    assert_eq!(c.legend.as_deref(), Some("b"));
+    let no_fallback_text = doc.slides.iter().flat_map(|s| s.shapes.iter()).all(|sh| !format!("{:?}", sh.kind).contains("isn't available"));
+    assert!(no_fallback_text);
+
+    // Unchanged: chartEx back in a cx1 choice, a plain chart as fallback, no workbook link.
+    let out = deckcraft_pptx::export(&doc).unwrap();
+    let ex = String::from_utf8(pkg_part(&out, "ppt/charts/chartEx1.xml").expect("chartEx part")).unwrap();
+    assert!(ex.contains(r#"layoutId="waterfall""#) && !ex.contains("externalData"), "{ex}");
+    let types = String::from_utf8(pkg_part(&out, "[Content_Types].xml").unwrap()).unwrap();
+    assert!(types.contains("application/vnd.ms-office.chartex+xml"));
+    let sx = String::from_utf8(pkg_part(&out, &slide).unwrap()).unwrap();
+    assert!(sx.contains(r#"Requires="cx1""#) && sx.contains("mc:Fallback") && sx.contains("c:chart "), "{sx}");
+    let srels = String::from_utf8(pkg_part(&out, &slide_rels).unwrap()).unwrap();
+    assert!(srels.contains("relationships/chartEx") && srels.contains("relationships/chart\""), "{srels}");
+    assert!(pkg_part(&out, "ppt/charts/chart1.xml").is_some());
+    let again = deckcraft_pptx::import(&out).unwrap();
+    assert_eq!(chart(&again).map(|c| (c.kind, c.categories, c.series.len())), Some((ChartType::Waterfall, c.categories.clone(), 1)));
+
+    // Edited: the kept part no longer matches, so a chartEx part is written from the model,
+    // still a waterfall with the new value.
+    let mut edited = doc.clone();
+    for sl in &mut edited.slides {
+        for sh in &mut Arc::make_mut(sl).shapes {
+            if let ShapeKind::Chart(ch) = &mut sh.kind {
+                ch.series[0].values[1] = Some(55.0);
+            }
+        }
+    }
+    let out = deckcraft_pptx::export(&edited).unwrap();
+    let ex = String::from_utf8(pkg_part(&out, "ppt/charts/chartEx1.xml").expect("a written chartEx part")).unwrap();
+    assert!(ex.contains(r#"layoutId="waterfall""#), "{ex}");
+    assert!(String::from_utf8(pkg_part(&out, &slide).unwrap()).unwrap().contains("cx1"));
+    let again = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+    assert_eq!(again.kind, ChartType::Waterfall);
+    assert_eq!(again.series[0].values[1], Some(55.0));
+    assert_eq!(again.subtotals, c.subtotals);
+}
+
+/// New Office 2016 charts made in DeckCraft are written as chartEx parts that read back as the
+/// same type, data and options.
+#[test]
+fn chartex_new_charts_save_as_their_own_type() {
+    use deckcraft_engine::Session;
+    for (ty, kind) in [
+        ("waterfall", ChartType::Waterfall),
+        ("funnel", ChartType::Funnel),
+        ("treemap", ChartType::Treemap),
+        ("sunburst", ChartType::Sunburst),
+        ("histogram", ChartType::Histogram),
+        ("pareto", ChartType::Pareto),
+        ("boxwhisker", ChartType::BoxWhisker),
+    ] {
+        let chart = |d: &Presentation| -> Option<Chart> {
+            d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+                ShapeKind::Chart(c) => Some((**c).clone()),
+                _ => None,
+            })
+        };
+        let mut s = Session::with_new();
+        s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+        s.execute("insert.chart", &serde_json::json!({"type": ty})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0].0;
+        let opts = match kind {
+            ChartType::Histogram | ChartType::Pareto => serde_json::json!({"id": id, "binCount": 4, "title": "T"}),
+            ChartType::Waterfall => serde_json::json!({"id": id, "subtotals": [3], "title": "T"}),
+            _ => serde_json::json!({"id": id, "title": "T"}),
+        };
+        s.execute("chart.options", &opts).unwrap();
+        let doc = &s.doc().unwrap().doc;
+        let before = chart(doc).unwrap();
+        let out = deckcraft_pptx::export(doc).unwrap();
+        assert!(pkg_part(&out, "ppt/charts/chartEx1.xml").is_some(), "{ty}: no chartEx part");
+        assert!(pkg_part(&out, "ppt/charts/chart1.xml").is_some(), "{ty}: no fallback chart");
+        let after = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(after.kind, kind, "{ty}");
+        assert_eq!(after.title.as_deref(), Some("T"), "{ty}");
+        assert_eq!(after.categories, before.categories, "{ty}");
+        let n = if matches!(kind, ChartType::BoxWhisker) { before.series.len() } else { 1 };
+        assert_eq!(after.series.len(), n, "{ty}");
+        assert_eq!(after.series[0].values, before.series[0].values, "{ty}");
+        assert_eq!((after.bin_count, after.subtotals.clone()), (before.bin_count, before.subtotals.clone()), "{ty}");
+    }
+}
+
+/// A two-level treemap keeps its parent level, and a box chart its inclusive quartiles, through
+/// a save and reopen.
+#[test]
+fn chartex_levels_and_quartiles_round_trip() {
+    use deckcraft_engine::Session;
+    let chart = |d: &Presentation| -> Option<Chart> {
+        d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+            ShapeKind::Chart(c) => Some((**c).clone()),
+            _ => None,
+        })
+    };
+    for ty in ["treemap", "sunburst", "boxwhisker"] {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+        s.execute("insert.chart", &serde_json::json!({"type": ty})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0].0;
+        if ty == "boxwhisker" {
+            s.execute("chart.options", &serde_json::json!({"id": id, "quartiles": "inclusive"})).unwrap();
+        } else {
+            s.execute(
+                "chart.data",
+                &serde_json::json!({"id": id, "levels": [["Q1", "", "", "Q2", "", "", "Q3", ""], ["H1", "", "", "", "", "", "H2", ""]]}),
+            )
+            .unwrap();
+        }
+        let before = chart(&s.doc().unwrap().doc).unwrap();
+        let out = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+        let after = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(after.category_levels, before.category_levels, "{ty}");
+        assert_eq!(after.inclusive_quartiles, before.inclusive_quartiles, "{ty}");
+        assert_eq!(after.category_tree(), before.category_tree(), "{ty}");
+        // Unchanged since import, the part is written back as read.
+        let again = deckcraft_pptx::export(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(chart(&deckcraft_pptx::import(&again).unwrap()).unwrap().category_levels, before.category_levels, "{ty}");
+    }
+}
+
+/// Radar, stock (with and without up/down bars) and combo charts keep their own plot groups
+/// through a save and reopen, written as PowerPoint writes them.
+#[test]
+fn radar_stock_and_combo_round_trip() {
+    use deckcraft_engine::Session;
+    let chart = |d: &Presentation| -> Option<Chart> {
+        d.slides.iter().flat_map(|s| s.shapes.iter()).find_map(|sh| match &sh.kind {
+            ShapeKind::Chart(c) => Some((**c).clone()),
+            _ => None,
+        })
+    };
+    for (ty, bars) in [("radar", false), ("filledradar", false), ("stock", false), ("stock", true), ("combo", false)] {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &serde_json::json!({"layout": "blank"})).unwrap();
+        s.execute("insert.chart", &serde_json::json!({"type": ty})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0].0;
+        if bars {
+            s.execute("chart.options", &serde_json::json!({"id": id, "upDownBars": true})).unwrap();
+        }
+        let before = chart(&s.doc().unwrap().doc).unwrap();
+        let out = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+        let after = chart(&deckcraft_pptx::import(&out).unwrap()).unwrap();
+        assert_eq!(after.kind, before.kind, "{ty}");
+        assert_eq!(after.up_down_bars, bars, "{ty}");
+        assert_eq!(after.series.len(), before.series.len(), "{ty}");
+        let kinds: Vec<_> = after.series.iter().map(|x| after.series_kind(x)).collect();
+        let want: Vec<_> = before.series.iter().map(|x| before.series_kind(x)).collect();
+        assert_eq!(kinds, want, "{ty}");
+        for (a, b) in after.series.iter().zip(&before.series) {
+            assert_eq!(a.values, b.values, "{ty}");
+        }
+    }
+}

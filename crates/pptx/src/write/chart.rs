@@ -4,6 +4,9 @@ use deckcraft_model::chart::{Chart, ChartType, Series, Trendline, TrendlineType}
 use deckcraft_model::style::Fill;
 
 use crate::opc::{NS_A, NS_C, NS_R};
+
+/// The Office 2016 chart namespace.
+pub const NS_CX: &str = "http://schemas.microsoft.com/office/drawing/2014/chartex";
 use crate::xml::{A, W};
 
 /// Column letter for a 0-based index (A, B, … Z, AA…).
@@ -118,11 +121,13 @@ enum Group {
     Scatter,
     Radar,
     Bubble,
+    Stock,
 }
 
 fn group_of(k: ChartType) -> Group {
     match k {
-        ChartType::Line | ChartType::LineMarkers | ChartType::StackedLine | ChartType::Stock => Group::Line,
+        ChartType::Line | ChartType::LineMarkers | ChartType::StackedLine => Group::Line,
+        ChartType::Stock => Group::Stock,
         ChartType::Area | ChartType::StackedArea | ChartType::Surface => Group::Area,
         ChartType::Pie => Group::Pie,
         ChartType::Doughnut | ChartType::Sunburst => Group::Doughnut,
@@ -140,7 +145,32 @@ fn series(w: &mut W, c: &Chart, s: &Series, i: usize, kind: ChartType, g: Group)
     w.open0("c:tx");
     str_cache(w, &format!("Sheet1!${}$1", col(i + 1)), std::slice::from_ref(&s.name));
     w.close("c:tx");
-    sp_pr(w, s.fill.as_ref(), s.line.as_ref());
+    if g == Group::Stock && s.line.is_none() {
+        // A stock chart's series are points joined by the high-low lines, not lines of their own.
+        w.open0("c:spPr");
+        w.open("a:ln", A::new().a("w", 19050));
+        w.empty0("a:noFill");
+        w.close("a:ln");
+        w.close("c:spPr");
+    } else {
+        sp_pr(w, s.fill.as_ref(), s.line.as_ref());
+    }
+    if g == Group::Stock {
+        // High-low-close: the close is a dash on the high-low line; with up/down bars (or a set
+        // marker) the series keep their own.
+        let close = !c.up_down_bars && i + 1 == c.series.len() && c.series.len() == 3;
+        let sym = s.marker.as_deref().filter(|m| !m.is_empty() && m.chars().all(|ch| ch.is_ascii_alphanumeric())).unwrap_or(if close {
+            "dash"
+        } else {
+            "none"
+        });
+        w.open0("c:marker");
+        w.val("c:symbol", sym);
+        if sym != "none" {
+            w.val("c:size", 7);
+        }
+        w.close("c:marker");
+    }
     if g == Group::Bar {
         w.val("c:invertIfNegative", 0);
     }
@@ -302,7 +332,7 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
         w.open0("c:catAx");
         w.val("c:axId", AX_CAT);
         w.open0("c:scaling");
-        w.val("c:orientation", "minMax");
+        w.val("c:orientation", if c.cat_reversed { "maxMin" } else { "minMax" });
         w.close("c:scaling");
         w.val("c:delete", 0);
         w.val("c:axPos", cat_pos);
@@ -324,6 +354,9 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     w.open0("c:valAx");
     w.val("c:axId", AX_VAL);
     w.open0("c:scaling");
+    if let Some(b) = c.y_log_base {
+        w.val("c:logBase", fmt_num(b));
+    }
     w.val("c:orientation", "minMax");
     if let Some(m) = c.y_max.filter(|v| v.is_finite()) {
         w.val("c:max", fmt_num(m));
@@ -336,6 +369,9 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     w.val("c:axPos", val_pos);
     if c.gridlines {
         w.empty0("c:majorGridlines");
+    }
+    if c.minor_gridlines {
+        w.empty0("c:minorGridlines");
     }
     if let Some(t) = &c.axis_titles.1 {
         title(w, t);
@@ -374,6 +410,7 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
         Group::Scatter => "c:scatterChart",
         Group::Radar => "c:radarChart",
         Group::Bubble => "c:bubbleChart",
+        Group::Stock => "c:stockChart",
     };
     w.open0(tag);
     match g {
@@ -386,7 +423,10 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
         Group::Radar => w.val("c:radarStyle", if kind == ChartType::FilledRadar { "filled" } else { "marker" }),
         _ => {}
     }
-    w.val("c:varyColors", vary);
+    // `c:stockChart` has no `c:varyColors`.
+    if g != Group::Stock {
+        w.val("c:varyColors", vary);
+    }
     for (i, s) in list {
         series(w, c, s, *i, kind, g);
     }
@@ -402,6 +442,24 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
             }
         }
         Group::Line => w.val("c:marker", 1),
+        Group::Stock => {
+            w.open0("c:hiLowLines");
+            w.open0("c:spPr");
+            w.open("a:ln", A::new().a("w", 9525));
+            w.open0("a:solidFill");
+            w.empty("a:schemeClr", A::new().a("val", "tx1"));
+            w.close("a:solidFill");
+            w.close("a:ln");
+            w.close("c:spPr");
+            w.close("c:hiLowLines");
+            if c.up_down_bars {
+                w.open0("c:upDownBars");
+                w.val("c:gapWidth", 150);
+                w.empty0("c:upBars");
+                w.empty0("c:downBars");
+                w.close("c:upDownBars");
+            }
+        }
         Group::Pie => w.val("c:firstSliceAng", 0),
         Group::Doughnut => {
             w.val("c:firstSliceAng", 0);
@@ -416,10 +474,35 @@ fn plot_group(w: &mut W, c: &Chart, kind: ChartType, list: &[(usize, &Series)]) 
     w.close(tag);
 }
 
+/// The `chartEx` part of an Office 2016 chart (waterfall, funnel…): the kept part when the chart
+/// is unchanged since it was read (without its workbook link), else one written from the model.
+/// `None` for other chart types.
+pub fn chartex_xml(c: &Chart) -> Option<Vec<u8>> {
+    kept_chartex(c).or_else(|| c.kind.is_chartex().then(|| build_chartex(c)))
+}
+
+fn kept_chartex(c: &Chart) -> Option<Vec<u8>> {
+    let raw = c.raw.as_ref()?;
+    let doc = crate::xml::parse(raw.as_bytes()).ok()?;
+    let mut root = doc.root.clone();
+    crate::read::resolve_mc(&mut root, 0);
+    let mut back = crate::read::chartex_from(&root)?;
+    back.raw = c.raw.clone();
+    if &back != c {
+        return None;
+    }
+    let mut keep = doc.root;
+    keep.remove_all(&["externalData"]);
+    let mut w = W::new();
+    w.raw(&keep.to_xml());
+    Some(w.finish())
+}
+
 /// The chart part XML.
 pub fn chart_xml(c: &Chart) -> Vec<u8> {
     // Reuse the kept part when the chart is unchanged since it was read.
     if let Some(raw) = &c.raw
+        && !raw.contains(NS_CX)
         && let Ok(doc) = crate::xml::parse(raw.as_bytes())
         && doc.root.is("chartSpace")
     {
@@ -501,6 +584,7 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
                 | ChartType::Bubble
                 | ChartType::Radar
                 | ChartType::FilledRadar
+                | ChartType::Stock
         ) {
             log::warn!("pptx: {} chart written as a column chart", c.kind.label());
         }
@@ -532,4 +616,220 @@ pub fn chart_xml(c: &Chart) -> Vec<u8> {
     }
     w.close("c:chartSpace");
     w.finish()
+}
+
+/// A `cx:tx` holding plain text.
+fn cx_text(w: &mut W, t: &str) {
+    w.open0("cx:tx");
+    w.open0("cx:txData");
+    w.open0("cx:v");
+    w.text(t);
+    w.close("cx:v");
+    w.close("cx:txData");
+    w.close("cx:tx");
+}
+
+/// A `cx:lvl` of points.
+fn cx_level(w: &mut W, pts: &[String], format: Option<&str>) {
+    let mut a = A::new().a("ptCount", pts.len());
+    if let Some(f) = format {
+        a = a.a("formatCode", f);
+    }
+    w.open("cx:lvl", a);
+    for (i, p) in pts.iter().enumerate() {
+        w.open("cx:pt", A::new().a("idx", i));
+        w.text(p);
+        w.close("cx:pt");
+    }
+    w.close("cx:lvl");
+}
+
+/// The `cx:layoutPr` of the region map series in a kept `chartEx` part.
+fn kept_region_layout(raw: &str) -> Option<String> {
+    let doc = crate::xml::parse(raw.as_bytes()).ok()?;
+    let mut root = doc.root;
+    crate::read::resolve_mc(&mut root, 0);
+    let region = root.child("chart")?.child("plotArea")?.child("plotAreaRegion")?;
+    let s = region.children_named("series").find(|s| s.attr("layoutId") == Some("regionMap"))?;
+    let lp = s.child("layoutPr")?;
+    // Written under our `cx` prefix; a part that bound chartex to another prefix is not copied.
+    lp.name.starts_with("cx:").then(|| lp.to_xml())
+}
+
+/// Writes an Office 2016 chart from the model, as PowerPoint lays the part out: one `cx:data`
+/// per series (categories and values), then the plot area with each series' layout, the axes
+/// the layout uses, the title and the legend.
+pub fn build_chartex(c: &Chart) -> Vec<u8> {
+    let mut w = W::new();
+    w.open("cx:chartSpace", A::new().a("xmlns:a", NS_A).a("xmlns:r", NS_R).a("xmlns:cx", NS_CX));
+    w.open0("cx:chartData");
+    for (i, s) in c.series.iter().enumerate() {
+        w.open("cx:data", A::new().a("id", i));
+        if !c.categories.is_empty() {
+            w.open("cx:strDim", A::new().a("type", "cat"));
+            cx_level(&mut w, &c.categories, None);
+            for lv in &c.category_levels {
+                cx_level(&mut w, lv, None);
+            }
+            w.close("cx:strDim");
+        }
+        let ty = match c.kind {
+            ChartType::Treemap | ChartType::Sunburst => "size",
+            ChartType::RegionMap => "colorVal",
+            _ => "val",
+        };
+        w.open("cx:numDim", A::new().a("type", ty));
+        let vals: Vec<String> = s.values.iter().map(|v| v.map(fmt_num).unwrap_or_default()).collect();
+        cx_level(&mut w, &vals, Some(s.number_format.as_deref().unwrap_or("General")));
+        w.close("cx:numDim");
+        w.close("cx:data");
+    }
+    w.close("cx:chartData");
+    w.open0("cx:chart");
+    if let Some(t) = &c.title {
+        w.open("cx:title", A::new().a("pos", "t").a("align", "ctr").a("overlay", "0"));
+        cx_text(&mut w, t);
+        w.close("cx:title");
+    }
+    w.open0("cx:plotArea");
+    w.open0("cx:plotAreaRegion");
+    let layout = match c.kind {
+        ChartType::Waterfall => "waterfall",
+        ChartType::Funnel => "funnel",
+        ChartType::Treemap => "treemap",
+        ChartType::Sunburst => "sunburst",
+        ChartType::BoxWhisker => "boxWhisker",
+        ChartType::RegionMap => "regionMap",
+        _ => "clusteredColumn",
+    };
+    let one = !matches!(c.kind, ChartType::BoxWhisker);
+    for (i, s) in c.series.iter().enumerate().take(if one { 1 } else { usize::MAX }) {
+        w.open("cx:series", A::new().a("layoutId", layout).a("uniqueId", format!("{{DC00000{i}-0000-4000-8000-000000000000}}")));
+        cx_text(&mut w, &s.name);
+        if s.data_labels.unwrap_or(c.data_labels) {
+            w.open("cx:dataLabels", A::new().a("pos", if c.kind == ChartType::Funnel { "ctr" } else { "outEnd" }));
+            w.empty("cx:visibility", A::new().a("seriesName", "0").a("categoryName", "0").a("value", "1"));
+            w.close("cx:dataLabels");
+        }
+        w.empty("cx:dataId", A::new().a("val", i));
+        match c.kind {
+            ChartType::Waterfall if !c.subtotals.is_empty() => {
+                w.open0("cx:layoutPr");
+                w.open0("cx:subtotals");
+                for t in &c.subtotals {
+                    w.empty("cx:idx", A::new().a("val", t));
+                }
+                w.close("cx:subtotals");
+                w.close("cx:layoutPr");
+            }
+            ChartType::Histogram | ChartType::Pareto => {
+                w.open0("cx:layoutPr");
+                w.open("cx:binning", A::new().a("intervalClosed", "r"));
+                if let Some(size) = c.bin_size {
+                    w.empty("cx:binSize", A::new().a("val", fmt_num(size)));
+                } else if let Some(n) = c.bin_count {
+                    w.empty("cx:binCount", A::new().a("val", n));
+                }
+                w.close("cx:binning");
+                w.close("cx:layoutPr");
+            }
+            ChartType::BoxWhisker => {
+                w.open0("cx:layoutPr");
+                w.empty("cx:visibility", A::new().a("meanLine", "0").a("meanMarker", "1").a("nonoutliers", "0").a("outliers", "1"));
+                w.empty("cx:statistics", A::new().a("quartileMethod", if c.inclusive_quartiles { "inclusive" } else { "exclusive" }));
+                w.close("cx:layoutPr");
+            }
+            ChartType::RegionMap => {
+                // The map's geography (projection, region level and the cached boundaries
+                // PowerPoint downloaded) is not modelled: carry it over from the part we read.
+                if let Some(lp) = c.raw.as_deref().and_then(kept_region_layout) {
+                    w.raw(&lp);
+                }
+            }
+            _ => {}
+        }
+        w.close("cx:series");
+    }
+    if c.kind == ChartType::Pareto {
+        w.open("cx:series", A::new().a("layoutId", "paretoLine").a("ownerIdx", "0").a("uniqueId", "{DC0000FF-0000-4000-8000-000000000000}"));
+        w.empty("cx:axisId", A::new().a("val", "2"));
+        w.close("cx:series");
+    }
+    w.close("cx:plotAreaRegion");
+    if !matches!(c.kind, ChartType::Treemap | ChartType::Sunburst | ChartType::RegionMap) {
+        w.open("cx:axis", A::new().a("id", "0"));
+        w.empty("cx:catScaling", A::new().a("gapWidth", if matches!(c.kind, ChartType::Histogram | ChartType::Pareto) { "0" } else { "0.5" }));
+        w.empty0("cx:tickLabels");
+        w.close("cx:axis");
+        if c.kind != ChartType::Funnel {
+            w.open("cx:axis", A::new().a("id", "1"));
+            w.empty0("cx:valScaling");
+            if c.gridlines {
+                w.empty0("cx:majorGridlines");
+            }
+            w.empty0("cx:tickLabels");
+            w.close("cx:axis");
+        }
+        if c.kind == ChartType::Pareto {
+            w.open("cx:axis", A::new().a("id", "2"));
+            w.empty("cx:valScaling", A::new().a("max", "1").a("min", "0"));
+            w.empty0("cx:units");
+            w.empty0("cx:tickLabels");
+            w.close("cx:axis");
+        }
+    }
+    w.close("cx:plotArea");
+    if let Some(pos) = &c.legend {
+        w.empty("cx:legend", A::new().a("pos", pos.as_str()).a("align", "ctr").a("overlay", "0"));
+    }
+    w.close("cx:chart");
+    w.close("cx:chartSpace");
+    w.finish()
+}
+
+#[cfg(test)]
+mod region_map_tests {
+    use super::*;
+
+    /// A region map part as PowerPoint writes it (our own numbers; the cached geography is a
+    /// stand-in blob).
+    const MAP: &str = r#"<cx:chartSpace xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:cx="http://schemas.microsoft.com/office/drawing/2014/chartex"><cx:chartData><cx:data id="0"><cx:strDim type="cat"><cx:f>Sheet1!$A$2:$A$4</cx:f><cx:lvl ptCount="3"><cx:pt idx="0">Minsk</cx:pt><cx:pt idx="1">Brest</cx:pt><cx:pt idx="2">Gomel</cx:pt></cx:lvl></cx:strDim><cx:numDim type="colorVal"><cx:f>Sheet1!$B$2:$B$4</cx:f><cx:lvl ptCount="3" formatCode="General"><cx:pt idx="0">12</cx:pt><cx:pt idx="1">5</cx:pt><cx:pt idx="2">8</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData><cx:chart><cx:title pos="t" align="ctr" overlay="0"/><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="regionMap" uniqueId="{00000000-0000-4000-8000-000000000001}"><cx:tx><cx:txData><cx:f>Sheet1!$B$1</cx:f><cx:v>Sales</cx:v></cx:txData></cx:tx><cx:dataId val="0"/><cx:layoutPr><cx:geography cultureLanguage="en-US" cultureRegion="BY" attribution="Powered by Bing"><cx:geoCache provider="{E9337A44-BEBE-4D9F-B70C-5C5E7DAFC167}"><cx:binary>ZGVja2NyYWZ0LXRlc3Q=</cx:binary></cx:geoCache></cx:geography></cx:layoutPr></cx:series></cx:plotAreaRegion></cx:plotArea><cx:legend pos="r" align="min" overlay="0"/></cx:chart></cx:chartSpace>"#;
+
+    #[test]
+    fn region_maps_keep_their_geography_through_save_and_edit() {
+        let c = crate::read::read_chartex_xml(MAP.as_bytes()).expect("a region map is read");
+        assert_eq!(c.kind, ChartType::RegionMap);
+        assert_eq!(c.categories, ["Minsk", "Brest", "Gomel"]);
+        assert_eq!(c.series.first().map(|s| s.values.clone()), Some(vec![Some(12.0), Some(5.0), Some(8.0)]));
+        // Unchanged: written back as read.
+        let kept = String::from_utf8(chartex_xml(&c).unwrap_or_default()).unwrap_or_default();
+        assert!(kept.contains("ZGVja2NyYWZ0LXRlc3Q=") && kept.contains("cultureRegion=\"BY\""), "{kept}");
+        // Edited: rebuilt from the model, with the geography carried over.
+        let mut e = c.clone();
+        if let Some(s) = e.series.first_mut() {
+            s.values[1] = Some(20.0);
+        }
+        let built = String::from_utf8(chartex_xml(&e).unwrap_or_default()).unwrap_or_default();
+        assert!(built.contains("<cx:geoCache") && built.contains("ZGVja2NyYWZ0LXRlc3Q=") && built.contains("colorVal"), "{built}");
+        assert!(!built.contains("<cx:axis"), "{built}");
+        let back = crate::read::read_chartex_xml(built.as_bytes()).expect("the rebuilt part reads");
+        assert_eq!(back.kind, ChartType::RegionMap);
+        assert_eq!(back.series.first().and_then(|s| s.values.get(1).copied().flatten()), Some(20.0));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use deckcraft_model::chart::{Chart, ChartType};
+
+    #[test]
+    fn reversed_category_axis_round_trips() {
+        let mut c = Chart::sample(ChartType::Bar);
+        c.cat_reversed = true;
+        let xml = super::chart_xml(&c);
+        assert!(String::from_utf8_lossy(&xml).contains(r#"<c:orientation val="maxMin"/>"#));
+        assert!(crate::read::chart::read_chart_xml(&xml).unwrap().cat_reversed);
+        c.cat_reversed = false;
+        assert!(!crate::read::chart::read_chart_xml(&super::chart_xml(&c)).unwrap().cat_reversed);
+    }
 }

@@ -15,6 +15,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (presenter timer pause/reset, clock and notes size; previous: trivial, See All Slides and zoom) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (custom show playback; previous: trivial, presenter timer) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (go to slide shows the typed number; previous: trivial, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (chart trendlines are drawn; the charts gap stays open for the data grid, chartex and secondary-axis export; previous: trivial, chart trendlines round-trip; the real-deck corpus stays open; core-workflow alpha gate added; stage stays alpha) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -153,6 +154,7 @@ plan above.
 | 2026-10-13 | trivial | Owned PPTX corpus covers comments, links and actions, custom shows, rotated groups and inherited placeholders. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
 | 2026-10-13 | trivial | Owned PPTX corpus covers text effects, body layout, theme effects, fills, bevels and connectors. Beta item 2 stays open for a larger corpus, embedded fonts and #70/#74/#77 |
 | 2026-10-14 | trivial | Current focus: `corpus_media.rs` keeps 3-D models and animation bounce end; the real-deck corpus stays open |
+| 2026-10-14 | trivial | Chart trendlines are drawn. The charts gap stays open for the data grid, chartex and secondary-axis export; the real-deck corpus (item 2) stays open |
 | 2026-10-14 | trivial | Chart trendlines round-trip in an owned corpus slice; the real-deck corpus (item 2) stays open |
 | 2026-10-14 | trivial | Review workflow: previous and next comment across the deck |
 | 2026-10-14 | minor | After beta: six original starter decks exist; a larger template gallery remains |

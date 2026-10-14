@@ -34,10 +34,29 @@ pub enum ChartType {
     Funnel,
     Treemap,
     Sunburst,
+    /// A filled (choropleth) map of regions coloured by value, kept and drawn from its data; it
+    /// is not offered in the chart menus (PowerPoint needs an online map service to make one).
+    RegionMap,
     Combo,
 }
 
 impl ChartType {
+    /// The Office 2016 (`chartEx`) types, offered after [`ChartType::MAIN`] in chart menus.
+    pub const OFFICE_2016: [ChartType; 7] = [
+        ChartType::Waterfall,
+        ChartType::Funnel,
+        ChartType::Histogram,
+        ChartType::Pareto,
+        ChartType::BoxWhisker,
+        ChartType::Treemap,
+        ChartType::Sunburst,
+    ];
+
+    /// Whether the type is saved as a `chartEx` part (with a plain chart as the fallback).
+    pub fn is_chartex(self) -> bool {
+        Self::OFFICE_2016.contains(&self) || self == ChartType::RegionMap
+    }
+
     pub const MAIN: [ChartType; 12] = [
         ChartType::Column,
         ChartType::Bar,
@@ -80,6 +99,7 @@ impl ChartType {
             ChartType::Funnel => "Funnel",
             ChartType::Treemap => "Treemap",
             ChartType::Sunburst => "Sunburst",
+            ChartType::RegionMap => "Map",
             ChartType::Combo => "Combo",
         }
     }
@@ -243,6 +263,8 @@ pub struct Chart {
     pub title_size: Option<f64>,
     pub data_labels: bool,
     pub gridlines: bool,
+    /// `c:minorGridlines` on the value axis: five to a major unit, between the major ones.
+    pub minor_gridlines: bool,
     pub axis_titles: (Option<String>, Option<String>),
     /// Chart style number (1–48) and colour palette (`colorful1`, `monochrome3`…).
     pub style: u32,
@@ -258,10 +280,15 @@ pub struct Chart {
     pub y_max: Option<f64>,
     /// The value axis' major unit, when the chart fixes it.
     pub y_major: Option<f64>,
+    /// `c:scaling/c:logBase`: the value axis is logarithmic in this base (2–1000).
+    pub y_log_base: Option<f64>,
     /// The value axis' number format (an Excel format code such as `#,##0` or `0.0%`).
     pub y_format: Option<String>,
     /// The value axis is deleted (`c:delete`): no labels, though gridlines may stay.
     pub y_hidden: bool,
+    /// The category axis runs backwards (`c:orientation val="maxMin"`): right to left, or on a
+    /// horizontal bar chart top to bottom (the default puts the first category at the bottom).
+    pub cat_reversed: bool,
     /// A combo chart's secondary value axis: bounds, major unit and number format.
     pub y2_min: Option<f64>,
     pub y2_max: Option<f64>,
@@ -270,6 +297,28 @@ pub struct Chart {
     pub y2_hidden: bool,
     /// The chart's language (`c:lang`, e.g. `ru-RU`): digit grouping and decimal mark.
     pub lang: Option<String>,
+    /// A waterfall's total points (`cx:subtotals`): bars that stand on the axis and restart
+    /// the running total, instead of floating.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subtotals: Vec<usize>,
+    /// Outer category levels of a treemap or sunburst, innermost first (the leaves' parents,
+    /// then theirs…), each with one label per category. A blank label continues the one above it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub category_levels: Vec<Vec<String>>,
+    /// Box and whisker quartiles by the inclusive method (QUARTILE.INC) instead of exclusive.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub inclusive_quartiles: bool,
+    /// A stock chart's up/down bars (`c:upDownBars`): open-high-low-close, the box between
+    /// the first and last series, hollow when the price rose.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub up_down_bars: bool,
+    /// A histogram's bin count (`cx:binCount`); with neither this nor `bin_size` the bins are
+    /// automatic (Scott's rule, as Excel does).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin_count: Option<u32>,
+    /// A histogram's bin width (`cx:binSize`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bin_size: Option<f64>,
     /// Original chart XML part kept for round-trip of unmodelled options.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw: Option<String>,
@@ -288,6 +337,7 @@ impl Default for Chart {
             title_size: None,
             data_labels: false,
             gridlines: true,
+            minor_gridlines: false,
             axis_titles: (None, None),
             style: 2,
             palette: "colorful1".into(),
@@ -301,14 +351,22 @@ impl Default for Chart {
             y_min: None,
             y_max: None,
             y_major: None,
+            y_log_base: None,
             y_format: None,
             y_hidden: false,
+            cat_reversed: false,
             y2_min: None,
             y2_max: None,
             y2_major: None,
             y2_format: None,
             y2_hidden: false,
             lang: None,
+            subtotals: vec![],
+            category_levels: vec![],
+            inclusive_quartiles: false,
+            up_down_bars: false,
+            bin_count: None,
+            bin_size: None,
             raw: None,
         }
     }
@@ -320,6 +378,45 @@ impl Chart {
         let cats = ["Q1", "Q2", "Q3", "Q4"];
         let data = [[4.2, 2.6, 2.1], [2.8, 4.1, 2.4], [3.6, 1.9, 3.3], [4.7, 3.0, 5.1]];
         let mut c = Chart { kind, categories: cats.iter().map(|s| s.to_string()).collect(), ..Default::default() };
+        if matches!(kind, ChartType::Treemap | ChartType::Sunburst) {
+            // A two-level hierarchy: months inside quarters.
+            c.categories = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"].iter().map(|s| s.to_string()).collect();
+            c.category_levels = vec![["Q1", "Q1", "Q1", "Q2", "Q2", "Q2", "Q3", "Q3"].iter().map(|s| s.to_string()).collect()];
+            let v = [4.2, 2.8, 3.6, 4.7, 2.6, 4.1, 1.9, 3.0];
+            c.series.push(Series { name: "Series 1".into(), values: v.iter().map(|x| Some(*x)).collect(), ..Default::default() });
+            c.vary_colors = true;
+            return c;
+        }
+        if matches!(kind, ChartType::Histogram | ChartType::Pareto | ChartType::BoxWhisker) {
+            // These plot raw observations: a histogram bins one series, a box chart summarises
+            // each category's points.
+            let obs = [12.0, 15.0, 17.0, 18.0, 21.0, 22.0, 22.0, 24.0, 25.0, 27.0, 28.0, 31.0, 33.0, 36.0, 41.0, 48.0];
+            let n_series = if kind == ChartType::BoxWhisker { 2 } else { 1 };
+            c.categories = if kind == ChartType::BoxWhisker {
+                (0..obs.len()).map(|i| if i % 2 == 0 { "Group A" } else { "Group B" }.to_string()).collect()
+            } else {
+                vec![]
+            };
+            for s in 0..n_series {
+                c.series.push(Series {
+                    name: format!("Series {}", s + 1),
+                    values: obs.iter().map(|v| Some(v + s as f64 * 6.0)).collect(),
+                    ..Default::default()
+                });
+            }
+            c.gridlines = true;
+            c.legend = (kind == ChartType::BoxWhisker).then(|| "b".to_string());
+            return c;
+        }
+        if kind == ChartType::Stock {
+            // High-low-close over five days, the series in the order PowerPoint expects.
+            c.categories = ["Mon", "Tue", "Wed", "Thu", "Fri"].iter().map(|s| s.to_string()).collect();
+            let hlc = [("High", [55.0, 57.0, 57.0, 58.0, 58.0]), ("Low", [11.0, 12.0, 13.0, 11.0, 25.0]), ("Close", [25.0, 38.0, 50.0, 35.0, 43.0])];
+            for (name, v) in hlc {
+                c.series.push(Series { name: name.into(), values: v.iter().map(|x| Some(*x)).collect(), ..Default::default() });
+            }
+            return c;
+        }
         let n_series =
             if matches!(kind, ChartType::Pie | ChartType::Doughnut | ChartType::Funnel | ChartType::Waterfall | ChartType::Treemap) { 1 } else { 3 };
         for s in 0..n_series {
@@ -331,6 +428,12 @@ impl Chart {
             });
         }
         c.vary_colors = n_series == 1;
+        if kind == ChartType::Combo {
+            // Columns with the last series as a line, as PowerPoint's combo starts.
+            for (i, s) in c.series.iter_mut().enumerate() {
+                s.kind = Some(if i + 1 == n_series { ChartType::Line } else { ChartType::Column });
+            }
+        }
         c
     }
     /// A series' own chart type: its own in a combo chart (columns when it names none), else the
@@ -364,6 +467,9 @@ impl Chart {
     /// stacked series as running sums from zero, 100 % series as 0–1. `(0, 0)` without finite
     /// values; `None` when no series uses the axis.
     fn plotted_extent(&self, secondary: bool) -> Option<(f64, f64)> {
+        if self.kind == ChartType::Waterfall {
+            return (!secondary).then(|| self.value_range());
+        }
         let ser: Vec<&Series> = self.series.iter().filter(|s| self.on_secondary(s) == secondary).collect();
         if ser.is_empty() {
             return (!secondary && self.kind != ChartType::Combo).then_some((0.0, 0.0));
@@ -391,11 +497,44 @@ impl Chart {
                 lo = lo.min(m);
             }
         }
+        if !percent {
+            for s in &ser {
+                if self.series_kind(s).stacked() {
+                    continue;
+                }
+                for y in s.trendline_ys(crate::trendline::series_is_scatter(self.series_kind(s))) {
+                    hi = hi.max(y);
+                    lo = lo.min(y);
+                }
+            }
+        }
         if percent {
             lo = lo.min(0.0);
             hi = hi.max(1.0);
         }
         Some(if lo <= hi { (lo, hi) } else { (0.0, 0.0) })
+    }
+
+    /// A waterfall's bars as (from, to) on the value axis: each point floats from the running
+    /// total, a total point stands on zero and sets it.
+    pub fn waterfall_bars(&self) -> Vec<(f64, f64)> {
+        let Some(s) = self.series.first() else { return vec![] };
+        let mut run = 0.0;
+        s.values
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let v = v.unwrap_or(0.0);
+                if self.subtotals.contains(&i) {
+                    run = v;
+                    (0.0, v)
+                } else {
+                    let from = run;
+                    run += v;
+                    (from, run)
+                }
+            })
+            .collect()
     }
 
     /// A value axis' scale — (min, max, major unit) — with at most `max_intervals` intervals:
@@ -406,6 +545,22 @@ impl Chart {
         let (fmin, fmax, major) = if secondary { (self.y2_min, self.y2_max, self.y2_major) } else { (self.y_min, self.y_max, self.y_major) };
         let full_percent = !secondary && self.kind.percent();
         Some(axis_scale(lo, hi, fmin, fmax, major, max_intervals, !full_percent))
+    }
+
+    /// A logarithmic value axis' scale in exponents — (min, max, unit), so its labels are
+    /// `base^min`, `base^(min+unit)`… — covering the positive values: whole powers, as PowerPoint
+    /// and LibreOffice draw them. `None` when the axis isn't logarithmic or nothing is positive.
+    pub fn log_axis_scale(&self, max_intervals: usize) -> Option<(f64, f64, f64)> {
+        let b = self.y_log_base.filter(|b| b.is_finite() && *b >= 2.0)?;
+        let vals = self.series.iter().filter(|s| !self.on_secondary(s)).flat_map(|s| s.values.iter().flatten().copied());
+        let (lo, hi) = vals
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .fold(None, |r: Option<(f64, f64)>, v| Some(r.map_or((v, v), |(a, z)| (a.min(v), z.max(v)))))?;
+        let e = |v: f64| v.log(b);
+        let lo = self.y_min.filter(|v| *v > 0.0).map_or(e(lo).floor(), e);
+        let hi = self.y_max.filter(|v| *v > 0.0).map_or(e(hi).ceil(), e).max(lo + 1.0);
+        let unit = ((hi - lo) / max_intervals.max(1) as f64).ceil().max(1.0);
+        Some((lo, lo + ((hi - lo) / unit).ceil() * unit, unit))
     }
 
     /// A value axis label in the axis' number format and the chart's language.
@@ -430,6 +585,13 @@ impl Chart {
     pub fn value_range(&self) -> (f64, f64) {
         let mut lo: f64 = 0.0;
         let mut hi: f64 = 0.0;
+        if self.kind == ChartType::Waterfall {
+            for (a, b) in self.waterfall_bars() {
+                lo = lo.min(a.min(b));
+                hi = hi.max(a.max(b));
+            }
+            return (lo, hi);
+        }
         let n = self.categories.len().max(self.series.iter().map(|s| s.values.len()).max().unwrap_or(0));
         if self.kind.stacked() {
             for i in 0..n {
@@ -453,6 +615,14 @@ impl Chart {
         }
         if self.kind.percent() {
             return (0.0, 1.0);
+        }
+        if !self.kind.stacked() {
+            for s in &self.series {
+                for y in s.trendline_ys(crate::trendline::series_is_scatter(self.series_kind(s))) {
+                    hi = hi.max(y);
+                    lo = lo.min(y);
+                }
+            }
         }
         (self.y_min.unwrap_or(lo), self.y_max.unwrap_or(hi))
     }
@@ -550,6 +720,17 @@ pub fn nice_scale(lo: f64, hi: f64) -> (f64, f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn log_axes_run_over_whole_powers() {
+        let mut c = Chart::sample(ChartType::Line);
+        c.series.truncate(1);
+        c.series[0].values = vec![Some(1.0), Some(10.0), Some(1000.0), Some(50000.0)];
+        assert_eq!(c.log_axis_scale(8), None);
+        c.y_log_base = Some(10.0);
+        assert_eq!(c.log_axis_scale(8), Some((0.0, 5.0, 1.0)));
+        assert_eq!(c.log_axis_scale(2), Some((0.0, 6.0, 3.0)));
+    }
 
     #[test]
     fn nice_scale_covers() {
@@ -696,6 +877,17 @@ mod tests {
     }
 
     #[test]
+    fn a_forecast_grows_the_value_axis() {
+        let mut c = Chart::sample(ChartType::Line);
+        c.series.truncate(1);
+        c.series[0].values = vec![Some(3.0), Some(5.0), Some(7.0), Some(9.0)];
+        let before = c.value_range().1;
+        c.series[0].trendlines.push(Trendline { forward: Some(1.0), ..Default::default() });
+        let after = c.value_range().1;
+        assert!(after > before && after >= 11.0 - 1e-6, "{before} {after}");
+    }
+
+    #[test]
     fn axis_labels_use_the_format_and_language() {
         let mut c = Chart::sample(ChartType::Column);
         c.y_format = Some(r#"_-* #\ ##0\ "₽"_-;\-* #\ ##0\ "₽"_-;_-* "-"??\ "₽"_-;_-@_-"#.into());
@@ -751,5 +943,378 @@ mod tests {
         let (_, hi) = c.value_range();
         assert!(hi > 10.0);
         assert_eq!(Chart::sample(ChartType::Pie).series.len(), 1);
+    }
+}
+
+/// One histogram bin: `[lo, hi]` (the first bin is closed on both sides, later ones open on the
+/// left, as Excel bins) and how many observations fall in it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bin {
+    pub lo: f64,
+    pub hi: f64,
+    pub count: usize,
+}
+
+/// Bins a histogram has at most (a hostile bin size cannot make millions).
+pub const MAX_BINS: usize = 1000;
+
+/// A box and whisker summary of one group: quartiles by Excel's exclusive method, whiskers at
+/// the furthest points within 1.5 IQR of the box, and the points beyond them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoxStats {
+    pub low: f64,
+    pub q1: f64,
+    pub median: f64,
+    pub q3: f64,
+    pub high: f64,
+    pub mean: f64,
+    pub outliers: Vec<f64>,
+}
+
+impl Chart {
+    /// The first series' finite observations.
+    fn observations(&self) -> Vec<f64> {
+        self.series.first().map(|s| s.values.iter().flatten().copied().filter(|v| v.is_finite()).collect()).unwrap_or_default()
+    }
+
+    /// The histogram's bins over the first series: by `bin_size`, else `bin_count`, else
+    /// Scott's rule (3.49·σ·n^(-1/3)). Empty without observations.
+    pub fn histogram_bins(&self) -> Vec<Bin> {
+        let mut v = self.observations();
+        if v.is_empty() {
+            return vec![];
+        }
+        v.sort_by(f64::total_cmp);
+        let (lo, hi) = (v[0], v[v.len() - 1]);
+        let span = hi - lo;
+        let n = v.len() as f64;
+        let width = if let Some(w) = self.bin_size.filter(|w| w.is_finite() && *w > 0.0) {
+            w
+        } else if let Some(k) = self.bin_count.filter(|k| *k > 0) {
+            span / f64::from(k)
+        } else {
+            let mean = v.iter().sum::<f64>() / n;
+            let sd = (v.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0).max(1.0)).sqrt();
+            3.49 * sd / n.cbrt()
+        };
+        let count = if span <= 0.0 || !width.is_finite() || width <= 0.0 { 1 } else { ((span / width).ceil() as usize).clamp(1, MAX_BINS) };
+        let width = if count == 1 && (span <= 0.0 || !width.is_finite() || width <= 0.0) { span.max(1.0) } else { width.max(span / MAX_BINS as f64) };
+        let mut bins: Vec<Bin> = (0..count).map(|i| Bin { lo: lo + width * i as f64, hi: lo + width * (i + 1) as f64, count: 0 }).collect();
+        for x in v {
+            // (lo, hi] bins, the first one also holding the minimum.
+            let i = (((x - lo) / width).ceil() as usize).saturating_sub(1).min(count - 1);
+            if let Some(b) = bins.get_mut(i) {
+                b.count += 1;
+            }
+        }
+        bins
+    }
+
+    /// A histogram (or Pareto) as the chart that draws it: a column chart of the bin counts with
+    /// touching columns, labelled by bin range. A Pareto sorts the bins by count and adds the
+    /// cumulative percentage as a line on a 0–100 % secondary axis.
+    pub fn histogram_view(&self) -> Chart {
+        let mut bins = self.histogram_bins();
+        let pareto = self.kind == ChartType::Pareto;
+        if pareto {
+            bins.sort_by_key(|b| std::cmp::Reverse(b.count));
+        }
+        let fmt = |v: f64| {
+            let r = (v * 100.0).round() / 100.0;
+            if (r - r.round()).abs() < 1e-9 { format!("{}", r.round() as i64) } else { format!("{r}") }
+        };
+        let first_lo = bins.iter().map(|b| b.lo).fold(f64::INFINITY, f64::min);
+        let mut v = Chart {
+            kind: if pareto { ChartType::Combo } else { ChartType::Column },
+            categories: bins
+                .iter()
+                .map(|b| if b.lo <= first_lo { format!("[{}, {}]", fmt(b.lo), fmt(b.hi)) } else { format!("({}, {}]", fmt(b.lo), fmt(b.hi)) })
+                .collect(),
+            series: vec![],
+            gap_width: 0.0,
+            raw: None,
+            subtotals: vec![],
+            ..self.clone()
+        };
+        let name = self.series.first().map(|s| s.name.clone()).unwrap_or_default();
+        let base = self.series.first().cloned().unwrap_or_default();
+        v.series.push(Series {
+            name,
+            values: bins.iter().map(|b| Some(b.count as f64)).collect(),
+            kind: pareto.then_some(ChartType::Column),
+            number_format: None,
+            ..base
+        });
+        if pareto {
+            let total = bins.iter().map(|b| b.count).sum::<usize>().max(1) as f64;
+            let mut run = 0.0;
+            v.series.push(Series {
+                name: "Cumulative %".into(),
+                values: bins
+                    .iter()
+                    .map(|b| {
+                        run += b.count as f64;
+                        Some(run / total)
+                    })
+                    .collect(),
+                kind: Some(ChartType::Line),
+                secondary_axis: true,
+                ..Default::default()
+            });
+            v.y2_min = Some(0.0);
+            v.y2_max = Some(1.0);
+            v.y2_major = Some(0.2);
+            v.y2_format = Some("0%".into());
+        }
+        v.vary_colors = false;
+        v
+    }
+
+    /// The box chart's groups (distinct category labels in order of appearance; one unnamed
+    /// group without categories) and, per series, each group's summary (None when it has no
+    /// points).
+    pub fn box_groups(&self) -> (Vec<String>, Vec<Vec<Option<BoxStats>>>) {
+        let mut groups: Vec<String> = Vec::new();
+        for c in &self.categories {
+            if !groups.contains(c) {
+                groups.push(c.clone());
+            }
+        }
+        if groups.is_empty() {
+            groups.push(String::new());
+        }
+        let stats = self
+            .series
+            .iter()
+            .map(|s| {
+                groups
+                    .iter()
+                    .map(|g| {
+                        let pts: Vec<f64> = s
+                            .values
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| self.categories.get(*i).map_or(g.is_empty() || self.categories.is_empty(), |c| c == g))
+                            .filter_map(|(_, v)| *v)
+                            .filter(|v| v.is_finite())
+                            .collect();
+                        box_stats_by(pts, self.inclusive_quartiles)
+                    })
+                    .collect()
+            })
+            .collect();
+        (groups, stats)
+    }
+}
+
+/// Excel's QUARTILE.EXC position `p·(n+1)` (1-based) on sorted data, clamped to the ends.
+fn quantile_exc(v: &[f64], p: f64) -> f64 {
+    let n = v.len();
+    let pos = (p * (n as f64 + 1.0)).clamp(1.0, n as f64);
+    let i = pos.floor() as usize;
+    let frac = pos - i as f64;
+    let a = v[i.saturating_sub(1).min(n - 1)];
+    let b = v[i.min(n - 1)];
+    a + (b - a) * frac
+}
+
+/// Excel's QUARTILE.INC position `p·(n-1)` (0-based) on sorted data.
+fn quantile_inc(v: &[f64], p: f64) -> f64 {
+    let n = v.len();
+    let pos = (p * (n as f64 - 1.0)).clamp(0.0, (n - 1) as f64);
+    let i = pos.floor() as usize;
+    let a = v[i.min(n - 1)];
+    let b = v[(i + 1).min(n - 1)];
+    a + (b - a) * (pos - i as f64)
+}
+
+/// The summary of one group's points, with exclusive quartiles.
+pub fn box_stats(pts: Vec<f64>) -> Option<BoxStats> {
+    box_stats_by(pts, false)
+}
+
+/// The summary of one group's points; `inclusive` picks QUARTILE.INC over QUARTILE.EXC.
+pub fn box_stats_by(mut pts: Vec<f64>, inclusive: bool) -> Option<BoxStats> {
+    if pts.is_empty() {
+        return None;
+    }
+    pts.sort_by(f64::total_cmp);
+    let q = |p: f64| if inclusive { quantile_inc(&pts, p) } else { quantile_exc(&pts, p) };
+    let (q1, median, q3) = (q(0.25), q(0.5), q(0.75));
+    let iqr = q3 - q1;
+    let (lo_fence, hi_fence) = (q1 - 1.5 * iqr, q3 + 1.5 * iqr);
+    let inside: Vec<f64> = pts.iter().copied().filter(|v| *v >= lo_fence && *v <= hi_fence).collect();
+    let low = inside.first().copied().unwrap_or(q1).min(q1);
+    let high = inside.last().copied().unwrap_or(q3).max(q3);
+    let mean = pts.iter().sum::<f64>() / pts.len() as f64;
+    let outliers = pts.iter().copied().filter(|v| *v < lo_fence || *v > hi_fence).collect();
+    Some(BoxStats { low, q1, median, q3, high, mean, outliers })
+}
+
+/// A node of a treemap or sunburst hierarchy: its label, the total of the leaves under it, and
+/// its children (none for a leaf, which names its category index).
+#[derive(Clone, Debug, PartialEq)]
+pub struct TreeNode {
+    pub name: String,
+    pub value: f64,
+    pub leaf: Option<usize>,
+    pub children: Vec<TreeNode>,
+}
+
+/// Levels of hierarchy a chart may have (a hostile file cannot nest deeper).
+pub const MAX_LEVELS: usize = 16;
+
+impl Chart {
+    /// The first series as a hierarchy: top-level nodes, each holding the consecutive
+    /// categories that share its label, down to the leaves. Without outer levels every
+    /// category is a top-level leaf. Negative and missing values count as zero.
+    pub fn category_tree(&self) -> Vec<TreeNode> {
+        let Some(s) = self.series.first() else { return vec![] };
+        let n = self.categories.len().max(s.values.len());
+        let levels: Vec<&Vec<String>> = self.category_levels.iter().take(MAX_LEVELS).collect();
+        // Each leaf's path from the top level down, blanks filled from the row above.
+        let mut last: Vec<String> = vec![String::new(); levels.len()];
+        let paths: Vec<Vec<String>> = (0..n)
+            .map(|i| {
+                let mut path = Vec::with_capacity(levels.len() + 1);
+                for (d, lv) in levels.iter().enumerate().rev() {
+                    let l = lv.get(i).map(|x| x.trim()).unwrap_or("");
+                    if !l.is_empty() {
+                        last[d] = l.to_string();
+                        // A new outer label starts fresh inner groups.
+                        for inner in last.iter_mut().take(d) {
+                            inner.clear();
+                        }
+                    }
+                    path.push(last[d].clone());
+                }
+                path.push(self.categories.get(i).cloned().unwrap_or_default());
+                path
+            })
+            .collect();
+        let value = |i: usize| s.values.get(i).copied().flatten().filter(|v| v.is_finite()).unwrap_or(0.0).max(0.0);
+        fn build(rows: &[(usize, &[String])], value: &dyn Fn(usize) -> f64) -> Vec<TreeNode> {
+            let mut out: Vec<TreeNode> = Vec::new();
+            let mut i = 0;
+            while i < rows.len() {
+                let (idx, path) = rows[i];
+                if path.len() <= 1 {
+                    out.push(TreeNode { name: path.first().cloned().unwrap_or_default(), value: value(idx), leaf: Some(idx), children: vec![] });
+                    i += 1;
+                    continue;
+                }
+                let head = &path[0];
+                let mut j = i;
+                while j < rows.len() && rows[j].1.len() > 1 && &rows[j].1[0] == head {
+                    j += 1;
+                }
+                let sub: Vec<(usize, &[String])> = rows[i..j].iter().map(|(k, p)| (*k, &p[1..])).collect();
+                let children = build(&sub, value);
+                out.push(TreeNode { name: head.clone(), value: children.iter().map(|c| c.value).sum(), leaf: None, children });
+                i = j;
+            }
+            out
+        }
+        let rows: Vec<(usize, &[String])> = paths.iter().enumerate().map(|(i, p)| (i, p.as_slice())).collect();
+        build(&rows, &value)
+    }
+}
+
+#[cfg(test)]
+mod chartex_tests {
+    use super::*;
+
+    fn obs(v: &[f64]) -> Chart {
+        Chart {
+            kind: ChartType::Histogram,
+            series: vec![Series { values: v.iter().map(|x| Some(*x)).collect(), ..Default::default() }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn histogram_bins_by_count_size_and_scott() {
+        let mut c = obs(&[1.0, 2.0, 2.0, 3.0, 4.0, 5.0, 9.0]);
+        c.bin_count = Some(4);
+        let b = c.histogram_bins();
+        assert_eq!(b.len(), 4);
+        assert_eq!((b[0].lo, b[0].hi), (1.0, 3.0));
+        // (lo, hi] bins with the minimum in the first: 1, 2, 2, 3 | 4, 5 | - | 9.
+        assert_eq!(b.iter().map(|b| b.count).collect::<Vec<_>>(), vec![4, 2, 0, 1]);
+        c.bin_count = None;
+        c.bin_size = Some(5.0);
+        assert_eq!(c.histogram_bins().iter().map(|b| b.count).collect::<Vec<_>>(), vec![6, 1]);
+        c.bin_size = None;
+        let auto = c.histogram_bins();
+        assert!(!auto.is_empty() && auto.iter().map(|b| b.count).sum::<usize>() == 7);
+        // A tiny bin size is capped; one value gives one bin.
+        c.bin_size = Some(1e-12);
+        assert!(c.histogram_bins().len() <= MAX_BINS);
+        assert_eq!(obs(&[3.0]).histogram_bins(), vec![Bin { lo: 3.0, hi: 4.0, count: 1 }]);
+        assert!(obs(&[]).histogram_bins().is_empty());
+    }
+
+    #[test]
+    fn pareto_view_sorts_bins_and_adds_the_cumulative_line() {
+        let mut c = obs(&[1.0, 5.0, 5.0, 5.0, 9.0, 9.0]);
+        c.kind = ChartType::Pareto;
+        c.bin_count = Some(3);
+        let v = c.histogram_view();
+        assert_eq!(v.kind, ChartType::Combo);
+        assert_eq!(v.series[0].values, vec![Some(3.0), Some(2.0), Some(1.0)]);
+        let cum = &v.series[1];
+        assert!(cum.secondary_axis && cum.kind == Some(ChartType::Line));
+        assert_eq!(cum.values.last(), Some(&Some(1.0)));
+        assert_eq!(v.categories[0], "(3.67, 6.33]");
+    }
+
+    #[test]
+    fn box_stats_use_exclusive_quartiles_and_fence_outliers() {
+        let b = box_stats(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0]).unwrap();
+        // QUARTILE.EXC on 8 points: positions 2.25, 4.5, 6.75.
+        assert_eq!((b.q1, b.median, b.q3), (2.25, 4.5, 6.75));
+        assert_eq!(b.outliers, vec![100.0]);
+        assert_eq!((b.low, b.high), (1.0, 7.0));
+        assert!(box_stats(vec![]).is_none());
+        let one = box_stats(vec![5.0]).unwrap();
+        assert_eq!((one.low, one.q1, one.median, one.q3, one.high), (5.0, 5.0, 5.0, 5.0, 5.0));
+    }
+
+    #[test]
+    fn inclusive_quartiles_follow_quartile_inc() {
+        let b = box_stats_by(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0], true).unwrap();
+        // QUARTILE.INC on 8 points: positions 1.75, 3.5, 5.25 (0-based).
+        assert_eq!((b.q1, b.median, b.q3), (2.75, 4.5, 6.25));
+    }
+
+    #[test]
+    fn category_tree_groups_runs_and_fills_blank_parents() {
+        let mut c = Chart::sample(ChartType::Treemap);
+        let t = c.category_tree();
+        assert_eq!(t.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["Q1", "Q2", "Q3"]);
+        assert_eq!(t[0].children.len(), 3);
+        assert_eq!(t[0].children[1].leaf, Some(1));
+        assert!((t[0].value - (4.2 + 2.8 + 3.6)).abs() < 1e-9);
+        // Blank parents continue the label above; two outer levels nest.
+        c.category_levels = vec![
+            vec!["a".into(), "".into(), "b".into(), "".into(), "c".into(), "".into(), "".into(), "".into()],
+            vec!["H1".into(), "".into(), "".into(), "".into(), "H2".into(), "".into(), "".into(), "".into()],
+        ];
+        let t = c.category_tree();
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[0].children.iter().map(|n| n.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        assert_eq!(t[1].children[0].children.len(), 4);
+        // No levels: every category is a leaf.
+        c.category_levels.clear();
+        assert!(c.category_tree().iter().all(|n| n.leaf.is_some()));
+    }
+
+    #[test]
+    fn box_groups_follow_category_labels() {
+        let c = Chart::sample(ChartType::BoxWhisker);
+        let (groups, stats) = c.box_groups();
+        assert_eq!(groups, vec!["Group A".to_string(), "Group B".to_string()]);
+        assert_eq!(stats.len(), 2);
+        assert!(stats.iter().all(|s| s.len() == 2 && s.iter().all(Option::is_some)));
     }
 }

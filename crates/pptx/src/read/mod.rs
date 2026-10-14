@@ -1,12 +1,14 @@
 //! PPTX import: package → [`Presentation`].
 
-mod chart;
+pub(crate) mod chart;
+mod chartex;
 pub(crate) mod dml;
 mod shapes;
 mod theme;
 mod timing;
 
 pub(crate) use chart::{chart_from as chart_from_el, read_chart_xml};
+pub(crate) use chartex::{chartex_from, read_chartex_xml};
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -155,7 +157,16 @@ pub fn keep_xml(el: &El, ns: &[(String, String)]) -> String {
 }
 
 /// Namespace prefixes whose `mc:Choice` content we understand.
-const SUPPORTED_MC: [&str; 9] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188"];
+const SUPPORTED_MC: [&str; 10] = ["p14", "p15", "p159", "a14", "a16", "p1510", "a15", "c14", "p188", "cx1"];
+
+/// Office 2016 charts sit in a `cx1` choice; take it only for a layout DeckCraft reads (the
+/// fallback is a picture or "this chart isn't available" text). The part is checked later, when
+/// the frame is read, so here only the namespace counts.
+fn chartex_readable(ch: &El) -> bool {
+    let mut found = vec![];
+    ch.find_all("graphicData", &mut found);
+    found.iter().any(|g| g.attr("uri").is_some_and(|u| u.ends_with("/chartex")))
+}
 
 /// A relationship to an embedded 3-D model (`.glb`).
 pub(crate) fn is_model3d(rel: &opc::Rel) -> bool {
@@ -285,7 +296,8 @@ fn resolve_mc_rels(el: &mut El, depth: usize, rels: Option<&Rels>) {
                     let choice = ac.children_named("Choice").find(|ch| {
                         let req_ok = ch.attr("Requires").unwrap_or("").split_whitespace().all(|r| SUPPORTED_MC.contains(&r));
                         // Ink content parts are not modelled; prefer their fallback picture.
-                        let modelled = !ch.elements().any(|e| e.is("contentPart"));
+                        let modelled = !ch.elements().any(|e| e.is("contentPart"))
+                            && (!ch.attr("Requires").unwrap_or("").contains("cx1") || chartex_readable(ch));
                         req_ok && modelled
                     });
                     let branch = choice.or_else(|| ac.child("Fallback"));

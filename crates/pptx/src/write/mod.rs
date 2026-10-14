@@ -1,6 +1,6 @@
 //! PPTX export: [`Presentation`] → package.
 
-mod chart;
+pub(crate) mod chart;
 pub(crate) mod dml;
 mod shapes;
 mod theme;
@@ -35,6 +35,8 @@ const CT_VIEW_PROPS: &str = "application/vnd.openxmlformats-officedocument.prese
 const CT_TABLE_STYLES: &str = "application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml";
 const CT_TAGS: &str = "application/vnd.openxmlformats-officedocument.presentationml.tags+xml";
 const CT_CHART: &str = "application/vnd.openxmlformats-officedocument.drawingml.chart+xml";
+const CT_CHARTEX: &str = "application/vnd.ms-office.chartex+xml";
+const RT_CHARTEX: &str = "http://schemas.microsoft.com/office/2014/relationships/chartEx";
 const CT_COMMENTS: &str = "application/vnd.openxmlformats-officedocument.presentationml.comments+xml";
 const CT_AUTHORS: &str = "application/vnd.openxmlformats-officedocument.presentationml.commentAuthors+xml";
 /// Modern threaded comments (read by PowerPoint 2021+ and DeckCraft; the flattened legacy
@@ -56,6 +58,7 @@ pub struct Exp<'a> {
     n_chart: u32,
     n_diagram: u32,
     n_tags: u32,
+    n_chartex: u32,
     pub slide_parts: HashMap<SlideId, String>,
     pub table_styles: Vec<String>,
     placeholder: Option<String>,
@@ -190,6 +193,15 @@ impl Exp<'_> {
         self.pkg.xml_part(&name, CT_TAGS, w.finish());
         o.rels.add_new("tags", &opc::relative(&o.name, &name), false)
     }
+    /// An unchanged Office 2016 chart's `chartEx` part and its relationship id.
+    pub fn chartex_rel(&mut self, o: &mut Out, c: &deckcraft_model::Chart) -> Option<String> {
+        let xml = chart::chartex_xml(c)?;
+        self.n_chartex += 1;
+        let name = format!("ppt/charts/chartEx{}.xml", self.n_chartex);
+        self.pkg.xml_part(&name, CT_CHARTEX, xml);
+        Some(o.rels.add_new(RT_CHARTEX, &opc::relative(&o.name, &name), false))
+    }
+
     pub fn chart_rel(&mut self, o: &mut Out, c: &deckcraft_model::Chart) -> String {
         self.n_chart += 1;
         let name = format!("ppt/charts/chart{}.xml", self.n_chart);
@@ -509,6 +521,7 @@ pub fn export(p: &Presentation, main_ct: &str) -> Result<Vec<u8>, PptxError> {
         n_chart: 0,
         n_diagram: 0,
         n_tags: 0,
+        n_chartex: 0,
         slide_parts: HashMap::new(),
         table_styles: vec![],
         placeholder: None,

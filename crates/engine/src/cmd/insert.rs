@@ -109,7 +109,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Edit Data",
             ["Chart Design", "Data"],
             None,
-            "{categories?: [..], series?: [{name, values}], id?}",
+            "{categories?: [..], levels?: [[..]] (outer category levels, innermost first), series?: [{name, values}], id?}",
             has_selection,
             chart_data
         ),
@@ -118,7 +118,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Chart Elements",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, id?}",
+            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, upDownBars?: bool, id?}",
             has_selection,
             chart_options
         ),
@@ -1689,7 +1689,12 @@ fn chart_type_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let k = chart_type(str_param(p, "type").unwrap_or("column"));
     with_chart(s, p, "chart.type", |c| {
         c.kind = k;
-        c.vary_colors = matches!(k, ChartType::Pie | ChartType::Doughnut) || c.series.len() == 1 && c.vary_colors;
+        c.vary_colors =
+            matches!(k, ChartType::Pie | ChartType::Doughnut | ChartType::Funnel | ChartType::Treemap | ChartType::Sunburst | ChartType::Waterfall)
+                || c.series.len() == 1 && c.vary_colors;
+        if matches!(k, ChartType::Waterfall | ChartType::Histogram | ChartType::Pareto | ChartType::BoxWhisker) {
+            c.gridlines = true;
+        }
         c.raw = None;
         Ok(())
     })
@@ -1709,9 +1714,20 @@ fn chart_data(s: &mut Session, p: &Value) -> Result<Value> {
             })
             .collect()
     });
+    let levels: Option<Vec<Vec<String>>> = p.get("levels").and_then(Value::as_array).map(|a| {
+        a.iter()
+            .take(deckcraft_model::chart::MAX_LEVELS)
+            .map(|l| {
+                l.as_array().map(|v| v.iter().map(|x| x.as_str().map(String::from).unwrap_or_else(|| x.to_string())).collect()).unwrap_or_default()
+            })
+            .collect()
+    });
     with_chart(s, p, "chart.data", |c| {
         if let Some(cs) = &cats {
             c.categories = cs.clone();
+        }
+        if let Some(l) = &levels {
+            c.category_levels = l.clone();
         }
         if let Some(se) = &series {
             // Keep series formatting by position.
@@ -1733,7 +1749,46 @@ fn chart_data(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn chart_options(s: &mut Session, p: &Value) -> Result<Value> {
+    // Histogram bins: a count or a width (setting one clears the other; null for automatic).
+    let bin_count = p.get("binCount").map(|v| v.as_u64().map(|n| n.clamp(1, deckcraft_model::chart::MAX_BINS as u64) as u32));
+    let bin_size = p.get("binSize").map(|v| v.as_f64().filter(|w| w.is_finite() && *w > 0.0));
+    if p.get("binSize").is_some_and(|v| !v.is_null()) && bin_size.flatten().is_none() {
+        return Err(bad("chart.options", "binSize must be a positive number"));
+    }
+    // Waterfall total points.
+    let subtotals: Option<Vec<usize>> =
+        p.get("subtotals").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(|i| i as usize).collect());
     with_chart(s, p, "chart.options", |c| {
+        if let Some(n) = bin_count {
+            c.bin_count = n;
+            if n.is_some() {
+                c.bin_size = None;
+            }
+        }
+        if let Some(w) = bin_size {
+            c.bin_size = w;
+            if w.is_some() {
+                c.bin_count = None;
+            }
+        }
+        if let Some(t) = &subtotals {
+            let n = c.series.first().map_or(0, |s| s.values.len());
+            let mut t: Vec<usize> = t.iter().copied().filter(|i| *i < n).collect();
+            t.sort_unstable();
+            t.dedup();
+            c.subtotals = t;
+        }
+        if let Some(b) = p.get("upDownBars").and_then(Value::as_bool) {
+            c.up_down_bars = b;
+            c.raw = None;
+        }
+        if let Some(q) = p.get("quartiles").and_then(Value::as_str) {
+            c.inclusive_quartiles = q.eq_ignore_ascii_case("inclusive");
+            c.raw = None;
+        }
+        if bin_count.is_some() || bin_size.is_some() || subtotals.is_some() {
+            c.raw = None;
+        }
         if let Some(t) = p.get("title") {
             c.title = t.as_str().map(String::from);
         }

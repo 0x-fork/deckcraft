@@ -32,6 +32,7 @@
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Design ▸ Effects; percentages unchanged) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Slide Master Preserve and Title/Footers placeholders; percentages unchanged; previous: hours to ~95% per audience, ready 56% → 55%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: Trim Media dialog follows the selection; breadth stays 79%; previous: minor, hours to ~95%) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (progress log: chart trendlines are drawn; previous: trivial, chart trendlines round-trip; hours to ~95% per audience added; ready ~55%; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 DeckCraft aims at full PowerPoint parity, and to be better: faster, open (a documented zip+JSON
 format plus PPTX), scriptable by agents (CLI, JSON control channel, MCP), and available everywhere
@@ -178,6 +179,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | PPTX round trip of comments, hyperlinks and actions, custom shows, rotated groups, and placeholders that inherit from the layout. Paragraph default formatting (`defRPr`, including a link) and action sounds (the clip, stop-previous, and a custom show's "Show and return") are kept. Embedded fonts and comment threads stay open |
 | 2026-10-13 | PPTX round trip of text effects, autofit, columns, vertical and RTL text, tab stops, line spacing, theme effects, gradient and pattern fills, 3-D bevels and connectors. A run keeps its inner shadow, reflection and soft edge, and a bevel preset with no kept 3-D XML is written back. Embedded fonts and #70, #74, #77 stay open |
 | 2026-10-14 | PPTX: an owned corpus round-trips SmartArt and OLE kept as XML, audio and video bookmarks and trims, a section with a hidden slide, slide-number and date fields, ink (as freeform lines), 3-D models (`.glb`, including the fallback picture) and animation repeat, bounce end and triggers. Relationship-bearing SmartArt and OLE (#203), playback options (#74) and rewind (#77) stay open |
+| 2026-10-14 | Chart trendlines are drawn: linear, exponential, logarithmic, polynomial, power and moving average, with forecast and the equation and R² label. The value axis grows to include the fit |
 | 2026-10-14 | Chart trendlines round-trip (type, polynomial order, moving-average period, forecast, intercept, equation and R²). An owned corpus slice also checks combo charts with data labels, merged tables with diagonal borders, and text columns, autofit, vertical text and a WordArt warp |
 | 2026-10-14 | Insert › Icons: a gallery of Lucide stroke icons (release 1.56.0) inserted as custom shapes, no fill, round stroke scaled from the 24-unit design |
 | 2026-10-14 | Size and Position dialog: height, width, rotation, scale and lock aspect ratio in one undo step, from Shape Format › Size and the shape menu. Breadth stays 79% |
@@ -244,6 +246,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-13 | trivial | Progress log: PPTX corpus for comments, links, custom shows, groups and inherited placeholders |
 | 2026-10-13 | trivial | Progress log: PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors |
 | 2026-10-14 | trivial | Progress log: PPTX corpus for 3-D models, media bookmarks and animation bounce end |
+| 2026-10-14 | trivial | Progress log: chart trendlines are drawn |
 | 2026-10-14 | trivial | Progress log: chart trendlines |
 | 2026-10-14 | trivial | Progress log: Lucide icon gallery |
 | 2026-10-14 | trivial | Progress log: Size and Position dialog. Breadth stays 79%, ready stays ~55% |
