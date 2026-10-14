@@ -48,6 +48,7 @@ fn title(id: &str) -> &'static str {
         "preferences" => "Preferences",
         "export" => "Export",
         "symbol" => "Symbol",
+        "photoAlbum" => "Photo Album",
         "equation" => "Equation",
         "spelling" => "Spelling",
         "pasteSpecial" => "Paste Special",
@@ -118,6 +119,189 @@ fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> 
 
 fn num(d: &mut Dialog, key: &str, default: f64) -> f64 {
     d.get(key, "").trim().trim_end_matches(['"', '%', ' ']).parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(default)
+}
+
+fn album_items(d: &Dialog) -> Option<Vec<Value>> {
+    let raw = d.fields.get("items").map(String::as_str).unwrap_or("[]");
+    serde_json::from_str::<Value>(raw).ok().and_then(|v| v.as_array().cloned())
+}
+
+fn store_album_items(d: &mut Dialog, items: &[Value]) {
+    let raw = serde_json::to_string(items).unwrap_or_else(|_| "[]".into());
+    d.fields.insert("items".into(), raw);
+}
+
+fn album_item_label(v: &Value) -> String {
+    if let Some(text) = v.get("text").and_then(Value::as_str) {
+        let text = text.trim();
+        if text.is_empty() { "Text Box".to_string() } else { format!("Text: {text}") }
+    } else {
+        v.get("name").and_then(Value::as_str).filter(|s| !s.is_empty()).unwrap_or("Picture").to_string()
+    }
+}
+
+fn pick_album_picture(app: &mut SlideApp) -> Option<Value> {
+    let path = if let Some(pick) = app.services.pick_open.as_mut() {
+        pick("picture")
+    } else {
+        app.set_status("Pass pictures to insert.photoAlbum");
+        None
+    };
+    let path = path?;
+    let loaded = if let Some(read) = app.services.read.as_ref() {
+        match read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                app.set_status(e);
+                return None;
+            }
+        }
+    } else {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    app.set_status(format!("{path}: {e}"));
+                    return None;
+                }
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            app.set_status("The web build inserts album pictures from data passed to insert.photoAlbum");
+            return None;
+        }
+    };
+    if loaded.is_empty() {
+        app.set_status("That file is empty");
+        return None;
+    }
+    if loaded.len() > 32 * 1024 * 1024 {
+        app.set_status("That picture is larger than 32 MB");
+        return None;
+    }
+    let name = std::path::Path::new(&path).file_name().and_then(|n| n.to_str()).filter(|s| !s.is_empty()).unwrap_or("picture").to_string();
+    Some(json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(&loaded)}))
+}
+
+fn album_choice(ui: &mut Ui, d: &mut Dialog, id: &str, key: &str, default: &str, choices: &[(&str, &str)]) {
+    let cur = d.get(key, default);
+    let label = choices.iter().find(|(k, _)| *k == cur).map(|(_, l)| *l).unwrap_or(default);
+    egui::ComboBox::from_id_salt(id).selected_text(label).width(220.0).show_ui(ui, |ui| {
+        for (k, l) in choices {
+            if ui.selectable_label(cur == *k, *l).clicked() {
+                d.fields.insert(key.into(), (*k).to_string());
+            }
+        }
+    });
+}
+
+/// Photo Album. Returns true when the dialog should close.
+fn photo_album_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    ui.set_min_width(400.0);
+    ui.label("Pictures in album");
+    let items = album_items(d).unwrap_or_default();
+    let mut sel = d.get("sel", "0").parse::<usize>().unwrap_or(0);
+    egui::ScrollArea::vertical().max_height(140.0).id_salt("album_list").show(ui, |ui| {
+        if items.is_empty() {
+            ui.label(egui::RichText::new("No pictures yet").color(Tokens::get(ui.ctx()).text_dim));
+        }
+        for (i, item) in items.iter().enumerate() {
+            if ui.selectable_label(sel == i, album_item_label(item)).clicked() {
+                sel = i;
+            }
+        }
+    });
+    d.fields.insert("sel".into(), sel.to_string());
+    ui.horizontal(|ui| {
+        if ui.button("Add Pictures…").clicked()
+            && let Some(item) = pick_album_picture(app)
+        {
+            match album_items(d) {
+                Some(mut list) if list.len() < 48 => {
+                    list.push(item);
+                    let next = list.len().saturating_sub(1);
+                    store_album_items(d, &list);
+                    d.fields.insert("sel".into(), next.to_string());
+                }
+                Some(_) => app.set_status("A photo album holds at most 48 pictures or text boxes"),
+                None => app.set_status("The picture list is invalid"),
+            }
+        }
+        if ui.button("New Text Box").clicked() {
+            let text = d.get("boxText", "Text Box");
+            let text = text.trim();
+            if text.is_empty() {
+                app.set_status("Type the text for the new text box");
+            } else if text.chars().count() > 400 {
+                app.set_status("Text is longer than 400 characters");
+            } else if let Some(mut list) = album_items(d) {
+                if list.len() >= 48 {
+                    app.set_status("A photo album holds at most 48 pictures or text boxes");
+                } else {
+                    list.push(json!({"text": text}));
+                    let next = list.len().saturating_sub(1);
+                    store_album_items(d, &list);
+                    d.fields.insert("sel".into(), next.to_string());
+                }
+            }
+        }
+        if ui.button("Remove").clicked()
+            && let Some(mut list) = album_items(d)
+            && let Some(i) = d.get("sel", "0").parse::<usize>().ok()
+            && i < list.len()
+        {
+            list.remove(i);
+            store_album_items(d, &list);
+            let next = i.min(list.len().saturating_sub(1));
+            d.fields.insert("sel".into(), next.to_string());
+        }
+    });
+    field(ui, d, "Text box:", "boxText", "Text Box");
+    ui.add_space(4.0);
+    ui.label("Picture layout");
+    album_choice(
+        ui,
+        d,
+        "album_layout",
+        "layout",
+        "1",
+        &[
+            ("fit", "Fit to slide"),
+            ("1", "1 picture"),
+            ("2", "2 pictures"),
+            ("4", "4 pictures"),
+            ("1title", "1 picture with title"),
+            ("2title", "2 pictures with title"),
+            ("4title", "4 pictures with title"),
+        ],
+    );
+    ui.label("Frame shape");
+    album_choice(
+        ui,
+        d,
+        "album_frame",
+        "frame",
+        "rect",
+        &[("none", "None"), ("rect", "Rectangle"), ("rounded", "Rounded"), ("simple", "Simple, white")],
+    );
+    let captions = check(ui, d, "Captions under pictures", "captions", false);
+    let (ok, cancel) = buttons(ui, "Create");
+    if ok {
+        let Some(list) = album_items(d) else {
+            app.set_status("The picture list is invalid");
+            return false;
+        };
+        if list.is_empty() {
+            app.set_status("Add a picture or a text box first");
+            return false;
+        }
+        let layout = d.get("layout", "1");
+        let frame = d.get("frame", "rect");
+        return app.run("insert.photoAlbum", json!({"pictures": list, "layout": layout, "frame": frame, "captions": captions})).is_ok();
+    }
+    cancel
 }
 
 /// Returns true when the dialog should close.
@@ -867,6 +1051,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let (ok, _) = buttons(ui, "Done");
             ok
         }
+        "photoAlbum" => photo_album_dialog(app, ui, d),
         _ => {
             ui.label(format!("“{}” is not available yet.", d.id));
             let (ok, cancel) = buttons(ui, "OK");
@@ -1209,3 +1394,7 @@ pub fn paint_logo(p: &egui::Painter, r: Rect) {
 #[cfg(test)]
 #[path = "size_position_tests.rs"]
 mod size_position_tests;
+
+#[cfg(test)]
+#[path = "photo_album_tests.rs"]
+mod photo_album_tests;

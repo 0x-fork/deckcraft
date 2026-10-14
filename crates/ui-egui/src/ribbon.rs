@@ -237,6 +237,16 @@ fn big(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Va
     }
 }
 
+/// Like [`big`], with an accesskit name (the painted label can be two lines).
+fn big_labeled(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, access: &str, id: &str, p: Value) {
+    let en = enabled(app, id);
+    let resp = big_button(ui, icon, label, en).on_hover_text(tip(id, access));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, access));
+    if resp.clicked() {
+        run(app, id, p);
+    }
+}
+
 fn small(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
     let en = enabled(app, id);
     if small_button(ui, icon, label, en, false).on_hover_text(tip(id, label)).clicked() {
@@ -1057,6 +1067,7 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
     });
     group(ui, |ui| {
         big(app, ui, Icon::Picture, "Pictures", "app.insertPictureDialog", json!({}));
+        big_labeled(app, ui, Icon::Picture, "Photo\nAlbum", "Photo Album…", "insert.photoAlbum", json!({}));
         let r = big_button(ui, Icon::Screenshot, "Screenshot", false);
         let _ = r.on_hover_text("Screenshot (not available yet)");
     });
