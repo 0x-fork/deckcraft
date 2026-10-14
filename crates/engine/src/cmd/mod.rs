@@ -11,6 +11,7 @@ pub mod inspect;
 pub mod media;
 pub mod merge;
 pub mod review;
+mod richclip;
 pub mod selection;
 pub mod shape;
 pub mod slide;

@@ -36,6 +36,22 @@ fn shape_fill_uses_theme_accent() {
 }
 
 #[test]
+fn render_shapes_draws_the_selection_on_a_transparent_canvas() {
+    let sh = Shape {
+        id: ShapeId(880),
+        xfrm: Some(Xfrm::new(100.0, 80.0, 60.0, 40.0)),
+        fill: Some(deckcraft_model::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0)))),
+        line: Some(deckcraft_model::Line::none()),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let img = render_shapes(&p, &p.slides[0], &[ShapeId(880)], 1.0).expect("picture");
+    let mid = img.pixel(img.width / 2, img.height / 2);
+    assert!(mid[0] > 200 && mid[1] < 40 && mid[3] > 200, "{mid:?}");
+    assert_eq!(img.pixel(0, 0)[3], 0, "{:?}", img.pixel(0, 0));
+}
+
+#[test]
 fn text_draws_ink() {
     let mut sh = Shape { id: ShapeId(501), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), text_box: true, ..Default::default() };
     let mut t = TextBody::from_text("HELLO WORLD");

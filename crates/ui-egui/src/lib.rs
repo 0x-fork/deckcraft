@@ -60,6 +60,10 @@ pub struct Services {
     pub inbox: Option<Inbox>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
+    /// HTML on the system clipboard (Pages, Keynote, and other apps that write `public.html`).
+    pub clipboard_html: Option<Box<dyn FnMut() -> Option<String>>>,
+    /// Put HTML and its plain-text alternative on the system clipboard. `true` when it landed.
+    pub clipboard_set_html: Option<Box<dyn FnMut(&str, &str) -> bool>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
 }
@@ -881,28 +885,24 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Ime(ime) => self.ime_event(&ime),
-                egui::Event::Copy => {
-                    if let Ok(v) = self.session.execute("edit.copy", &json!({}))
-                        && let Some(t) = v.get("text").and_then(Value::as_str)
-                    {
-                        ctx.copy_text(t.to_string());
-                    }
-                }
-                egui::Event::Cut => {
-                    if let Ok(v) = self.session.execute("edit.cut", &json!({}))
-                        && let Some(t) = v.get("text").and_then(Value::as_str)
-                    {
-                        ctx.copy_text(t.to_string());
-                    }
-                }
+                egui::Event::Copy => self.publish_clipboard(ctx, false),
+                egui::Event::Cut => self.publish_clipboard(ctx, true),
                 egui::Event::Paste(text) => {
-                    // An image on the clipboard (screenshots, copied pictures) becomes a picture.
+                    // A picture (TIFF from Keynote, a screenshot) lands when the paste has no text.
+                    // Text keeps its HTML (bold, italic, underline) when the host can read it.
+                    let html = self.services.clipboard_html.as_mut().and_then(|f| f()).filter(|h| !h.is_empty());
                     let img = if text.is_empty() { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
                     let r = match img {
                         Some(png) => self
                             .session
                             .execute("insert.picture", &json!({"name": "Pasted image.png", "data": deckcraft_engine::cmd::base64_encode(&png)})),
-                        None => self.session.execute("edit.paste", &json!({"text": text})),
+                        None => {
+                            let mut params = json!({"text": text});
+                            if let Some(h) = html {
+                                params["html"] = Value::String(h);
+                            }
+                            self.session.execute("edit.paste", &params)
+                        }
                     };
                     if let Err(e) = r {
                         self.set_status(e.to_string());
@@ -923,6 +923,61 @@ impl SlideApp {
             }
         }
         self.drain_requests();
+    }
+
+    /// Offer the copy or cut on the system clipboard.
+    ///
+    /// Slides go out as plain text. A textless shape goes out as a picture (Keynote and Pages
+    /// paste that). Text goes out as HTML plus the same plain words, so a paste back into
+    /// DeckCraft still uses the internal clipboard.
+    fn publish_clipboard(&mut self, ctx: &egui::Context, cut: bool) {
+        // Cut deletes the shapes, so the picture is taken first.
+        let picture = self.textless_selection_image();
+        let cmd = if cut { "edit.cut" } else { "edit.copy" };
+        let Ok(v) = self.session.execute(cmd, &json!({})) else { return };
+        let text = v.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+        let html = v.get("html").and_then(Value::as_str).unwrap_or("").to_string();
+        if !self.session.clipboard.slides.is_empty() {
+            ctx.copy_text(text);
+            return;
+        }
+        if let Some(img) = picture {
+            ctx.copy_image(img);
+            return;
+        }
+        if !html.is_empty() && self.services.clipboard_set_html.as_mut().is_some_and(|f| f(&html, &text)) {
+            return;
+        }
+        ctx.copy_text(text);
+    }
+
+    /// A picture of the selected shapes when none of them has text, on the slide (not a master).
+    fn textless_selection_image(&self) -> Option<egui::ColorImage> {
+        let st = self.session.active()?;
+        if st.selection.target != deckcraft_engine::Target::Slides || st.selection.text.is_some() || st.selection.shapes.is_empty() {
+            return None;
+        }
+        let mut plain = String::new();
+        let mut any = false;
+        for id in &st.selection.shapes {
+            let Some(sh) = st.shape(*id) else { continue };
+            any = true;
+            if let Some(t) = &sh.text {
+                if !plain.is_empty() {
+                    plain.push('\n');
+                }
+                plain.push_str(&t.text());
+            }
+        }
+        if !any || !plain.is_empty() {
+            return None;
+        }
+        let slide = st.current_slide()?;
+        let img = deckcraft_render::render_shapes(&st.doc, slide, &st.selection.shapes, 2.0)?;
+        if img.width == 0 || img.height == 0 {
+            return None;
+        }
+        Some(textures::to_color_image(&img, false))
     }
 
     /// Lay out the whole window.
@@ -1407,5 +1462,72 @@ mod tests {
         let n = app.textures.canvas_renders;
         harness.run_steps(3);
         assert_eq!(harness.state().textures.canvas_renders, n, "an unchanged slide isn't rendered again");
+    }
+
+    fn step_app(services: Services) -> egui_kittest::Harness<'static, SlideApp> {
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), services),
+        );
+        h.run_steps(2);
+        h
+    }
+
+    /// Copy of a bold selection offers HTML; paste of Pages-like HTML keeps the bold.
+    #[test]
+    fn copy_offers_html_and_paste_keeps_bold() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        let seen = Rc::new(RefCell::new(None));
+        let record = seen.clone();
+        let services = Services {
+            clipboard_set_html: Some(Box::new(move |html, plain| {
+                *record.borrow_mut() = Some((html.to_string(), plain.to_string()));
+                true
+            })),
+            ..Default::default()
+        };
+        let mut h = step_app(services);
+        let title = h.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        h.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        h.event(egui::Event::Text("Hi".into()));
+        h.run_steps(1);
+        h.state_mut().session.execute("text.selectAll", &json!({})).unwrap();
+        h.state_mut().session.execute("format.bold", &json!({"on": true})).unwrap();
+        h.event(egui::Event::Copy);
+        h.run_steps(1);
+        let (html, plain) = seen.borrow().clone().expect("html offered");
+        assert!(html.contains("<b>"), "{html}");
+        assert_eq!(plain, "Hi");
+        assert!(!h.output().platform_output.commands.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyText(_))));
+
+        let services = Services { clipboard_html: Some(Box::new(|| Some("<p><b>Hi</b></p>".into()))), ..Default::default() };
+        let mut h = step_app(services);
+        h.event(egui::Event::Paste("Hi".into()));
+        h.run_steps(1);
+        let st = h.state().session.active().unwrap();
+        let body = st
+            .current_slide()
+            .unwrap()
+            .shapes
+            .iter()
+            .find(|sh| sh.text.as_ref().is_some_and(|t| t.text() == "Hi"))
+            .and_then(|sh| sh.text.clone())
+            .expect("pasted text");
+        assert_eq!(body.paragraphs[0].runs[0].props.bold, Some(true), "{body:?}");
+    }
+
+    /// A shape with no text copies out as a picture.
+    #[test]
+    fn a_textless_shape_copies_as_a_picture() {
+        let mut h = step_app(Services::default());
+        h.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 120.0, 80.0]})).unwrap();
+        h.event(egui::Event::Copy);
+        h.run_steps(1);
+        let cmds = &h.output().platform_output.commands;
+        assert!(cmds.iter().any(|c| matches!(c, egui::output::OutputCommand::CopyImage(img) if img.size[0] > 0 && img.size[1] > 0)), "{cmds:?}");
     }
 }
