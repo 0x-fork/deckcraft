@@ -129,6 +129,12 @@ pub struct History {
     pub undo: Vec<HistoryEntry>,
     pub redo: Vec<HistoryEntry>,
     pub limit: usize,
+    /// Most memory (estimated bytes) the undo steps may keep beyond the current document;
+    /// 0 means [`UNDO_BYTE_BUDGET`].
+    pub byte_limit: usize,
+    /// Estimated bytes each undo step keeps that the document after it doesn't share, by the
+    /// step's document address.
+    pub costs: std::collections::HashMap<usize, usize>,
 }
 
 /// A live pointer interaction: the document before it began (one undo step at the end).
@@ -543,11 +549,67 @@ fn clamp_selection(st: &mut DocState) {
     }
 }
 
+/// Default for [`History::byte_limit`].
+pub const UNDO_BYTE_BUDGET: usize = 256 << 20;
+
+/// A rough size of a shape in memory: the struct, its text and kept XML, its children.
+fn shape_cost(sh: &deckcraft_model::Shape, depth: usize) -> usize {
+    let text: usize =
+        sh.text.as_ref().map_or(0, |t| t.paragraphs.iter().map(|p| 96 + p.runs.iter().map(|r| 128 + r.text.len()).sum::<usize>()).sum());
+    let kids: usize = if depth < 64 { sh.children().iter().map(|c| shape_cost(c, depth + 1)).sum() } else { 0 };
+    768 + text + sh.raw_ext.as_ref().map_or(0, String::len) + kids
+}
+
+fn shapes_cost(shapes: &[deckcraft_model::Shape]) -> usize {
+    shapes.iter().map(|s| shape_cost(s, 0)).sum()
+}
+
+/// Estimated bytes `doc` keeps alive that `newer` doesn't share: its slides, masters and media
+/// that aren't the same allocations (undo steps share everything an edit didn't touch).
+pub fn undo_cost(doc: &Presentation, newer: &Presentation) -> usize {
+    use std::collections::HashSet;
+    let slides: HashSet<*const deckcraft_model::Slide> = newer.slides.iter().map(Arc::as_ptr).collect();
+    let masters: HashSet<*const deckcraft_model::Master> = newer.masters.iter().map(Arc::as_ptr).collect();
+    let media: HashSet<*const Vec<u8>> = newer.media.iter().map(|m| Arc::as_ptr(&m.data)).collect();
+    let mut n = 64 * doc.slides.len();
+    for s in doc.slides.iter().filter(|s| !slides.contains(&Arc::as_ptr(s))) {
+        n += 512 + shapes_cost(&s.shapes);
+    }
+    for m in doc.masters.iter().filter(|m| !masters.contains(&Arc::as_ptr(m))) {
+        n += 4096 + shapes_cost(&m.shapes) + m.layouts.iter().map(|l| 512 + shapes_cost(&l.shapes)).sum::<usize>();
+    }
+    for m in doc.media.iter().filter(|m| !media.contains(&Arc::as_ptr(&m.data))) {
+        n += m.data.len();
+    }
+    n
+}
+
 pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {
-    st.history.undo.push(e);
-    st.history.redo.clear();
-    if st.history.undo.len() > st.history.limit.max(1) {
-        st.history.undo.remove(0);
+    let h = &mut st.history;
+    h.costs.insert(Arc::as_ptr(&e.doc) as usize, undo_cost(&e.doc, &st.doc));
+    h.undo.push(e);
+    h.redo.clear();
+    if h.undo.len() > h.limit.max(1) {
+        h.undo.remove(0);
+    }
+    // Memory too: drop the oldest steps while the kept ones pass the budget (the newest always
+    // stays, however big). A deck-wide edit keeps a copy of every slide, so 500 of them on a big
+    // deck could hold hundreds of copies.
+    let budget = if h.byte_limit == 0 { UNDO_BYTE_BUDGET } else { h.byte_limit };
+    let cost = |h: &History, e: &HistoryEntry| h.costs.get(&(Arc::as_ptr(&e.doc) as usize)).copied().unwrap_or(0);
+    let mut total: usize = h.undo.iter().map(|e| cost(h, e)).sum();
+    let mut drop = 0;
+    while total > budget && drop + 1 < h.undo.len() {
+        total -= cost(h, &h.undo[drop]);
+        drop += 1;
+    }
+    if drop > 0 {
+        h.undo.drain(..drop);
+    }
+    // Costs of steps that are gone (dropped, or redo steps cleared above).
+    if h.costs.len() > h.undo.len() + 16 {
+        let live: std::collections::HashSet<usize> = h.undo.iter().chain(h.redo.iter()).map(|e| Arc::as_ptr(&e.doc) as usize).collect();
+        h.costs.retain(|k, _| live.contains(k));
     }
 }
 

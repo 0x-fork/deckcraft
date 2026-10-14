@@ -835,3 +835,33 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     let opts = cmd::file::pdf_options(&json!({"slides": [0, 7, 1]}), 2).unwrap();
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
+
+/// Undo keeps a bounded amount of memory: deck-wide edits (each step holds a copy of every
+/// slide) are dropped oldest first once the steps pass the byte budget, while ordinary small
+/// edits still get the full step count.
+#[test]
+fn undo_history_is_capped_by_memory_as_well_as_steps() {
+    let mut s = Session::with_new();
+    for _ in 0..40 {
+        s.execute("slide.new", &json!({})).unwrap();
+    }
+    let one_copy = crate::undo_cost(&s.doc().unwrap().doc, &Presentation::default());
+    assert!(one_copy > 0);
+    s.doc_mut().unwrap().history = History { limit: 500, byte_limit: one_copy * 10, ..Default::default() };
+    for i in 0..30 {
+        // Resizing the slides rescales every shape on every slide: a new copy of each.
+        let w = if i % 2 == 0 { 720 } else { 960 };
+        s.execute("design.slideSize", &json!({"w": w, "h": 540})).unwrap();
+    }
+    let n = s.doc().unwrap().history.undo.len();
+    assert!((5..=11).contains(&n), "{n} deck-wide steps kept");
+    // Still undoable, newest first.
+    s.execute("edit.undo", &json!({})).unwrap();
+    // Small edits: each keeps one slide's copy, so many fit.
+    let mut s = Session::with_new();
+    s.doc_mut().unwrap().history.byte_limit = one_copy * 10;
+    for _ in 0..120 {
+        s.execute("slide.new", &json!({})).unwrap();
+    }
+    assert_eq!(s.doc().unwrap().history.undo.len(), 120);
+}
