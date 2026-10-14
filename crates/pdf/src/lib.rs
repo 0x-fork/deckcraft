@@ -67,7 +67,7 @@ pub struct PdfOptions {
     pub frame_slides: bool,
     /// Document title (defaults to the presentation title).
     pub title: Option<String>,
-    /// Handout/notes page size in points (default US Letter portrait).
+    /// Handout/notes page size in points (default US Letter portrait; see [`paper_size`]).
     pub paper: (f64, f64),
 }
 
@@ -84,6 +84,36 @@ impl Default for PdfOptions {
             paper: (612.0, 792.0),
         }
     }
+}
+
+/// Paper sizes the Print page offers, as (id, label, width × height in points, portrait).
+pub const PAPERS: [(&str, &str, (f64, f64)); 4] = [
+    ("letter", "Letter (8.5 × 11 in)", (612.0, 792.0)),
+    ("a4", "A4 (210 × 297 mm)", (595.28, 841.89)),
+    ("legal", "Legal (8.5 × 14 in)", (612.0, 1008.0)),
+    ("a3", "A3 (297 × 420 mm)", (841.89, 1190.55)),
+];
+
+/// The page size in points for a paper id from [`PAPERS`] (case-insensitive), turned on its side
+/// when `landscape`. `None` for an unknown id.
+pub fn paper_size(id: &str, landscape: bool) -> Option<(f64, f64)> {
+    let (_, _, (w, h)) = PAPERS.iter().find(|p| p.0.eq_ignore_ascii_case(id.trim()))?;
+    Some(if landscape { (*h, *w) } else { (*w, *h) })
+}
+
+/// The slide box on a notes page of `paper`: an inch of margin at the sides and the slide at most
+/// half the page tall, so landscape paper still leaves room for the notes.
+pub fn notes_slide_box(paper: (f64, f64), aspect: f64) -> Rect {
+    let (pw, ph) = paper;
+    let mut w = (pw - 2.0 * 72.0).max(1.0);
+    let mut h = w / aspect.max(0.01);
+    let max_h = (ph * 0.5 - 54.0).max(1.0);
+    if h > max_h {
+        h = max_h;
+        w = h * aspect;
+    }
+    let x = (pw - w) / 2.0;
+    Rect::new(x, 54.0, x + w, 54.0 + h)
 }
 
 /// Export `pres` as PDF bytes.
@@ -112,10 +142,8 @@ pub fn export(pres: &Presentation, opts: &PdfOptions) -> Result<Vec<u8>> {
     let pages: Vec<Vec<(usize, Rect)>> = match opts.layout {
         PageLayout::Slides => slides.iter().map(|&i| vec![(i, Rect::new(0.0, 0.0, sw, sh))]).collect(),
         PageLayout::Notes => {
-            let (pw, _) = opts.paper;
-            let w = pw - 2.0 * 72.0;
-            let h = w * sh / sw;
-            slides.iter().map(|&i| vec![(i, Rect::new(72.0, 54.0, 72.0 + w, 54.0 + h))]).collect()
+            let b = notes_slide_box(opts.paper, sw / sh);
+            slides.iter().map(|&i| vec![(i, b)]).collect()
         }
         PageLayout::Handouts { per_page } => {
             let boxes = handout_boxes(per_page, opts.paper, sw / sh);

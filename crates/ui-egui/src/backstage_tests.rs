@@ -492,4 +492,13 @@ fn print_slides_follow_the_settings() {
     bs.print_layout = "h6";
     assert_eq!(print_params(&bs, &[1, 3])["perPage"], 6);
     assert_eq!(print_params(&bs, &[1, 3])["layout"], "handouts");
+    assert_eq!(print_params(&bs, &[1])["paper"], "letter");
+    assert_eq!(print_page_size(&bs, &doc), (612.0, 792.0));
+    bs.print_paper = "a4";
+    bs.print_landscape = true;
+    assert_eq!(print_params(&bs, &[1])["orientation"], "landscape");
+    let (w, h) = print_page_size(&bs, &doc);
+    assert!((w - 841.89).abs() < 0.01 && (h - 595.28).abs() < 0.01);
+    bs.print_layout = "slides";
+    assert_eq!(print_page_size(&bs, &doc), (doc.slide_size.width as f32, doc.slide_size.height as f32), "slides print slide-shaped");
 }

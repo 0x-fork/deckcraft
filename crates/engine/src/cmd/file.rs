@@ -15,7 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "file.saveAs", "Save As…", ["File"], Some("Cmd+Shift+S"), "{path, format?}", has_doc, save_as),
         cmd!(noundo "file.saveTemplate", "Save as Template…", ["File"], None, "{path}", has_doc, save_as),
         cmd!(query "file.saveBytes", "Save to Data", [], None, "{format?: deckcraft|pptx} → {data: base64}", has_doc, save_bytes_cmd),
-        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, dpi?, slides?: [index] | \"1-3,5\", includeHidden?, textLayer?, frame?}", has_doc, export),
+        cmd!(noundo "file.export", "Export…", ["File"], None, "{path, format: png|jpeg|pptx|deckcraft|outline|pdf, slide?: index, all?: bool, scale?: px per pt; pdf: layout?: slides|notes|handouts, perPage?: 1|2|3|4|6|9, paper?: letter|a4|legal|a3, orientation?: portrait|landscape, dpi?, slides?: [index] | \"1-3,5\", includeHidden?, textLayer?, frame?}", has_doc, export),
         cmd!(
             query "file.info",
             "Info",
@@ -144,8 +144,11 @@ pub fn save_bytes(doc: &Presentation, format: &str) -> Result<Vec<u8>> {
     }
 }
 
+/// Paper sizes for notes and handouts, for the UI's Print page.
+pub use deckcraft_pdf::{PAPERS, paper_size};
+
 /// PDF options from command params: `{layout: slides|notes|handouts, perPage, dpi, slides,
-/// includeHidden, textLayer, frame}` for a presentation of `count` slides. `slides` is a list of
+/// includeHidden, textLayer, frame, paper: letter|a4|legal|a3, orientation: portrait|landscape}` for a presentation of `count` slides. `slides` is a list of
 /// 0-based indices or a range as typed in PowerPoint's Print page (`"1-3, 5"`, 1-based).
 pub fn pdf_options(p: &Value, count: usize) -> Result<deckcraft_pdf::PdfOptions> {
     let mut o = deckcraft_pdf::PdfOptions { layout: deckcraft_pdf::PageLayout::Slides, ..Default::default() };
@@ -163,6 +166,16 @@ pub fn pdf_options(p: &Value, count: usize) -> Result<deckcraft_pdf::PdfOptions>
     o.include_hidden = bool_or(p, "includeHidden", false);
     o.text_layer = bool_or(p, "textLayer", true);
     o.frame_slides = bool_or(p, "frame", true);
+    let landscape = match str_param(p, "orientation").unwrap_or("portrait") {
+        "portrait" => false,
+        "landscape" => true,
+        other => return Err(bad("file.export", format!("orientation “{other}” isn't portrait or landscape"))),
+    };
+    let paper = str_param(p, "paper").unwrap_or("letter");
+    o.paper = deckcraft_pdf::paper_size(paper, landscape).ok_or_else(|| {
+        let ids: Vec<&str> = deckcraft_pdf::PAPERS.iter().map(|p| p.0).collect();
+        bad("file.export", format!("paper “{paper}” isn't one of {}", ids.join(", ")))
+    })?;
     Ok(o)
 }
 

@@ -66,3 +66,36 @@ fn handout_boxes_fit_the_paper() {
         }
     }
 }
+
+/// Notes pages and handouts print on the chosen paper, landscape included, with every slide box
+/// on the page and room left for the notes.
+#[test]
+fn notes_and_handouts_fit_any_paper_and_orientation() {
+    let p = deck(3);
+    for (id, _, _) in PAPERS {
+        for landscape in [false, true] {
+            let paper = paper_size(id, landscape).expect("known paper");
+            assert_eq!(paper.0 > paper.1, landscape, "{id}");
+            let b = notes_slide_box(paper, 16.0 / 9.0);
+            assert!(b.x0 >= 0.0 && b.x1 <= paper.0 && b.y1 <= paper.1 * 0.5, "{id} {landscape}: {b:?}");
+            assert!((b.width() / b.height() - 16.0 / 9.0).abs() < 1e-6);
+            for n in [1, 3, 6, 9] {
+                for r in handout_boxes(n, paper, 16.0 / 9.0) {
+                    assert!(r.x0 >= 0.0 && r.y0 >= 0.0 && r.x1 <= paper.0 && r.y1 <= paper.1, "{id} {landscape} {n}: {r:?}");
+                }
+            }
+            for layout in [PageLayout::Notes, PageLayout::Handouts { per_page: 6 }] {
+                let bytes = export(&p, &PdfOptions { paper, ..opts(layout) }).expect("export");
+                let text = String::from_utf8_lossy(&bytes);
+                let media = format!("/MediaBox[0 0 {} {}]", fmt(paper.0), fmt(paper.1));
+                assert!(text.contains(&media), "{id} {landscape} {layout:?}: no {media}");
+            }
+        }
+    }
+    assert_eq!(paper_size("bogus", false), None);
+}
+
+fn fmt(v: f64) -> String {
+    let s = format!("{:.2}", v as f32);
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
+}

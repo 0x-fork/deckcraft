@@ -1194,3 +1194,16 @@ fn font_add_refuses_non_fonts_and_rescan_reports_the_catalog() {
     let r = s.execute("font.rescan", &json!({})).unwrap();
     assert!(r["families"].as_u64().unwrap() >= 1, "{r}");
 }
+
+/// The Print page's paper and orientation reach the PDF options; Letter portrait by default.
+#[test]
+fn pdf_options_take_paper_and_orientation() {
+    let o = cmd::file::pdf_options(&json!({}), 1).unwrap();
+    assert_eq!(o.paper, (612.0, 792.0));
+    let o = cmd::file::pdf_options(&json!({"paper": "A4", "orientation": "landscape"}), 1).unwrap();
+    assert_eq!(o.paper, (841.89, 595.28));
+    let o = cmd::file::pdf_options(&json!({"paper": "legal"}), 1).unwrap();
+    assert_eq!(o.paper, (612.0, 1008.0));
+    assert!(cmd::file::pdf_options(&json!({"paper": "tabloid"}), 1).is_err());
+    assert!(cmd::file::pdf_options(&json!({"orientation": "sideways"}), 1).is_err());
+}
