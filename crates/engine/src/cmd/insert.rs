@@ -60,6 +60,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("insert.dateTime", "Date & Time", ["Insert", "Text"], None, "{format?: datetime1..}", has_slide, date_time),
         cmd!("insert.symbol", "Symbol", ["Insert", "Symbols"], None, "{text: character(s)}", has_slide, symbol),
         cmd!(
+            "shape.action",
+            "Action Settings",
+            ["Insert", "Links"],
+            None,
+            "{on?: click|hover, action: none|next|previous|first|last|lastViewed|endShow|playMedia|slide|url|customShow|program, slide?: index, url?, show?: custom show name, path?, highlight?: bool, tooltip?, ids?}",
+            has_selection,
+            shape_action
+        ),
+        cmd!(
             "insert.hyperlink",
             "Link",
             ["Insert", "Links"],
@@ -647,6 +656,55 @@ fn hyperlink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     edit_shapes(s, p, "insert.hyperlink", |sh| {
         sh.click = Some(link.clone());
+        Ok(())
+    })
+}
+
+/// Insert ▸ Action (Action Settings): what clicking the selected shapes, or pointing at them, does
+/// in a show.
+fn shape_action(s: &mut Session, p: &Value) -> Result<Value> {
+    use deckcraft_model::text::{Action, Hyperlink};
+    const CMD: &str = "shape.action";
+    let hover = match str_param(p, "on").unwrap_or("click") {
+        "click" => false,
+        "hover" | "over" => true,
+        o => return Err(bad(CMD, format!("`on` is click or hover, not `{o}`"))),
+    };
+    let need = |k: &str| str_param(p, k).map(str::to_string).filter(|v| !v.trim().is_empty()).ok_or_else(|| bad(CMD, format!("missing `{k}`")));
+    let action = match str_param(p, "action").unwrap_or("none") {
+        "none" => None,
+        "next" => Some(Action::NextSlide),
+        "previous" => Some(Action::PreviousSlide),
+        "first" => Some(Action::FirstSlide),
+        "last" => Some(Action::LastSlide),
+        "lastViewed" => Some(Action::LastViewed),
+        "endShow" => Some(Action::EndShow),
+        "playMedia" => Some(Action::PlayMedia),
+        "url" => Some(Action::Url { url: need("url")? }),
+        "customShow" => {
+            let name = need("show")?;
+            if !s.doc()?.doc.custom_shows.iter().any(|c| c.name == name) {
+                return Err(bad(CMD, format!("no custom show `{name}`")));
+            }
+            Some(Action::CustomShow { name })
+        }
+        "program" => Some(Action::Program { path: need("path")? }),
+        "slide" => {
+            let i = usize_param(p, "slide").ok_or_else(|| bad(CMD, "missing `slide`"))?;
+            let slide = s.doc()?.doc.slides.get(i).ok_or_else(|| bad(CMD, "no such slide"))?;
+            Some(Action::Slide { slide: slide.id })
+        }
+        a => return Err(bad(CMD, format!("unknown action `{a}`"))),
+    };
+    let highlight = bool_param(p, "highlight").unwrap_or(true);
+    let tooltip = str_param(p, "tooltip").unwrap_or("").to_string();
+    let link = action.map(|action| Hyperlink { action, tooltip, highlight_click: highlight });
+    edit_shapes(s, p, CMD, |sh| {
+        if hover {
+            sh.hover = link.clone();
+        } else {
+            sh.click = link.clone();
+        }
         Ok(())
     })
 }

@@ -1853,3 +1853,27 @@ fn smartart_converts_to_and_from_text_and_shapes() {
     let g = st.doc.slides[1].shapes.iter().find(|x| x.id.0 as u64 == gid).unwrap();
     assert!(g.diagram.is_none() && !g.children().is_empty(), "a plain group of the same shapes");
 }
+
+/// Action Settings: click and hover actions on the selected shape, removed again with `none`.
+#[test]
+fn action_settings_set_click_and_hover() {
+    use deckcraft_model::text::Action;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [0, 0, 50, 50]})).unwrap();
+    let shape = |s: &Session| s.doc().unwrap().selected_shapes()[0].clone();
+    s.execute("shape.action", &json!({"action": "slide", "slide": 0, "highlight": false})).unwrap();
+    let first = s.doc().unwrap().doc.slides[0].id;
+    let sh = shape(&s);
+    assert!(matches!(sh.click.as_ref().map(|h| (&h.action, h.highlight_click)), Some((Action::Slide { slide }, false)) if *slide == first));
+    s.execute("shape.action", &json!({"on": "hover", "action": "url", "url": "https://example.com"})).unwrap();
+    assert!(matches!(shape(&s).hover.map(|h| h.action), Some(Action::Url { url }) if url == "https://example.com"));
+    assert!(shape(&s).click.is_some(), "hover leaves the click action");
+    s.execute("shape.action", &json!({"action": "none"})).unwrap();
+    assert!(shape(&s).click.is_none());
+    // Bad input is refused.
+    assert!(s.execute("shape.action", &json!({"action": "slide", "slide": 99})).is_err());
+    assert!(s.execute("shape.action", &json!({"action": "url"})).is_err());
+    assert!(s.execute("shape.action", &json!({"action": "customShow", "show": "nope"})).is_err());
+    assert!(s.execute("shape.action", &json!({"on": "drag", "action": "next"})).is_err());
+}
