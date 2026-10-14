@@ -281,7 +281,7 @@ fn hostile_adjusts_and_boxes_stay_finite() {
 #[test]
 fn every_preset_has_one_handle_per_adjust() {
     let r = rect();
-    for name in ALL {
+    for name in CATALOG.iter().map(|p| p.id) {
         let hs = handles(name, &[], r);
         assert_eq!(hs.len(), adjust_count(name), "{name}");
         let defaults = adjust_defaults(name);

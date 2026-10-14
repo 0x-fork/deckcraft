@@ -47,7 +47,6 @@ fn title(id: &str) -> &'static str {
         "paragraph" => "Paragraph",
         "tabs" => "Tabs",
         "font" => "Font",
-        "tabs" => "Tabs",
         "about" => "About DeckCraft",
         "preferences" => "Preferences",
         "gridOptions" => "Grid Options",
