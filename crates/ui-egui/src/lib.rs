@@ -1408,4 +1408,114 @@ mod tests {
         harness.run_steps(3);
         assert_eq!(harness.state().textures.canvas_renders, n, "an unchanged slide isn't rendered again");
     }
+
+    fn flick_harness() -> egui_kittest::Harness<'static, SlideApp> {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        // Fitted: the slide is smaller than the window, so a flick turns the page instead of panning.
+        harness.state_mut().ui.zoom = Some(0.4);
+        harness
+    }
+
+    fn slide_at(app: &SlideApp) -> usize {
+        app.session.active().unwrap().selection.slide
+    }
+
+    /// One frame of a trackpad flick: four short samples, each under egui's cutoff for smoothing a
+    /// mouse notch. The harness runs one frame per queued event, so they have to share a frame or
+    /// none of them reaches the page threshold.
+    fn flick(harness: &mut egui_kittest::Harness<'static, SlideApp>, delta: egui::Vec2) {
+        let centre = harness.state().canvas_rect.unwrap_or(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))).center();
+        let input = harness.input_mut();
+        input.events.push(egui::Event::PointerMoved(centre));
+        let step = delta / 4.0;
+        for _ in 0..4 {
+            input.events.push(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: step,
+                phase: egui::TouchPhase::Move,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        harness.run_steps(1);
+    }
+
+    #[test]
+    fn page_flick_uses_the_stronger_axis() {
+        assert_eq!(crate::canvas::page_flick(egui::vec2(-24.0, -4.0)), Some(true));
+        assert_eq!(crate::canvas::page_flick(egui::vec2(24.0, 4.0)), Some(false));
+        assert_eq!(crate::canvas::page_flick(egui::vec2(-4.0, -24.0)), Some(true));
+        assert_eq!(crate::canvas::page_flick(egui::vec2(4.0, 10.0)), None);
+    }
+
+    /// A sideways swipe on a fitted slide turns the page, like PowerPoint on a Mac trackpad.
+    /// The frames of one gesture do not skip ahead.
+    #[test]
+    fn a_sideways_trackpad_swipe_turns_the_page_and_a_second_flick_waits() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.run_steps(1);
+        assert_eq!(slide_at(harness.state()), 0);
+
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 1, "swipe left goes to the next slide");
+
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 1, "the next frame of the same gesture does not skip a slide");
+
+        harness.run_steps(30);
+        flick(&mut harness, egui::vec2(24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 0, "swipe right goes back");
+    }
+
+    #[test]
+    fn a_vertical_wheel_still_turns_the_page_and_a_zoomed_slide_pans_instead() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.run_steps(1);
+        flick(&mut harness, egui::vec2(-2.0, -24.0));
+        assert_eq!(slide_at(harness.state()), 1, "a vertical wheel still goes to the next slide");
+
+        harness.state_mut().ui.zoom = Some(3.0);
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.run_steps(2);
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(slide_at(harness.state()), 0, "zoomed in, a sideways swipe pans instead of turning the page");
+    }
+
+    #[test]
+    fn a_swipe_during_the_show_turns_the_page() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().session.execute("slide.go", &json!({"index": 0})).unwrap();
+        harness.state_mut().start_show(0, true);
+        harness.run_steps(2);
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(1));
+        harness.run_steps(30);
+        flick(&mut harness, egui::vec2(24.0, 0.0));
+        assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(0));
+    }
+
+    /// The pen is drawing. A flick must not turn the page out from under the stroke.
+    #[test]
+    fn the_pen_ignores_a_swipe_during_the_show() {
+        let mut harness = flick_harness();
+        harness.state_mut().session.execute("slide.new", &json!({})).unwrap();
+        harness.state_mut().start_show(0, true);
+        harness.run_steps(2);
+        harness.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::P);
+        harness.run_steps(1);
+        flick(&mut harness, egui::vec2(-24.0, 0.0));
+        assert_eq!(harness.state().show.as_ref().map(|s| s.state.slide), Some(0));
+    }
 }

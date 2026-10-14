@@ -1,6 +1,6 @@
 # Slide show and presenter view: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-10 · **Last updated:** 2026-10-10 · **Change:** major (created; measured from `crates/ui-egui/src/show.rs` and `crates/anim/src/show.rs` against PowerPoint 16.113's Slide Show tab and menu) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (a trackpad swipe or mouse wheel turns the page during the show; previous: major, created) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -14,6 +14,7 @@ ready** (estimated), **10–16 h** to parity.
 |---|---|---|---|
 | Play from Start / from Current Slide (F5, Shift+F5, Cmd+Enter) | yes | yes | |
 | Next/previous by click, arrows, Space, Page Up/Down, Enter, Backspace | yes | yes | #17 reported arrows not working in v0.3.0 AppImage; recheck |
+| Next/previous by trackpad swipe or mouse wheel | yes | yes | One flick turns one page. The pen ignores the flick |
 | Go to slide (number + Enter), first/last | yes | yes | |
 | Black / white screen (B / W) | yes | yes | |
 | End screen, Esc to leave | yes | yes | |
