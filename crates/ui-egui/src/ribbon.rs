@@ -1161,6 +1161,12 @@ fn home(app: &mut SlideApp, ui: &mut Ui) {
     });
     drawing_group(app, ui);
     group(ui, |ui| {
+        ui.vertical(|ui| {
+            small(app, ui, Icon::Search, "Find", "app.find", json!({}));
+            small(app, ui, Icon::Spelling, "Replace", "app.replace", json!({}));
+        });
+    });
+    group(ui, |ui| {
         // Also under Arrange, but that is disabled until something is selected (#132).
         big(app, ui, Icon::SelectionPane, "Selection\nPane", "view.pane", json!({"pane": "selection"}));
         if small_button(ui, Icon::Fonts, "Replace Fonts…", enabled(app, "font.replace"), false).clicked() {

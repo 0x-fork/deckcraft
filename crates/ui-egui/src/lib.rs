@@ -216,6 +216,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.pasteSpecial", "Paste Special…", Some("Cmd+Alt+V"), "{}"),
     ("app.qat", "Quick Access Toolbar", None, "{add: command id, params?, label?, icon?} | {remove: id, params?} | {reset: true} → [buttons]"),
+    ("app.find", "Find…", Some("Cmd+F"), "{}"),
+    ("app.replace", "Replace…", Some("Cmd+H"), "{}"),
     ("app.links", "Community Links", None, "{}"),
 ];
 
@@ -731,6 +733,12 @@ impl SlideApp {
                 }
             }
             "app.qat" => return qat::command(self, p),
+            "app.find" | "app.replace" if self.session.active().is_some() => {
+                let mut d = dialogs::Dialog::new("find");
+                d.fields.insert("replace".into(), if id == "app.replace" { "1" } else { "0" }.into());
+                self.dialog = Some(d);
+            }
+            "app.find" | "app.replace" => self.palette = Some((String::new(), 0)),
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
                 self.dialog = Some(dialogs::Dialog::new(d));

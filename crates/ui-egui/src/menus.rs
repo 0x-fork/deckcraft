@@ -70,10 +70,8 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
             app.dialog = Some(crate::dialogs::Dialog::new("hyperlink"));
             return true;
         }
-        (F, true, false, false) => {
-            app.palette = Some((String::new(), 0));
-            return true;
-        }
+        (F, true, false, false) => "app.find",
+        (H, true, false, false) => "app.replace",
         _ => return false,
     };
     let _ = app.run(id, json!({}));
@@ -193,7 +191,8 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Duplicate", "edit.duplicate"),
                 ("Delete Slide", "slide.delete"),
                 ("-", ""),
-                ("Find…", "app.palette"),
+                ("Find…", "app.find"),
+                ("Replace…", "app.replace"),
             ],
         ),
         (

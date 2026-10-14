@@ -2357,3 +2357,29 @@ fn shape_picture_fill_options_tile_offset_and_round_trip() {
     assert!(back.upright);
     assert!((back.alpha.unwrap() - 0.6).abs() < 1e-6);
 }
+
+#[test]
+fn find_and_replace_across_shapes_and_notes() {
+    let mut s = session();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100], "text": "Old plan, old team\nboldly"})).unwrap();
+    s.execute("slide.notes", &json!({"text": "Discuss the old plan"})).unwrap();
+    let q = json!({"text": "old"});
+    let found = s.execute("text.find", &q).unwrap();
+    let n = found.as_array().unwrap().len();
+    assert!(n >= 3, "{found}");
+    let whole = s.execute("text.find", &json!({"text": "old", "wholeWords": true, "matchCase": true})).unwrap();
+    assert_eq!(whole.as_array().unwrap().len(), n - 2, "Old and boldly are not whole lower-case matches");
+
+    let first = found[0].clone();
+    assert_eq!((first["para"].as_u64(), first["start"].as_u64()), (Some(0), Some(0)));
+    s.execute("text.replace", &json!({"text": "old", "with": "New", "at": first})).unwrap();
+    assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+
+    let r = s.execute("text.replace", &json!({"text": "old", "with": "new", "wholeWords": true})).unwrap();
+    assert_eq!(r["replaced"].as_u64(), Some(n as u64 - 2));
+    let text = s.doc().unwrap().doc.slides[0].shapes.iter().filter_map(|x| x.text.as_ref()).map(|t| t.text()).collect::<Vec<_>>().join("|");
+    assert!(text.contains("New plan, new team\nboldly"), "{text}");
+    assert!(s.execute("text.replace", &json!({"text": "zebra", "with": "x"})).is_err());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
+}
