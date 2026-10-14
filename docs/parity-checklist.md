@@ -23,6 +23,7 @@ The summary between `<!-- SUMMARY -->
 | Files | 71% |
 | Slides | 90% |
 | Views | 93% |
+| Views | 95% |
 | Masters & themes | 85% |
 | Views | 90% |
 | Masters & themes | 88% |
@@ -97,7 +98,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Views | Notes Page | P1 | D |
 | Views | Reading View | P1 | D |
 | Views | Zoom, fit to window | P0 | D |
-| Views | Rulers, gridlines, guides | P1 | P |
+| Views | Rulers, gridlines, guides | P1 | D |
 | Views | Smart guides | P1 | D |
 | Views | Grayscale / black and white view | P2 | D |
 | Views | New window / arrange windows | P2 | P |

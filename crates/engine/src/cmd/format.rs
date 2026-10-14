@@ -159,6 +159,16 @@ pub fn specs() -> Vec<CommandSpec> {
             has_text_or_shapes,
             paragraph
         ),
+        cmd!(query "format.ruler", "Ruler", [], None, "{} → {x, y, width, rotated, marginLeft, indent, tabs: [{pos, align}], defaultTab} for the paragraph with the caret (x, y: the text area's top-left in slide pt)", has_text, ruler),
+        cmd!(
+            "format.tabs",
+            "Tabs…",
+            ["Home", "Paragraph"],
+            None,
+            "{add?: {pos, align?: l|ctr|r|dec}, move?: {from, to}, remove?: pos, clear?: bool, defaultTab?: pt} on the selected paragraphs (pos in pt from the text area's left)",
+            has_text_or_shapes,
+            tabs
+        ),
         cmd!("format.anchor", "Align Text", ["Home", "Paragraph"], None, "{anchor: top|middle|bottom}", has_text_or_shapes, anchor),
         cmd!(
             "format.direction",
@@ -798,3 +808,85 @@ fn font_rescan(_s: &mut Session, _p: &Value) -> Result<Value> {
     let faces = 0usize;
     Ok(json!({"faces": faces, "families": db.families().len()}))
 }
+
+/// What the horizontal ruler shows while editing text: the paragraph's indents and tab stops,
+/// and where its text area sits on the slide.
+fn ruler(s: &mut Session, _p: &Value) -> Result<Value> {
+    let props = current_para(s);
+    let st = s.doc()?;
+    let t = st.selection.text.clone().ok_or_else(|| bad("format.ruler", "not editing text"))?;
+    let (x, y, w, rotated) = match (t.notes, st.shape(t.shape)) {
+        (false, Some(sh)) => {
+            let ctx = super::text::ctx_for(&st.doc, &st.selection);
+            let x = match &ctx {
+                Some(c) => resolve::xfrm(c, sh),
+                None => sh.xfrm.unwrap_or_default(),
+            };
+            let body = match &ctx {
+                Some(c) => resolve::body(c, sh),
+                None => sh.text.as_ref().map(|b| b.body.clone()).unwrap_or_default(),
+            };
+            let (l, r, tp) = (body.inset_l.unwrap_or(7.2), body.inset_r.unwrap_or(7.2), body.inset_t.unwrap_or(3.6));
+            (x.x + l, x.y + tp, (x.w - l - r).max(0.0), x.rot != 0.0 || body.vert.is_some_and(|v| v != TextDir::Horizontal))
+        }
+        _ => (0.0, 0.0, 0.0, true),
+    };
+    let tabs: Vec<Value> = props.tabs.clone().unwrap_or_default().iter().map(|t| json!({"pos": t.pos, "align": t.align})).collect();
+    Ok(json!({
+        "x": x, "y": y, "width": w, "rotated": rotated,
+        "marginLeft": props.margin_left.unwrap_or(0.0),
+        "indent": props.indent.unwrap_or(0.0),
+        "tabs": tabs,
+        "defaultTab": props.default_tab.unwrap_or(72.0),
+    }))
+}
+
+const MAX_TABS: usize = 32;
+
+fn tabs(s: &mut Session, p: &Value) -> Result<Value> {
+    let fin = |v: Option<f64>| v.filter(|x| x.is_finite()).map(|x| x.clamp(0.0, 4000.0));
+    let align_of = |v: &Value| match v.get("align").and_then(Value::as_str).unwrap_or("l") {
+        "ctr" | "center" => "ctr",
+        "r" | "right" => "r",
+        "dec" | "decimal" => "dec",
+        _ => "l",
+    };
+    let add = p.get("add").and_then(|a| fin(a.get("pos").and_then(Value::as_f64)).map(|pos| (pos, align_of(a).to_string())));
+    let mv = p.get("move").and_then(|m| Some((fin(m.get("from").and_then(Value::as_f64))?, fin(m.get("to").and_then(Value::as_f64))?)));
+    let remove = fin(p.get("remove").and_then(Value::as_f64));
+    let clear = bool_or(p, "clear", false);
+    let default_tab = fin(p.get("defaultTab").and_then(Value::as_f64)).filter(|v| *v >= 1.0);
+    if add.is_none() && mv.is_none() && remove.is_none() && !clear && default_tab.is_none() {
+        return Err(bad("format.tabs", "nothing to change"));
+    }
+    // The stops as the caret's paragraph shows them (inherited ones included), so editing a
+    // placeholder's tab that came from its layout works like editing one set on the paragraph.
+    let base = current_para(s).tabs.unwrap_or_default();
+    let near = |a: f64, b: f64| (a - b).abs() < 0.5;
+    let mut stops = if clear { vec![] } else { base };
+    if let Some(at) = remove {
+        stops.retain(|t| !near(t.pos, at));
+    }
+    if let Some((from, to)) = mv
+        && let Some(t) = stops.iter_mut().find(|t| near(t.pos, from))
+    {
+        t.pos = to;
+    }
+    if let Some((pos, align)) = add {
+        stops.retain(|t| !near(t.pos, pos));
+        stops.push(deckcraft_model::text::TabStop { pos, align });
+    }
+    stops.sort_by(|a, b| a.pos.total_cmp(&b.pos));
+    stops.dedup_by(|a, b| near(a.pos, b.pos));
+    stops.truncate(MAX_TABS);
+    format_para(s, &move |para| {
+        para.props.tabs = Some(stops.clone());
+        if let Some(d) = default_tab {
+            para.props.default_tab = Some(d);
+        }
+    })
+}
+
+#[cfg(test)]
+#[path = "ruler_tests.rs"]
+mod ruler_tests;
