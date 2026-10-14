@@ -318,6 +318,7 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
     let cat_ax = pa.child("catAx").or_else(|| pa.child("dateAx")).or_else(|| pa.children_named("valAx").find(|a| !vertical(a)));
     if let Some(v) = val_ax {
         c.gridlines = v.child("majorGridlines").is_some();
+        c.minor_gridlines = v.child("minorGridlines").is_some();
         let sc = v.child("scaling");
         c.y_min = sc.and_then(|s| s.child_val("min")).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
         c.y_max = sc.and_then(|s| s.child_val("max")).and_then(|v| v.parse().ok()).filter(|v: &f64| v.is_finite());
@@ -437,6 +438,16 @@ mod tests {
         // A small chart is untouched by the default budget.
         let c = chart_from(&doc.root).unwrap();
         assert!(c.series.iter().all(|s| s.values.len() == 100_000));
+    }
+
+    #[test]
+    fn minor_gridlines_are_read_and_written_back() {
+        let mut c = Chart::sample(ChartType::Line);
+        c.minor_gridlines = true;
+        let back = read_chart_xml(&crate::write::chart::chart_xml(&c)).unwrap();
+        assert!(back.gridlines && back.minor_gridlines);
+        c.minor_gridlines = false;
+        assert!(!read_chart_xml(&crate::write::chart::chart_xml(&c)).unwrap().minor_gridlines);
     }
 
     #[test]

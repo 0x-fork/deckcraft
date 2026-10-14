@@ -367,6 +367,9 @@ fn axes(w: &mut W, c: &Chart, g: Group) {
     if c.gridlines {
         w.empty0("c:majorGridlines");
     }
+    if c.minor_gridlines {
+        w.empty0("c:minorGridlines");
+    }
     if let Some(t) = &c.axis_titles.1 {
         title(w, t);
     }

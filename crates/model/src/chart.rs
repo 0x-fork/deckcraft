@@ -263,6 +263,8 @@ pub struct Chart {
     pub title_size: Option<f64>,
     pub data_labels: bool,
     pub gridlines: bool,
+    /// `c:minorGridlines` on the value axis: five to a major unit, between the major ones.
+    pub minor_gridlines: bool,
     pub axis_titles: (Option<String>, Option<String>),
     /// Chart style number (1–48) and colour palette (`colorful1`, `monochrome3`…).
     pub style: u32,
@@ -333,6 +335,7 @@ impl Default for Chart {
             title_size: None,
             data_labels: false,
             gridlines: true,
+            minor_gridlines: false,
             axis_titles: (None, None),
             style: 2,
             palette: "colorful1".into(),
