@@ -225,11 +225,6 @@ Detail in [file-format-parity.md](file-format-parity.md).
 - **Impact:** copy-paste of screenshots is a core workflow.
 - **Estimate:** 2–4 h. **Beta blocker.**
 
-### Tab inside a text box ends text entry (#78)
-- **Evidence:** #78.
-- **Impact:** tab stops and indented lists can't be typed.
-- **Estimate:** 1–2 h.
-
 ### Charts: data grid, elements and the newer chart types
 - **Evidence:** checklist rows "Edit chart data" (P0, partial), "Chart elements" (partial), "Other
   chart types" (partial); `chartex` parts (waterfall, funnel, treemap, sunburst, histogram, Pareto,
@@ -519,6 +514,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |
 | 2026-10-12 | minor | EMF/WMF text, pattern and hatch brushes drawn; legacy OLE and ActiveX previews shown; the SVG gap keeps only EMF clip regions |
 | 2026-10-12 | minor | Text warps render (all 40 presets, adjusts round-trip); the warp gap is now the gallery, command and handles |
+| 2026-10-11 | minor | Removed "Tab inside a text box ends text entry" (#78, fixed) |
 | 2026-10-11 | minor | Animated GIF export landed (#171); the entry now covers video export and animating transitions in the GIF |
 | 2026-10-10 | minor | Noted that no gap blocks alpha (core-workflow gate passes) |
 | 2026-10-10 | major | Created: every gap from the 2026-10-10 re-measure and the 16 open GitHub issues, ranked, with beta blockers marked |

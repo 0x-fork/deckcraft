@@ -639,7 +639,7 @@ fn revised_bytes(p: &Value) -> Result<(String, Vec<u8>)> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = str_param(p, "path") {
-        let bytes = std::fs::read(path).map_err(|e| crate::EngineError::Other(format!("{path}: {e}")))?;
+        let bytes = crate::io::read_file(path).map_err(crate::EngineError::Other)?;
         return Ok((path.to_string(), bytes));
     }
     Err(bad("review.compare", "give `path` or `data`"))

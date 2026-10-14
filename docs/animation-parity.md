@@ -43,7 +43,7 @@ perspective-correct subdivided meshes.
 | Duration, advance on click / after time, Apply To All | yes | yes |
 | Transition sounds | yes | yes: Transitions › Sound offers six built-in sounds (synthesised, no sound files shipped), Other Sound…, [Stop Previous Sound] and Loop Until Next Sound; they play in the show and round-trip |
 | Preview in the editor | yes | yes |
-| Morph: objects move, resize, recolour | yes | yes |
+| Morph: objects move, resize, recolour; unmatched text boxes fade in place; a picture's crop morphs | yes | yes (#119, #118) |
 | Morph: Words and Characters | yes | yes (#5) |
 | Morph: geometry (circle to star) | yes | yes (#27) |
 | Morph: `!!` name forcing, pictures, 3-D models, ink | yes | names partly; no 3-D or ink |
@@ -105,4 +105,6 @@ In, Wipe, Zoom, Float In, Grow/Shrink, Pulse, Spin, motion lines): weighted, ~85
 | 2026-10-13 | minor | Animations ▸ Preview and Animation Pane ▸ Play All play the current slide's animations on the editor canvas; preview from the selected effect is still open |
 | 2026-10-13 | major | Transitions measured frame by frame against PowerPoint's video export and retuned (mean diff 35.7 → 15.0); PowerPoint's XML defaults and option meanings; new options |
 | 2026-10-13 | minor | Triggers now play in the slide show (they were read and written but never started), effects of different triggers apply in the order they were clicked |
+| 2026-10-11 | minor | Morph leaves unrelated text boxes unpaired: they fade in place (#119) |
+| 2026-10-11 | minor | Morph animates a changed picture crop (#118) |
 | 2026-10-10 | major | Created: 48/48 transitions, 64 of ~190 animation effects, pane and option depth, estimates |

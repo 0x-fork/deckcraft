@@ -740,19 +740,33 @@ fn sane_len(v: f64, dflt: f64) -> f64 {
 
 /// Does the element (or a descendant) reference a relationship?
 pub fn has_rel_refs(el: &El) -> bool {
-    fn rec(e: &El, depth: usize) -> bool {
+    !rel_refs(el).is_empty()
+}
+
+/// Is this attribute a relationship id (`r:id`, `r:embed`, `r:dm`…)?
+pub fn is_rel_attr(k: &str, v: &str) -> bool {
+    !k.starts_with("xmlns")
+        && k.contains(':')
+        && matches!(k.rsplit(':').next(), Some("id" | "embed" | "link" | "dm" | "lo" | "qs" | "cs" | "pict" | "href"))
+        && !v.is_empty()
+}
+
+/// Every relationship id `el` and its descendants use, sorted and without repeats.
+pub fn rel_refs(el: &El) -> Vec<String> {
+    fn rec(e: &El, out: &mut Vec<String>, depth: usize) {
         if depth > crate::xml::MAX_DEPTH {
-            return false;
+            return;
         }
-        let own = e.attrs.iter().any(|(k, v)| {
-            !k.starts_with("xmlns")
-                && k.contains(':')
-                && matches!(k.rsplit(':').next(), Some("id" | "embed" | "link" | "dm" | "lo" | "qs" | "cs" | "pict" | "href"))
-                && !v.is_empty()
-        });
-        own || e.elements().any(|c| rec(c, depth + 1))
+        out.extend(e.attrs.iter().filter(|(k, v)| is_rel_attr(k, v)).map(|(_, v)| v.clone()));
+        for c in e.elements() {
+            rec(c, out, depth + 1);
+        }
     }
-    rec(el, 0)
+    let mut out = vec![];
+    rec(el, &mut out, 0);
+    out.sort();
+    out.dedup();
+    out
 }
 
 pub fn color_map(cm: &El) -> Vec<(String, String)> {

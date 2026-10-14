@@ -867,6 +867,8 @@ fn right_to_left_paragraphs() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
     s.execute("text.edit", &json!({"id": title})).unwrap();
+    // Explicitly left-to-right first, so typing Arabic doesn't already turn it right-to-left (#169).
+    s.execute("format.rtl", &json!({"on": false})).unwrap();
     s.execute("text.insert", &json!({"text": "سنة 2024 (Retrait) فقط"})).unwrap();
     s.execute("format.rtl", &json!({})).unwrap();
     let para = |s: &Session| s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
@@ -885,6 +887,61 @@ fn right_to_left_paragraphs() {
     assert_eq!(para(&s).align, Some(deckcraft_model::text::Align::Right));
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(para(&s).rtl, Some(true));
+}
+
+#[test]
+fn typing_kurdish_or_arabic_auto_detects_rtl_and_advances_caret_smoothly() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+
+    let mut first_x = None;
+    let mut last_x = 0.0;
+
+    // Type Kurdish sentence character-by-character: "من ناوم هێڤاره"
+    for ch in ["م", "ن", " ", "ن", "ا", "و", "م", " ", "ه", "ێ", "ڤ", "ا", "ر", "ه"] {
+        s.execute("text.insert", &json!({"text": ch})).unwrap();
+        let st = s.doc().unwrap();
+        let t = st.selection.text.as_ref().unwrap();
+        let l = super::cmd::text::layout_for(st, t).unwrap();
+        let (cx, ..) = l.caret(deckcraft_text::Pos { para: t.caret.0, ch: t.caret.1 }).unwrap();
+
+        if first_x.is_none() {
+            first_x = Some(cx);
+        }
+        last_x = cx;
+
+        // The title is centred: the caret must NOT jump back to the left margin (~7.2 pt).
+        assert!(cx > 100.0, "caret should not jump to left margin: {cx}");
+    }
+
+    // Caret advances leftwards overall as text is appended
+    assert!(last_x < first_x.unwrap(), "caret should advance leftwards: last={last_x} first={:?}", first_x);
+    let para = s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
+    assert_eq!(para.rtl, Some(true), "auto-detected as RTL");
+    assert_eq!(para.align, None, "the title keeps the alignment it inherits");
+
+    // A text box inherits the deck's default (left) alignment, which it keeps too.
+    s.execute("text.exit", &json!({})).ok();
+    let id = s.execute("insert.textBox", &json!({"rect": [10, 10, 300, 100], "text": ""})).unwrap()["id"].as_u64().unwrap();
+    s.execute("text.edit", &json!({"id": id})).unwrap();
+    s.execute("text.insert", &json!({"text": "مرحبا"})).unwrap();
+    let st = s.doc().unwrap();
+    let sh = st.shape(deckcraft_model::ShapeId(id as u32)).unwrap();
+    let para = sh.text.as_ref().unwrap().paragraphs[0].props.clone();
+    assert_eq!(para.rtl, Some(true));
+    assert_eq!(para.align, None, "the text box keeps the alignment it inherits");
+}
+
+#[test]
+fn explicit_ltr_override_is_preserved_when_typing_rtl() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("format.rtl", &json!({"on": false})).unwrap();
+    s.execute("text.insert", &json!({"text": "مرحبا"})).unwrap();
+    let para = s.doc().unwrap().current_slide().unwrap().shapes[0].text.as_ref().unwrap().paragraphs[0].props.clone();
+    assert_eq!(para.rtl, Some(false), "user explicit LTR is preserved");
 }
 
 #[test]
@@ -3115,6 +3172,37 @@ fn language_marks_text_and_no_proof_and_repeats_are_reported() {
     s.execute("format.language", &json!({"noProof": true})).unwrap();
     assert!(s.execute("review.spelling", &json!({})).unwrap().as_array().unwrap().is_empty());
     assert!(s.execute("format.language", &json!({"lang": "en US!"})).is_err());
+}
+
+#[test]
+fn the_caret_takes_the_colour_of_the_text() {
+    let caret = |theme: &str| {
+        let mut s = session();
+        s.execute("design.theme", &json!({"name": theme})).unwrap();
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+        s.execute("text.edit", &json!({"id": title})).unwrap();
+        let st = s.doc().unwrap();
+        let empty = cmd::text::caret_color(st, &st.selection.text.clone().unwrap()).unwrap();
+        s.execute("text.insert", &json!({"text": "Typed"})).unwrap();
+        let st = s.doc().unwrap();
+        assert_eq!(cmd::text::caret_color(st, &st.selection.text.clone().unwrap()), Some(empty));
+        empty
+    };
+    // Dark text on the light theme, light text on the dark one: never black on a dark slide.
+    let (light, dark) = (caret("DeckCraft"), caret("Nocturne"));
+    assert!(light.r < 0x60 && light.g < 0x60 && light.b < 0x60, "{light:?}");
+    assert!(dark.r > 0xC0 && dark.g > 0xC0 && dark.b > 0xC0, "{dark:?}");
+    // Text set to red gets a red caret.
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Red"})).unwrap();
+    s.execute("text.selectAll", &json!({})).unwrap();
+    s.execute("format.color", &json!({"color": "#FF0000"})).unwrap();
+    s.execute("text.move", &json!({"to": "end"})).unwrap();
+    let st = s.doc().unwrap();
+    let red = cmd::text::caret_color(st, &st.selection.text.clone().unwrap()).unwrap();
+    assert_eq!((red.r, red.g, red.b), (0xFF, 0, 0));
 }
 
 /// Smooth Corners (#286): a rounded rectangle becomes a squircle outline that survives PPTX.

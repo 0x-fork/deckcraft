@@ -165,7 +165,7 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
 #[cfg(not(target_arch = "wasm32"))]
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
-    let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let bytes = crate::io::read_file(path).map_err(EngineError::Other)?;
     let (doc, damaged) = open_checked(path, &bytes)?;
     let native = deckcraft_format::sniff(&bytes) || deckcraft_pptx::sniff(&bytes);
     // A damaged file opens as an untitled repaired copy, so Save can't overwrite the original
@@ -340,36 +340,8 @@ fn mark_saved(s: &mut Session, path: Option<String>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
-    use std::io::Write;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let err = |e: std::io::Error| EngineError::Other(format!("{path}: {e}"));
-    // Write to a uniquely named temporary sibling, created exclusively (never following or reusing an
-    // existing file or symlink), then rename it over the destination so a failed save never truncates
-    // the old file and concurrent saves never share temporary bytes.
-    let mut attempts = 0;
-    let (tmp, mut file) = loop {
-        let tmp = format!("{path}.{}.{}.saving", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
-            Ok(f) => break (tmp, f),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempts < 16 => attempts += 1,
-            Err(e) => return Err(err(e)),
-        }
-    };
-    let written = file.write_all(bytes).and_then(|()| file.sync_all());
-    drop(file);
-    let result = written.and_then(|()| std::fs::rename(&tmp, path));
-    if let Err(e) = result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(err(e));
-    }
-    Ok(())
-}
-#[cfg(target_arch = "wasm32")]
-fn write_file(_path: &str, _bytes: &[u8]) -> Result<()> {
-    Err(EngineError::Other("saving to a path is not available in the browser".into()))
+    crate::io::write_file(path, bytes).map_err(EngineError::Other)
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
@@ -529,7 +501,7 @@ fn info(s: &mut Session, _p: &Value) -> Result<Value> {
     let st = s.doc()?;
     let doc = &st.doc;
     #[cfg(not(target_arch = "wasm32"))]
-    let bytes = st.path.as_ref().and_then(|p| std::fs::metadata(p).ok()).map(|m| m.len());
+    let bytes = st.path.as_deref().and_then(crate::io::file_len);
     #[cfg(target_arch = "wasm32")]
     let bytes: Option<u64> = None;
     Ok(json!({

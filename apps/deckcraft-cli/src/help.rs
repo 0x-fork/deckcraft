@@ -126,11 +126,16 @@ and prints its answer as JSON. COMMAND [PARAMS] runs a command, as run --cmd doe
     },
     Subcommand {
         name: "mcp",
-        usage: "mcp [--connect PORT] [--sample]",
+        usage: "mcp [--connect PORT] [--sample] [--automation-read-root DIR] [--automation-write-root DIR]",
         summary: "serve the commands to an agent over MCP on stdio",
         details: "Runs a Model Context Protocol server on stdin and stdout. It works on its own presentation without a
 window, or with --connect PORT (or host:port) on the DeckCraft app started with --control PORT.
---sample opens the sample presentation.",
+--sample opens the sample presentation.
+
+--automation-read-root DIR and --automation-write-root DIR confine every file the agent's commands read
+(open, pictures, audio, video) and write (save, export, PDF) to those folders, links followed; a root left
+out grants none of its access. They run the in-process server, so they conflict with --connect (a running
+app is not confined by them).",
     },
     Subcommand {
         name: "bench",

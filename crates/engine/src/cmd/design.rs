@@ -152,7 +152,7 @@ fn browse_theme(s: &mut Session, p: &Value) -> Result<Value> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let path = str_param(p, "path").ok_or_else(|| bad("design.browseTheme", "give `path` or `data`"))?;
-            std::fs::read(path).map_err(|e| crate::EngineError::Other(format!("{path}: {e}")))?
+            crate::io::read_file(path).map_err(crate::EngineError::Other)?
         }
         #[cfg(target_arch = "wasm32")]
         return Err(bad("design.browseTheme", "give `data`"));

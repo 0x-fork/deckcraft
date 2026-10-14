@@ -195,9 +195,8 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
             "surfaceChart" | "surface3DChart" => ChartType::Surface,
             _ => continue,
         };
-        if let Some(v) = g.child_val("varyColors") {
-            c.vary_colors = v == "1" || v == "true";
-        }
+        // A missing <c:varyColors> means "vary by point" (the schema default is true), as PowerPoint draws it.
+        c.vary_colors = g.child_val("varyColors").is_none_or(|v| v == "1" || v == "true");
         // A bar group without c:gapWidth / c:overlap takes the schema's defaults (150 %, 0 %),
         // not the 219 % / -27 % PowerPoint writes into its new charts.
         let bar_group = g.is("barChart") || g.is("bar3DChart");
@@ -286,6 +285,10 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
             }
             c.series.push(ser);
         }
+    }
+    // `autoTitleDeleted val="0"` without `c:title`: PowerPoint and LibreOffice draw the series name as the title of a single-series chart.
+    if ch.child("title").is_none() && ch.child("autoTitleDeleted").and_then(|a| a.bool("val")) == Some(false) && c.series.len() == 1 {
+        c.title = c.series.first().map(|s| s.name.clone()).filter(|n| !n.is_empty());
     }
     let first = *kinds.first()?;
     c.kind = if kinds.iter().any(|k| *k != first) { ChartType::Combo } else { first };
@@ -607,5 +610,53 @@ mod tests {
         assert!(t[0].disp_eq && t[0].disp_r_sqr);
         assert_eq!((t[1].kind, t[1].order), (TrendlineType::Poly, Some(6)));
         assert_eq!((t[2].kind, t[2].period), (TrendlineType::MovingAvg, Some(3)));
+    }
+
+    const NS_C: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+    const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
+
+    fn chart(auto_deleted: &str, title: &str, series: usize) -> Chart {
+        let val = r#"<c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>1</c:v></c:pt></c:numLit></c:val>"#;
+        let ser: String = (0..series).map(|i| format!(r#"<c:ser><c:idx val="{i}"/><c:tx><c:v>S{i}</c:v></c:tx>{val}</c:ser>"#)).collect();
+        let plot = format!(r#"<c:plotArea><c:barChart><c:barDir val="col"/>{ser}</c:barChart></c:plotArea>"#);
+        let xml = format!(r#"<c:chartSpace xmlns:c="{NS_C}" xmlns:a="{NS_A}"><c:chart>{title}{auto_deleted}{plot}</c:chart></c:chartSpace>"#);
+        read_chart_xml(xml.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn single_series_gets_automatic_title() {
+        assert_eq!(chart(r#"<c:autoTitleDeleted val="0"/>"#, "", 1).title.as_deref(), Some("S0"));
+    }
+
+    #[test]
+    fn no_automatic_title_when_deleted_or_multi_series() {
+        assert_eq!(chart(r#"<c:autoTitleDeleted val="1"/>"#, "", 1).title, None);
+        assert_eq!(chart("", "", 1).title, None);
+        assert_eq!(chart(r#"<c:autoTitleDeleted val="0"/>"#, "", 2).title, None);
+    }
+
+    #[test]
+    fn explicit_title_wins() {
+        let t = "<c:title><c:tx><c:rich><a:p><a:r><a:t>Mine</a:t></a:r></a:p></c:rich></c:tx></c:title>";
+        assert_eq!(chart(r#"<c:autoTitleDeleted val="0"/>"#, t, 1).title.as_deref(), Some("Mine"));
+    }
+
+    const NS_CHART: &str = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+
+    fn vary_xml(vary: &str) -> String {
+        let ser = r#"<c:ser><c:idx val="0"/><c:order val="0"/></c:ser>"#;
+        let bar = format!(r#"<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>{vary}{ser}</c:barChart>"#);
+        format!(r#"<c:chartSpace xmlns:c="{NS_CHART}"><c:chart><c:plotArea>{bar}</c:plotArea></c:chart></c:chartSpace>"#)
+    }
+
+    #[test]
+    fn missing_vary_colors_means_vary_by_point() {
+        assert!(read_chart_xml(vary_xml("").as_bytes()).is_some_and(|c| c.vary_colors));
+    }
+
+    #[test]
+    fn explicit_vary_colors_is_respected() {
+        assert!(read_chart_xml(vary_xml(r#"<c:varyColors val="0"/>"#).as_bytes()).is_some_and(|c| !c.vary_colors));
+        assert!(read_chart_xml(vary_xml(r#"<c:varyColors val="1"/>"#).as_bytes()).is_some_and(|c| c.vary_colors));
     }
 }

@@ -498,6 +498,8 @@ pub struct SlideApp {
     pub sorter: sorter::State,
     /// The slide thumbnail pane was the last thing clicked, so ⌘A selects slides, not shapes.
     pub(crate) slides_focused: bool,
+    /// A V key press or a Paste event arrived since the last V release (see `keyboard`).
+    v_seen: bool,
     /// Which recent paths exist on disk, probed once per path per session (a dead network share
     /// must not stall every frame). Not persisted.
     recent_checked: HashMap<String, bool>,
@@ -568,6 +570,7 @@ impl SlideApp {
             doc_window: None,
             sorter: sorter::State::default(),
             slides_focused: false,
+            v_seen: false,
             recent_checked: HashMap::new(),
             twisting: false,
             next_file_id: 1,
@@ -758,10 +761,13 @@ impl SlideApp {
         let Some(doc) = self.session.active().map(|d| d.doc.clone()) else { return false };
         let bytes = match format {
             "png" | "jpeg" => {
-                let scale = 2.0;
-                let img = deckcraft_render::render_slide(&doc, slide, &deckcraft_render::RenderOpts { scale, ..Default::default() });
-                let dpi = deckcraft_render::dpi_for_scale(scale);
-                Ok(if format == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) })
+                // Every slide for "all slides", one download each, named like the desktop export (#64).
+                let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
+                let mut any = false;
+                for (file, bytes) in web_image_files(&doc, slide, all, &name, ext) {
+                    any = self.download(&file, Ok(bytes)) || any;
+                }
+                return any;
             }
             "pdf" => deckcraft_engine::cmd::file::pdf_bytes(&doc, &extra),
             "gif" => deckcraft_engine::cmd::file::gif_bytes(&doc, &extra),
@@ -1612,10 +1618,25 @@ impl SlideApp {
 
     /// Keyboard and clipboard for the slide (when no text field has focus).
     fn keyboard(&mut self, ctx: &egui::Context) {
+        let events = ctx.input(|i| i.events.clone());
+        // Ctrl+V with only an image on the clipboard: egui-winit sends no Paste event and swallows the
+        // key press, so the release of a V press never seen is the paste. Tracked even while a text
+        // field has focus, so that a V typed there is not taken for one.
+        let mut image_paste = false;
+        for e in &events {
+            match e {
+                egui::Event::Paste(_) | egui::Event::Key { key: egui::Key::V, pressed: true, .. } => self.v_seen = true,
+                egui::Event::Key { key: egui::Key::V, pressed: false, modifiers, .. } => {
+                    // Only a release with Command/Ctrl held is a paste: a bare V release is not.
+                    let seen = std::mem::take(&mut self.v_seen);
+                    image_paste = !seen && (modifiers.command || modifiers.ctrl);
+                }
+                _ => {}
+            }
+        }
         if ctx.memory(|m| m.focused().is_some()) || self.dialog.as_ref().is_some_and(|d| d.modal()) || self.palette.is_some() {
             return;
         }
-        let events = ctx.input(|i| i.events.clone());
         if self.backstage.is_some() {
             // The File tab: its own keys (Esc goes back, arrows walk the side menu) and app
             // shortcuts (New, Open, Command Palette…); typing, pasting or deleting would edit the
@@ -1637,6 +1658,13 @@ impl SlideApp {
             }
             self.drain_requests();
             return;
+        }
+        let img = if image_paste { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
+        if let Some(png) = img {
+            let data = deckcraft_engine::cmd::base64_encode(&png);
+            if let Err(e) = self.session.execute("insert.picture", &json!({"name": "Pasted image.png", "data": data})) {
+                self.set_status(e.to_string());
+            }
         }
         for e in events {
             match e {
@@ -1674,6 +1702,12 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
+                    if key == egui::Key::Tab {
+                        // The slide has the keyboard, so Tab is ours (indent, tab character, next
+                        // shape). Left to egui it would also focus the first ribbon widget, and
+                        // every key after it would go there instead of the slide (#78).
+                        ctx.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+                    }
                     if key == egui::Key::Escape && self.anim_preview.is_some() && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
                         self.anim_preview = None;
                         continue;
@@ -1923,6 +1957,25 @@ pub fn now_ms() -> f64 {
     }
 }
 
+/// Images for the browser download: the current slide, or every slide (named `<name>1.png`,
+/// `<name>2.png`... like the native export) when `all`.
+fn web_image_files(doc: &deckcraft_model::Presentation, current: usize, all: bool, name: &str, ext: &str) -> Vec<(String, Vec<u8>)> {
+    let slides: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![current] };
+    let single = slides.len() == 1;
+    let scale = 2.0;
+    let dpi = deckcraft_render::dpi_for_scale(scale);
+    slides
+        .into_iter()
+        .enumerate()
+        .map(|(k, i)| {
+            let img = deckcraft_render::render_slide(doc, i, &deckcraft_render::RenderOpts { scale, ..Default::default() });
+            let bytes = if ext == "png" { img.to_png_at(dpi) } else { img.to_jpeg_at(92, Some(dpi)) };
+            let file = if single { format!("{name}.{ext}") } else { format!("{name}{}.{ext}", k + 1) };
+            (file, bytes)
+        })
+        .collect()
+}
+
 #[cfg(target_arch = "wasm32")]
 fn js_now() -> f64 {
     js_sys::Date::now()
@@ -2005,6 +2058,23 @@ mod tests {
         assert!(harness.state().session.active().unwrap().interaction.is_none());
         harness.state_mut().session.execute("edit.undo", &json!({})).unwrap();
         assert!((shape_rot(harness.state()) - 0.0).abs() < 0.01, "one undo, got {}", shape_rot(harness.state()));
+    }
+
+    /// The browser "PNG images (all slides)" export yields one image per slide, not just the selected one (#64).
+    #[test]
+    fn web_export_all_slides_gives_one_file_per_slide() {
+        let mut doc = deckcraft_model::Presentation::default();
+        if let Some(first) = doc.slides.first().cloned() {
+            doc.slides.push(first.clone());
+            doc.slides.push(first);
+        }
+        assert_eq!(doc.slides.len(), 3);
+        let all = web_image_files(&doc, 1, true, "Deck", "png");
+        let names: Vec<&str> = all.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Deck1.png", "Deck2.png", "Deck3.png"]);
+        let one = web_image_files(&doc, 1, false, "Deck", "png");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].0, "Deck.png");
     }
 
     fn title_text(app: &SlideApp) -> String {
@@ -2279,6 +2349,88 @@ mod tests {
         harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
         harness.run_steps(2);
         assert_eq!(harness.state().dialog.as_ref().map(|d| d.id.as_str()), Some("export"));
+    }
+
+    /// #53: Ctrl+V did nothing for an image-only clipboard: egui-winit sends no Paste event for it and
+    /// swallows the key press, so only the V release reaches the app.
+    #[test]
+    fn ctrl_v_pastes_an_image_when_no_paste_event_arrives() {
+        let session = Session::with_new();
+        let png = {
+            let d = session.active().unwrap();
+            deckcraft_engine::cmd::file::render_png(&d.doc, 0, 0.1, false).0
+        };
+        assert!(!png.is_empty());
+        let services = Services { clipboard_image: Some(Box::new(move || Some(png.clone()))), ..Default::default() };
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(session, services),
+        );
+        harness.run_steps(2);
+        let pictures = |app: &SlideApp| {
+            let d = app.session.active().unwrap();
+            d.doc.slides[0].shapes.iter().filter(|s| matches!(s.kind, deckcraft_model::ShapeKind::Picture { .. })).count()
+        };
+        let v = |pressed| egui::Event::Key { key: egui::Key::V, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        // A text paste (Paste event on the press) does not also paste the image on release.
+        harness.event(egui::Event::Paste("hello".into()));
+        harness.run_steps(2);
+        harness.event(v(false));
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 0);
+        // A V release without Command/Ctrl is not a paste.
+        harness.event(egui::Event::Key { key: egui::Key::V, physical_key: None, pressed: false, repeat: false, modifiers: egui::Modifiers::NONE });
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 0);
+        // What egui-winit sends for Ctrl+V with only an image on the clipboard: the release alone.
+        harness.event(v(false));
+        harness.run_steps(2);
+        assert_eq!(pictures(harness.state()), 1);
+    }
+
+    /// #78: after Tab in a text box, typing and deleting no longer reached the text.
+    #[test]
+    fn typing_goes_on_after_tab_in_a_text_box() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            {
+                let mut session = Session::with_new();
+                session.prefs.autocorrect = false;
+                SlideApp::new(session, Services::default())
+            },
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.event(egui::Event::Text("ab".into()));
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("c".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\tc");
+        harness.key_press(egui::Key::Backspace);
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\t");
+        assert!(harness.state().session.active().unwrap().selection.text.is_some(), "still editing");
+        // Tab at the start of a paragraph indents it, and typing goes on there too (#93).
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab);
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("d".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "ab\t\nd");
+        let level = |h: &egui_kittest::Harness<SlideApp>| {
+            h.state().session.active().unwrap().doc.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[1].level
+        };
+        assert_eq!(level(&harness), 1);
     }
 
     #[test]
