@@ -5,7 +5,7 @@ use deckcraft_geom::Xfrm;
 use deckcraft_model::chart::ChartType;
 use deckcraft_model::style::PictureFill;
 use deckcraft_model::text::{AutoFit, RunKind, TextBody};
-use deckcraft_model::{Chart, ColorRef, Fill, Geom, MediaClip, Shape, ShapeId, ShapeKind, ShapeStyle, Table};
+use deckcraft_model::{Chart, ColorRef, Fill, Geom, Line, MediaClip, Shape, ShapeId, ShapeKind, ShapeStyle, Table};
 use serde_json::{Value, json};
 
 use super::*;
@@ -22,6 +22,16 @@ pub fn specs() -> Vec<CommandSpec> {
             has_slide,
             insert_shape
         ),
+        cmd!(
+            "insert.icon",
+            "Icons",
+            ["Insert", "Illustrations"],
+            None,
+            "{name: star|arrow-right|… (see insert.icons), rect?: [x,y,w,h]}",
+            has_slide,
+            insert_icon
+        ),
+        cmd!(query "insert.icons", "Icon Gallery", [], None, "{} → [{name, label, category}]", always, list_icons),
         cmd!(query "shape.presets", "Shape Gallery", [], None, "{} → [{name, label, category}]", always, presets),
         cmd!("insert.textBox", "Text Box", ["Insert", "Text"], None, "{rect?: [x,y,w,h], text?: string}", has_slide, text_box),
         cmd!(
@@ -185,6 +195,46 @@ fn presets(_s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(Value::Array(
         deckcraft_geom::preset::CATALOG.iter().map(|i| json!({"name": i.name, "label": i.label, "category": i.category.label()})).collect(),
     ))
+}
+
+fn list_icons(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(Value::Array(crate::icons::icons().iter().map(|i| json!({"name": i.name, "label": i.label, "category": i.category})).collect()))
+}
+
+/// A Lucide stroke icon: custom geometry, no fill, round line scaled from the 24-unit design.
+fn insert_icon(s: &mut Session, p: &Value) -> Result<Value> {
+    let name = str_param(p, "name").ok_or_else(|| bad("insert.icon", "missing `name`"))?;
+    let icon = crate::icons::find(name).ok_or_else(|| bad("insert.icon", format!("unknown icon `{name}`")))?;
+    let d = crate::icons::path_data(icon.name).ok_or_else(|| bad("insert.icon", format!("could not build icon `{}`", icon.name)))?;
+    let rect = rect_param(p, "rect").unwrap_or_else(|| default_rect(s, 72.0, 72.0));
+    if rect.w < 1.0 || rect.h < 1.0 {
+        return Err(bad("insert.icon", "rect needs a positive width and height"));
+    }
+    let shape = Shape {
+        name: icon.label.to_string(),
+        xfrm: Some(rect),
+        geom: Geom::Custom {
+            paths: vec![deckcraft_model::CustomPath {
+                w: crate::icons::VIEW,
+                h: crate::icons::VIEW,
+                d,
+                fill: deckcraft_geom::preset::FillMode::None,
+                stroke: true,
+            }],
+        },
+        fill: Some(Fill::None),
+        line: Some(Line {
+            fill: Some(Fill::solid(ColorRef::scheme(SchemeSlot::Tx1))),
+            width: Some(crate::icons::stroke_width(icon, rect.w, rect.h)),
+            cap: Some(deckcraft_model::style::LineCap::Round),
+            join: Some(deckcraft_model::style::LineJoin::Round),
+            ..Default::default()
+        }),
+        style: Some(ShapeStyle::line(SchemeSlot::Tx1)),
+        ..Default::default()
+    };
+    let id = add_shape(s, shape, true)?;
+    Ok(json!({"id": id}))
 }
 
 pub(crate) fn new_text_box(rect: Xfrm, text: &str) -> Shape {

@@ -10,6 +10,7 @@
 > **Last reviewed:** 2026-10-13 · **Last updated:** 2026-10-13 · **Change:** minor (owned PPTX corpus for text effects, body layout, theme effects, fills, bevels and connectors; run effect lists and bevel presets kept; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (owned corpus `corpus_media.rs`: 3-D model parts and animation bounce end round-trip; the real-deck corpus and #70/#74/#77 stay open) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 > **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (chart trendlines round-trip; previous: minor, 3-D bevel, camera and face lighting rendered; IME composition and CJK interface text landed, #101; core-workflow alpha gate added; stage stays alpha; full re-measure against PowerPoint for Mac 16.113.4 and the open GitHub issues) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (Insert › Icons places a Lucide stroke set; 3-D models and stock content remain; previous: minor, 3-D bevel, camera and face lighting rendered) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every known shortfall, one entry each, ranked by how much it stops someone who presents with
 PowerPoint from switching. This is the work list: pick from the top. Numbers are summarized in
@@ -273,7 +274,7 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), laser pointer (1–2 h), transition
 sounds (1–2 h), artistic effects (6–10 h), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
-encryption), ink to shape/text (6–10 h), icons and 3-D models (8–14 h, needs an open icon set).
+encryption), ink to shape/text (6–10 h), 3-D models and stock content (6–10 h; Insert › Icons places a Lucide stroke set).
 
 ## UI/UX
 
@@ -358,6 +359,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | trivial | 3-D contours |
 | 2026-10-14 | trivial | 3-D light rigs and materials; extrusion sides lit per side |
 | 2026-10-14 | trivial | 3-D extrusions draw their sides under turned cameras |
+| 2026-10-14 | minor | Insert › Icons places Lucide 1.56.0 stroke icons as custom shapes. The checklist row stays missing until 3-D models and stock content exist |
 | 2026-10-13 | minor | Shape, picture and table rendering checked against PowerPoint on ~150 synthetic edge-case slides; 3-D bevels, cameras and face lighting now render approximately (gap narrowed to extrusion, rigs and the 3-D pane) |
 | 2026-10-13 | minor | Interactive decks: triggers, return-to-slide state and click rules landed in the slide show; the remaining pieces are one new entry under Features |
 | 2026-10-12 | minor | IME composition in slide text and notes, and CJK interface text with real glyphs (#101): the IME gap is now Korean on the web and table-cell underlines |

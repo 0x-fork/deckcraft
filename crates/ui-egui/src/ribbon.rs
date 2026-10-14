@@ -1067,8 +1067,8 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
                 app.session.set_tool(deckcraft_engine::ToolKind::Shape { preset: p.to_string() });
             }
         });
-        let r = big_button(ui, Icon::Icons, "Icons", enabled(app, "shape.insert"));
-        egui::Popup::menu(&r).width(260.0).show(|ui| icon_library(app, ui));
+        let r = big_button(ui, Icon::Icons, "Icons", enabled(app, "insert.icon"));
+        egui::Popup::menu(&r).width(340.0).show(|ui| icon_library(app, ui));
         big(app, ui, Icon::SmartArt, "SmartArt", "app.dialog", json!({"id": "smartart"}));
         let r = big_button(ui, Icon::Chart, "Chart", enabled(app, "insert.chart"));
         egui::Popup::menu(&r).show(|ui| {
@@ -1148,51 +1148,96 @@ pub fn table_grid_picker(ui: &mut Ui) -> Option<(usize, usize)> {
     if resp.clicked() && hover.0 > 0 { Some(hover) } else { None }
 }
 
-/// A small built-in icon library: our own simple pictograms built from preset shapes.
+/// Lucide stroke icons (Insert › Icons). Search filters the gallery; a click inserts the outline.
 fn icon_library(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let items: [(&str, &str); 24] = [
-        ("star5", "Star"),
-        ("heart", "Heart"),
-        ("lightningBolt", "Lightning"),
-        ("sun", "Sun"),
-        ("moon", "Moon"),
-        ("cloud", "Cloud"),
-        ("smileyFace", "Smile"),
-        ("noSmoking", "Not allowed"),
-        ("mathPlus", "Plus"),
-        ("mathMultiply", "Multiply"),
-        ("mathEqual", "Equals"),
-        ("chevron", "Chevron"),
-        ("rightArrow", "Arrow"),
-        ("quadArrow", "Move"),
-        ("uturnArrow", "Return"),
-        ("flowChartDecision", "Decision"),
-        ("flowChartMagneticDisk", "Database"),
-        ("flowChartDocument", "Document"),
-        ("wedgeRoundRectCallout", "Speech"),
-        ("cloudCallout", "Thought"),
-        ("teardrop", "Pin"),
-        ("donut", "Ring"),
-        ("irregularSeal1", "Burst"),
-        ("ribbon2", "Banner"),
-    ];
-    ui.horizontal_wrapped(|ui| {
-        for (preset, label) in items {
-            let (r, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
-            if resp.hovered() {
-                ui.painter().rect_filled(r, CornerRadius::same(4), t.hover);
+    let (color, hover) = (t.text, t.hover);
+    let id = ui.id().with("icon-query");
+    let mut query = ui.data_mut(|d| d.get_temp::<String>(id).unwrap_or_default());
+    ui.add(egui::TextEdit::singleline(&mut query).hint_text("Search icons").desired_width(ui.available_width()));
+    let q = query.trim().to_lowercase();
+    ui.data_mut(|d| d.insert_temp(id, query));
+    let icons = deckcraft_engine::icons::icons();
+    egui::ScrollArea::vertical().id_salt("icon-scroll").max_height(420.0).show(ui, |ui| {
+        if q.is_empty() {
+            let mut cats: Vec<&str> = Vec::new();
+            for icon in icons {
+                if !cats.contains(&icon.category) {
+                    cats.push(icon.category);
+                }
             }
-            paint_preset(ui.painter(), r.shrink(6.0), preset, t.text, t.text);
-            if resp.on_hover_text(label).clicked() {
-                let size = app.session.active().map(|d| d.doc.slide_size).unwrap_or(deckcraft_model::defaults::WIDE);
-                let _ = app.run("shape.insert", json!({"preset": preset, "rect": [size.width / 2.0 - 48.0, size.height / 2.0 - 48.0, 96, 96]}));
-                let _ = app.run("shape.fill", json!({"color": "tx1"}));
-                let _ = app.run("shape.line", json!({"none": true}));
-                ui.close();
+            for cat in cats {
+                ui.label(egui::RichText::new(cat).small().strong());
+                ui.horizontal_wrapped(|ui| {
+                    for icon in icons.iter().filter(|i| i.category == cat) {
+                        icon_cell(app, ui, icon, color, hover);
+                    }
+                });
+            }
+        } else {
+            let mut n = 0;
+            ui.horizontal_wrapped(|ui| {
+                for icon in icons {
+                    if icon.name.contains(&q) || icon.label.to_lowercase().contains(&q) {
+                        icon_cell(app, ui, icon, color, hover);
+                        n += 1;
+                    }
+                }
+            });
+            if n == 0 {
+                ui.label("No icons match.");
             }
         }
     });
+}
+
+fn icon_cell(app: &mut SlideApp, ui: &mut Ui, icon: &deckcraft_engine::icons::Icon, color: Color32, hover: Color32) {
+    let (r, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(r, CornerRadius::same(4), hover);
+    }
+    paint_icon(ui.painter(), r.shrink(6.0), icon, color);
+    if resp.on_hover_text(icon.label).clicked() {
+        let _ = app.run("insert.icon", json!({"name": icon.name}));
+        ui.close();
+    }
+}
+
+/// Stroke a Lucide outline into a gallery cell. The line is the design stroke scaled to the cell.
+fn paint_icon(p: &egui::Painter, r: Rect, icon: &deckcraft_engine::icons::Icon, color: Color32) {
+    let Some(src) = deckcraft_engine::icons::outline(icon.name) else { return };
+    let mut bp = src.clone();
+    let (w, h) = (r.width().max(1.0) as f64, r.height().max(1.0) as f64);
+    bp.apply_affine(deckcraft_geom::Affine::scale_non_uniform(w / deckcraft_engine::icons::VIEW, h / deckcraft_engine::icons::VIEW));
+    let sw = ((r.width() * icon.stroke as f32) / deckcraft_engine::icons::VIEW as f32).clamp(1.0, 3.5);
+    let mut pts: Vec<egui::Pos2> = vec![];
+    let mut polys: Vec<(Vec<egui::Pos2>, bool)> = vec![];
+    kurbo_flatten(&bp, |el| match el {
+        Fl::Move(x, y) => {
+            if pts.len() > 1 {
+                polys.push((std::mem::take(&mut pts), false));
+            }
+            pts.clear();
+            pts.push(pos2(r.min.x + x as f32, r.min.y + y as f32));
+        }
+        Fl::Line(x, y) => pts.push(pos2(r.min.x + x as f32, r.min.y + y as f32)),
+        Fl::Close => {
+            if pts.len() > 1 {
+                polys.push((std::mem::take(&mut pts), true));
+            }
+        }
+    });
+    if pts.len() > 1 {
+        polys.push((pts, false));
+    }
+    for (poly, closed) in polys {
+        p.add(egui::Shape::Path(egui::epaint::PathShape {
+            points: poly,
+            closed,
+            fill: Color32::TRANSPARENT,
+            stroke: egui::epaint::PathStroke::new(sw, color),
+        }));
+    }
 }
 
 // ---------- Draw ----------
