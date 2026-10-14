@@ -385,23 +385,27 @@ struct NotesMasterWrite {
 }
 
 fn notes_master_write(p: &Presentation) -> Option<NotesMasterWrite> {
-    let kept = p.notes_master.as_ref().filter(|m| !m.shapes.is_empty());
+    let nm = p.notes_master.as_deref();
+    let kept = nm.filter(|m| !m.shapes.is_empty());
     let has_notes = p.slides.iter().any(|s| !s.notes.is_empty());
-    if !has_notes && kept.is_none() {
+    if !has_notes && nm.is_none() {
         return None;
     }
+    let default_bg = || Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) };
     Some(match kept {
         Some(m) => NotesMasterWrite {
             shapes: m.shapes.clone(),
-            background: m.background.clone(),
+            background: Some(m.background.clone().unwrap_or_else(default_bg)),
             color_map: m.color_map.clone(),
             style: if m.body_style.is_empty() { notes_style() } else { m.body_style.clone() },
             theme: Some(m.theme.clone()),
         },
+        // A master without placeholders of its own gets PowerPoint's defaults, keeping its
+        // background and colour map.
         None => NotesMasterWrite {
             shapes: notes_master_shapes(p.notes_size),
-            background: Some(Background::Ref { idx: 1001, color: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1) }),
-            color_map: vec![],
+            background: Some(nm.and_then(|m| m.background.clone()).unwrap_or_else(default_bg)),
+            color_map: nm.map(|m| m.color_map.clone()).unwrap_or_default(),
             style: notes_style(),
             theme: None,
         },
