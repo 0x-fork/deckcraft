@@ -342,10 +342,30 @@ fn mark_saved(s: &mut Session, path: Option<String>) -> Result<()> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
-    // Write to a temporary sibling then rename, so a failed save never truncates the old file.
-    let tmp = format!("{path}.saving");
-    std::fs::write(&tmp, bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    std::fs::rename(&tmp, path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let err = |e: std::io::Error| EngineError::Other(format!("{path}: {e}"));
+    // Write to a uniquely named temporary sibling, created exclusively (never following or reusing an
+    // existing file or symlink), then rename it over the destination so a failed save never truncates
+    // the old file and concurrent saves never share temporary bytes.
+    let mut attempts = 0;
+    let (tmp, mut file) = loop {
+        let tmp = format!("{path}.{}.{}.saving", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed));
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(f) => break (tmp, f),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempts < 16 => attempts += 1,
+            Err(e) => return Err(err(e)),
+        }
+    };
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let result = written.and_then(|()| std::fs::rename(&tmp, path));
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err(e));
+    }
+    Ok(())
 }
 #[cfg(target_arch = "wasm32")]
 fn write_file(_path: &str, _bytes: &[u8]) -> Result<()> {
@@ -620,3 +640,41 @@ fn recovery_discard(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 #[path = "color_at_tests.rs"]
 mod color_at_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::write_file;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("deckcraft-write-file-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn write_file_does_not_touch_a_predictable_saving_sibling() {
+        let dir = scratch("sibling");
+        let dest = dir.join("deck.deckcraft");
+        let dest_str = dest.to_str().unwrap();
+        std::fs::write(&dest, b"old").unwrap();
+        std::fs::write(dir.join("deck.deckcraft.saving"), b"precious").unwrap();
+        write_file(dest_str, b"new").unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert_eq!(std::fs::read(dir.join("deck.deckcraft.saving")).unwrap(), b"precious");
+        let names: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(names.len(), 2, "no temporary file may be left behind: {names:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_file_failed_rename_keeps_destination_and_cleans_up() {
+        let dir = scratch("failed");
+        let dest = dir.join("target");
+        std::fs::create_dir(&dest).unwrap();
+        assert!(write_file(dest.to_str().unwrap(), b"new").is_err());
+        assert!(dest.is_dir());
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
