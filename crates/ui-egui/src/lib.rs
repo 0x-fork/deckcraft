@@ -1661,7 +1661,11 @@ mod tests {
                 app.logic(ui.ctx());
                 app.ui(ui);
             },
-            SlideApp::new(Session::with_new(), Services::default()),
+            {
+                let mut session = Session::with_new();
+                session.prefs.autocorrect = false;
+                SlideApp::new(session, Services::default())
+            },
         );
         harness.run_steps(2);
         let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
