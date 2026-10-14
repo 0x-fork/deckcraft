@@ -104,6 +104,8 @@ the round trip even though DeckCraft doesn't model it.
 | Embedded fonts | yes | yes | MicroType Express subsets kept, not drawn |
 | Tags (`p:custDataLst`) on the presentation, slides and shapes | yes | yes | Add-ins such as think-cell keep their identity; `tags_survive_round_trip` |
 | Custom XML, VBA | no / no | no / no | |
+| Custom XML data, sensitivity label (`docMetadata/LabelInfo.xml`), custom document properties | kept verbatim | yes | SharePoint metadata and the label survive a save; `custom_xml_label_and_custom_properties_survive_save` |
+| Tags, VBA | no / no | | |
 | Embedded fonts | no | no | |
 | Encryption (password to open) | no | no | |
 
@@ -129,6 +131,7 @@ the round trip even though DeckCraft doesn't model it.
 | 2026-10-14 | minor | 3-D models (`.glb`) round-trip, including an alternate-content fallback picture; animation bounce end is read and written (`corpus_media.rs`) |
 | 2026-10-14 | minor | Chart trendlines round-trip (`corpus_charts.rs`); merges, diagonal borders, columns, autofit, vertical text and WordArt warp are in that slice |
 | 2026-10-13 | minor | Add-in tags on the presentation, slides and shapes read and written |
+| 2026-10-13 | minor | Custom XML parts, the sensitivity label and custom properties kept on save |
 | 2026-10-12 | minor | EMF/WMF text and pattern brushes drawn; OLE (VML) and ActiveX previews read |
 | 2026-10-12 | minor | Text warps rendered; their adjust values read and written |
 | 2026-10-12 | trivial | Groups with a small legacy child coordinate space draw outlines, dashes, arrowheads and ink at their own width (#233) |
