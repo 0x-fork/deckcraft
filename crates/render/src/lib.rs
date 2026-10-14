@@ -1388,7 +1388,11 @@ impl Renderer {
             ctx.set_paint(color(c.with_alpha(255), 1.0));
             ctx.set_stroke(kurbo::Stroke::new(g.radius.max(0.0) * 0.95).with_join(kurbo::Join::Round));
             ctx.stroke_path(&silhouette);
-            ctx.fill_path(&silhouette);
+            // A shape without a fill (an outline, a frame) glows along its line only: the inside
+            // stays clear, as PowerPoint draws it.
+            if content.is_some() || fill_alpha.is_some() {
+                ctx.fill_path(&silhouette);
+            }
             ctx.pop_layer();
         }
         if let Some(rf) = &e.reflection {
