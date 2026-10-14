@@ -445,10 +445,15 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     let (back, fwd) = forecast_pad(c);
     let nspan = ncat as f64 + back + fwd;
     let band = if horiz { plot.height() / nspan } else { plot.width() / nspan };
+    // Where category `i`'s band starts along its axis: left to right, or bottom to top on a
+    // horizontal bar chart, unless the axis is reversed. The forecast's empty slots stay on
+    // their own side of the data.
+    let backwards = horiz != c.cat_reversed;
+    let slot = |i: usize| if backwards { ncat.saturating_sub(i + 1) as f64 + fwd } else { i as f64 + back };
     // Category labels: wrapped onto two lines when they don't fit their band (long date ranges).
     let wraps = !horiz && c.categories.iter().any(|n| n.chars().count() as f64 * base * 0.5 > band);
     for (i, name) in c.categories.iter().enumerate() {
-        let mid = if horiz { plot.y0 + band * (i as f64 + back + 0.5) } else { plot.x0 + band * (i as f64 + back + 0.5) };
+        let mid = if horiz { plot.y0 + band * (slot(i) + 0.5) } else { plot.x0 + band * (slot(i) + 0.5) };
         if horiz {
             label(
                 ctx,
@@ -507,7 +512,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             for (bi, (si, s)) in bars.iter().enumerate() {
                 let sec = c.on_secondary(s);
                 let v = s.values.get(i).copied().flatten().unwrap_or(0.0) / total;
-                let start = band * (i as f64 + back) + (band - group) / 2.0 + if stacked { 0.0 } else { step * bi as f64 };
+                let start = band * slot(i) + (band - group) / 2.0 + if stacked { 0.0 } else { step * bi as f64 };
                 let (a, b) = if waterfall {
                     c.waterfall_bars().get(i).copied().unwrap_or_default()
                 } else if stacked {
@@ -612,9 +617,9 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     let xs: Vec<f64> = s.x_values.iter().flatten().copied().collect();
                     let (xl, xh) = (xs.iter().copied().fold(f64::MAX, f64::min), xs.iter().copied().fold(f64::MIN, f64::max));
                     let xv = s.x_values.get(i).copied().flatten().unwrap_or(i as f64);
-                    if xh > xl { plot.x0 + (xv - xl) / (xh - xl) * plot.width() } else { plot.x0 + band * (i as f64 + back + 0.5) }
+                    if xh > xl { plot.x0 + (xv - xl) / (xh - xl) * plot.width() } else { plot.x0 + band * (slot(i) + 0.5) }
                 }
-                _ => plot.x0 + band * (i as f64 + back + 0.5),
+                _ => plot.x0 + band * (slot(i) + 0.5),
             };
             pts.push(Point::new(x, to_axis(sec, v)));
         }

@@ -325,6 +325,26 @@ fn column_points_take_their_own_fill_and_smooth_lines_curve() {
 }
 
 #[test]
+fn horizontal_bars_list_the_first_category_at_the_bottom_unless_reversed() {
+    let draw = |reversed: bool| {
+        let mut c = Chart::sample(ChartType::Bar);
+        c.title = None;
+        c.legend = None;
+        c.series.truncate(1);
+        c.categories = vec!["A".into(), "B".into(), "C".into()];
+        c.series[0].values = vec![Some(10.0), Some(10.0), Some(10.0)];
+        c.series[0].point_fills = vec![(0, deckcraft_model::style::Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))))];
+        c.cat_reversed = reversed;
+        let sh = Shape { id: ShapeId(623), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        let rows: Vec<u32> = (0..540).filter(|y| (0..960).any(|x| img.pixel(x, *y)[..3] == [255, 0, 0])).collect();
+        (rows[0] + rows[rows.len() - 1]) / 2
+    };
+    assert!(draw(false) > 360, "first category at the bottom: {}", draw(false));
+    assert!(draw(true) < 180, "reversed: first category at the top: {}", draw(true));
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });

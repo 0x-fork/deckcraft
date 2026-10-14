@@ -1,6 +1,6 @@
 //! PPTX import: package → [`Presentation`].
 
-mod chart;
+pub(crate) mod chart;
 mod chartex;
 pub(crate) mod dml;
 mod shapes;
