@@ -2212,8 +2212,14 @@ fn size_group(app: &mut SlideApp, ui: &mut Ui) {
 
 fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
-        let r = big_button(ui, Icon::RemoveBackground, "Remove\nBackground", false);
-        let _ = r.on_hover_text("Remove Background (coming soon)");
+        let r = big_button(ui, Icon::RemoveBackground, "Remove\nBackground", enabled(app, "picture.removeBackground"));
+        egui::Popup::menu(&r).show(|ui| {
+            for (label, tol) in [("Remove Background", 20.0), ("Remove More (looser)", 35.0), ("Remove Less (tighter)", 10.0)] {
+                if ui.button(label).clicked() {
+                    run(app, "picture.removeBackground", json!({"tolerance": tol}));
+                }
+            }
+        });
         let r = big_button(ui, Icon::Corrections, "Corrections", true);
         egui::Popup::menu(&r).show(|ui| {
             for b in [-0.4, -0.2, 0.0, 0.2, 0.4] {

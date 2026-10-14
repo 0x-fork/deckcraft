@@ -227,8 +227,7 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
 
 ### Smaller missing rows
 Zoom (summary/section/slide, 6–10 h), reuse slides (2–4 h), laser pointer (1–2 h), transition
-sounds (1–2 h), artistic effects (6–10 h), remove background (6–10 h; needs a model or a classical
-matte), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
+sounds (1–2 h), artistic effects (6–10 h), compress pictures (2–3 h), insert screenshot (2–3 h), record audio/screen and record slide
 show (8–12 h), compare presentations (6–10 h), password protection (4–6 h, ECMA-376 agile
 encryption), ink to shape/text (6–10 h), icons and 3-D models (8–14 h, needs an open icon set).
 

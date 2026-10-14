@@ -2,6 +2,7 @@
 
 pub mod animation;
 pub mod arrange;
+pub mod background;
 pub mod design;
 pub mod edit;
 pub mod file;
@@ -132,6 +133,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(slide::specs());
         v.extend(insert::specs());
         v.extend(shape::specs());
+        v.extend(background::specs());
         v.extend(arrange::specs());
         v.extend(selection::specs());
         v.extend(merge::specs());
