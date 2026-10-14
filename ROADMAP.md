@@ -128,6 +128,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-14 | During a show, a typed slide number is shown and Enter goes to that slide. Breadth stays 79% |
 | 2026-10-14 | A custom show plays only its slides: Show in the Custom Shows dialog, Set Up Slide Show, or a click action. Breadth stays 79% |
 | 2026-10-14 | Presenter view pauses and resets its timer (T, R) and changes notes size (A-/A+, brackets). The clock shows local time. Second-display placement stays with #433. Breadth stays 79% |
 | 2026-10-14 | See All Slides and zoom during a show: a thumbnail grid (G, or All), click to jump, and click-to-zoom at 2× (Z). Presenter view has Black, White, All slides and Zoom. Breadth stays 79% |
@@ -153,6 +154,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Progress log: go to slide shows the typed number. Breadth stays 79% |
 | 2026-10-14 | trivial | Progress log: custom show playback. Breadth stays 79% |
 | 2026-10-14 | trivial | Progress log: presenter timer pause/reset, clock and notes size. Breadth stays 79% |
 | 2026-10-14 | trivial | Progress log: See All Slides and zoom during a show. Breadth stays 79% |

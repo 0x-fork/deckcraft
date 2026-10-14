@@ -1,6 +1,6 @@
 # Slide show and presenter view: parity with PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (custom show playback; previous: minor, presenter timer pause/reset) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** minor (go to slide shows the number while it is typed; previous: minor, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Presenting is the job PowerPoint is hired for. This doc covers the show window, presenter view,
 rehearsal and recording. Transition and animation playback are in
@@ -14,7 +14,7 @@ ready** (estimated), **10–16 h** to parity.
 |---|---|---|---|
 | Play from Start / from Current Slide (F5, Shift+F5, Cmd+Enter) | yes | yes | |
 | Next/previous by click, arrows, Space, Page Up/Down, Enter, Backspace | yes | yes | #17 reported arrows not working in v0.3.0 AppImage; recheck |
-| Go to slide (number + Enter), first/last | yes | yes | |
+| Go to slide (number + Enter), first/last | yes | yes: the digits show as "Go to slide …" until Enter, Backspace, Esc, or 3 seconds | Slide numbers are 1-based; 0 and a number past the end do not move |
 | Black / white screen (B / W) | yes | yes | |
 | End screen, Esc to leave | yes | yes | |
 | Step clock: a click after a long pause plays its step (#11) | yes | yes | |
@@ -72,6 +72,7 @@ Reading View in a window with navigation: present (checklist row done).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | minor | Typing a slide number during the show shows it, and Enter goes there. Esc clears the number before it leaves the show. Checklist breadth stays 66% |
 | 2026-10-14 | minor | A custom show plays only its slides, from the Custom Shows dialog, from Set Up Slide Show, or from a click action. Checklist breadth stays 66% |
 | 2026-10-14 | minor | Presenter view pauses and resets its timer (T, R) and changes notes size (A-/A+, brackets). The clock shows local time. Second-display placement and swap stay with #433. Checklist breadth stays 66% |
 | 2026-10-14 | minor | See All Slides (G) and click-to-zoom (Z) during the show. Presenter view opens that grid and sets black, white and zoom. Checklist breadth stays 66% |

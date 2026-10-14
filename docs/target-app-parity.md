@@ -1,6 +1,6 @@
 # DeckCraft vs Microsoft PowerPoint: parity assessment
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (slide show plays a custom show; breadth stays 79%; previous: trivial, presenter timer) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-14 · **Change:** trivial (go to slide shows the typed number; breadth stays 79%; previous: trivial, custom show playback) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 The authoritative answer to "how close is DeckCraft to PowerPoint, and how much work is left?".
 [ROADMAP.md](../ROADMAP.md) summarizes it; [gaps.md](gaps.md) itemizes every shortfall;
@@ -227,7 +227,7 @@ Carried from the 2026-10-07 ROADMAP status and updated with what has landed sinc
 - **Transitions and animations:** 48 transitions including Morph (objects, words, characters,
   geometry outlines), 64 animation effects (entrance, emphasis, exit, motion paths, media),
   triggers, by-paragraph builds, Animation Painter, on a shared timeline engine.
-- **Slide show:** full screen, keyboard/mouse navigation, blank screens, go-to-slide, See All
+- **Slide show:** full screen, keyboard/mouse navigation, blank screens, go-to-slide (the typed number is shown), See All
   Slides, click-to-zoom, pen, presenter window (black, white, zoom, the slide grid, a timer that
   pauses and resets, a local clock, and notes size), rehearse timings, custom shows played on
   their own, Set Up Show, Reading View; links and shape actions followed on click.
@@ -277,6 +277,7 @@ scored done (16 open issues).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-14 | trivial | Slide show evidence includes a visible go-to-slide number. Breadth stays 79% |
 | 2026-10-14 | trivial | Slide show evidence includes custom show playback. Breadth stays 79% |
 | 2026-10-14 | trivial | Slide show evidence includes presenter timer pause/reset, a local clock and notes size. Breadth stays 79% |
 | 2026-10-14 | trivial | Slide show evidence includes See All Slides and zoom. Breadth stays 79% |
