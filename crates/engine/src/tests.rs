@@ -903,3 +903,58 @@ fn cell_fill_walks_only_the_cells_a_huge_selection_covers() {
     let fills: Vec<bool> = [(0, 0), (0, 1), (1, 0), (1, 1)].iter().map(|&(r, c)| t.cell(r, c).is_some_and(|x| x.fill.is_some())).collect();
     assert_eq!(fills, [false, false, false, true]);
 }
+
+/// Each slide as (title, [(level, bullet text)]).
+fn outline_of(p: &deckcraft_model::Presentation) -> Vec<(String, Vec<(u8, String)>)> {
+    p.slides
+        .iter()
+        .map(|s| {
+            let body =
+                s.shapes.get(1).and_then(|b| b.text.as_ref()).map(|t| t.paragraphs.iter().map(|p| (p.level, p.text())).collect()).unwrap_or_default();
+            (s.title(), body)
+        })
+        .collect()
+}
+
+const MD_OUTLINE: &str = "# Intro\n- Point one\n- Point two\n  - Sub point\n\n# Second\n- More\n";
+
+fn md_expected() -> Vec<(String, Vec<(u8, String)>)> {
+    vec![
+        ("Intro".into(), vec![(0, "Point one".into()), (0, "Point two".into()), (1, "Sub point".into())]),
+        ("Second".into(), vec![(0, "More".into())]),
+    ]
+}
+
+#[test]
+fn markdown_outlines_take_headings_as_slides_and_lists_as_bullets() {
+    let p = crate::cmd::file::open_presentation("outline.md", MD_OUTLINE.as_bytes()).unwrap();
+    assert_eq!(outline_of(&p), md_expected());
+    // numbered lists, `*` / `+` bullets, text under a heading, and closing #s
+    let p = crate::cmd::file::open_presentation("o.md", b"## Plan ##\n1. First\n2) Second\n* star\n+ plus\nA plain line\n").unwrap();
+    assert_eq!(
+        outline_of(&p),
+        vec![("Plan".into(), vec![(0, "First".into()), (0, "Second".into()), (0, "star".into()), (0, "plus".into()), (0, "A plain line".into())])]
+    );
+}
+
+#[test]
+fn slides_from_a_markdown_outline_file() {
+    let mut s = session();
+    s.execute("slide.fromOutline", &json!({"text": MD_OUTLINE, "markdown": true})).unwrap();
+    let doc = &s.doc().unwrap().doc;
+    assert_eq!(outline_of(doc)[1..], md_expected()[..]);
+}
+
+#[test]
+fn plain_outlines_are_unchanged() {
+    // .txt keeps the indentation format, and so does a .md without headings
+    let indented = "Intro\n\tPoint one\n\t\tSub point\nSecond\n\tMore\n";
+    let want =
+        vec![("Intro".to_string(), vec![(0, "Point one".to_string()), (1, "Sub point".to_string())]), ("Second".into(), vec![(0, "More".into())])];
+    for name in ["outline.txt", "outline.md"] {
+        let p = crate::cmd::file::open_presentation(name, indented.as_bytes()).unwrap();
+        assert_eq!(outline_of(&p), want, "{name}");
+    }
+    let p = crate::cmd::file::open_presentation("outline.txt", MD_OUTLINE.as_bytes()).unwrap();
+    assert_eq!(p.slides.first().map(|s| s.title()).as_deref(), Some("# Intro"));
+}
