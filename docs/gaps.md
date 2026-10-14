@@ -250,9 +250,9 @@ Detail in [animation-parity.md](animation-parity.md). 10–16 h; the pane is a *
   PDF) place the slide and notes where the notes master does and print its header, date, footer
   and page number in their own fonts, sizes and colours; PDF handouts print the handout master's.
   Notes Master view previews the slide in its slide-image placeholder. PDF pages lay master text
-  out with the text engine (wrapping, mixed formatting). Left: the on-screen Notes Page view still
-  draws it as one line per placeholder.
-- **Estimate:** 0.5 h.
+  out with the text engine (wrapping, mixed formatting), and the Notes Page view draws the same
+  layout. Left: the view draws it in the interface font (sizes, colours and weights kept).
+- **Estimate:** done for beta.
 
 ### Edit points, text warp, 3-D
 - **Evidence:** checklist rows "Edit points" (P1 missing), "Text warp transforms" (partial: all 40
@@ -387,6 +387,7 @@ Detail in [localization-parity.md](localization-parity.md).
 | 2026-10-14 | minor | Size and Position dialog landed (position, size, rotation, scale, lock aspect, one undo). The dialog gap remains Font, Bullets and Numbering, Find/Replace, Replace Fonts, Action Settings, Print, Insert Object and the rest of the ~60 |
 | 2026-10-14 | minor | File › New has six original starter decks; a large template gallery is still open |
 | 2026-10-13 | minor | Artistic effects: 7 of 22 (blur, pencil grayscale, line drawing, film grain, cutout, glow edges, photocopy) applied, removed and round-tripped (`a14:imgLayer`) |
+| 2026-10-14 | trivial | Notes Page view draws master text wrapped, as the PDF does |
 | 2026-10-14 | trivial | PDF master header/footer text wraps and keeps mixed formatting |
 | 2026-10-14 | trivial | Notes Master slide preview; master header/footer text keeps its formatting |
 | 2026-10-14 | minor | Notes pages and PDF handouts follow the notes and handout masters |
