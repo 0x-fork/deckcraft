@@ -107,11 +107,7 @@ fn an_unchanged_chart_keeps_its_embedded_workbook() {
         .expect("chart relationships");
     assert!(rels.contains("../embeddings/Microsoft_Excel_Worksheet1.xlsx"), "{rels}");
     assert!(!rels.contains("slide1.xml"), "a chart relationship must not replace the slide: {rels}");
-    let slide = saved_parts
-        .iter()
-        .find(|(n, _)| n == "ppt/slides/slide1.xml")
-        .map(|(_, d)| String::from_utf8_lossy(d).into_owned())
-        .expect("slide");
+    let slide = saved_parts.iter().find(|(n, _)| n == "ppt/slides/slide1.xml").map(|(_, d)| String::from_utf8_lossy(d).into_owned()).expect("slide");
     assert!(slide.contains("sld"), "{slide}");
     assert!(!slide.as_bytes().windows(WORKBOOK.len()).any(|w| w == WORKBOOK));
     let xml = saved_parts
