@@ -1499,18 +1499,6 @@ mod tests {
             deckcraft_engine::cmd::text::caret_line(st, ts).unwrap().0
         };
         let first = caret(&h);
-        // Optional local screenshots use the actual canvas renderer, including its cache.
-        let preview = |h: &mut Harness<'_, SlideApp>, name: &str| {
-            if let Ok(dir) = std::env::var("BULLET_PREVIEW_DIR") {
-                // Capture the visible phase of the caret, with the pointer clear of the text.
-                let time = h.ctx.input(|i| i.time);
-                h.input_mut().time = Some((time * 1.6).floor() / 1.6 + 0.65);
-                h.event(Event::PointerMoved(pos2(25.0, 25.0)));
-                h.step();
-                h.render().unwrap().save(std::path::Path::new(&dir).join(name)).unwrap();
-            }
-        };
-        preview(&mut h, "bullet-empty.png");
         h.event(Event::Text("First point".into()));
         h.run_steps(3);
         h.key_press(egui::Key::Enter);
@@ -1522,12 +1510,10 @@ mod tests {
         let l = deckcraft_engine::cmd::text::layout_for(st, st.selection.text.as_ref().unwrap()).unwrap();
         assert_eq!(l.empty_bullets.len(), 1);
         assert_eq!(l.empty_bullets[0].para, 1);
-        preview(&mut h, "bullet-after-enter.png");
         let renders = h.state().textures.canvas_renders;
         h.state_mut().run("text.exit", json!({})).unwrap();
         h.run_steps(3);
         assert!(h.state().textures.canvas_renders > renders, "leaving text editing refreshes the marker texture");
-        preview(&mut h, "bullet-after-exit.png");
         h.state_mut().run("text.edit", json!({"id": id, "at": [1, 0]})).unwrap();
         h.run_steps(3);
         h.event(Event::Text("Second point".into()));
