@@ -1342,3 +1342,68 @@ fn stacked_combining_marks_take_a_face_that_draws_them() {
     }
     let _ = f;
 }
+
+/// #736: `anchorCtr` centres the text block horizontally, whatever the paragraphs' own
+/// alignment, and overflowing content centres symmetrically past both edges.
+#[test]
+fn anchorctr_centres_the_text_block() {
+    let text = "The shape is top - center - overriding paragraph right alignment.";
+    // The block's centre: (min left + max right) over the laid-out lines, in box coordinates.
+    let block_centre = |l: &TextLayout| -> f64 {
+        // Empty lines carry no ink and sit where their alignment left them: not part of the block.
+        let ink = l.lines.iter().filter(|li| li.end > li.start);
+        let (min, max) = ink.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), li| (a.min(li.extent.0), b.max(li.extent.1)));
+        (min + max) / 2.0
+    };
+    let para = |align: Option<Align>, text: &str| Paragraph {
+        props: ParaProps { align, ..Default::default() },
+        runs: vec![Run::new(text)],
+        ..Default::default()
+    };
+    let anchored =
+        |paragraphs: Vec<Paragraph>| TextBody { body: BodyProps { anchor_ctr: Some(true), ..Default::default() }, paragraphs, ..Default::default() };
+    // One right-aligned line in a wide box: the block is centred, not pushed past the right edge.
+    let body_right = anchored(vec![para(Some(Align::Right), text)]);
+    let (p, mut sh) = setup("", 828.0, 104.0);
+    sh.text = Some(body_right);
+    let l = lay(&p, &sh, 828.0, 104.0);
+    assert!((block_centre(&l) - 414.0).abs() <= 1.0, "right-aligned: centre {}, want 414", block_centre(&l));
+    // Left-aligned text centres the same way.
+    let body_left = anchored(vec![para(None, text)]);
+    let (p, mut sh) = setup("", 828.0, 104.0);
+    sh.text = Some(body_left);
+    let l = lay(&p, &sh, 828.0, 104.0);
+    assert!((block_centre(&l) - 414.0).abs() <= 1.0, "left-aligned: centre {}, want 414", block_centre(&l));
+    // A trailing empty paragraph carries no ink and must not skew the block.
+    let body_empty = anchored(vec![para(Some(Align::Right), text), para(None, "")]);
+    let (p, mut sh) = setup("", 828.0, 104.0);
+    sh.text = Some(body_empty);
+    let l = lay(&p, &sh, 828.0, 104.0);
+    assert!((block_centre(&l) - 414.0).abs() <= 1.0, "trailing empty paragraph: centre {}, want 414", block_centre(&l));
+    // Mixed alignments: the drawn block (not either alignment edge) is what centres.
+    let body_mixed = anchored(vec![para(Some(Align::Right), text), para(None, "short")]);
+    let (p, mut sh) = setup("", 828.0, 104.0);
+    sh.text = Some(body_mixed);
+    let l = lay(&p, &sh, 828.0, 104.0);
+    assert!((block_centre(&l) - 414.0).abs() <= 1.0, "mixed: centre {}, want 414", block_centre(&l));
+    // Content wider than the box overflows symmetrically past both edges (no wrap).
+    let body_wide = TextBody {
+        body: BodyProps { anchor_ctr: Some(true), wrap: Some(false), ..Default::default() },
+        paragraphs: vec![para(Some(Align::Right), text)],
+        ..Default::default()
+    };
+    let (p, mut sh) = setup("", 300.0, 104.0);
+    sh.text = Some(body_wide);
+    let l = lay(&p, &sh, 300.0, 104.0);
+    assert!((block_centre(&l) - 150.0).abs() <= 2.0, "overflowing: centre {}, want 150", block_centre(&l));
+    // Control: without anchorCtr a right-aligned line still ends at the box's right edge.
+    let body_control = TextBody { body: BodyProps::default(), paragraphs: vec![para(Some(Align::Right), text)], ..Default::default() };
+    let (p, mut sh) = setup(text, 828.0, 104.0);
+    sh.text = Some(body_control);
+    let l = lay(&p, &sh, 828.0, 104.0);
+    assert!(
+        l.lines.iter().all(|li| li.extent.1 > 810.0),
+        "control: right-aligned at the box edge, got {:?}",
+        l.lines.iter().map(|li| li.extent).collect::<Vec<_>>()
+    );
+}

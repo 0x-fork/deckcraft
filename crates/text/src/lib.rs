@@ -1911,9 +1911,20 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
         // PowerPoint draws justified and distributed anchoring at the bottom.
         Anchor::Bottom | Anchor::Justified | Anchor::Distributed => inner.height() - used_h,
     };
-    // anchorCtr: centre the block horizontally.
-    let dx = if bp.anchor_ctr.unwrap_or(false) { ((inner.width() - out.content_width) / 2.0).max(0.0) } else { 0.0 };
-    let ox = inner.x0 + dx;
+    // anchorCtr: centre the drawn text block on the box. Lines sit where their alignment put
+    // them, so the origin is set so the block's centre lands on the box's centre — a left-edge
+    // offset alone pushed right-aligned lines out of the box (#736). Empty lines carry no ink
+    // and stay out of the block. Overflowing content centres symmetrically past both edges.
+    // Not applied to vertical text (there the offset would run along the wrong axis) or
+    // multi-column bodies (centring unimplemented for them).
+    let centre_block = bp.anchor_ctr.unwrap_or(false) && ncols == 1 && matches!(vert, TextDir::Horizontal);
+    let ox = if centre_block && !all_lines.is_empty() {
+        let ink = all_lines.iter().filter(|(li, ..)| li.end > li.start);
+        let (bmin, bmax) = ink.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (li, ..)| (a.min(li.extent.0), b.max(li.extent.1)));
+        if bmax >= bmin { inner.x0 + inner.width() / 2.0 - (bmin + bmax) / 2.0 } else { inner.x0 }
+    } else {
+        inner.x0
+    };
     let oy = inner.y0 + dy;
     // Emit runs, in visual order.
     for (line, place, _, bullet) in all_lines.iter_mut() {
