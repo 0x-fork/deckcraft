@@ -2509,3 +2509,30 @@ fn single_series_column_chart_varies_colours_by_point() {
     };
     assert_ne!(render(true), render(false));
 }
+
+#[test]
+fn empty_bullet_is_gray_only_while_editing_and_never_in_exports() {
+    use deckcraft_model::text::{Bullet, Paragraph};
+    let mut para = Paragraph::default();
+    para.props.bullet = Some(Bullet::Char { char: "•".into() });
+    para.props.margin_left = Some(24.0);
+    para.props.indent = Some(-24.0);
+    para.end_props.size = Some(32.0);
+    let sh = Shape {
+        id: ShapeId(901),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 120.0)),
+        text: Some(TextBody { paragraphs: vec![para], ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![sh]);
+    let render = |edit, editing_text| render_slide(&p, 0, &RenderOpts { edit, editing_text, ..Default::default() });
+    let plain = render(false, None);
+    assert_eq!(plain.pixels, render(true, None).pixels);
+    assert_eq!(plain.pixels, render(false, Some(ShapeId(901))).pixels, "export ignores editor markers");
+    assert_eq!(plain.pixels, render(true, Some(ShapeId(902))).pixels, "other shapes stay empty");
+    let editing = render(true, Some(ShapeId(901)));
+    let changed: Vec<_> = editing.pixels.chunks_exact(4).zip(plain.pixels.chunks_exact(4)).filter(|(a, b)| a != b).collect();
+    assert!(!changed.is_empty(), "an empty bullet must be visible");
+    assert!(changed.iter().any(|(px, _)| px[0] == 179 && px[1] == 179 && px[2] == 179));
+    assert!(changed.iter().all(|(px, _)| px[0] >= 179 && px[0] == px[1] && px[1] == px[2]));
+}

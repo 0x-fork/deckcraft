@@ -292,6 +292,9 @@ pub struct LineInfo {
 #[derive(Clone, Debug, Default)]
 pub struct TextLayout {
     pub runs: Vec<GlyphRun>,
+    /// Empty list markers for the editor only; ordinary rendering and export omit them.
+    /// Their space is still reserved so the caret starts where the first character will.
+    pub empty_bullets: Vec<GlyphRun>,
     pub decos: Vec<Deco>,
     pub lines: Vec<LineInfo>,
     /// Inner text box (insets applied), shape-local.
@@ -739,56 +742,52 @@ fn shape_para(ctx: &Ctx, shape: &Shape, body: &TextBody, pi: usize, scale: f64, 
     let lead_size = lead_style.size;
     let lead_face = lead_style.face.clone();
     // Bullet.
-    let bullet = if para.is_empty() && opts.prompt_color.is_none() {
-        None
-    } else {
-        match &props.bullet {
-            Some(Bullet::Char { char }) => {
-                let mut rp = lead.clone();
-                if let Some(f) = &props.bullet_font {
-                    rp.font = Some(f.clone());
-                }
-                rp.bold = Some(false);
-                rp.italic = Some(false);
-                if let Some(c) = &props.bullet_color {
-                    rp.fill = Some(Fill::solid(c.clone()));
-                }
-                rp.size = Some(lead.size.unwrap_or(18.0) * props.bullet_size.unwrap_or(1.0));
-                rp.underline = None;
-                rp.strike = None;
-                rp.highlight = None;
-                let mut st = make_style(ctx, &rp, scale, opts.prompt_color);
-                st.baseline = 0.0;
-                // Symbol fonts (Wingdings) aren't available: map common private-use bullets.
-                let ch = map_symbol_bullet(char, props.bullet_font.as_deref());
-                bullet_face(db, &mut st, &ch);
+    let bullet = match &props.bullet {
+        Some(Bullet::Char { char }) => {
+            let mut rp = lead.clone();
+            if let Some(f) = &props.bullet_font {
+                rp.font = Some(f.clone());
+            }
+            rp.bold = Some(false);
+            rp.italic = Some(false);
+            if let Some(c) = &props.bullet_color {
+                rp.fill = Some(Fill::solid(c.clone()));
+            }
+            rp.size = Some(lead.size.unwrap_or(18.0) * props.bullet_size.unwrap_or(1.0));
+            rp.underline = None;
+            rp.strike = None;
+            rp.highlight = None;
+            let mut st = make_style(ctx, &rp, scale, opts.prompt_color);
+            st.baseline = 0.0;
+            // Symbol fonts (Wingdings) aren't available: map common private-use bullets.
+            let ch = map_symbol_bullet(char, props.bullet_font.as_deref());
+            bullet_face(db, &mut st, &ch);
 
-                // A symbol font (Wingdings, Symbol…) that is installed draws its own glyph, found
-                // at U+F000 + the character code as such fonts map them; otherwise common symbol
-                // bullets are mapped to Unicode look-alikes.
-                let ch = match symbol_font_char(&st.face, char, props.bullet_font.as_deref()) {
-                    Some(c) => c.to_string(),
-                    None => map_symbol_bullet(char, props.bullet_font.as_deref()),
-                };
-                if !st.face.covers(ch.chars().next().unwrap_or('•')) {
-                    st.face = db.face("Inter", "Regular");
-                }
-                Some((ch, st))
+            // A symbol font (Wingdings, Symbol…) that is installed draws its own glyph, found
+            // at U+F000 + the character code as such fonts map them; otherwise common symbol
+            // bullets are mapped to Unicode look-alikes.
+            let ch = match symbol_font_char(&st.face, char, props.bullet_font.as_deref()) {
+                Some(c) => c.to_string(),
+                None => map_symbol_bullet(char, props.bullet_font.as_deref()),
+            };
+            if !st.face.covers(ch.chars().next().unwrap_or('•')) {
+                st.face = db.face("Inter", "Regular");
             }
-            Some(Bullet::AutoNum { scheme, start_at }) => {
-                let mut rp = lead.clone();
-                if let Some(c) = &props.bullet_color {
-                    rp.fill = Some(Fill::solid(c.clone()));
-                }
-                rp.size = Some(lead.size.unwrap_or(18.0) * props.bullet_size.unwrap_or(1.0));
-                rp.underline = None;
-                let mut st = make_style(ctx, &rp, scale, opts.prompt_color);
-                let label = autonum(scheme, start_at.saturating_sub(1).saturating_add(number.unwrap_or(1)));
-                bullet_face(db, &mut st, &label);
-                Some((label, st))
-            }
-            _ => None,
+            Some((ch, st))
         }
+        Some(Bullet::AutoNum { scheme, start_at }) => {
+            let mut rp = lead.clone();
+            if let Some(c) = &props.bullet_color {
+                rp.fill = Some(Fill::solid(c.clone()));
+            }
+            rp.size = Some(lead.size.unwrap_or(18.0) * props.bullet_size.unwrap_or(1.0));
+            rp.underline = None;
+            let mut st = make_style(ctx, &rp, scale, opts.prompt_color);
+            let label = autonum(scheme, start_at.saturating_sub(1).saturating_add(number.unwrap_or(1)));
+            bullet_face(db, &mut st, &label);
+            Some((label, st))
+        }
+        _ => None,
     };
     ParaShaped { cells, styles, faces, props, lead_size, lead_face, bullet, level: para.level, rtl }
 }
@@ -1654,6 +1653,10 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 *deeper = 0;
             }
             numbering.get(lvl).copied()
+        } else if matches!(pp.bullet, Some(Bullet::AutoNum { .. })) {
+            // Preview the next number without consuming it: empty paragraphs do not advance
+            // numbering in the saved document or affect later populated paragraphs.
+            numbering.get(lvl).map(|n| n.saturating_add(1))
         } else {
             if !para.is_empty() {
                 for n in numbering.iter_mut().skip(lvl) {
@@ -1930,7 +1933,7 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
             && let Some((_, st)) = p.bullet.as_ref()
         {
             let (_, g) = measure_str(&st.face, st.size, &s);
-            out.runs.push(GlyphRun {
+            let run = GlyphRun {
                 face: st.face.clone(),
                 size: st.size,
                 color: st.color,
@@ -1946,7 +1949,12 @@ fn layout_scaled(ctx: &Ctx, shape: &Shape, body: &TextBody, bp: &BodyProps, opts
                 gradient: None,
                 effects: None,
                 upright: false,
-            });
+            };
+            if body.paragraphs.get(line.para).is_some_and(|p| p.is_empty()) && opts.prompt_color.is_none() {
+                out.empty_bullets.push(run);
+            } else {
+                out.runs.push(run);
+            }
         }
         // Group visually consecutive cells by (style, face).
         let mut cur: Option<GlyphRun> = None;
