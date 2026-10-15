@@ -2142,9 +2142,21 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             if ui.checkbox(&mut dark, "Dark appearance").changed() {
                 let _ = app.run("view.dark", json!({"on": dark}));
             }
-            let mut scale = app.ui.ui_scale;
-            if ui.add(egui::Slider::new(&mut scale, 0.75..=1.75).text("Interface size")).changed() {
-                app.ui.ui_scale = scale;
+            // While the pointer holds the slider its value only waits in the dialog: applying it
+            // would rescale the slider under the pointer and run it to an end (#767). It applies
+            // on release, and at once from the keyboard.
+            let pending = d.fields.get("uiScale").and_then(|v| v.parse::<f32>().ok());
+            let mut scale = pending.unwrap_or(app.ui.ui_scale);
+            let r = ui.add(egui::Slider::new(&mut scale, 0.75..=1.75).text("Interface size"));
+            if r.is_pointer_button_down_on() {
+                if r.changed() || pending.is_some() {
+                    d.fields.insert("uiScale".into(), scale.to_string());
+                }
+            } else {
+                if r.changed() || pending.is_some() {
+                    app.ui.ui_scale = scale;
+                }
+                d.fields.remove("uiScale");
             }
             ui.label(egui::RichText::new("Editing").font(theme::bold(13.0)));
             ui.checkbox(&mut app.session.prefs.smart_guides, "Show smart guides");
