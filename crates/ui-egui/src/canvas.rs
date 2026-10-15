@@ -1082,7 +1082,16 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
     resp.context_menu(|ui| {
         let editing = app.session.active().and_then(|d| app.session.tool.editing_points(d).and_then(|id| d.shape(id).cloned()));
         if let Some(sh) = editing {
-            if let Some((path, index)) = app.session.tool.edit_vertex {
+            if let Some((path, index)) = app.session.tool.edit_segment {
+                let cur = deckcraft_engine::cmd::points::segment_kind_of(&sh, path, index);
+                for (l, k) in [("Straight Segment", "straight"), ("Curved Segment", "curved")] {
+                    if ui.radio(cur == Some(k), l).clicked() {
+                        let _ = app.run("shape.segmentType", json!({"path": path, "segment": index, "type": k}));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+            } else if let Some((path, index)) = app.session.tool.edit_vertex {
                 let cur = deckcraft_engine::cmd::points::kind_of(&sh, path, index);
                 for (l, k) in [("Smooth Point", "smooth"), ("Straight Point", "straight"), ("Corner Point", "corner")] {
                     if ui.radio(cur == Some(k), l).clicked() {
@@ -1092,6 +1101,16 @@ fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
                 }
                 if ui.button("Delete Point").clicked() {
                     let _ = app.run("shape.deletePoint", json!({"path": path, "index": index}));
+                    app.session.tool.edit_vertex = None;
+                    ui.close();
+                }
+                let (label, id) = match deckcraft_engine::cmd::points::closed_at(&sh, path, index) {
+                    Some(false) => ("Close Path", "shape.closePath"),
+                    _ => ("Open Path", "shape.openPath"),
+                };
+                if ui.button(label).clicked() {
+                    let _ = app.run(id, json!({"path": path, "index": index}));
+                    // The points are numbered from the new start now.
                     app.session.tool.edit_vertex = None;
                     ui.close();
                 }
@@ -1354,6 +1373,7 @@ mod tests {
     use deckcraft_engine::Session;
     use egui::{Event, Modifiers, MouseWheelUnit, Pos2, TouchPhase, pos2, vec2};
     use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
 
     use super::*;
     use crate::{Services, SlideApp};
@@ -1581,6 +1601,47 @@ mod tests {
         let st = harness.state().session.active().unwrap();
         let deckcraft_model::ShapeKind::Table(t) = &st.shape(id).unwrap().kind else { panic!("not a table") };
         assert!((t.cols[0] - 240.0).abs() < 0.5 && (t.cols[1] - 160.0).abs() < 0.5, "{:?}", t.cols);
+    }
+
+    fn right_click(h: &mut Harness<'_, SlideApp>, pos: Pos2) {
+        h.event(Event::PointerMoved(pos));
+        h.step();
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos, button: egui::PointerButton::Secondary, pressed, modifiers: Modifiers::NONE });
+            h.step();
+        }
+        h.run_steps(2);
+    }
+
+    /// In Edit Points, right-clicking a segment offers Straight/Curved Segment and right-clicking
+    /// a point offers Open Path, then Close Path once the outline is open.
+    #[test]
+    fn edit_points_menu_sets_segment_types_and_opens_the_path() {
+        let mut h = harness();
+        h.state_mut().run("slide.layout", json!({"layout": "blank"})).unwrap();
+        h.state_mut().run("shape.insert", json!({"preset": "rect", "rect": [200, 150, 300, 200]})).unwrap();
+        h.state_mut().run("shape.editPoints", json!({"on": true})).unwrap();
+        h.run_steps(3);
+        let q = |h: &mut Harness<'_, SlideApp>| h.state_mut().session.execute("shape.points", &json!({})).unwrap();
+        // The middle of the right edge: the segment ending at point 2.
+        let p = screen(h.state(), 500.0, 250.0);
+        right_click(&mut h, p);
+        if let (Ok(path), Ok(img)) = (std::env::var("DECKCRAFT_PNG_OUT_SEGMENTS"), h.render()) {
+            let _ = img.save(path);
+        }
+        h.get_by_label("Curved Segment").click();
+        h.run_steps(3);
+        assert_eq!(q(&mut h)["segments"][0], json!(["straight", "straight", "curved", "straight"]));
+        // The bottom-right corner: Open Path breaks the outline there.
+        let p = screen(h.state(), 500.0, 350.0);
+        right_click(&mut h, p);
+        h.get_by_label("Open Path").click();
+        h.run_steps(3);
+        assert_eq!(q(&mut h)["paths"][0].as_array().map(Vec::len), Some(5));
+        right_click(&mut h, p);
+        h.get_by_label("Close Path").click();
+        h.run_steps(3);
+        assert_eq!(q(&mut h)["paths"][0].as_array().map(Vec::len), Some(4));
     }
 
     #[test]

@@ -261,6 +261,9 @@ pub struct ToolState {
     pub edit_points: Option<ShapeId>,
     /// The vertex (path, index) whose control handles show in Edit Points.
     pub edit_vertex: Option<(usize, usize)>,
+    /// The segment (path, index of the vertex ending it) last right-clicked in Edit Points, for
+    /// the segment menu.
+    pub edit_segment: Option<(usize, usize)>,
     /// The point type last chosen for a vertex (path, index, type): handle drags follow it.
     pub vertex_kind: Option<(usize, usize, String)>,
     /// Drawing guides are shown (View › Guides): they can be dragged and shapes snap to them.
@@ -1199,12 +1202,21 @@ impl Session {
             ) => Some(*id),
             None => None,
         };
+        // Edit Points: the point or else the segment under the pointer picks the menu.
+        let picked = self.tool.editing_points(st).and_then(|eid| st.shape(eid)).map(|sh| match &hit {
+            Some(Hit::Vertex { path, index, .. }) => (Some((*path, *index)), None),
+            _ => (None, cmd::points::segment_at(&st.doc, &st.selection, sh, p, tol * 1.6).map(|(path, seg, _)| (path, seg))),
+        });
         if !id.is_some_and(|id| st.selection.shapes.contains(&id)) {
             self.select(|_, sel| {
                 sel.text = None;
                 sel.cells = None;
                 sel.shapes = id.into_iter().collect();
             })?;
+        }
+        if let Some((vertex, segment)) = picked {
+            self.tool.edit_vertex = vertex;
+            self.tool.edit_segment = segment;
         }
         let st = self.doc()?;
         Ok(json!({
