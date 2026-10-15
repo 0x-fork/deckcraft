@@ -1425,6 +1425,41 @@ fn slide_ranges_parse_like_powerpoints_print_box() {
     assert_eq!(opts.slides, Some(vec![0, 1]), "indices past the end are dropped");
 }
 
+/// #725: a layout with a small body placeholder ahead of its content placeholder (as Keynote
+/// exports "Title & Bullets") still gets the body in the content placeholder (`idx="1"`).
+#[test]
+fn new_slide_body_goes_to_the_content_placeholder() {
+    for before in [true, false] {
+        let mut s = session();
+        let doc = std::sync::Arc::make_mut(&mut s.doc_mut().unwrap().doc);
+        let id = deckcraft_model::ShapeId(doc.alloc_id().expect("id"));
+        let lay = std::sync::Arc::make_mut(&mut doc.masters[0])
+            .layouts
+            .iter_mut()
+            .find(|l| l.kind == deckcraft_model::LayoutType::TitleAndContent)
+            .unwrap();
+        let at = lay.shapes.iter().position(|x| x.ph.as_ref().is_some_and(|p| p.idx == 1)).unwrap();
+        let mut small = lay.shapes[at].clone();
+        small.id = id;
+        small.name = "Subtitle 21".into();
+        let ph = small.ph.as_mut().unwrap();
+        ph.kind = deckcraft_model::PhType::Body;
+        ph.idx = 21;
+        ph.size = Some("quarter".into());
+        lay.shapes.insert(if before { at } else { at + 1 }, small);
+
+        s.execute("slide.new", &json!({"layout": "titleAndContent", "title": "T", "body": "Line one\nLine two"})).unwrap();
+        let doc = &s.doc().unwrap().doc;
+        let slide = &doc.slides[doc.slides.len() - 1];
+        let text = |idx: u32| {
+            let sh = slide.shapes.iter().find(|x| x.ph.as_ref().is_some_and(|p| p.idx == idx)).unwrap();
+            sh.text.as_ref().map(|t| t.text()).unwrap_or_default()
+        };
+        assert_eq!(text(1), "Line one\nLine two", "before = {before}");
+        assert_eq!(text(21), "", "before = {before}");
+    }
+}
+
 #[test]
 fn cell_fill_walks_only_the_cells_a_huge_selection_covers() {
     // A selection may reach far past the table; filling it touches the real cells and nothing more.
