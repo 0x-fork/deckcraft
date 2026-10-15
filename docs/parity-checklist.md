@@ -228,7 +228,7 @@ Open P0 items: Contextual tabs (Shape Format, Picture Format, Table Design/Layou
 | Undo & clipboard | Unlimited undo/redo | P0 | D |
 | Undo & clipboard | Cut, copy, paste shapes and slides | P0 | D |
 | Undo & clipboard | Paste special (keep formatting, picture, text only) | P1 | D |
-| Automation (✱) | Every command scriptable (CLI, control channel, MCP) | P0 | D |
+| Automation (✱) | Every command scriptable (CLI, control channel, MCP; remote reply IDs, envelopes and framing validated, #718) | P0 | D |
 | Automation (✱) | Headless rendering and conversion | P0 | D |
 | Platforms (✱) | macOS, Windows, Linux builds | P0 | P |
 | Platforms (✱) | Web (WASM) build | P1 | D |
