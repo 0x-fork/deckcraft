@@ -758,12 +758,7 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
         (ToolKind::Shape { .. }, _) => egui::CursorIcon::Crosshair,
         (ToolKind::TextBox, _) => egui::CursorIcon::Text,
         (ToolKind::Ink { .. }, _) => egui::CursorIcon::Crosshair,
-        (_, Some(Hit::Resize { handle, .. })) => match handle {
-            0 | 4 => egui::CursorIcon::ResizeNwSe,
-            2 | 6 => egui::CursorIcon::ResizeNeSw,
-            1 | 5 => egui::CursorIcon::ResizeVertical,
-            _ => egui::CursorIcon::ResizeHorizontal,
-        },
+        (_, Some(Hit::Resize { id, handle })) => resize_cursor(&app.session, *id, *handle),
         (_, Some(Hit::Rotate { .. })) => egui::CursorIcon::Alias,
         (_, Some(Hit::TableColumn { .. })) => egui::CursorIcon::ResizeColumn,
         (_, Some(Hit::TableRow { .. })) => egui::CursorIcon::ResizeRow,
@@ -1347,9 +1342,62 @@ fn grid_fits(span: f32, step: f32) -> bool {
     span.is_finite() && span > 0.0 && step >= 1.0 && span / step <= 800.0
 }
 
+/// The resize cursor for `handle` of shape `id`: the handle's resize axis is computed in the
+/// shape's own space and mapped through its transform, so a rotated or flipped shape shows the
+/// diagonal that matches where the drag actually goes (#745). Without a transform the mapping
+/// reduces to the classic NW/NE/E/SE/S/SW/W assignment.
+fn resize_cursor(session: &deckcraft_engine::Session, id: deckcraft_model::ShapeId, handle: u8) -> egui::CursorIcon {
+    // The resize handles are drawn from the shape's effective box (a placeholder inherits it
+    // from its layout), so the cursor follows the same one.
+    let Some(d) = session.active() else { return egui::CursorIcon::Default };
+    let Some(sh) = d.shape(id) else { return egui::CursorIcon::Default };
+    let x = deckcraft_engine::cmd::xfrm_of(&d.doc, &d.selection, sh);
+    // The resize axis in the shape's own coordinates, as (dx, dy) from the box centre toward
+    // the handle. Corners resize along the diagonal, edge handles along their edge. The
+    // direction is normalised - the diagonal at 45 degrees whatever the shape's proportions -
+    // so a wide rectangle still shows a diagonal cursor on its corners.
+    let (dx, dy): (f64, f64) = match handle {
+        0 => (-1.0, -1.0),
+        1 => (0.0, -1.0),
+        2 => (1.0, -1.0),
+        3 => (1.0, 0.0),
+        4 => (1.0, 1.0),
+        5 => (0.0, 1.0),
+        6 => (-1.0, 1.0),
+        _ => (-1.0, 0.0),
+    };
+    // Map through the linear part of the transform (rotation, flips): two points along the
+    // axis, the difference is the slide-space direction.
+    let centre = Point::new(x.x + x.w / 2.0, x.y + x.h / 2.0);
+    let a = x.affine();
+    let p0 = a * centre;
+    let p1 = a * Point::new(centre.x + dx, centre.y + dy);
+    let v = p1 - p0;
+    if !v.x.is_finite() || !v.y.is_finite() || (v.x.abs() < 1e-12 && v.y.abs() < 1e-12) {
+        return egui::CursorIcon::Default;
+    }
+    // Angle in [0, 180): 0° = right (horizontal), 45° = down-right (NW-SE), 90° = down
+    // (vertical), 135° = down-left (NE-SW). Pick the closest of the four.
+    let mut deg = v.y.atan2(v.x).to_degrees();
+    if deg < 0.0 {
+        deg += 180.0;
+    }
+    if (22.5..67.5).contains(&deg) {
+        egui::CursorIcon::ResizeNwSe
+    } else if (67.5..112.5).contains(&deg) {
+        egui::CursorIcon::ResizeVertical
+    } else if (112.5..157.5).contains(&deg) {
+        egui::CursorIcon::ResizeNeSw
+    } else {
+        egui::CursorIcon::ResizeHorizontal
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use std::sync::Arc;
 
     use deckcraft_engine::Session;
     use egui::{Event, Modifiers, MouseWheelUnit, Pos2, TouchPhase, pos2, vec2};
@@ -1357,6 +1405,92 @@ mod tests {
 
     use super::*;
     use crate::{Services, SlideApp};
+
+    /// #745: the resize cursor follows the handle's on-screen diagonal. A 45°-rotated shape's
+    /// NW corner sits at the top-right of the screen, where the drag axis is NE-SW — the old
+    /// fixed handle-to-cursor mapping showed NW-SE there.
+    #[test]
+    fn resize_cursor_tracks_rotation() {
+        let mut s = Session::with_new();
+        // A square shape: the NW handle's diagonal is at 45° unrotated, so each 45° of shape
+        // rotation cleanly moves the cursor to the next of the four resize directions.
+        let id = s.execute("shape.insert", &serde_json::json!({"preset": "rect", "rect": [100.0, 100.0, 100.0, 100.0]})).unwrap()["id"]
+            .as_u64()
+            .unwrap() as u32;
+        let sid = deckcraft_model::ShapeId(id);
+        // Unrotated: the NW handle (0) drags the NW-SE diagonal.
+        assert_eq!(resize_cursor(&s, sid, 0), egui::CursorIcon::ResizeNwSe);
+        assert_eq!(resize_cursor(&s, sid, 4), egui::CursorIcon::ResizeNwSe);
+        assert_eq!(resize_cursor(&s, sid, 2), egui::CursorIcon::ResizeNeSw);
+        assert_eq!(resize_cursor(&s, sid, 6), egui::CursorIcon::ResizeNeSw);
+        assert_eq!(resize_cursor(&s, sid, 1), egui::CursorIcon::ResizeVertical);
+        assert_eq!(resize_cursor(&s, sid, 3), egui::CursorIcon::ResizeHorizontal);
+        // 45° rotation: the NW corner's drag axis rotates 45° with the shape — it is now vertical.
+        {
+            let doc = s.doc_mut().unwrap();
+            let pres = Arc::make_mut(&mut doc.doc);
+            let slide = Arc::make_mut(&mut pres.slides[0]);
+            if let Some(sh) = slide.shapes.iter_mut().find(|x| x.id == sid)
+                && let Some(x) = sh.xfrm.as_mut()
+            {
+                x.rot = 45.0;
+            }
+        }
+        assert_eq!(resize_cursor(&s, sid, 0), egui::CursorIcon::ResizeVertical, "45°: NW handle drags vertically");
+        assert_eq!(resize_cursor(&s, sid, 2), egui::CursorIcon::ResizeHorizontal, "45°: NE handle drags horizontally");
+        // 90° rotation: the NW corner is at the top-right; the drag axis is NE-SW.
+        {
+            let doc = s.doc_mut().unwrap();
+            let pres = Arc::make_mut(&mut doc.doc);
+            let slide = Arc::make_mut(&mut pres.slides[0]);
+            if let Some(sh) = slide.shapes.iter_mut().find(|x| x.id == sid)
+                && let Some(x) = sh.xfrm.as_mut()
+            {
+                x.rot = 90.0;
+            }
+        }
+        assert_eq!(resize_cursor(&s, sid, 0), egui::CursorIcon::ResizeNeSw, "90°: the diagonal is NE-SW");
+        assert_eq!(resize_cursor(&s, sid, 2), egui::CursorIcon::ResizeNwSe, "90°: NE diagonal is NW-SE");
+        assert_eq!(resize_cursor(&s, sid, 1), egui::CursorIcon::ResizeHorizontal, "90°: the top edge is horizontal");
+    }
+
+    /// #745: a corner handle shows a diagonal cursor whatever the shape's proportions. The
+    /// corner's direction is the diagonal, not the line to the box's centre, so a wide
+    /// rectangle's NW corner still drags along the NW-SE diagonal.
+    #[test]
+    fn a_wide_shape_keeps_its_corner_cursors_diagonal() {
+        let mut s = Session::with_new();
+        let id = s.execute("shape.insert", &serde_json::json!({"preset": "rect", "rect": [100.0, 100.0, 400.0, 80.0]})).unwrap()["id"]
+            .as_u64()
+            .unwrap() as u32;
+        let sid = deckcraft_model::ShapeId(id);
+        assert_eq!(resize_cursor(&s, sid, 0), egui::CursorIcon::ResizeNwSe, "the NW corner drags NW-SE");
+        assert_eq!(resize_cursor(&s, sid, 4), egui::CursorIcon::ResizeNwSe, "the SE corner drags NW-SE");
+        assert_eq!(resize_cursor(&s, sid, 2), egui::CursorIcon::ResizeNeSw, "the NE corner drags NE-SW");
+        assert_eq!(resize_cursor(&s, sid, 6), egui::CursorIcon::ResizeNeSw, "the SW corner drags NE-SW");
+        // The edges keep their own cursors.
+        assert_eq!(resize_cursor(&s, sid, 1), egui::CursorIcon::ResizeVertical, "the top edge drags vertically");
+        assert_eq!(resize_cursor(&s, sid, 3), egui::CursorIcon::ResizeHorizontal, "the right edge drags horizontally");
+    }
+
+    /// #745: a placeholder that inherits its box from the layout still shows a resize cursor.
+    /// Its handles are drawn from the inherited box, so the cursor follows that one.
+    #[test]
+    fn a_placeholder_that_inherits_its_box_has_a_resize_cursor() {
+        let s = Session::with_new();
+        let st = s.doc().unwrap();
+        let ph = st
+            .current_slide()
+            .unwrap()
+            .shapes
+            .iter()
+            .find(|sh| sh.xfrm.is_none() && sh.ph.is_some())
+            .expect("the new slide has a placeholder without a box of its own")
+            .id;
+        assert_eq!(resize_cursor(&s, ph, 0), egui::CursorIcon::ResizeNwSe, "the NW corner drags NW-SE");
+        assert_eq!(resize_cursor(&s, ph, 2), egui::CursorIcon::ResizeNeSw, "the NE corner drags NE-SW");
+        assert_eq!(resize_cursor(&s, ph, 1), egui::CursorIcon::ResizeVertical, "the top edge drags vertically");
+    }
 
     fn harness() -> Harness<'static, SlideApp> {
         let mut h = Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
