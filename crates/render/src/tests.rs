@@ -2509,3 +2509,35 @@ fn single_series_column_chart_varies_colours_by_point() {
     };
     assert_ne!(render(true), render(false));
 }
+
+/// A 1024×1024 PNG of 2 px wide black and white vertical stripes.
+fn fine_stripes_png() -> Vec<u8> {
+    let img =
+        image::RgbaImage::from_fn(1024, 1024, |x, _| if (x / 2) % 2 == 0 { image::Rgba([0, 0, 0, 255]) } else { image::Rgba([255, 255, 255, 255]) });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(img).write_to(&mut out, image::ImageFormat::Png).expect("png");
+    out.into_inner()
+}
+
+#[test]
+fn a_cropped_picture_is_decoded_at_the_resolution_of_the_whole_image() {
+    // The top-left sixteenth of the image in a 64 pt box: 64 image pixels over 64 output pixels.
+    // Decoding at the box's size instead of the whole image's blurs the stripes to grey (#762).
+    let mut p = Presentation::default();
+    let media = p.add_media("stripes.png", "image/png", fine_stripes_png()).expect("media");
+    let fill = deckcraft_model::style::PictureFill { media, crop: [0.0, 0.0, 15.0 / 16.0, 15.0 / 16.0], ..Default::default() };
+    let sh = Shape { id: ShapeId(600), xfrm: Some(Xfrm::new(100.0, 100.0, 64.0, 64.0)), kind: ShapeKind::Picture { fill }, ..Default::default() };
+    std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let (mut sharp, mut total) = (0, 0);
+    for y in 110..154 {
+        for x in 110..154 {
+            let v = img.pixel(x, y)[0];
+            total += 1;
+            if !(48..=208).contains(&v) {
+                sharp += 1;
+            }
+        }
+    }
+    assert!(sharp * 10 >= total * 9, "the stripes stay sharp: {sharp} of {total} pixels black or white");
+}
