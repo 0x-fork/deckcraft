@@ -20,7 +20,43 @@ pub fn run(root: &Path) -> Result<(), String> {
     }
     let metadata: Value = serde_json::from_slice(&output.stdout).map_err(|e| format!("cargo metadata: {e}"))?;
     validate(&metadata)?;
-    println!("PDF writer: pinned craft-pdf/Krilla; write only; parser assertions are development-only");
+    // Metadata merges target features even with --filter-platform. Check Cargo's
+    // selected feature graph separately so native compression never enables threads on WASM.
+    let output =
+        Command::new(std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into())).arg("-vV").output().map_err(|e| format!("rustc host: {e}"))?;
+    if !output.status.success() {
+        return Err(format!("rustc host: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    let version = String::from_utf8(output.stdout).map_err(|e| format!("rustc host: {e}"))?;
+    let host = version.lines().find_map(|line| line.strip_prefix("host: ")).ok_or("rustc did not report its host target")?;
+    for (target, parallel) in [(host, true), ("wasm32-unknown-unknown", false)] {
+        let output = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .current_dir(root)
+            .args([
+                "tree",
+                "--locked",
+                "--target",
+                target,
+                "--edges",
+                "normal,build",
+                "--package",
+                "deckcraft-pdf",
+                "--depth",
+                "2",
+                "--no-dedupe",
+                "--prefix",
+                "none",
+                "--format",
+                "{p}|{f}",
+            ])
+            .output()
+            .map_err(|e| format!("cargo tree ({target}): {e}"))?;
+        if !output.status.success() {
+            return Err(format!("cargo tree ({target}): {}", String::from_utf8_lossy(&output.stderr)));
+        }
+        validate_target_features(&String::from_utf8_lossy(&output.stdout), parallel).map_err(|e| format!("{target}: {e}"))?;
+    }
+    println!("PDF writer: pinned craft-pdf/Krilla; native-only parallel compression; parser assertions are development-only");
     Ok(())
 }
 
@@ -37,7 +73,7 @@ fn validate(metadata: &Value) -> Result<(), String> {
     let source = format!("git+https://github.com/storytold/craft-libs?rev={SHARED_REV}#{SHARED_REV}");
     for (name, version, expected_source, expected_features) in [
         ("craft-pdf", "0.1.0", source.as_str(), vec!["write"]),
-        ("krilla", "0.8.2", source.as_str(), vec!["default", "raster-images", "simple-text"]),
+        ("krilla", "0.8.2", source.as_str(), vec!["default", "raster-images", "rayon", "simple-text"]),
         ("hayro-syntax", "0.7.2", REGISTRY, vec!["std"]),
     ] {
         let package = one_package(name)?;
@@ -82,6 +118,25 @@ fn validate(metadata: &Value) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_target_features(tree: &str, parallel: bool) -> Result<(), String> {
+    let mut expected = BTreeSet::from(["default", "raster-images", "simple-text"]);
+    if parallel {
+        expected.insert("rayon");
+    }
+    let mut found = false;
+    for (package, features) in tree.lines().filter_map(|line| line.split_once('|')).filter(|(package, _)| package.starts_with("krilla v")) {
+        found = true;
+        let actual: BTreeSet<_> = features.split(',').collect();
+        if actual != expected {
+            return Err(format!("{package}: expected features {expected:?}; got {actual:?}"));
+        }
+    }
+    if !found {
+        return Err("missing Krilla in the exporter's target dependency graph".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,10 +154,21 @@ mod tests {
             "resolve":{"nodes":[
                 {"id":"app", "deps":[{"pkg":"writer", "dep_kinds":[{"kind":null}]}, {"pkg":"parser", "dep_kinds":[{"kind":"dev"}]}]},
                 {"id":"writer", "features":["write"], "deps":[{"pkg":"backend", "dep_kinds":[{"kind":null}]}]},
-                {"id":"backend", "features":["default","raster-images","simple-text"], "deps":[]},
+                {"id":"backend", "features":["default","raster-images","rayon","simple-text"], "deps":[]},
                 {"id":"parser", "features":["std"], "deps":[]}
             ]}
         })
+    }
+
+    #[test]
+    fn parallel_compression_is_required_only_on_native_targets() {
+        let serial = "krilla v0.8.2 (pinned)|default,raster-images,simple-text\n";
+        let parallel = "krilla v0.8.2 (pinned)|default,raster-images,rayon,simple-text\n";
+        assert!(validate_target_features(serial, false).is_ok());
+        assert!(validate_target_features(parallel, true).is_ok());
+        assert!(validate_target_features(serial, true).is_err());
+        assert!(validate_target_features(parallel, false).is_err());
+        assert!(validate_target_features("", false).is_err());
     }
 
     #[test]
@@ -124,7 +190,7 @@ mod tests {
         for (node, features) in [
             (1, json!([])),
             (1, json!(["write", "write-pdf"])),
-            (2, json!(["default", "raster-images", "simple-text", "pdf"])),
+            (2, json!(["default", "raster-images", "rayon", "simple-text", "pdf"])),
             (2, json!(["raster-images"])),
             (3, json!(["std", "images"])),
         ] {
