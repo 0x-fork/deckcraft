@@ -108,6 +108,9 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
     let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
     if open && !close && !escape {
         app.dialog = Some(d);
+    } else if !close && d.id == "preferences" {
+        // Esc or the window's close button: the same as Cancel.
+        restore_preferences(app, &d);
     } else if app.dialog.is_none()
         && let Some(ret) = d.params.get("returnParams").filter(|v| v.is_object()).cloned()
     {
@@ -135,6 +138,31 @@ fn buttons(ui: &mut Ui, ok_label: &str) -> (bool, bool) {
         }
     });
     (ok, cancel)
+}
+
+/// What the Preferences dialog can change, as it was when the dialog opened.
+fn preferences_snapshot(app: &SlideApp) -> Value {
+    json!({
+        "dark": app.ui.brightness == theme::Brightness::Dark,
+        "uiScale": app.ui.ui_scale,
+        "prefs": serde_json::to_value(&app.session.prefs).unwrap_or(Value::Null),
+    })
+}
+
+/// Puts back the settings the Preferences dialog opened with (Cancel, Esc, the close button).
+fn restore_preferences(app: &mut SlideApp, d: &Dialog) {
+    let Some(before) = d.params.get("before") else { return };
+    if let Some(dark) = before.get("dark").and_then(Value::as_bool)
+        && dark != (app.ui.brightness == theme::Brightness::Dark)
+    {
+        let _ = app.run("view.dark", json!({ "on": dark }));
+    }
+    if let Some(scale) = before.get("uiScale").and_then(Value::as_f64) {
+        app.ui.ui_scale = scale as f32;
+    }
+    if let Some(prefs) = before.get("prefs").and_then(|p| serde_json::from_value(p.clone()).ok()) {
+        app.session.prefs = prefs;
+    }
 }
 
 fn field(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: &str) {
@@ -2104,6 +2132,11 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         }
         "gridOptions" => grid_options(app, ui, d),
         "preferences" => {
+            // The controls apply as they change, so the dialog remembers what it opened with and
+            // Cancel (or Esc, or the close button: see `show`) puts that back.
+            if d.params.get("before").is_none() {
+                d.params = json!({ "before": preferences_snapshot(app) });
+            }
             ui.label(egui::RichText::new("General").font(theme::bold(13.0)));
             let mut dark = app.ui.brightness == theme::Brightness::Dark;
             if ui.checkbox(&mut dark, "Dark appearance").changed() {
@@ -2130,8 +2163,11 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 ui.label("Your name (comments):");
                 ui.text_edit_singleline(&mut app.session.prefs.author);
             });
-            let (ok, _) = buttons(ui, "Done");
-            ok
+            let (ok, cancel) = buttons(ui, "Done");
+            if cancel {
+                restore_preferences(app, d);
+            }
+            ok || cancel
         }
         "photoAlbum" => photo_album_dialog(app, ui, d),
         "themeColors" => theme_colors_dialog(app, ui, d),

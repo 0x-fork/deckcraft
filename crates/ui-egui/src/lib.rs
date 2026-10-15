@@ -2573,6 +2573,71 @@ mod tests {
         assert!((harness.state().session.prefs.grid_spacing - 6.0).abs() < 1e-9);
     }
 
+    /// Preferences (#752): Cancel, Esc and the window's close button put back what the dialog
+    /// changed while it was open; Done keeps it.
+    #[test]
+    fn preferences_cancel_restores_the_settings_done_keeps_them() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let before = harness.state().session.prefs.clone();
+        let dark_before = harness.state().ui.brightness;
+        let change = |harness: &mut egui_kittest::Harness<'static, SlideApp>| {
+            harness.state_mut().run("app.preferences", json!({})).unwrap();
+            harness.run_steps(2);
+            for label in ["Dark appearance", "Show smart guides", "Snap objects to grid"] {
+                harness
+                    .query_all_by_role_and_label(egui::accesskit::Role::CheckBox, label)
+                    .next()
+                    .unwrap_or_else(|| panic!("no {label} checkbox"))
+                    .click_accesskit();
+                harness.run_steps(2);
+            }
+            assert_ne!(harness.state().ui.brightness, dark_before, "the dialog previews the appearance");
+            assert_ne!(harness.state().session.prefs.smart_guides, before.smart_guides);
+        };
+        let unchanged = |harness: &egui_kittest::Harness<'static, SlideApp>, how: &str| {
+            let s = harness.state();
+            assert!(s.dialog.is_none(), "{how} closes Preferences");
+            assert_eq!(s.ui.brightness, dark_before, "{how} restores the appearance");
+            assert_eq!(s.session.prefs.smart_guides, before.smart_guides, "{how} restores smart guides");
+            assert_eq!(s.session.prefs.snap_to_grid, before.snap_to_grid, "{how} restores snap to grid");
+        };
+
+        change(&mut harness);
+        harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, "Cancel")
+            .next()
+            .unwrap_or_else(|| panic!("no Cancel button"))
+            .click_accesskit();
+        harness.run_steps(2);
+        unchanged(&harness, "Cancel");
+
+        change(&mut harness);
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        unchanged(&harness, "Esc");
+
+        change(&mut harness);
+        harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, "Done")
+            .next()
+            .unwrap_or_else(|| panic!("no Done button"))
+            .click_accesskit();
+        harness.run_steps(2);
+        let s = harness.state();
+        assert!(s.dialog.is_none(), "Done closes Preferences");
+        assert_ne!(s.ui.brightness, dark_before, "Done keeps the appearance");
+        assert_ne!(s.session.prefs.smart_guides, before.smart_guides, "Done keeps smart guides");
+        assert_ne!(s.session.prefs.snap_to_grid, before.snap_to_grid, "Done keeps snap to grid");
+    }
+
     fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
         let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
             |ui, app: &mut SlideApp| {
