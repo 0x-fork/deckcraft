@@ -1407,3 +1407,60 @@ fn anchorctr_centres_the_text_block() {
         l.lines.iter().map(|li| li.extent).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn empty_bullets_reserve_the_typed_indent_without_becoming_content() {
+    for rtl in [false, true] {
+        for level in [0, 1, 2] {
+            let (p, mut sh) = setup("First\n", 600.0, 300.0);
+            for para in &mut sh.text.as_mut().unwrap().paragraphs {
+                para.level = level;
+                para.props.rtl = Some(rtl);
+                para.props.align = Some(if rtl { Align::Right } else { Align::Left });
+            }
+            let empty = lay(&p, &sh, 600.0, 300.0);
+            assert_eq!(empty.empty_bullets.len(), 1);
+            assert_eq!(empty.empty_bullets[0].para, 1);
+            assert!(empty.runs.iter().all(|r| r.para == 0), "empty bullet must not be exported");
+            let caret = empty.caret(Pos { para: 1, ch: 0 }).unwrap();
+            let bx = empty.empty_bullets[0].glyphs[0].1;
+            assert!(if rtl { bx >= caret.0 } else { bx < caret.0 });
+            deckcraft_model::edit::insert(sh.text.as_mut().unwrap(), (1, 0), if rtl { "אבג" } else { "Next" }, None);
+            let typed = lay(&p, &sh, 600.0, 300.0);
+            assert!(typed.empty_bullets.is_empty());
+            let after = typed.caret(Pos { para: 1, ch: 0 }).unwrap();
+            assert!(
+                (caret.0 - after.0).abs() < 1e-6 && (caret.1 - after.1).abs() < 1e-6 && (caret.2 - after.2).abs() < 1e-6,
+                "typing must not move the line's start: {caret:?} vs {after:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn empty_numbered_paragraph_previews_the_next_number_without_consuming_it() {
+    let (p, mut sh) = setup("One\n\nTwo", 600.0, 300.0);
+    for para in &mut sh.text.as_mut().unwrap().paragraphs {
+        para.props.bullet = Some(Bullet::AutoNum { scheme: "arabicPeriod".into(), start_at: 4 });
+    }
+    let l = lay(&p, &sh, 600.0, 300.0);
+    let preview = &l.empty_bullets[0];
+    let next = l.runs.iter().find(|r| r.para == 2 && r.cells.is_empty()).unwrap();
+    let ids = |r: &GlyphRun| r.glyphs.iter().map(|g| g.0).collect::<Vec<_>>();
+    assert_eq!(preview.para, 1);
+    assert_eq!(ids(preview), ids(next), "both should use 5.");
+    let expected = measure_str(&preview.face, preview.size, "5.").1;
+    assert_eq!(ids(preview), expected.iter().map(|g| g.0).collect::<Vec<_>>());
+}
+
+#[test]
+fn empty_plain_paragraphs_and_soft_breaks_have_no_bullet_preview() {
+    let (p, mut sh) = setup("", 600.0, 300.0);
+    sh.text.as_mut().unwrap().paragraphs[0].props.bullet = Some(Bullet::None);
+    assert!(lay(&p, &sh, 600.0, 300.0).empty_bullets.is_empty());
+    sh.text = Some(TextBody::from_text("First"));
+    deckcraft_model::edit::insert(sh.text.as_mut().unwrap(), (0, 5), "\u{b}", None);
+    let l = lay(&p, &sh, 600.0, 300.0);
+    assert_eq!(l.lines.len(), 2);
+    assert!(l.empty_bullets.is_empty(), "a soft line break is not a new list item");
+}
