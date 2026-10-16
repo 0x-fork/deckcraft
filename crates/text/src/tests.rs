@@ -949,16 +949,38 @@ fn symbol_char_maps_symbol_font_codes() {
 }
 
 #[test]
+fn symbol_font_remaps_private_use_to_real_unicode() {
+    // Apple's "Symbol" on macOS has no private-use cmap: it draws the classic Symbol glyphs at
+    // their real Unicode points. A document's U+F0xx symbol characters must be remapped to those.
+    // Skipped without an installed Symbol face that actually draws the remapped character.
+    let db = FontDb::global();
+    if !db.has_family("Symbol") {
+        eprintln!("skipped: no Symbol font installed");
+        return;
+    }
+    let face = db.face("Symbol", "Regular");
+    // U+F0DE is the Symbol font's double arrow (⇒, U+21D2). The face must draw it at the real
+    // Unicode point — the PUA code itself only when the face has a private-use cmap (Windows).
+    let drawn = symbol_font_draw(&face, 0xDE);
+    if face.covers('\u{F0DE}') {
+        assert_eq!(drawn, Some('\u{F0DE}'));
+    } else {
+        assert_eq!(drawn, Some('\u{21D2}'), "Apple Symbol maps U+F0DE to the real double arrow");
+    }
+}
+
+#[test]
 fn symbol_font_characters_draw_in_the_sym_font() {
     // PowerPoint stores a Symbol-font character as U+F0xx with `<a:sym typeface="Symbol"/>`:
     // U+F0DE is the Symbol font's double arrow (⇒). It must come from that font, not from
     // whichever installed font happens to map U+F0DE (Wingdings draws an arrow at another angle).
     let symbol = "Symbol";
     let db = FontDb::global();
-    // Some installed Symbol faces use Unicode mappings only, without the legacy U+F0xx cmap.
-    // This integration test needs a face that can draw the symbol code used by the document.
-    if !db.has_family(symbol) || !db.face(symbol, "Regular").covers('\u{F0DE}') {
-        eprintln!("skipped: no installed Symbol face covers U+F0DE");
+    // The installed Symbol face draws the code either at the private-use U+F0DE or, when it has no
+    // private-use mapping (Apple's Symbol on macOS maps glyphs to real Unicode), at the real
+    // character the Symbol font stores the code at. Skip only if neither is covered.
+    if !db.has_family(symbol) || !covers_symbol(&db.face(symbol, "Regular"), '\u{F0DE}') {
+        eprintln!("skipped: no installed Symbol face draws U+F0DE");
         return;
     }
     let (p, mut sh) = setup("x\u{F0DE}y", 600.0, 300.0);
