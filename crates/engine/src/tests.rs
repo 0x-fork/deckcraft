@@ -3557,3 +3557,22 @@ fn an_exhausted_id_space_refuses_growth() {
     sorted.dedup();
     assert_eq!(sorted.len(), ids.len(), "no id repeats");
 }
+
+#[test]
+fn shape_ids_beyond_u32_are_rejected_not_wrapped() {
+    let (mut s, a, b) = two_shapes();
+    let wrap = |id: deckcraft_model::ShapeId| u64::from(id.0) + (1u64 << 32);
+    let shapes_before = s.doc().unwrap().shapes().len();
+    let r = s.execute("shape.connect", &json!({"from": wrap(a), "to": wrap(b)}));
+    assert!(r.is_err(), "connect must reject ids beyond u32, got {r:?}");
+    let r = s.execute("shape.sites", &json!({"id": wrap(a)}));
+    assert!(r.is_err(), "sites must reject ids beyond u32, got {r:?}");
+    let r = s.execute("shape.points", &json!({"id": wrap(a)}));
+    assert!(r.is_err(), "points must reject ids beyond u32, got {r:?}");
+    let r = s.execute("shape.movePoint", &json!({"id": wrap(a), "index": 0, "x": 1.0, "y": 1.0}));
+    assert!(r.is_err_and(|e| e.to_string().contains("not a valid shape id")), "movePoint must reject ids beyond u32");
+    assert_eq!(s.doc().unwrap().shapes().len(), shapes_before, "no connector was created");
+    // In-range ids still work.
+    assert!(s.execute("shape.sites", &json!({"id": a.0})).is_ok());
+    assert!(s.execute("shape.connect", &json!({"from": a.0, "to": b.0})).is_ok());
+}
