@@ -3576,3 +3576,19 @@ fn shape_ids_beyond_u32_are_rejected_not_wrapped() {
     assert!(s.execute("shape.sites", &json!({"id": a.0})).is_ok());
     assert!(s.execute("shape.connect", &json!({"from": a.0, "to": b.0})).is_ok());
 }
+
+#[test]
+fn table_insert_below_or_right_of_a_huge_index_appends_at_the_end() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
+    let r = s.execute("table.insertRowBelow", &json!({"id": id.0, "row": u64::MAX}));
+    assert!(r.is_ok(), "insertRowBelow must clamp a huge row, got {r:?}");
+    let t = table_of(&s, id);
+    assert_eq!(t.n_rows(), 3);
+    assert_eq!(t.cell(0, 0).unwrap().text.text(), "a", "the original rows keep their place");
+    let r = s.execute("table.insertColumnRight", &json!({"id": id.0, "col": u64::MAX}));
+    assert!(r.is_ok(), "insertColumnRight must clamp a huge col, got {r:?}");
+    let t = table_of(&s, id);
+    assert_eq!(t.n_cols(), 3);
+    assert_eq!(t.cell(0, 1).unwrap().text.text(), "b", "the original columns keep their place");
+}
