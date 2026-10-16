@@ -3623,3 +3623,28 @@ fn table_column_width_of_a_huge_column_is_ignored() {
         assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0], "no column changes");
     }
 }
+
+#[test]
+fn shape_geometry_commands_limit_size_and_position() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "moon", "rect": [100, 100, 200, 100]})).unwrap();
+    let xfrm = |s: &Session| s.doc().unwrap().selected_shapes()[0].xfrm.unwrap();
+    let within = |s: &Session| {
+        let x = xfrm(s);
+        [x.w, x.h].iter().all(|v| v.is_finite() && (0.0..=15_840.0).contains(v)) && [x.x, x.y].iter().all(|v| v.is_finite() && v.abs() <= 100_000.0)
+    };
+    s.execute("shape.setBounds", &json!({"x": 1e100, "y": -1e100, "w": 100000, "h": 1e100})).unwrap();
+    let x = xfrm(&s);
+    assert!(within(&s), "setBounds stored {x:?}");
+    s.execute("shape.resize", &json!({"w": 10, "h": 10})).unwrap();
+    s.execute("shape.resize", &json!({"h": 1e100})).unwrap();
+    let x = xfrm(&s);
+    assert!(within(&s), "resize stored {x:?}");
+    s.execute("shape.resize", &json!({"h": 1e100, "lockAspect": true})).unwrap();
+    let x = xfrm(&s);
+    assert!(within(&s), "locked resize stored {x:?}");
+    s.execute("shape.move", &json!({"x": 1e100, "y": -1e100})).unwrap();
+    let x = xfrm(&s);
+    assert!(within(&s), "move stored {x:?}");
+}
