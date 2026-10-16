@@ -491,7 +491,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let scale = finite_scale(f64_or(p, "scale", 2.0));
     let transparent = bool_or(p, "transparentBackground", false);
     if transparent && format != "png" {
-        return Err(bad("file.export", format!("a transparent background needs PNG; {format} can't keep transparency")));
+        return Err(bad("file.export", format!("a transparent background is for PNG export, not {format}")));
     }
     match format.as_str() {
         "png" | "jpeg" | "jpg" => {

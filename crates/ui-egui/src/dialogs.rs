@@ -1599,7 +1599,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 let mut clear = d.get("pngTransparent", "false") == "true";
                 if ui
                     .checkbox(&mut clear, "Transparent background")
-                    .on_hover_text("Leave the slide background out: only what is on the slide is drawn (#784)")
+                    .on_hover_text("Leave the slide background out: only what is on the slide is drawn")
                     .changed()
                 {
                     d.fields.insert("pngTransparent".into(), clear.to_string());

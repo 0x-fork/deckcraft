@@ -2798,7 +2798,7 @@ fn a_png_export_can_leave_the_background_transparent() {
     for (name, format) in [("slide.jpg", "jpeg"), ("deck.pdf", "pdf"), ("deck.gif", "gif"), ("deck.pptx", "pptx")] {
         let path = dir.join(name);
         let e = s.execute("file.export", &json!({"path": path.to_str().unwrap(), "format": format, "transparentBackground": true})).unwrap_err();
-        assert!(e.to_string().contains("needs PNG"), "{format}: {e}");
+        assert!(e.to_string().contains("for PNG export"), "{format}: {e}");
         assert!(!path.exists(), "{format}: nothing is written");
     }
     let _ = std::fs::remove_dir_all(&dir);
