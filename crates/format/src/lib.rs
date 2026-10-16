@@ -418,7 +418,12 @@ pub fn outline_to_slides(p: &mut Presentation, text: &str) -> usize {
         let tabs = raw.chars().take_while(|c| *c == '\t').count();
         let spaces = raw.chars().take_while(|c| *c == ' ').count() / 2;
         let level = tabs.max(spaces);
-        let line = raw.trim().trim_start_matches(['-', '*', '•']).trim().to_string();
+        let t = raw.trim();
+        let line = match t.strip_prefix(['-', '*', '•']) {
+            Some(rest) if rest.starts_with([' ', '\t']) => rest.trim(),
+            _ => t,
+        }
+        .to_string();
         if level == 0 {
             slides.push((line, Vec::new()));
         } else if let Some((_, body)) = slides.last_mut() {
@@ -809,6 +814,15 @@ mod tests {
         assert_eq!(n, 2);
         let o = slides_to_outline(&p);
         assert!(o.contains("Intro\n\tPoint one\n\t\tSub point\nSecond"), "{o}");
+    }
+
+    #[test]
+    fn outline_keeps_leading_dash_text() {
+        let mut p = defaults::blank_presentation(defaults::WIDE, Default::default(), false);
+        let n = outline_to_slides(&mut p, "-5 °C tonight\n\t--verbose flag\n\t*args and **kwargs\n- Bullets\n\t- Point\n\t• Other");
+        assert_eq!(n, 2);
+        let o = slides_to_outline(&p);
+        assert!(o.contains("-5 °C tonight\n\t--verbose flag\n\t*args and **kwargs\nBullets\n\tPoint\n\tOther"), "{o}");
     }
 
     #[test]
