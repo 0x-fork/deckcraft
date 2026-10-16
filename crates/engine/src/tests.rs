@@ -3623,3 +3623,39 @@ fn table_column_width_of_a_huge_column_is_ignored() {
         assert_eq!(table_of(&s, id).cols, vec![100.0, 100.0], "no column changes");
     }
 }
+
+#[test]
+fn change_case_spans_formatting_runs() {
+    let setup = |text: &str, bold_to: usize| {
+        let mut s = session();
+        let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [80.0, 80.0, 420.0, 160.0], "text": text})).unwrap();
+        let id = r["id"].as_u64().unwrap() as u32;
+        s.execute("text.edit", &json!({"id": id})).unwrap();
+        s.execute("text.select", &json!({"anchor": [0, 0], "caret": [0, bold_to]})).unwrap();
+        s.execute("format.bold", &json!({"on": true})).unwrap();
+        (s, id)
+    };
+    let text_of = |s: &Session, id: u32| s.doc().unwrap().shape(deckcraft_model::ShapeId(id)).unwrap().text.clone().unwrap();
+    for (mode, input, want) in [("title", "hello world", "Hello World"), ("sentence", "hello world. bye", "Hello world. Bye")] {
+        // Text range.
+        let (mut s, id) = setup(input, 3);
+        let n = input.chars().count();
+        s.execute("text.select", &json!({"anchor": [0, 0], "caret": [0, n]})).unwrap();
+        s.execute("format.case", &json!({"mode": mode})).unwrap();
+        assert_eq!(text_of(&s, id).text(), want, "{mode} range");
+        // Whole shape.
+        let (mut s, id) = setup(input, 3);
+        s.execute("text.exit", &json!({})).unwrap();
+        s.execute("format.case", &json!({"mode": mode})).unwrap();
+        assert_eq!(text_of(&s, id).text(), want, "{mode} shape");
+        assert_eq!(text_of(&s, id).paragraphs[0].runs[0].props.bold, Some(true));
+    }
+    // A length-changing mapping keeps each piece in its own run.
+    let (mut s, id) = setup("straße", 4);
+    s.execute("text.select", &json!({"anchor": [0, 0], "caret": [0, 6]})).unwrap();
+    s.execute("format.case", &json!({"mode": "upper"})).unwrap();
+    let body = text_of(&s, id);
+    assert_eq!(body.text(), "STRASSE");
+    assert_eq!(body.paragraphs[0].runs[0].text, "STRA");
+    assert_eq!(body.paragraphs[0].runs[0].props.bold, Some(true));
+}
