@@ -318,9 +318,10 @@ impl MediaHost {
     }
 
     /// Carry out a `media.*` request from the engine for presentation `doc_uid`.
-    pub fn request(&mut self, doc_uid: u64, doc: &Presentation, action: &str, id: ShapeId, ms: Option<u64>, owner: Owner) {
+    /// `slide` is the slide the request comes from: shape ids are only unique per slide.
+    pub fn request(&mut self, doc_uid: u64, doc: &Presentation, slide: usize, action: &str, id: ShapeId, ms: Option<u64>, owner: Owner) {
         self.ensure_doc(doc_uid);
-        let Some(clip) = find_clip(doc, id) else { return };
+        let Some(clip) = find_clip(doc, id, Some(slide)) else { return };
         let t = ms.map(|v| v as f64 / 1000.0);
         match action {
             "play" => self.play(doc_uid, doc, id, &clip, t, owner),
@@ -333,8 +334,9 @@ impl MediaHost {
     }
 }
 
-/// The clip of media shape `id` anywhere in the deck.
-pub fn find_clip(doc: &Presentation, id: ShapeId) -> Option<MediaClip> {
+/// The clip of media shape `id`. Ids are only unique per slide (the PPTX import numbers each slide
+/// afresh), so the `near` slide is searched first, then the rest of the deck.
+pub fn find_clip(doc: &Presentation, id: ShapeId, near: Option<usize>) -> Option<MediaClip> {
     fn walk(shapes: &[deckcraft_model::Shape], id: ShapeId) -> Option<MediaClip> {
         shapes.iter().find_map(|s| match &s.kind {
             ShapeKind::Media(m) if s.id == id => Some(m.clone()),
@@ -342,7 +344,7 @@ pub fn find_clip(doc: &Presentation, id: ShapeId) -> Option<MediaClip> {
             _ => None,
         })
     }
-    doc.slides.iter().find_map(|s| walk(&s.shapes, id))
+    near.and_then(|i| doc.slides.get(i)).and_then(|s| walk(&s.shapes, id)).or_else(|| doc.slides.iter().find_map(|s| walk(&s.shapes, id)))
 }
 
 /// Media shapes directly on slide `index`: (id, box in slide points, clip).
@@ -616,5 +618,19 @@ mod tests {
         assert_eq!(host.gifs.get(&id).map(|c| c.0), Some(50.0), "a new document starts its own clock");
         host.set_document(None);
         assert!(host.gifs.is_empty());
+    }
+
+    #[test]
+    fn a_clip_is_looked_up_on_the_slide_it_was_asked_from() {
+        // The PPTX import numbers shapes per slide, so two slides can hold different clips under one id.
+        let (mut doc, id, first) = deck(4000, wav_level(0.05, 0.5));
+        let other = doc.add_media("two.wav", "audio/wav", wav_level(0.05, 0.25)).expect("media");
+        let mut second = (*doc.slides[0]).clone();
+        second.shapes.last_mut().expect("shape").kind = ShapeKind::Media(MediaClip { media: other, volume: 1.0, ..Default::default() });
+        doc.slides.push(Arc::new(second));
+        assert_eq!(find_clip(&doc, id, Some(0)).map(|c| c.media), Some(first.media));
+        assert_eq!(find_clip(&doc, id, Some(1)).map(|c| c.media), Some(other), "the second slide's own clip");
+        assert_eq!(find_clip(&doc, id, None).map(|c| c.media), Some(first.media), "without a hint: first match");
+        assert_eq!(find_clip(&doc, id, Some(9)).map(|c| c.media), Some(first.media), "a slide that doesn't exist");
     }
 }

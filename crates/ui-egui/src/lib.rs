@@ -1347,8 +1347,9 @@ impl SlideApp {
                 }
                 UiRequest::Media { action, shape, ms } => {
                     let owner = if self.show.is_some() { media::Owner::Show } else { media::Owner::Editor };
-                    if let Some((uid, doc)) = self.session.active().map(|d| (d.uid, d.doc.clone())) {
-                        self.media.request(uid, &doc, &action, shape, ms, owner);
+                    let shown = self.show.as_ref().map(|s| s.state.slide);
+                    if let Some((uid, doc, slide)) = self.session.active().map(|d| (d.uid, d.doc.clone(), shown.unwrap_or(d.selection.slide))) {
+                        self.media.request(uid, &doc, slide, &action, shape, ms, owner);
                     }
                 }
             }

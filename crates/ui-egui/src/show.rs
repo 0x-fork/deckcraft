@@ -1070,7 +1070,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
     if show.media_slide == cur {
         return;
     }
-    show.media_slide = cur;
+    let previous = std::mem::replace(&mut show.media_slide, cur);
     let trans = cur.and_then(|i| doc.slides.get(i)).and_then(|s| s.transition.as_ref());
     let sound = trans.and_then(|t| t.sound);
     let sound_loop = trans.is_some_and(|t| t.sound_loop);
@@ -1081,7 +1081,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
             .media
             .ids()
             .into_iter()
-            .filter(|id| crate::media::find_clip(doc, *id).is_some_and(|c| c.play_across_slides))
+            .filter(|id| crate::media::find_clip(doc, *id, previous).is_some_and(|c| c.play_across_slides))
             // A transition sound plays to its end, as in PowerPoint, unless the new slide has its own.
             .chain((sound.is_none() && !stop_previous).then_some(TRANSITION_SOUND).filter(|id| app.media.is_playing(*id)))
             .collect(),
@@ -1110,7 +1110,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
 /// the clip is already playing, Pause toggles, Stop stops.
 fn run_media_cues(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentation) {
     for (id, effect) in std::mem::take(&mut show.media_cues) {
-        let Some(clip) = crate::media::find_clip(doc, id) else { continue };
+        let Some(clip) = crate::media::find_clip(doc, id, Some(show.state.slide)) else { continue };
         match effect.as_str() {
             "pause" => app.media.toggle(doc_uid, doc, id, &clip, crate::media::Owner::Show),
             "stop" => app.media.stop(id),
