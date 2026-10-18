@@ -3196,7 +3196,18 @@ fn tabs_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
 /// Home › Find / Replace: step through matches (slide text, table cells, notes) or replace them.
 fn find_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     let replace_mode = d.get("replace", "0") == "1";
-    field(ui, d, "Find what:", "text", "");
+    // "Find what:" has the keyboard when the dialog opens, so Ctrl+F and typing finds (#951).
+    let mut what = d.get("text", "");
+    ui.horizontal(|ui| {
+        ui.add_sized(vec2(120.0, 20.0), egui::Label::new("Find what:"));
+        let r = ui.add(egui::TextEdit::singleline(&mut what).desired_width(180.0));
+        // Enter finds the next match and leaves the keyboard here, so the search can be changed.
+        if !d.fields.contains_key("focused") || (r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
+            r.request_focus();
+            d.fields.insert("focused".into(), "1".into());
+        }
+    });
+    d.fields.insert("text".into(), what);
     if replace_mode {
         field(ui, d, "Replace with:", "with", "");
     }
