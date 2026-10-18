@@ -231,6 +231,8 @@ pub struct MediaClip {
     pub video: bool,
     /// Poster frame image.
     pub poster: Option<MediaId>,
+    /// Crop of the picture (left, top, right, bottom as fractions), PowerPoint's `srcRect` on the video.
+    pub crop: [f64; 4],
     pub trim_start_ms: u32,
     pub trim_end_ms: u32,
     pub fade_in_ms: u32,

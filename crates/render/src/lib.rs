@@ -1094,8 +1094,10 @@ impl Renderer {
                 ctx.set_transform(m);
                 let bounds = Rect::new(0.0, 0.0, w, h);
                 if let Some(p) = mc.poster {
-                    let pf = deckcraft_model::style::PictureFill { media: p, ..Default::default() };
+                    let pf = deckcraft_model::style::PictureFill { media: p, crop: mc.crop, ..Default::default() };
+                    ctx.push_clip_layer(&outline);
                     paint::picture(ctx, f.pres, &pf, bounds, m, None);
+                    ctx.pop_layer();
                 } else if mc.video {
                     ctx.set_paint(peniko::Color::from_rgba8(20, 20, 24, 255));
                     ctx.fill_rect(&bounds);
