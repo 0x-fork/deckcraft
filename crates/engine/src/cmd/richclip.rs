@@ -313,7 +313,7 @@ fn decode_text(raw: &str) -> String {
             "gt" => Some('>'),
             "quot" => Some('"'),
             "apos" => Some('\''),
-            "nbsp" => Some(' '),
+            "nbsp" => Some('\u{a0}'),
             _ => entity.strip_prefix('#').and_then(numeric_char),
         };
         if let Some(c) = decoded {
