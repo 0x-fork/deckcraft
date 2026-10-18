@@ -4072,3 +4072,36 @@ fn a_shape_in_front_of_edited_text_takes_the_click() {
     let st = s.doc().unwrap();
     assert!(st.selection.text.as_ref().is_none_or(|t| t.shape.0 as u64 != tb), "the click on the member in front left the text: {:?}", st.selection);
 }
+
+#[test]
+fn duplicating_a_moved_copy_repeats_the_move() {
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 50, 50]})).unwrap();
+    let a = r["id"].as_u64().unwrap();
+    let boxed = |s: &mut Session, id: u64| {
+        let v = s.execute("shape.inspect", &json!({"id": id})).unwrap();
+        (v["box"]["x"].as_f64().unwrap(), v["box"]["y"].as_f64().unwrap())
+    };
+    let dup = |s: &mut Session| s.execute("edit.duplicate", &json!({})).unwrap()["ids"][0].as_u64().unwrap();
+    // The first copy gets the usual offset.
+    let b = dup(&mut s);
+    let off = s.prefs.duplicate_offset;
+    assert_eq!(boxed(&mut s, b), (100.0 + off, 100.0 + off));
+    // Moved, then duplicated again: the next copy repeats the move from the original (#966).
+    s.execute("shape.move", &json!({"dx": 80.0 - off, "dy": -off})).unwrap();
+    assert_eq!(boxed(&mut s, b), (180.0, 100.0));
+    let c = dup(&mut s);
+    assert_eq!(boxed(&mut s, c), (260.0, 100.0));
+    let d = dup(&mut s);
+    assert_eq!(boxed(&mut s, d), (340.0, 100.0));
+    // Duplicating something else goes back to the usual offset.
+    s.doc_mut().unwrap().selection.shapes = vec![ShapeId(a as u32)];
+    let e = dup(&mut s);
+    assert_eq!(boxed(&mut s, e), (100.0 + off, 100.0 + off));
+    // After Undo removed that copy, duplicating the last moved copy gets the usual offset too.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.doc_mut().unwrap().selection.shapes = vec![ShapeId(d as u32)];
+    let f = dup(&mut s);
+    assert_eq!(boxed(&mut s, f), (340.0 + off, 100.0 + off));
+    assert_eq!(s.doc().unwrap().doc.validate(), Vec::<String>::new());
+}
