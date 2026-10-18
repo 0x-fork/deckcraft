@@ -207,7 +207,9 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
 
 #[allow(clippy::too_many_arguments)]
 fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h: f64, boxes: Option<&crate::chartex::Boxes>) {
-    let text_col = c.text_color.as_ref().map(|t| rctx.color(t, None)).unwrap_or(Rgba::rgb(0x59, 0x59, 0x59));
+    // Text without a colour of its own takes the theme's text colour, so a chart on a dark
+    // theme is readable (a fixed grey used to vanish there).
+    let text_col = rctx.color(c.text_color.as_ref().unwrap_or(&ColorRef::scheme(SchemeSlot::Tx1)), None);
     let grid_col = Rgba::rgb(0xD9, 0xD9, 0xD9);
     if let Some(f) = &c.chart_fill {
         crate::paint::fill_path(
