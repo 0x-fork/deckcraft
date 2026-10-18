@@ -4098,6 +4098,13 @@ fn duplicating_a_moved_copy_repeats_the_move() {
     s.doc_mut().unwrap().selection.shapes = vec![ShapeId(a as u32)];
     let e = dup(&mut s);
     assert_eq!(boxed(&mut s, e), (100.0 + off, 100.0 + off));
+    // Undone, its id can go to a new shape: duplicating that one uses the usual offset too.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let r = s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [400, 300, 40, 40]})).unwrap();
+    let g = r["id"].as_u64().unwrap();
+    assert_eq!(g, e, "the new shape reuses the undone copy's id");
+    let h = dup(&mut s);
+    assert_eq!(boxed(&mut s, h), (400.0 + off, 300.0 + off));
     // After Undo removed that copy, duplicating the last moved copy gets the usual offset too.
     s.execute("edit.undo", &json!({})).unwrap();
     s.doc_mut().unwrap().selection.shapes = vec![ShapeId(d as u32)];

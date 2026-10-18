@@ -51,6 +51,8 @@ fn restore(s: &mut Session, redo: bool) -> Result<Value> {
     st.doc = e.doc;
     st.selection = e.selection;
     st.interaction = None;
+    // A later shape can get an undone copy's id: Duplicate starts over with the usual offset.
+    st.last_duplicate = None;
     st.revision += 1;
     Ok(json!({"label": e.label}))
 }
