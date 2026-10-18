@@ -857,7 +857,7 @@ pub fn build_chartex(c: &Chart) -> Vec<u8> {
     for (i, s) in c.series.iter().enumerate().take(if one { 1 } else { usize::MAX }) {
         w.open("cx:series", A::new().a("layoutId", layout).a("uniqueId", format!("{{DC00000{i}-0000-4000-8000-000000000000}}")));
         cx_text(&mut w, &s.name);
-        if s.data_labels.unwrap_or(c.data_labels) {
+        if c.series_data_labels(s) {
             w.open("cx:dataLabels", A::new().a("pos", if c.kind == ChartType::Funnel { "ctr" } else { "outEnd" }));
             w.empty("cx:visibility", A::new().a("seriesName", "0").a("categoryName", "0").a("value", "1"));
             w.close("cx:dataLabels");

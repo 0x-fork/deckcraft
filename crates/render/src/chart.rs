@@ -310,7 +310,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
             ctx.set_paint(color(Rgba::WHITE, 1.0));
             ctx.set_stroke(kurbo::Stroke::new(1.0));
             ctx.stroke_path(&p);
-            if c.data_labels {
+            if c.series_data_labels(s) {
                 let mid = a0 + sweep / 2.0;
                 let lp = Point::new(cen.x + r * 0.65 * mid.cos(), cen.y + r * 0.65 * mid.sin());
                 label(
@@ -656,7 +656,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                         err_marks.push((mid, p0, p1, bar.min(base * 0.8) * 0.5, e.end_cap));
                     }
                 }
-                if c.data_labels {
+                if c.series_data_labels(s) {
                     let t = c.data_label(s, s.values.get(i).copied().flatten().unwrap_or(0.0));
                     let lr = if horiz {
                         Rect::new(r.x1 + 2.0, r.y0, r.x1 + 40.0, r.y1)

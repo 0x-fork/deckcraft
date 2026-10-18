@@ -699,6 +699,12 @@ impl Chart {
         crate::numfmt::format(code.map_or("General", String::as_str), v, self.lang.as_deref())
     }
 
+    /// Does series `s` show its data labels? The series' own `c:dLbls/c:showVal` wins — an
+    /// explicit `false` hides them even when the chart-wide setting is on (#868).
+    pub fn series_data_labels(&self, s: &Series) -> bool {
+        s.data_labels.unwrap_or(self.data_labels)
+    }
+
     /// Value range across series (stacked sums for stacked types).
     pub fn value_range(&self) -> (f64, f64) {
         let mut lo: f64 = 0.0;
@@ -848,6 +854,20 @@ mod tests {
         c.y_log_base = Some(10.0);
         assert_eq!(c.log_axis_scale(8), Some((0.0, 5.0, 1.0)));
         assert_eq!(c.log_axis_scale(2), Some((0.0, 6.0, 3.0)));
+    }
+
+    /// #868: a series' own label setting wins; an unset series takes the chart-wide one.
+    #[test]
+    fn series_data_labels_override_the_chart_wide_setting() {
+        let mut c = Chart::sample(ChartType::Column);
+        c.data_labels = false;
+        let mut s = c.series[0].clone();
+        assert!(!c.series_data_labels(&s), "unset series follows the chart");
+        s.data_labels = Some(true);
+        assert!(c.series_data_labels(&s), "a series that asks for labels gets them");
+        c.data_labels = true;
+        s.data_labels = Some(false);
+        assert!(!c.series_data_labels(&s), "an explicit series false hides them anyway");
     }
 
     #[test]

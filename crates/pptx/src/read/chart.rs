@@ -213,7 +213,11 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
         if let Some(v) = g.child_val("holeSize").and_then(|v| v.parse::<f64>().ok()) {
             c.hole_size = (v / 100.0).clamp(0.0, 0.9);
         }
-        if g.path(&["dLbls", "showVal"]).and_then(|v| v.bool("val")) == Some(true) {
+        // `<c:showVal/>` without a val attribute means true, as in the schema's default.
+        // The setting belongs to this plot group: a group that asks for no labels keeps them
+        // off, even when another group of a combo chart asks for them (#868).
+        let group_labels = g.path(&["dLbls", "showVal"]).map(|v| v.bool("val").unwrap_or(true));
+        if group_labels == Some(true) {
             c.data_labels = true;
         }
         kinds.push(kind);
@@ -230,8 +234,12 @@ fn chart_within(root: &El, mut budget: usize) -> Option<Chart> {
                 secondary_axis: secondary,
                 ..Default::default()
             };
-            if let Some(d) = s.child("dLbls").and_then(|d| d.child("showVal")).and_then(|v| v.bool("val")) {
+            // `<c:showVal/>` without a val attribute means true, as in the schema's default.
+            if let Some(d) = s.child("dLbls").and_then(|d| d.child("showVal")).map(|v| v.bool("val").unwrap_or(true)) {
                 ser.data_labels = Some(d);
+            } else if let Some(false) = group_labels {
+                // The group asks for no labels and the series does not say otherwise.
+                ser.data_labels = Some(false);
             }
             for t in s.children_named("trendline").take(16) {
                 if let Some(t) = trendline(t) {
