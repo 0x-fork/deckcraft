@@ -27,6 +27,8 @@ pub struct Show {
     step_end: f64,
     trans: Option<Transition>,
     tex: Option<(Key, TextureHandle)>,
+    /// The shapes stacked above the playing videos, drawn over the video frames (#1005).
+    overlay: Option<(Key, Vec<ShapeId>, TextureHandle)>,
     next_tex: Option<(usize, TextureHandle)>,
     /// The next slide's first frame, rendered in the background while this one is shown so
     /// advancing only uploads it (#240).
@@ -130,6 +132,55 @@ fn render_frame(
     crate::textures::to_color_image(&img, false)
 }
 
+/// Render only the slide's own shapes except `skip`, over transparency: what is stacked above a
+/// playing video, to be drawn over the video frame.
+#[allow(clippy::too_many_arguments)]
+fn render_overlay(
+    doc: &Presentation,
+    idx: usize,
+    tl: Timeline,
+    step: usize,
+    t: f64,
+    size: (u32, u32),
+    hidden: Vec<ShapeId>,
+    skip: &[ShapeId],
+    times: &[(ShapeId, f64)],
+    threads: u16,
+    plays: &[TriggerPlay],
+    stamps: &[StepStamp],
+) -> egui::ColorImage {
+    let f = move |id: ShapeId| {
+        let mut st = state_for(&tl, id, step, t, plays, stamps);
+        if hidden.contains(&id) {
+            st.visible = false;
+        }
+        st
+    };
+    let opts = RenderOpts {
+        scale: size.0 as f64 / doc.slide_size.width.max(1.0),
+        size: Some(size),
+        state: Some(&f),
+        skip,
+        gif_times: times,
+        threads,
+        ..Default::default()
+    };
+    let img = deckcraft_render::render_slide_part(doc, idx, deckcraft_render::SlidePart::Content, &opts);
+    crate::textures::to_color_image(&img, false)
+}
+
+/// The shapes of slide `idx` to leave out when drawing what is stacked above the lowest of the
+/// playing `videos` (that video, everything below it and the other videos). Empty when nothing
+/// is above a video: the video frame is then painted last.
+fn below_playing_video(doc: &Presentation, idx: usize, videos: &[ShapeId]) -> Vec<ShapeId> {
+    let Some(slide) = doc.slides.get(idx) else { return vec![] };
+    let Some(first) = slide.shapes.iter().position(|s| videos.contains(&s.id)) else { return vec![] };
+    if slide.shapes.iter().skip(first + 1).all(|s| videos.contains(&s.id)) {
+        return vec![];
+    }
+    slide.shapes.iter().enumerate().filter(|(i, s)| *i <= first || videos.contains(&s.id)).map(|(_, s)| s.id).collect()
+}
+
 /// Media on slide `idx` hidden until it plays, as it is when the slide is entered.
 fn hidden_on_entry(doc: &Presentation, idx: usize) -> Vec<ShapeId> {
     crate::media::slide_media(doc, idx).into_iter().filter(|(_, _, clip)| clip.hide_while_not_playing).map(|m| m.0).collect()
@@ -183,6 +234,7 @@ impl Show {
             step_end: 0.0,
             trans: None,
             tex: None,
+            overlay: None,
             next_tex: None,
             prefetch: None,
             blank: None,
@@ -736,7 +788,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 }
                 None => crate::textures::upload(&ctx, "show", ci),
             };
-            show.tex = Some((key, tex.clone()));
+            show.tex = Some((key.clone(), tex.clone()));
             Some(tex)
         };
         // While this slide rests, render the next one's first frame (not one with GIFs, whose
@@ -842,16 +894,44 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
             // Playing video: the current frame in its box, or full screen.
             let (sw, sh) = (doc.slide_size.width as f32, doc.slide_size.height as f32);
             let uv = show.zoom_uv();
+            let mut framed: Vec<ShapeId> = vec![];
+            let mut full_screen = false;
             for (id, x, clip) in &media {
                 if !clip.video || hidden.contains(id) {
                     continue;
                 }
                 let r = if clip.full_screen && app.media.is_playing(*id) {
+                    full_screen = true;
                     full
                 } else {
                     slide_box(srect, uv, sw, sh, x.x as f32, x.y as f32, x.w as f32, x.h as f32)
                 };
-                crate::media::paint_frame(&painter, &app.media, *id, r);
+                if crate::media::paint_frame(&painter, &app.media, *id, r) {
+                    framed.push(*id);
+                }
+            }
+            // Shapes stacked above a playing video show over it, as in PowerPoint (#1005); a video
+            // playing full screen covers the whole slide.
+            let skip = if full_screen { vec![] } else { below_playing_video(&doc, idx, &framed) };
+            if skip.is_empty() {
+                show.overlay = None;
+            } else {
+                let fresh = !animating && show.overlay.as_ref().is_some_and(|(k, s, _)| *k == key && *s == skip);
+                if !fresh {
+                    let tl = show.timeline(&doc).clone();
+                    let ci = render_overlay(&doc, idx, tl, step, t, size, hidden.clone(), &skip, &times, render_threads(), &plays, &stamps);
+                    let handle = match show.overlay.take() {
+                        Some((_, _, mut h)) => {
+                            crate::textures::replace(&ctx, &mut h, ci);
+                            h
+                        }
+                        None => crate::textures::upload(&ctx, "show-overlay", ci),
+                    };
+                    show.overlay = Some((key.clone(), skip, handle));
+                }
+                if let Some((_, _, h)) = &show.overlay {
+                    painter.image(h.id(), srect, uv, Color32::WHITE);
+                }
             }
             // Play/pause on the animated GIF under the pointer, and the audio/video bar.
             // Slide Show ▸ Show Media Controls hides both (the click still plays a clip).
@@ -1882,6 +1962,29 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    /// #1005: shapes stacked above a playing video must be drawn over its frame; the video, what
+    /// is below it and other videos stay out of that overlay.
+    #[test]
+    fn shapes_above_a_playing_video_are_the_overlay() {
+        let mut session = deckcraft_engine::Session::with_new();
+        for _ in 0..3 {
+            session.execute("shape.insert", &json!({"preset": "rect", "rect": [0.0, 0.0, 100.0, 100.0]})).unwrap();
+        }
+        let mut doc = (*session.active().unwrap().doc).clone();
+        // Keep only the three inserted rects (a new slide may start with placeholders).
+        let keep = doc.slides[0].shapes.len() - 3;
+        doc.slides[0].shapes.drain(..keep);
+        let ids: Vec<ShapeId> = doc.slides[0].shapes.iter().map(|s| s.id).collect();
+        doc.slides[0].shapes[1].kind = deckcraft_model::ShapeKind::Media(deckcraft_model::MediaClip { video: true, ..Default::default() });
+        // Video in the middle: the shape above it is drawn over it.
+        assert_eq!(below_playing_video(&doc, 0, &[ids[1]]), vec![ids[0], ids[1]]);
+        // Video on top: nothing above it, the frame is painted last as before.
+        doc.slides[0].shapes.swap(1, 2);
+        assert!(below_playing_video(&doc, 0, &[ids[1]]).is_empty());
+        // No video playing.
+        assert!(below_playing_video(&doc, 0, &[]).is_empty());
+    }
 
     /// #968: over a shape a click acts on (a clip with its play trigger, a link) the pointing hand
     /// never gave way to the idle hide, so a still pointer stayed on the playing video.
