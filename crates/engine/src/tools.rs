@@ -409,10 +409,12 @@ impl Session {
                 }
             }
         }
-        // The frame of the text being edited: grabbing it moves the box.
+        // The frame of the text being edited: grabbing it moves the box, unless a shape in front
+        // of the text covers that spot (#931).
         if let Some(e) = edited_box(st)
             && e.movable
             && edit_zone(&e.xfrm, p, tol) == EditZone::Frame
+            && !shape_in_front(st, st.shapes(), e.id, p, tol, 0)
         {
             return Some(Hit::Frame { id: e.id });
         }
@@ -1228,14 +1230,8 @@ impl Session {
             None => edited_box(st).is_some_and(|e| edit_zone(&e.xfrm, p, tol) != EditZone::Outside),
             Some(_) => xfrm_of(&st.doc, &st.selection, sh).bounds().inflate(tol, tol).contains(p),
         };
-        // A shape in front of the edited text takes the click, as in PowerPoint (#931): the shapes
-        // above the one holding the text, topmost first.
-        let in_front = st
-            .shapes()
-            .iter()
-            .rev()
-            .take_while(|s| deckcraft_model::find_shape(std::slice::from_ref(*s), t.shape).is_none())
-            .any(|s| !s.hidden && hit_shape(st, s, p, tol).is_some());
+        // A shape in front of the edited text takes the click, as in PowerPoint (#931).
+        let in_front = shape_in_front(st, st.shapes(), t.shape, p, tol, 0);
         if !inside
             || in_front
             || matches!(
@@ -1657,6 +1653,27 @@ struct EditedBox {
     xfrm: Xfrm,
     /// Its frame can be grabbed to move it: not a line (no frame to grab) and not locked.
     movable: bool,
+}
+
+/// Whether a visible shape drawn in front of `target` is under `p`: the shapes above it in its
+/// list, topmost first, and inside a group that holds it, the members above it.
+fn shape_in_front(st: &crate::DocState, shapes: &[Shape], target: ShapeId, p: Point, tol: f64, depth: usize) -> bool {
+    if depth > 64 {
+        return false;
+    }
+    for s in shapes.iter().rev() {
+        if s.id == target {
+            return false;
+        }
+        if deckcraft_model::find_shape(std::slice::from_ref(s), target).is_some() {
+            // The group holding the text: look among its members.
+            return shape_in_front(st, s.children(), target, p, tol, depth + 1);
+        }
+        if !s.hidden && hit_shape(st, s, p, tol).is_some() {
+            return true;
+        }
+    }
+    false
 }
 
 fn edited_box(st: &crate::DocState) -> Option<EditedBox> {
