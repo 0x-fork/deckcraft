@@ -118,7 +118,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Chart Elements",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, upDownBars?: bool, id?}",
+            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, upDownBars?: bool, textColor?: #RRGGBB|accent1..6|tx1…|null (title, axes, legend and labels; null for the theme's text colour), id?}",
             has_selection,
             chart_options
         ),
@@ -1771,7 +1771,18 @@ fn chart_options(s: &mut Session, p: &Value) -> Result<Value> {
     // Waterfall total points.
     let subtotals: Option<Vec<usize>> =
         p.get("subtotals").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(|i| i as usize).collect());
+    // Colour of the chart's text (title, axes, legend, data labels); null goes back to the theme's.
+    let text_color = match p.get("textColor") {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(v) => {
+            Some(Some(color_value(v).ok_or_else(|| bad("chart.options", "`textColor` is a colour: #RRGGBB, accent1…accent6, tx1…, or null"))?))
+        }
+    };
     with_chart(s, p, "chart.options", |c| {
+        if let Some(t) = &text_color {
+            c.text_color = t.clone();
+        }
         if let Some(n) = bin_count {
             c.bin_count = n;
             if n.is_some() {
