@@ -3985,3 +3985,59 @@ fn edit_points_conversion_is_one_undo_step() {
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(preset(&s), "the only step was the conversion");
 }
+
+/// #931: while the text of a placeholder is being edited, a shape in front of it still takes a
+/// click (as in PowerPoint); a click on the text where nothing is in front still moves the caret.
+#[test]
+fn a_shape_in_front_of_edited_text_takes_the_click() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "titleAndContent"})).unwrap();
+    let square = s.execute("shape.insert", &json!({"preset": "rect", "rect": [380, 260, 200, 120]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    let ev = |kind, x: f64, y: f64| tools::PointerEvent { kind, x, y, mods: Default::default(), tol: 4.0, pressure: None };
+    let click = |s: &mut Session, x: f64, y: f64| {
+        s.pointer(ev(tools::PointerKind::Down, x, y)).unwrap();
+        s.pointer(ev(tools::PointerKind::Up, x, y)).unwrap();
+    };
+    // The content placeholder's edge: its (empty) text is now being edited.
+    click(&mut s, 66.0, 300.0);
+    let body = s.doc().unwrap().selection.text.as_ref().map(|t| t.shape).expect("editing the content placeholder");
+    assert_ne!(body.0 as u64, square);
+    // A click on the text away from the square keeps editing it.
+    click(&mut s, 200.0, 300.0);
+    assert_eq!(s.doc().unwrap().selection.text.as_ref().map(|t| t.shape), Some(body));
+    // A click on the square, in front of the text, selects the square.
+    click(&mut s, 480.0, 320.0);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.shapes.iter().map(|id| id.0 as u64).collect::<Vec<_>>(), vec![square]);
+    assert!(st.selection.text.as_ref().is_none_or(|t| t.shape.0 as u64 == square), "{:?}", st.selection.text);
+
+    // A shape over the edited box's edge takes the click there too: the edge would otherwise drag
+    // the box.
+    let edge = {
+        let st = s.doc().unwrap();
+        let x = cmd::xfrm_of(&st.doc, &st.selection, st.shape(body).unwrap());
+        (x.x, x.y + x.h / 2.0)
+    };
+    let corner =
+        s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [edge.0 - 10.0, edge.1 - 10.0, 20, 20]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.deselect", &json!({})).unwrap();
+    s.execute("text.edit", &json!({"id": body.0})).unwrap();
+    // On the box's left edge, inside the band that drags it, clear of its middle handle (handles
+    // stay on top, as in PowerPoint).
+    click(&mut s, edge.0 + 1.0, edge.1 - 9.0);
+    let st = s.doc().unwrap();
+    assert_eq!(st.selection.shapes.iter().map(|id| id.0 as u64).collect::<Vec<_>>(), vec![corner], "{:?}", st.selection);
+
+    // Text inside a group: a member in front of it takes the click instead of the caret.
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    let tb =
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 300, 150], "text": "Grouped text"})).unwrap()["id"].as_u64().unwrap();
+    let cover = s.execute("shape.insert", &json!({"preset": "rect", "rect": [200, 150, 60, 40]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("arrange.group", &json!({"ids": [tb, cover]})).unwrap();
+    s.execute("text.edit", &json!({"id": tb})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.text.as_ref().map(|t| t.shape.0 as u64), Some(tb));
+    click(&mut s, 230.0, 170.0);
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.as_ref().is_none_or(|t| t.shape.0 as u64 != tb), "the click on the member in front left the text: {:?}", st.selection);
+}
