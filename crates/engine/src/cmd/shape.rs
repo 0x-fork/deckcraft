@@ -170,13 +170,14 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Keeps a side length in `0..=MAX_PT` so a huge value cannot exhaust memory when rendering.
+/// An overflow to infinity lands on the limit; NaN becomes 0.
 fn clamp_side(v: f64) -> f64 {
-    if v.is_finite() { v.clamp(0.0, MAX_PT) } else { 0.0 }
+    if v.is_nan() { 0.0 } else { v.clamp(0.0, MAX_PT) }
 }
 
 /// Keeps a coordinate within `±POS_LIMIT`.
 fn clamp_pos(v: f64) -> f64 {
-    if v.is_finite() { v.clamp(-POS_LIMIT, POS_LIMIT) } else { 0.0 }
+    if v.is_nan() { 0.0 } else { v.clamp(-POS_LIMIT, POS_LIMIT) }
 }
 
 fn move_by(s: &mut Session, p: &Value) -> Result<Value> {
@@ -216,8 +217,8 @@ fn resize(s: &mut Session, p: &Value) -> Result<Value> {
             x.h = clamp_side(x.h);
             // Rotated shapes resize about their centre; others keep the top-left.
             if x.rot != 0.0 {
-                x.x = cx - x.w / 2.0;
-                x.y = cy - x.h / 2.0;
+                x.x = clamp_pos(cx - x.w / 2.0);
+                x.y = clamp_pos(cy - x.h / 2.0);
             }
         }
         Ok(())

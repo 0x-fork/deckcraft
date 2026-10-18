@@ -3647,4 +3647,13 @@ fn shape_geometry_commands_limit_size_and_position() {
     s.execute("shape.move", &json!({"x": 1e100, "y": -1e100})).unwrap();
     let x = xfrm(&s);
     assert!(within(&s), "move stored {x:?}");
+    // A move that overflows to infinity lands on the limit, not back at 0.
+    s.execute("shape.move", &json!({"x": 1e308, "dx": 1e308})).unwrap();
+    assert_eq!(xfrm(&s).x, 100_000.0);
+    // A rotated shape resizes about its centre and still stays inside the limit.
+    s.execute("shape.setBounds", &json!({"x": 99_000, "y": 0, "w": 10, "h": 10})).unwrap();
+    s.execute("shape.rotate", &json!({"deg": 45})).unwrap();
+    s.execute("shape.resize", &json!({"w": 1e100})).unwrap();
+    let x = xfrm(&s);
+    assert!(within(&s), "rotated resize stored {x:?}");
 }
