@@ -1,6 +1,7 @@
 //! Design tab and masters: themes, colours, fonts, backgrounds, slide size, header & footer,
 //! Slide Master view.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use deckcraft_geom::Size;
@@ -592,6 +593,11 @@ fn background_of(doc: &Presentation, sel: &crate::Selection, index: Option<usize
     }
 }
 
+fn used_master_indices(doc: &Presentation) -> BTreeSet<usize> {
+    let fallback = (!doc.masters.is_empty()).then_some(0);
+    doc.slides.iter().filter_map(|sl| doc.masters.iter().position(|m| m.layout(sl.layout).is_some()).or(fallback)).collect()
+}
+
 fn backgrounds_already(doc: &Presentation, sel: &crate::Selection, index: Option<usize>, all: bool, bg: &Option<Background>) -> bool {
     match sel.target {
         Target::Master { master } => doc.masters.get(master).is_some_and(|m| m.background == *bg),
@@ -600,8 +606,9 @@ fn backgrounds_already(doc: &Presentation, sel: &crate::Selection, index: Option
         Target::Slides => {
             let list: Vec<usize> = if all { (0..doc.slides.len()).collect() } else { vec![index.unwrap_or(sel.slide)] };
             let slides_match = !list.is_empty() && list.iter().all(|i| doc.slides.get(*i).is_some_and(|sl| sl.background == *bg));
-            if all {
-                let masters_match = doc.masters.iter().all(|m| m.background == *bg);
+            if all && bg.is_some() {
+                let masters = used_master_indices(doc);
+                let masters_match = !masters.is_empty() && masters.iter().all(|&idx| doc.masters.get(idx).is_some_and(|m| m.background == *bg));
                 slides_match && masters_match
             } else {
                 slides_match
@@ -628,12 +635,14 @@ fn write_background(doc: &mut Presentation, sel: &crate::Selection, index: Optio
             }
         }
         Target::Slides => {
-            if all {
-                for m in &mut doc.masters {
-                    let m = Arc::make_mut(m);
-                    m.background = bg.clone();
-                    for l in &mut m.layouts {
-                        l.background = None;
+            if all && bg.is_some() {
+                for idx in used_master_indices(doc) {
+                    if let Some(m) = doc.masters.get_mut(idx) {
+                        let m = Arc::make_mut(m);
+                        m.background = bg.clone();
+                        for l in &mut m.layouts {
+                            l.background = None;
+                        }
                     }
                 }
             }
@@ -655,7 +664,12 @@ fn copy_slide_background(s: &mut Session) -> Result<Value> {
         }
         let bg = st.doc.slides.get(st.selection.slide).and_then(|sl| sl.background.clone());
         let slides_match = st.doc.slides.iter().all(|sl| sl.background == bg);
-        let masters_match = st.doc.masters.iter().all(|m| m.background == bg);
+        let masters_match = if bg.is_some() {
+            let masters = used_master_indices(&st.doc);
+            !masters.is_empty() && masters.iter().all(|&idx| st.doc.masters.get(idx).is_some_and(|m| m.background == bg))
+        } else {
+            true
+        };
         if slides_match && masters_match {
             return ok();
         }
@@ -1473,6 +1487,8 @@ fn slide_number_paragraph() -> deckcraft_model::Paragraph {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use deckcraft_color::SchemeSlot;
     use deckcraft_model::style::PictureMode;
     use deckcraft_model::theme::{FontScheme, ScriptFont, builtin_color_schemes, builtin_font_schemes};
@@ -1781,6 +1797,118 @@ mod tests {
         s.execute("edit.undo", &json!({})).unwrap(); // undos design.background
         let s0_reverted = s.execute("slide.inspect", &json!({"index": 0})).unwrap();
         assert_eq!(s0_reverted["background"], "#121826");
+    }
+
+    #[test]
+    fn background_copy_from_slide_following_master_preserves_master_and_layout_backgrounds() {
+        let mut s = Session::with_new();
+        s.execute("file.new", &json!({"theme": "Nocturne"})).unwrap();
+        s.execute("slide.new", &json!({"layout": "titleAndContent"})).unwrap();
+
+        let custom_layout_bg = Background::Fill { fill: Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0x22, 0x22, 0x22))) };
+        s.edit(|doc, _| {
+            let m = Arc::make_mut(&mut doc.masters[0]);
+            m.layouts[0].background = Some(custom_layout_bg.clone());
+            Ok(())
+        })
+        .unwrap();
+
+        // Slide 0 follows master (background: None)
+        assert!(s.doc().unwrap().doc.slides[0].background.is_none());
+        // Give Slide 1 an explicit override
+        s.execute("design.background", &json!({"color": "#FF0000", "index": 1})).unwrap();
+        assert!(s.doc().unwrap().doc.slides[1].background.is_some());
+
+        let orig_master_bg = s.doc().unwrap().doc.masters[0].background.clone();
+        assert!(orig_master_bg.is_some());
+
+        // Select slide 0 (which follows master) and apply copy to all
+        s.execute("slide.go", &json!({"index": 0})).unwrap();
+        let n = undo_len(&s);
+        s.execute("design.background", &json!({"copy": true})).unwrap();
+        assert_eq!(undo_len(&s), n + 1);
+
+        // Slide 1 has been reset to None (follows master), slide 0 remains None
+        let doc = &s.doc().unwrap().doc;
+        assert!(doc.slides[0].background.is_none());
+        assert!(doc.slides[1].background.is_none());
+
+        // Master and layout backgrounds survived!
+        assert_eq!(doc.masters[0].background, orig_master_bg);
+        assert_eq!(doc.masters[0].layouts[0].background, Some(custom_layout_bg));
+
+        // Idempotency: re-applying copy is a no-op
+        s.execute("design.background", &json!({"copy": true})).unwrap();
+        assert_eq!(undo_len(&s), n + 1, "re-copying when already matching is a no-op");
+    }
+
+    #[test]
+    fn background_reset_all_preserves_master_and_layout_backgrounds() {
+        let mut s = Session::with_new();
+        s.execute("file.new", &json!({"theme": "Nocturne"})).unwrap();
+        s.execute("slide.new", &json!({"layout": "titleAndContent"})).unwrap();
+
+        let custom_layout_bg = Background::Fill { fill: Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0x33, 0x33, 0x33))) };
+        s.edit(|doc, _| {
+            let m = Arc::make_mut(&mut doc.masters[0]);
+            m.layouts[0].background = Some(custom_layout_bg.clone());
+            Ok(())
+        })
+        .unwrap();
+
+        let orig_master_bg = s.doc().unwrap().doc.masters[0].background.clone();
+        assert!(orig_master_bg.is_some());
+
+        // Set explicit backgrounds on both slides individually (master remains untouched)
+        s.execute("design.background", &json!({"color": "#0D0D0D", "index": 0})).unwrap();
+        s.execute("design.background", &json!({"color": "#0D0D0D", "index": 1})).unwrap();
+        assert!(s.doc().unwrap().doc.slides[0].background.is_some());
+        assert!(s.doc().unwrap().doc.slides[1].background.is_some());
+
+        // Now perform reset with all
+        let n = undo_len(&s);
+        s.execute("design.background", &json!({"reset": true, "all": true})).unwrap();
+        assert_eq!(undo_len(&s), n + 1);
+
+        // Slides reset to None to follow master
+        let doc = &s.doc().unwrap().doc;
+        assert!(doc.slides[0].background.is_none());
+        assert!(doc.slides[1].background.is_none());
+
+        // Master and layout backgrounds survived!
+        assert_eq!(doc.masters[0].background, orig_master_bg);
+        assert_eq!(doc.masters[0].layouts[0].background, Some(custom_layout_bg));
+
+        // Idempotency: re-running reset all is a no-op
+        s.execute("design.background", &json!({"reset": true, "all": true})).unwrap();
+        assert_eq!(undo_len(&s), n + 1, "re-resetting when already reset is a no-op");
+    }
+
+    #[test]
+    fn background_all_only_touches_used_masters() {
+        let mut s = Session::with_new();
+        s.execute("file.new", &json!({"theme": "Nocturne"})).unwrap();
+
+        // Add a second master to presentation
+        let second_master_bg = Background::Fill { fill: Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0x55, 0x55, 0x55))) };
+        s.edit(|doc, _| {
+            let mut m2 = (*doc.masters[0]).clone();
+            m2.id = deckcraft_model::MasterId(999);
+            m2.background = Some(second_master_bg.clone());
+            doc.masters.push(Arc::new(m2));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(s.doc().unwrap().doc.masters.len(), 2);
+        // Slides only use master 0 (default layout)
+        s.execute("design.background", &json!({"color": "#AA0000", "all": true})).unwrap();
+
+        let doc = &s.doc().unwrap().doc;
+        // Master 0 updated
+        assert_eq!(doc.masters[0].background, doc.slides[0].background);
+        // Master 1 preserved!
+        assert_eq!(doc.masters[1].background, Some(second_master_bg));
     }
 }
 
