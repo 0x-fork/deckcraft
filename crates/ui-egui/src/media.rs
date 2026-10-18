@@ -337,14 +337,27 @@ impl MediaHost {
 /// The clip of media shape `id`. Ids are only unique per slide (the PPTX import numbers each slide
 /// afresh), so the `near` slide is searched first, then the rest of the deck.
 pub fn find_clip(doc: &Presentation, id: ShapeId, near: Option<usize>) -> Option<MediaClip> {
-    fn walk(shapes: &[deckcraft_model::Shape], id: ShapeId) -> Option<MediaClip> {
-        shapes.iter().find_map(|s| match &s.kind {
-            ShapeKind::Media(m) if s.id == id => Some(m.clone()),
-            ShapeKind::Group { children, .. } => walk(children, id),
-            _ => None,
-        })
-    }
-    near.and_then(|i| doc.slides.get(i)).and_then(|s| walk(&s.shapes, id)).or_else(|| doc.slides.iter().find_map(|s| walk(&s.shapes, id)))
+    near.and_then(|i| clip_on(doc, i, id)).or_else(|| doc.slides.iter().find_map(|s| walk_clip(&s.shapes, id)))
+}
+
+/// The clip `id` on slide `index` only (inside groups too).
+pub fn clip_on(doc: &Presentation, index: usize, id: ShapeId) -> Option<MediaClip> {
+    doc.slides.get(index).and_then(|s| walk_clip(&s.shapes, id))
+}
+
+fn walk_clip(shapes: &[deckcraft_model::Shape], id: ShapeId) -> Option<MediaClip> {
+    shapes.iter().find_map(|s| match &s.kind {
+        ShapeKind::Media(m) if s.id == id => Some(m.clone()),
+        ShapeKind::Group { children, .. } => walk_clip(children, id),
+        _ => None,
+    })
+}
+
+/// Whether the voice `id`, playing on slide `from`, keeps playing on slide `to`: its clip plays
+/// across slides and `to` doesn't hold another clip under the same id.
+pub fn carries_over(doc: &Presentation, id: ShapeId, from: Option<usize>, to: usize) -> bool {
+    let Some(clip) = find_clip(doc, id, from).filter(|c| c.play_across_slides) else { return false };
+    clip_on(doc, to, id).is_none_or(|c| c.media == clip.media)
 }
 
 /// Media shapes directly on slide `index`: (id, box in slide points, clip).
@@ -632,5 +645,28 @@ mod tests {
         assert_eq!(find_clip(&doc, id, Some(1)).map(|c| c.media), Some(other), "the second slide's own clip");
         assert_eq!(find_clip(&doc, id, None).map(|c| c.media), Some(first.media), "without a hint: first match");
         assert_eq!(find_clip(&doc, id, Some(9)).map(|c| c.media), Some(first.media), "a slide that doesn't exist");
+    }
+
+    #[test]
+    fn a_clip_across_slides_stops_where_the_next_slide_reuses_its_id() {
+        let (mut doc, id, first) = deck(4000, wav_level(0.05, 0.5));
+        if let ShapeKind::Media(m) = &mut Arc::make_mut(&mut doc.slides[0]).shapes.last_mut().expect("shape").kind {
+            m.play_across_slides = true;
+        }
+        let mut plain = (*doc.slides[0]).clone();
+        plain.shapes.clear();
+        doc.slides.push(Arc::new(plain));
+        assert!(carries_over(&doc, id, Some(0), 1), "a slide without that id");
+        let mut same = (*doc.slides[0]).clone();
+        if let ShapeKind::Media(m) = &mut same.shapes.last_mut().expect("shape").kind {
+            m.play_across_slides = false;
+        }
+        doc.slides.push(Arc::new(same));
+        assert!(carries_over(&doc, id, Some(0), 2), "the same media under that id");
+        let other = doc.add_media("two.wav", "audio/wav", wav_level(0.05, 0.25)).expect("media");
+        let mut reused = (*doc.slides[0]).clone();
+        reused.shapes.last_mut().expect("shape").kind = ShapeKind::Media(MediaClip { media: other, volume: 1.0, autoplay: true, ..first.clone() });
+        doc.slides.push(Arc::new(reused));
+        assert!(!carries_over(&doc, id, Some(0), 3), "another clip under that id");
     }
 }

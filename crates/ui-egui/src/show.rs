@@ -1077,11 +1077,11 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
     // [Stop Previous Sound] ends a transition sound still playing.
     let stop_previous = trans.is_some_and(|t| t.stop_sound);
     let keep: Vec<ShapeId> = match cur {
-        Some(_) => app
+        Some(i) => app
             .media
             .ids()
             .into_iter()
-            .filter(|id| crate::media::find_clip(doc, *id, previous).is_some_and(|c| c.play_across_slides))
+            .filter(|id| crate::media::carries_over(doc, *id, previous, i))
             // A transition sound plays to its end, as in PowerPoint, unless the new slide has its own.
             .chain((sound.is_none() && !stop_previous).then_some(TRANSITION_SOUND).filter(|id| app.media.is_playing(*id)))
             .collect(),
