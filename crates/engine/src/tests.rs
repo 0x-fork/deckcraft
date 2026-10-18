@@ -4428,3 +4428,13 @@ fn chart_options_text_color_sets_clears_and_refuses() {
     s.execute("chart.options", &json!({"id": id, "textColor": null})).unwrap();
     assert_eq!(chart_of(&s, id).text_color, None);
 }
+
+/// Font Color on a selected chart colours the chart's text (it used to answer and change nothing).
+#[test]
+fn format_color_on_a_selected_chart_sets_its_text_color() {
+    let mut s = session();
+    let id = s.execute("insert.chart", &json!({"type": "column", "title": "Sales"})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.execute("format.color", &json!({"color": "accent2"})).unwrap();
+    assert_eq!(chart_of(&s, id).text_color, Some(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)));
+}

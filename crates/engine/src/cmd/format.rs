@@ -4,7 +4,7 @@
 use deckcraft_model::edit as ed;
 use deckcraft_model::resolve;
 use deckcraft_model::text::{Align, Anchor, AutoFit, Bullet, Caps, ParaProps, RunProps, Spacing, Strike, TabStop, TextDir};
-use deckcraft_model::{ColorRef, ColorTransform, Effects, Fill, Line, SchemeSlot, Shape};
+use deckcraft_model::{ColorRef, ColorTransform, Effects, Fill, Line, SchemeSlot, Shape, ShapeKind};
 use serde_json::{Value, json};
 
 use super::text::{format_body, format_para, format_run};
@@ -340,6 +340,27 @@ fn shrink(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 fn color(s: &mut Session, p: &Value) -> Result<Value> {
     let c = color_param(p, "color").ok_or_else(|| bad("format.color", "missing or invalid `color`"))?;
+    // A selected chart has no runs: Font Color colours its text (title, axes, legend, labels),
+    // which used to answer and change nothing.
+    let st = s.doc()?;
+    if st.selection.text.is_none() {
+        let charts: Vec<ShapeId> =
+            st.selection.shapes.iter().copied().filter(|id| matches!(st.shape(*id).map(|sh| &sh.kind), Some(ShapeKind::Chart(_)))).collect();
+        let only_charts = charts.len() == st.selection.shapes.len();
+        if !charts.is_empty() {
+            let tc = c.clone();
+            edit_shapes(s, &json!({"ids": charts}), "format.color", |sh| {
+                if let ShapeKind::Chart(ch) = &mut sh.kind {
+                    ch.text_color = Some(tc.clone());
+                    ch.raw = None;
+                }
+                Ok(())
+            })?;
+            if only_charts {
+                return ok();
+            }
+        }
+    }
     format_run(s, &move |r| r.fill = Some(Fill::solid(c.clone())))
 }
 /// `a:alpha` for `transparency` (0–1) on `c`, replacing any alpha it had; fully opaque drops it.
