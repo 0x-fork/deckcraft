@@ -3699,7 +3699,38 @@ mod paragraph_dialog_tests;
 
 #[cfg(test)]
 mod about_credits_tests {
-    use super::{CREDITS_SIZE, credits_block};
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    use super::{CREDITS_SIZE, Dialog, credits_block};
+    use crate::{Services, SlideApp};
+
+    fn tab_of(h: &Harness<'_, SlideApp>) -> String {
+        let d = h.state().dialog.as_ref().expect("the About dialog is open");
+        d.fields.get("tab").cloned().unwrap_or_else(|| "about".into())
+    }
+
+    /// The reported symptom (#843): in the real dialog the tabs stopped answering once Contributors
+    /// or Models was open. Click through Contributors, Models and back to About.
+    #[test]
+    fn about_dialog_tabs_keep_responding() {
+        let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), Services::default());
+        app.dialog = Some(Dialog::new("about"));
+        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(4);
+        assert_eq!(tab_of(&h), "about");
+        for label in ["Contributors", "Models", "About", "Models", "Contributors"] {
+            h.get_by_label(label).click();
+            h.run_steps(3);
+            assert_eq!(tab_of(&h), label.to_lowercase(), "clicking {label} switches the tab");
+        }
+    }
 
     #[test]
     fn credits_get_their_own_block_below_the_tab_row() {
@@ -3708,11 +3739,12 @@ mod about_credits_tests {
             let mut tabs = egui::Rect::NOTHING;
             let mut block = egui::Rect::NOTHING;
             let mut whole = egui::Rect::NOTHING;
-            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 tabs = ui.label("About").rect;
                 block = credits_block(ui, models);
                 whole = ui.min_rect();
             });
+            out.textures_delta.clear();
             assert_eq!(block.size(), CREDITS_SIZE, "models={models}");
             assert!(block.min.y >= tabs.max.y, "the credits start below the tab row (models={models})");
             assert!(whole.max.y >= block.max.y, "the dialog grows to hold the block (models={models})");
