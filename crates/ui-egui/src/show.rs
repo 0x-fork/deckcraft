@@ -1973,14 +1973,15 @@ mod tests {
         }
         let mut doc = (*session.active().unwrap().doc).clone();
         // Keep only the three inserted rects (a new slide may start with placeholders).
-        let keep = doc.slides[0].shapes.len() - 3;
-        doc.slides[0].shapes.drain(..keep);
-        let ids: Vec<ShapeId> = doc.slides[0].shapes.iter().map(|s| s.id).collect();
-        doc.slides[0].shapes[1].kind = deckcraft_model::ShapeKind::Media(deckcraft_model::MediaClip { video: true, ..Default::default() });
+        let slide = std::sync::Arc::make_mut(&mut doc.slides[0]);
+        let keep = slide.shapes.len() - 3;
+        slide.shapes.drain(..keep);
+        let ids: Vec<ShapeId> = slide.shapes.iter().map(|s| s.id).collect();
+        slide.shapes[1].kind = deckcraft_model::ShapeKind::Media(deckcraft_model::MediaClip { video: true, ..Default::default() });
         // Video in the middle: the shape above it is drawn over it.
         assert_eq!(below_playing_video(&doc, 0, &[ids[1]]), vec![ids[0], ids[1]]);
         // Video on top: nothing above it, the frame is painted last as before.
-        doc.slides[0].shapes.swap(1, 2);
+        std::sync::Arc::make_mut(&mut doc.slides[0]).shapes.swap(1, 2);
         assert!(below_playing_video(&doc, 0, &[ids[1]]).is_empty());
         // No video playing.
         assert!(below_playing_video(&doc, 0, &[]).is_empty());
