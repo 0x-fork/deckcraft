@@ -1449,6 +1449,13 @@ impl Session {
     /// Smart guides: snap `r` edges/centres to the slide and other shapes. Returns the offset to
     /// apply and the guides to draw.
     fn snap_rect(&self, r: Rect, exclude: &[ShapeId], tol: f64, enabled: bool) -> (Vec2, Vec<Guide>) {
+        self.snap_edges(r, exclude, tol, enabled, [true; 3], [true; 3])
+    }
+
+    /// `snap_rect` looking only at some of `r`'s edges: `xs_on` is left, centre, right and `ys_on`
+    /// top, centre, bottom. Resizing passes just the edges being dragged, so a fixed edge that
+    /// already sits on a line (distance 0) doesn't win and leave the dragged edge unsnapped.
+    fn snap_edges(&self, r: Rect, exclude: &[ShapeId], tol: f64, enabled: bool, xs_on: [bool; 3], ys_on: [bool; 3]) -> (Vec2, Vec<Guide>) {
         let Some(st) = self.active() else { return (Vec2::ZERO, vec![]) };
         if !enabled || !self.prefs.smart_guides {
             return (Vec2::ZERO, vec![]);
@@ -1486,7 +1493,7 @@ impl Session {
             }
         }
         let mut best_x: Option<(f64, f64, Rect)> = None;
-        for edge in [r.x0, r.center().x, r.x1] {
+        for edge in [r.x0, r.center().x, r.x1].into_iter().zip(xs_on).filter_map(|(e, on)| on.then_some(e)) {
             for (x, b) in &xs {
                 let d = x - edge;
                 if d.abs() <= tol && best_x.is_none_or(|(bd, _, _)| d.abs() < bd.abs()) {
@@ -1495,7 +1502,7 @@ impl Session {
             }
         }
         let mut best_y: Option<(f64, f64, Rect)> = None;
-        for edge in [r.y0, r.center().y, r.y1] {
+        for edge in [r.y0, r.center().y, r.y1].into_iter().zip(ys_on).filter_map(|(e, on)| on.then_some(e)) {
             for (y, b) in &ys {
                 let d = y - edge;
                 if d.abs() <= tol && best_y.is_none_or(|(bd, _, _)| d.abs() < bd.abs()) {
@@ -1509,15 +1516,29 @@ impl Session {
             off.x = d;
             let rr = r + Vec2::new(d, 0.0);
             guides.push(Guide { vertical: true, pos: x, from: b.y0.min(rr.y0), to: b.y1.max(rr.y1) });
-        } else if self.prefs.snap_to_grid {
-            off.x = deckcraft_geom::snap(r.x0, self.prefs.grid_spacing) - r.x0;
+        } else if self.prefs.snap_to_grid && xs_on.contains(&true) {
+            let at = if xs_on[0] {
+                r.x0
+            } else if xs_on[2] {
+                r.x1
+            } else {
+                r.center().x
+            };
+            off.x = deckcraft_geom::snap(at, self.prefs.grid_spacing) - at;
         }
         if let Some((d, y, b)) = best_y {
             off.y = d;
             let rr = r + Vec2::new(0.0, d);
             guides.push(Guide { vertical: false, pos: y, from: b.x0.min(rr.x0), to: b.x1.max(rr.x1) });
-        } else if self.prefs.snap_to_grid {
-            off.y = deckcraft_geom::snap(r.y0, self.prefs.grid_spacing) - r.y0;
+        } else if self.prefs.snap_to_grid && ys_on.contains(&true) {
+            let at = if ys_on[0] {
+                r.y0
+            } else if ys_on[2] {
+                r.y1
+            } else {
+                r.center().y
+            };
+            off.y = deckcraft_geom::snap(at, self.prefs.grid_spacing) - at;
         }
         (off, guides)
     }
@@ -1528,13 +1549,13 @@ impl Session {
             return x;
         }
         let r = x.rect();
-        let (off, guides) = self.snap_rect(r, &[id], tol * 1.5, true);
-        let mut nx = x;
-        // Only the dragged edges move.
+        // Only the dragged edges move, so only they look for a line to snap to.
         let moves_left = matches!(handle, 0 | 6 | 7);
         let moves_right = matches!(handle, 2..=4);
         let moves_top = matches!(handle, 0..=2);
         let moves_bottom = matches!(handle, 4..=6);
+        let (off, guides) = self.snap_edges(r, &[id], tol * 1.5, true, [moves_left, false, moves_right], [moves_top, false, moves_bottom]);
+        let mut nx = x;
         if moves_left {
             nx.x += off.x;
             nx.w -= off.x;
