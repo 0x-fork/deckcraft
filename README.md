@@ -158,8 +158,8 @@ deckcraft-cli mcp --automation-read-root DIR --automation-write-root DIR   # con
 
 ## Roadmap
 
-DeckCraft is in **alpha**. It covers **84% of standard presentation features by breadth** (92% of the core
-ones, measured) and is about **55% of the way to full professional readiness** (estimated).
+DeckCraft is in **alpha**. It covers **84% of the features tracked in [`docs/target-app-parity.md`](docs/target-app-parity.md) by breadth** (92% of the core
+ones, measured) and is about **55% ready for real work across all tracked capabilities** (estimated).
 See [ROADMAP.md](ROADMAP.md) for the stage, numbers by dimension and what's next,
 [docs/target-app-parity.md](docs/target-app-parity.md) for the full assessment,
 [docs/gaps.md](docs/gaps.md) for every known shortfall and
