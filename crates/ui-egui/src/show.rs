@@ -1938,7 +1938,6 @@ mod tests {
 
     /// A running show on a slide with one 10 s clip. Returns the harness, the clip, a point on the
     /// bar's seek track, and what `pointer_on_media_bar` said on the last frame.
-    #[allow(clippy::type_complexity)]
     fn show_with_clip() -> (egui_kittest::Harness<'static, SlideApp>, ShapeId, Pos2, std::rc::Rc<std::cell::Cell<bool>>) {
         let size = vec2(1000.0, 700.0);
         let mut session = deckcraft_engine::Session::with_new();
