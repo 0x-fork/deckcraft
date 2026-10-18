@@ -1070,7 +1070,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
     if show.media_slide == cur {
         return;
     }
-    let previous = std::mem::replace(&mut show.media_slide, cur);
+    show.media_slide = cur;
     let trans = cur.and_then(|i| doc.slides.get(i)).and_then(|s| s.transition.as_ref());
     let sound = trans.and_then(|t| t.sound);
     let sound_loop = trans.is_some_and(|t| t.sound_loop);
@@ -1081,7 +1081,7 @@ fn show_media(app: &mut SlideApp, show: &mut Show, doc_uid: u64, doc: &Presentat
             .media
             .ids()
             .into_iter()
-            .filter(|id| crate::media::carries_over(doc, *id, previous, i))
+            .filter(|id| app.media.clip(*id).is_some_and(|c| crate::media::carries_over(c, doc, *id, i)))
             // A transition sound plays to its end, as in PowerPoint, unless the new slide has its own.
             .chain((sound.is_none() && !stop_previous).then_some(TRANSITION_SOUND).filter(|id| app.media.is_playing(*id)))
             .collect(),

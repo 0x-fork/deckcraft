@@ -176,6 +176,11 @@ impl MediaHost {
         self.owners.get(&id).map(|o| o.owner)
     }
 
+    /// The clip voice `id` was started with.
+    pub fn clip(&self, id: ShapeId) -> Option<&MediaClip> {
+        self.owners.get(&id).map(|o| &o.clip)
+    }
+
     /// Shapes with a voice (playing, paused or ended).
     pub fn ids(&self) -> Vec<ShapeId> {
         self.owners.keys().copied().collect()
@@ -353,11 +358,10 @@ fn walk_clip(shapes: &[deckcraft_model::Shape], id: ShapeId) -> Option<MediaClip
     })
 }
 
-/// Whether the voice `id`, playing on slide `from`, keeps playing on slide `to`: its clip plays
-/// across slides and `to` doesn't hold another clip under the same id.
-pub fn carries_over(doc: &Presentation, id: ShapeId, from: Option<usize>, to: usize) -> bool {
-    let Some(clip) = find_clip(doc, id, from).filter(|c| c.play_across_slides) else { return false };
-    clip_on(doc, to, id).is_none_or(|c| c.media == clip.media)
+/// Whether the voice `id`, playing `clip` (the clip it was started with), keeps playing on slide
+/// `to`: the clip plays across slides and `to` doesn't hold another clip under the same id.
+pub fn carries_over(clip: &MediaClip, doc: &Presentation, id: ShapeId, to: usize) -> bool {
+    clip.play_across_slides && clip_on(doc, to, id).is_none_or(|c| c.media == clip.media)
 }
 
 /// Media shapes directly on slide `index`: (id, box in slide points, clip).
@@ -650,23 +654,22 @@ mod tests {
     #[test]
     fn a_clip_across_slides_stops_where_the_next_slide_reuses_its_id() {
         let (mut doc, id, first) = deck(4000, wav_level(0.05, 0.5));
-        if let ShapeKind::Media(m) = &mut Arc::make_mut(&mut doc.slides[0]).shapes.last_mut().expect("shape").kind {
-            m.play_across_slides = true;
-        }
+        let playing = MediaClip { play_across_slides: true, ..first.clone() };
         let mut plain = (*doc.slides[0]).clone();
         plain.shapes.clear();
         doc.slides.push(Arc::new(plain));
-        assert!(carries_over(&doc, id, Some(0), 1), "a slide without that id");
-        let mut same = (*doc.slides[0]).clone();
-        if let ShapeKind::Media(m) = &mut same.shapes.last_mut().expect("shape").kind {
-            m.play_across_slides = false;
-        }
-        doc.slides.push(Arc::new(same));
-        assert!(carries_over(&doc, id, Some(0), 2), "the same media under that id");
+        assert!(carries_over(&playing, &doc, id, 1), "a slide without that id");
+        // Slide 0 holds the same media under that id, without Play Across Slides: the voice that
+        // came from elsewhere goes on (its own clip decides), here and on the next slide.
+        assert!(carries_over(&playing, &doc, id, 0), "the same media under that id");
+        assert!(!carries_over(&first, &doc, id, 1), "a clip that doesn't play across slides");
         let other = doc.add_media("two.wav", "audio/wav", wav_level(0.05, 0.25)).expect("media");
         let mut reused = (*doc.slides[0]).clone();
         reused.shapes.last_mut().expect("shape").kind = ShapeKind::Media(MediaClip { media: other, volume: 1.0, autoplay: true, ..first.clone() });
         doc.slides.push(Arc::new(reused));
-        assert!(!carries_over(&doc, id, Some(0), 3), "another clip under that id");
+        assert!(!carries_over(&playing, &doc, id, 2), "another clip under that id");
+        let mut host = MediaHost::new(None);
+        host.play(1, &doc, id, &playing, None, Owner::Show);
+        assert_eq!(host.clip(id), Some(&playing), "the voice keeps the clip it was started with");
     }
 }
