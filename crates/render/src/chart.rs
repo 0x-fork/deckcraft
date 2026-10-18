@@ -324,7 +324,8 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     base,
                     Align::Center,
                     Anchor::Middle,
-                    Rgba::WHITE,
+                    // On the slices themselves: white, unless the chart's text was given a colour.
+                    if c.text_color.is_some() { text_col } else { Rgba::WHITE },
                     false,
                 );
             }

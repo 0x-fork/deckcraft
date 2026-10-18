@@ -2747,3 +2747,27 @@ fn chart_text_follows_the_theme_when_it_has_no_colour_of_its_own() {
     let dark_ink = count(&light_titled, &|l| l < 80) as i64 - count(&light_bare, &|l| l < 80) as i64;
     assert!(dark_ink > 100, "the title is dark on a light theme (dark pixels added: {dark_ink})");
 }
+
+/// Pie data labels sit on the slices in white; a colour given to the chart's text (chart.options
+/// textColor, Font Color on the chart) colours them too, as it does the title and legend.
+#[test]
+fn pie_data_labels_take_the_chart_text_colour_when_it_has_one() {
+    let draw = |colour: Option<ColorRef>| {
+        let mut c = Chart::sample(ChartType::Pie);
+        c.title = None;
+        c.legend = None;
+        c.data_labels = true;
+        c.text_color = colour;
+        let sh = Shape { id: ShapeId(632), xfrm: Some(Xfrm::new(0.0, 0.0, 400.0, 400.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let count = |img: &Image, f: &dyn Fn([u8; 4]) -> bool| {
+        (0..400u32).flat_map(|x| (0..400u32).map(move |y| (x, y))).filter(|(x, y)| f(img.pixel(*x, *y))).count()
+    };
+    let red = |p: [u8; 4]| p[0] > 200 && p[1] < 60 && p[2] < 60;
+    let white = |p: [u8; 4]| p[0] > 245 && p[1] > 245 && p[2] > 245;
+    let (plain, coloured) = (draw(None), draw(Some(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0)))));
+    assert_eq!(count(&plain, &red), 0, "no red without a text colour");
+    assert!(count(&coloured, &red) > 30, "the labels take the chart's red: {} red pixels", count(&coloured, &red));
+    assert!(count(&plain, &white) > count(&coloured, &white), "the labels were white before");
+}
