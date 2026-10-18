@@ -918,10 +918,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         ctx.set_cursor_icon(egui::CursorIcon::None);
     } else if show.zoom_arm || show.grid {
         ctx.set_cursor_icon(egui::CursorIcon::Crosshair);
+    } else if now - show.last_move > 2.5 && !show.reading {
+        // Idle first: a still pointer hides also over a clickable shape, such as a playing clip.
+        ctx.set_cursor_icon(egui::CursorIcon::None);
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
     } else if pointing {
         ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
-    } else if now - show.last_move > 2.5 && !show.reading {
-        ctx.set_cursor_icon(egui::CursorIcon::None);
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
     let pen_col = theme::to_color32(doc.show.pen_color);
@@ -1880,6 +1882,32 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
+
+    /// #968: over a shape a click acts on (a clip with its play trigger, a link) the pointing hand
+    /// never gave way to the idle hide, so a still pointer stayed on the playing video.
+    #[test]
+    fn a_still_cursor_hides_over_a_clickable_shape() {
+        let mut session = deckcraft_engine::Session::with_new();
+        let size = session.active().unwrap().doc.slide_size;
+        let r = session.execute("shape.insert", &json!({"preset": "rect", "rect": [0.0, 0.0, size.width, size.height]})).unwrap();
+        session.execute("insert.hyperlink", &json!({"url": "https://example.org", "ids": [r["id"]]})).unwrap();
+        let app = SlideApp::new(session, crate::Services::default());
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0)).with_step_dt(0.25).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        harness.run_steps(3);
+        harness.state_mut().start_show(0, false);
+        harness.run_steps(2);
+        harness.hover_at(pos2(500.0, 350.0));
+        harness.run_steps(2);
+        assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand);
+        harness.run_steps(12);
+        assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None, "still for 3 s: hidden");
+    }
 
     /// Send real egui key events to the presenter UI, without the audience window's handler.
     #[test]
