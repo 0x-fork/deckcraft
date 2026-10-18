@@ -1249,7 +1249,7 @@ fn insert(app: &mut SlideApp, ui: &mut Ui) {
             }
         });
         let r = big_button(ui, Icon::Icons, "Icons", enabled(app, "insert.icon"));
-        egui::Popup::menu(&r).width(340.0).show(|ui| icon_library(app, ui));
+        egui::Popup::menu(&r).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).width(340.0).show(|ui| icon_library(app, ui));
         big(app, ui, Icon::SmartArt, "SmartArt", "app.dialog", json!({"id": "smartart"}));
         let r = big_button(ui, Icon::Chart, "Chart", enabled(app, "insert.chart"));
         egui::Popup::menu(&r).show(|ui| {
@@ -3473,6 +3473,10 @@ mod effects_tests;
 #[cfg(test)]
 #[path = "master_layout_tests.rs"]
 mod master_layout_tests;
+
+#[cfg(test)]
+#[path = "icons_popup_tests.rs"]
+mod icons_popup_tests;
 
 #[cfg(test)]
 #[path = "align_tests.rs"]
