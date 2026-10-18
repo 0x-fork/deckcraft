@@ -1543,17 +1543,20 @@ impl Session {
         (off, guides)
     }
 
+    /// Snap the edges that resize handle `handle` drags in the resized box `x` to the smart guides.
     fn snap_resize(&mut self, x: Xfrm, _orig: &Xfrm, handle: u8, id: ShapeId, tol: f64) -> Xfrm {
         if x.rot != 0.0 {
             self.tool.guides.clear();
             return x;
         }
         let r = x.rect();
-        // Only the dragged edges move, so only they look for a line to snap to.
-        let moves_left = matches!(handle, 0 | 6 | 7);
-        let moves_right = matches!(handle, 2..=4);
-        let moves_top = matches!(handle, 0..=2);
-        let moves_bottom = matches!(handle, 4..=6);
+        // Only the dragged edges move, so only they look for a line to snap to. The handles sit in
+        // the box's unflipped frame: in a flipped box, also one that a drag past the opposite edge
+        // just flipped, the dragged handle is on the other side.
+        let (left, right) = (matches!(handle, 0 | 6 | 7), matches!(handle, 2..=4));
+        let (top, bottom) = (matches!(handle, 0..=2), matches!(handle, 4..=6));
+        let (moves_left, moves_right) = if x.flip_h { (right, left) } else { (left, right) };
+        let (moves_top, moves_bottom) = if x.flip_v { (bottom, top) } else { (top, bottom) };
         let (off, guides) = self.snap_edges(r, &[id], tol * 1.5, true, [moves_left, false, moves_right], [moves_top, false, moves_bottom]);
         let mut nx = x;
         if moves_left {
