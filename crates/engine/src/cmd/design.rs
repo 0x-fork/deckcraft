@@ -609,7 +609,9 @@ fn backgrounds_already(doc: &Presentation, sel: &crate::Selection, index: Option
             if all && bg.is_some() {
                 let masters = used_master_indices(doc);
                 let masters_match = !masters.is_empty() && masters.iter().all(|&idx| doc.masters.get(idx).is_some_and(|m| m.background == *bg));
-                slides_match && masters_match
+                let layouts_match = !masters.is_empty()
+                    && masters.iter().all(|&idx| doc.masters.get(idx).is_some_and(|m| m.layouts.iter().all(|l| l.background.is_none())));
+                slides_match && masters_match && layouts_match
             } else {
                 slides_match
             }
@@ -1909,6 +1911,37 @@ mod tests {
         assert_eq!(doc.masters[0].background, doc.slides[0].background);
         // Master 1 preserved!
         assert_eq!(doc.masters[1].background, Some(second_master_bg));
+    }
+
+    #[test]
+    fn background_all_clears_layout_overrides_even_if_slides_and_master_match() {
+        let mut s = Session::with_new();
+        s.execute("file.new", &json!({"theme": "Nocturne"})).unwrap();
+
+        // Set all slides and master to #AA0000
+        s.execute("design.background", &json!({"color": "#AA0000", "all": true})).unwrap();
+        assert_eq!(s.doc().unwrap().doc.masters[0].background, s.doc().unwrap().doc.slides[0].background);
+
+        // Add a layout override on layout 0
+        let custom_bg = Background::Fill { fill: Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0x12, 0x34, 0x56))) };
+        s.edit(|doc, _| {
+            let m = Arc::make_mut(&mut doc.masters[0]);
+            m.layouts[0].background = Some(custom_bg);
+            Ok(())
+        })
+        .unwrap();
+
+        // Re-run Apply to All with #AA0000. Must not be skipped as no-op; must clear layout override.
+        let n = undo_len(&s);
+        s.execute("design.background", &json!({"color": "#AA0000", "all": true})).unwrap();
+        assert_eq!(undo_len(&s), n + 1, "should execute and clear layout override, not treat as no-op");
+
+        let doc = &s.doc().unwrap().doc;
+        assert!(doc.masters[0].layouts[0].background.is_none());
+
+        // Now that layout override is cleared, repeating is an actual no-op
+        s.execute("design.background", &json!({"color": "#AA0000", "all": true})).unwrap();
+        assert_eq!(undo_len(&s), n + 1, "now it is truly a no-op");
     }
 }
 
