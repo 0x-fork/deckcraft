@@ -392,6 +392,13 @@ fn sane_reflection(r: &mut deckcraft_model::style::Reflection) {
     r.dist = effect_size(r.dist, MAX_REFLECTION);
 }
 
+/// Run properties a list style hands down to the text that inherits it.
+fn sane_list_style(ls: &mut deckcraft_model::text::ListStyle) {
+    for level in ls.levels.iter_mut().flatten() {
+        sane_run(&mut level.run);
+    }
+}
+
 fn sane_effects(e: &mut deckcraft_model::Effects) {
     for s in e.outer_shadow.iter_mut().chain(e.inner_shadow.iter_mut()) {
         sane_shadow(s);
@@ -420,6 +427,7 @@ fn sane_shapes(shapes: &mut [deckcraft_model::Shape], depth: usize) {
             sane_effects(e);
         }
         if let Some(t) = sh.text.as_mut() {
+            sane_list_style(&mut t.list_style);
             for para in &mut t.paragraphs {
                 sane_run(&mut para.end_props);
                 for r in &mut para.runs {
@@ -438,6 +446,9 @@ fn sane_shapes(shapes: &mut [deckcraft_model::Shape], depth: usize) {
                 sane_shapes(children, depth + 1);
             }
             deckcraft_model::ShapeKind::Table(t) => {
+                for cell in t.rows.iter_mut().flat_map(|r| r.cells.iter_mut()) {
+                    sane_list_style(&mut cell.text.list_style);
+                }
                 for para in t.rows.iter_mut().flat_map(|r| r.cells.iter_mut()).flat_map(|c| c.text.paragraphs.iter_mut()) {
                     sane_run(&mut para.end_props);
                     for r in &mut para.runs {
@@ -459,11 +470,20 @@ pub fn sane_numbers(p: &mut Presentation) {
             *slide = Arc::new(fixed);
         }
     }
+    // What text and shapes inherit: the deck's default text style, each master's title, body and
+    // other styles, and the theme's effect styles that shape styles point at.
+    sane_list_style(&mut p.default_text_style);
     for m in p.masters.iter_mut().chain(p.notes_master.iter_mut()).chain(p.handout_master.iter_mut()) {
         let mut fixed = (**m).clone();
         sane_shapes(&mut fixed.shapes, 0);
         for l in &mut fixed.layouts {
             sane_shapes(&mut l.shapes, 0);
+        }
+        for ls in [&mut fixed.title_style, &mut fixed.body_style, &mut fixed.other_style] {
+            sane_list_style(ls);
+        }
+        for e in &mut fixed.theme.format.effects {
+            sane_effects(e);
         }
         if fixed != **m {
             *m = Arc::new(fixed);

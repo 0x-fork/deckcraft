@@ -3660,6 +3660,25 @@ fn opening_a_file_caps_absurd_effect_sizes() {
                 r.props.glow = glow.clone();
             }
         }
+        // Inherited styles too: the deck default, a master's body style, a text box's own list
+        // style, and the theme's effect styles that shape styles point at.
+        let level = deckcraft_model::text::LevelStyle {
+            run: deckcraft_model::text::RunProps {
+                glow: Some(Glow { color: deckcraft_model::style::ColorRef::rgb(deckcraft_color::Rgba::BLACK), radius: huge }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        doc.default_text_style.set(0, level.clone());
+        let m = std::sync::Arc::make_mut(&mut doc.masters[0]);
+        m.body_style.set(0, level.clone());
+        if let Some(fx) = m.theme.format.effects.first_mut() {
+            fx.glow = Some(Glow { color: deckcraft_model::style::ColorRef::rgb(deckcraft_color::Rgba::BLACK), radius: huge });
+        }
+        let list = crate::shapes_mut(doc, sel).unwrap();
+        if let Some(t) = list.iter_mut().find_map(|sh| sh.text.as_mut()) {
+            t.list_style.set(0, level);
+        }
         Ok(())
     })
     .unwrap();
@@ -3689,6 +3708,16 @@ fn opening_a_file_caps_absurd_effect_sizes() {
                 glows.extend(cells.flat_map(|p| p.runs.iter()).filter_map(|r| r.props.glow.as_ref().map(|g| g.radius)));
             }
         });
+        let inherited = |ls: &deckcraft_model::text::ListStyle| {
+            ls.levels.iter().flatten().filter_map(|l| l.run.glow.as_ref().map(|g| g.radius)).collect::<Vec<_>>()
+        };
+        glows.extend(inherited(&st.doc.default_text_style));
+        let m = &st.doc.masters[0];
+        for ls in [&m.title_style, &m.body_style, &m.other_style] {
+            glows.extend(inherited(ls));
+        }
+        glows.extend(m.theme.format.effects.iter().filter_map(|e| e.glow.as_ref().map(|g| g.radius)));
+        deckcraft_model::walk(&slide.shapes, &mut |sh, _| glows.extend(sh.text.iter().flat_map(|t| inherited(&t.list_style))));
         assert!(!glows.is_empty(), "{format}: the glows were kept");
         assert!(glows.iter().all(|g| (0.0..=150.0).contains(g)), "{format}: {glows:?}");
         // Capped, the slide renders (checked last: uncapped, this is what ran out of memory).
