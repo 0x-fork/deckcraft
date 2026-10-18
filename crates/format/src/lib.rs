@@ -350,6 +350,66 @@ fn sane_xfrm(x: &mut deckcraft_model::Xfrm) {
 
 fn sane_run(p: &mut deckcraft_model::text::RunProps) {
     p.size = p.size.filter(|v| v.is_finite() && *v > 0.0).map(|v| v.clamp(1.0, 4000.0));
+    for s in p.shadow.iter_mut().chain(p.inner_shadow.iter_mut()) {
+        sane_shadow(s);
+    }
+    if let Some(g) = p.glow.as_mut() {
+        g.radius = effect_size(g.radius, MAX_GLOW);
+    }
+    if let Some(r) = p.reflection.as_mut() {
+        sane_reflection(r);
+    }
+    p.soft_edge = p.soft_edge.map(|v| effect_size(v, MAX_SOFT_EDGE));
+}
+
+/// The largest effect sizes, in points: what Format Shape and `shape.effects` allow. A file can
+/// say anything, and the renderer's memory grows with these (a glow of 10^18 pt asked for 34 GB).
+const MAX_GLOW: f64 = 150.0;
+const MAX_SOFT_EDGE: f64 = 100.0;
+const MAX_SHADOW: f64 = 200.0;
+const MAX_REFLECTION: f64 = 100.0;
+
+/// `v` within 0..=`max`; not a number is 0.
+fn effect_size(v: f64, max: f64) -> f64 {
+    if v.is_finite() { v.clamp(0.0, max) } else { 0.0 }
+}
+
+fn sane_shadow(s: &mut deckcraft_model::style::Shadow) {
+    s.blur = effect_size(s.blur, MAX_SHADOW);
+    s.dist = effect_size(s.dist, MAX_SHADOW);
+    s.dir = if s.dir.is_finite() { s.dir.rem_euclid(360.0) } else { 0.0 };
+    // Perspective scale (1 = 100%) and skew (degrees).
+    for v in [&mut s.sx, &mut s.sy] {
+        *v = if v.is_finite() { v.clamp(-10.0, 10.0) } else { 1.0 };
+    }
+    for v in [&mut s.kx, &mut s.ky] {
+        *v = if v.is_finite() { v.clamp(-89.0, 89.0) } else { 0.0 };
+    }
+}
+
+fn sane_reflection(r: &mut deckcraft_model::style::Reflection) {
+    r.blur = effect_size(r.blur, MAX_REFLECTION);
+    r.dist = effect_size(r.dist, MAX_REFLECTION);
+}
+
+/// Run properties a list style hands down to the text that inherits it.
+fn sane_list_style(ls: &mut deckcraft_model::text::ListStyle) {
+    for level in ls.levels.iter_mut().flatten() {
+        sane_run(&mut level.run);
+    }
+}
+
+fn sane_effects(e: &mut deckcraft_model::Effects) {
+    for s in e.outer_shadow.iter_mut().chain(e.inner_shadow.iter_mut()) {
+        sane_shadow(s);
+    }
+    if let Some(g) = e.glow.as_mut() {
+        g.radius = effect_size(g.radius, MAX_GLOW);
+    }
+    e.soft_edge = e.soft_edge.map(|v| effect_size(v, MAX_SOFT_EDGE));
+    if let Some(r) = e.reflection.as_mut() {
+        sane_reflection(r);
+    }
 }
 
 fn sane_shapes(shapes: &mut [deckcraft_model::Shape], depth: usize) {
@@ -363,7 +423,11 @@ fn sane_shapes(shapes: &mut [deckcraft_model::Shape], depth: usize) {
         if let Some(l) = sh.line.as_mut() {
             l.width = l.width.filter(|v| v.is_finite() && *v >= 0.0).map(|v| v.min(1584.0));
         }
+        if let Some(e) = sh.effects.as_mut() {
+            sane_effects(e);
+        }
         if let Some(t) = sh.text.as_mut() {
+            sane_list_style(&mut t.list_style);
             for para in &mut t.paragraphs {
                 sane_run(&mut para.end_props);
                 for r in &mut para.runs {
@@ -381,6 +445,17 @@ fn sane_shapes(shapes: &mut [deckcraft_model::Shape], depth: usize) {
                 sane_xfrm(child);
                 sane_shapes(children, depth + 1);
             }
+            deckcraft_model::ShapeKind::Table(t) => {
+                for cell in t.rows.iter_mut().flat_map(|r| r.cells.iter_mut()) {
+                    sane_list_style(&mut cell.text.list_style);
+                }
+                for para in t.rows.iter_mut().flat_map(|r| r.cells.iter_mut()).flat_map(|c| c.text.paragraphs.iter_mut()) {
+                    sane_run(&mut para.end_props);
+                    for r in &mut para.runs {
+                        sane_run(&mut r.props);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -395,11 +470,20 @@ pub fn sane_numbers(p: &mut Presentation) {
             *slide = Arc::new(fixed);
         }
     }
+    // What text and shapes inherit: the deck's default text style, each master's title, body and
+    // other styles, and the theme's effect styles that shape styles point at.
+    sane_list_style(&mut p.default_text_style);
     for m in p.masters.iter_mut().chain(p.notes_master.iter_mut()).chain(p.handout_master.iter_mut()) {
         let mut fixed = (**m).clone();
         sane_shapes(&mut fixed.shapes, 0);
         for l in &mut fixed.layouts {
             sane_shapes(&mut l.shapes, 0);
+        }
+        for ls in [&mut fixed.title_style, &mut fixed.body_style, &mut fixed.other_style] {
+            sane_list_style(ls);
+        }
+        for e in &mut fixed.theme.format.effects {
+            sane_effects(e);
         }
         if fixed != **m {
             *m = Arc::new(fixed);
