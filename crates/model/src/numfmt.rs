@@ -253,7 +253,7 @@ fn fixed(toks: &[Tok], first: usize, last: usize, v: f64, sep: char, dec: char) 
     let grouping = int_part.iter().any(|t| *t == Tok::Comma || matches!(t, Tok::Lit(s) if s.trim().is_empty()));
     // Commas right after the last digit scale by a thousand each (`#,##0,` = thousands).
     let after = toks.get(last + 1..).unwrap_or(&[]);
-    let scale_commas = if dot.is_none() { after.iter().take_while(|t| **t == Tok::Comma).count() } else { 0 };
+    let scale_commas = after.iter().take_while(|t| **t == Tok::Comma).count();
     let min_int = int_part.iter().filter(|t| **t == Tok::Digit('0')).count();
     let frac_digits: Vec<char> = frac_part.iter().filter_map(|t| if let Tok::Digit(c) = t { Some(*c) } else { None }).collect();
     let max_frac = frac_digits.len();
@@ -312,6 +312,12 @@ mod tests {
         assert_eq!(format("0;0", -3.0, None), "3");
         assert_eq!(format("0", -3.0, None), "-3");
         assert_eq!(format("\"x\"0", 5.0, None), "x5");
+    }
+
+    #[test]
+    fn trailing_commas_with_decimals() {
+        assert_eq!(format("0.0,,", 15_000_000.0, Some("en-US")), "15.0");
+        assert_eq!(format("0.00,\"K\"", 15_000.0, Some("en-US")), "15.00K");
     }
 
     #[test]
