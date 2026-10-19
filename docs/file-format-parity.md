@@ -1,6 +1,6 @@
 # File-format parity with PowerPoint
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-15 · **Change:** major (community PR wave 2026-10-14: seven owned PPTX corpus files, embedded fonts, EMF/WMF clip regions, threaded comments (#70), chart trendlines and workbooks (#335), SmartArt written as a diagram, tags and custom XML kept, picture export DPI; duplicated rows and headers folded; previous: trivial, lines in scaled groups, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-18 · **Change:** minor (native chart payloads stored in bounded ZIP members; previous: major, community PR wave 2026-10-14: seven owned PPTX corpus files, embedded fonts, EMF/WMF clip regions, threaded comments (#70), chart trendlines and workbooks (#335), SmartArt written as a diagram, tags and custom XML kept, picture export DPI; duplicated rows and headers folded; previous: trivial, lines in scaled groups, #233) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Every format PowerPoint reads or writes, DeckCraft's support, fidelity and how it is tested.
 Gaps are itemized in [gaps.md](gaps.md#file-formats). Dimension score: **~58% ready**
@@ -33,6 +33,22 @@ PowerPoint opens and saves; Viewer = opens only).
 | Print | yes | n/a | no | PR #66 (browser) open | none |
 
 ## Pictures and media inside decks
+
+Native files retain a nonempty chart `kept` sidecar: relationships, part names, content types
+and `nativeEntry` references live in `presentation.json`; exact binary payloads live in distinct
+`chart-parts/<index>` ZIP members. This keeps workbooks and drawings through a native save before
+exporting back to PPTX without expanding workbook bytes into JSON numbers. Chart parts and
+media share the 4 GiB inflated-byte and 100,000-item budgets; each member is read through the
+existing 2 GiB entry limit. Missing chart members are reported by `load_checked` and left empty.
+A present chart member that fails decoding, CRC or its entry limit refuses the file immediately,
+so later corrupt members cannot reuse the remaining inflation budget. Invalid, reused or
+ambiguous references are refused. A synthetic 3 MiB payload test
+checks the ZIP layout and bounded reads, alongside shared-budget and all-owner round trips.
+
+Older native files without a sidecar still load. Earlier inline chart byte arrays are read
+under the existing manifest-size limit, then charged to the shared budget; saving migrates them
+to ZIP members. Builds predating chart-sidecar support ignore it and lose it on resave. The
+intermediate build that required inline `bytes` cannot read the new referenced representation.
 
 | Kind | PowerPoint | DeckCraft | Notes |
 |---|---|---|---|
@@ -103,6 +119,8 @@ the round trip even though DeckCraft doesn't model it.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
+| 2026-10-15 | trivial | Native `.deckcraft` files serialize a nonempty chart `kept` sidecar (relationships, part names, content types and bytes). Older files without it still load; empty sidecars are omitted. Headless PPTX → edit → native save/reopen → PPTX checks keep the workbook and drawing bytes; editing chart data still drops the stale workbook |
 | 2026-10-15 | trivial | PPTX interactive timing sequences keep later On Click steps and paragraph click builds (`trigger_steps.rs`); mixed starts and independent buttons survive import/edit/save/reopen |
 | 2026-10-15 | minor | A `.pptx` slide that can't be read is reported instead of dropped in silence: `file.open` and `file.openBytes` return `lostSlides`, the app shows a message and opens a repaired copy (Save asks for a new name), and `deckcraft-cli` warns on stderr (#203) |
 | 2026-10-16 | minor | PNG slide export with a transparent background (#784) |
