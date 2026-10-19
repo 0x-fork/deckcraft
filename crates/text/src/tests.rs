@@ -969,6 +969,35 @@ fn symbol_font_remaps_private_use_to_real_unicode() {
     }
 }
 
+#[test]
+fn symbol_font_draw_falls_back_to_ascii() {
+    // 0x3C–0x3F are plain ASCII < = > ? in Adobe's symbol encoding (≤ ≥ ∞ sit at 0xA3/0xB3/0xA5 and
+    // ∴ at 0x5C), so a document's "a<b" set in Symbol must draw "a<b", not "a≤b". ASCII codes with no
+    // table entry draw themselves too: U+F031 is "1", U+F028 "(". Skipped without an installed
+    // Symbol face.
+    let db = FontDb::global();
+    if !db.has_family("Symbol") {
+        eprintln!("skipped: no Symbol font installed");
+        return;
+    }
+    let face = db.face("Symbol", "Regular");
+    for &code in &[0x3C, 0x3D, 0x3E, 0x3F, 0x31, 0x28, 0x30, 0x2B] {
+        let pua = char::from_u32(0xF000 | code).unwrap();
+        let ascii = char::from_u32(code).unwrap();
+        let drawn = symbol_font_draw(&face, code);
+        if face.covers(pua) {
+            // Windows Symbol covers its private-use block; that glyph wins.
+            assert_eq!(drawn, Some(pua), "the face's private-use glyph wins for 0x{code:02X}");
+        } else if face.covers(ascii) {
+            // Apple's Symbol (no PUA cmap) draws the ASCII character itself, never a remap of
+            // 0x3C–0x3F to ≤ ≥ ∞ ∴.
+            assert_eq!(drawn, Some(ascii), "Symbol code 0x{code:02X} must draw its ASCII character");
+        } else {
+            assert_eq!(drawn, None, "0x{code:02X} has no glyph in this Symbol face");
+        }
+    }
+}
+
 /// Every entry of the Adobe Symbol encoding table, in full. Pure and platform-independent: the
 /// table maps a Symbol code to its real Unicode character regardless of any installed font, so this
 /// runs on every machine. Guarded against typos in `symbol_unicode` (e.g. 0x40 must be U+2245, the
@@ -980,7 +1009,7 @@ fn symbol_unicode_table_covers_the_adobe_encoding() {
     // glyphs have no standard Unicode point, so `symbol_unicode` returns None for them.
     let table: &[(u32, u32)] = &[
         // 0x20–0x7E: the few mathematical ones among the ASCII-range characters.
-        (0x22, 0x2200), (0x24, 0x2203), (0x27, 0x220B), (0x2A, 0x2217), (0x2D, 0x2212), (0x3C, 0x2264), (0x3D, 0x2265), (0x3E, 0x221E), (0x3F, 0x2234), (0x40, 0x2245),
+        (0x22, 0x2200), (0x24, 0x2203), (0x27, 0x220B), (0x2A, 0x2217), (0x2D, 0x2212), (0x40, 0x2245),
         (0x5C, 0x2234), (0x5E, 0x22A5), (0x7E, 0x223C),
         // 0x41–0x5A: Greek uppercase.
         (0x41, 0x0391), (0x42, 0x0392), (0x43, 0x03A7), (0x44, 0x0394), (0x45, 0x0395), (0x46, 0x03A6), (0x47, 0x0393), (0x48, 0x0397), (0x49, 0x0399), (0x4A, 0x03D1),
@@ -1011,7 +1040,7 @@ fn symbol_unicode_table_covers_the_adobe_encoding() {
     // ASCII codes pass through as themselves (symbol_unicode has no entry), and the CUS fragment
     // codes return None: 0x60 radical extender, 0xBD/0xBE arrow extenders, 0xD2–0xD4 serif marks,
     // 0xE2–0xE4 sans-serif marks and the paren/bracket extender run 0xE6–0xFF.
-    for code in [0x20, 0x21, 0x23, 0x25, 0x26, 0x28, 0x29, 0x2B, 0x2C, 0x2E, 0x2F, 0x30, 0x31, 0x39, 0x3A, 0x3B, 0x5B, 0x5D, 0x5F, 0x7B, 0x7C, 0x7D] {
+    for code in [0x20, 0x21, 0x23, 0x25, 0x26, 0x28, 0x29, 0x2B, 0x2C, 0x2E, 0x2F, 0x30, 0x31, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x5B, 0x5D, 0x5F, 0x7B, 0x7C, 0x7D] {
         assert_eq!(symbol_unicode(code), None, "ASCII code 0x{code:02X} has no Symbol remap");
     }
     for code in [0x60, 0xBD, 0xBE, 0xD2, 0xD3, 0xD4, 0xE2, 0xE3, 0xE4, 0xE6, 0xE7, 0xE8, 0xE9, 0xEA, 0xEB, 0xEC, 0xED, 0xEE, 0xEF, 0xF0, 0xF4, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF] {

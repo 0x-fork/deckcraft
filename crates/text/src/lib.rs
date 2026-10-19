@@ -1145,10 +1145,10 @@ fn is_symbol_font(family: &str) -> bool {
 
 /// Does `face` draw the symbol-font character `c` (a U+F0xx private-use code)? Either directly at
 /// the PUA, or, when the face has no private-use mapping (Apple's "Symbol" maps its glyphs to real
-/// Unicode), at the Adobe Symbol encoding's real character.
+/// Unicode), at the Adobe Symbol encoding's real character, or at the ASCII character itself when
+/// `c`'s code is plain printable ASCII (0x20–0x7E with no table entry).
 fn covers_symbol(face: &FontFace, c: char) -> bool {
-    let code = (c as u32) & 0xFF;
-    face.covers(c) || symbol_unicode(code).is_some_and(|u| char::from_u32(u).is_some_and(|r| face.covers(r)))
+    symbol_font_draw(face, (c as u32) & 0xFF).is_some()
 }
 
 /// The character `ch` is drawn as when the item's face is the `a:sym` symbol font `sym`: a U+F0xx
@@ -1183,10 +1183,6 @@ const fn symbol_unicode(code: u32) -> Option<u32> {
         0x27 => 0x220B,
         0x2A => 0x2217,
         0x2D => 0x2212,
-        0x3C => 0x2264,
-        0x3D => 0x2265,
-        0x3E => 0x221E,
-        0x3F => 0x2234,
         0x40 => 0x2245,
         0x5C => 0x2234,
         0x5E => 0x22A5,
@@ -1321,19 +1317,31 @@ const fn symbol_unicode(code: u32) -> Option<u32> {
 
 /// The character the symbol font draws the code `code` at, when the installed `face` is that font:
 /// its private-use code U+F000 + code, or, when the face has no private-use mapping (Apple's
-/// "Symbol" maps its glyphs to real Unicode), the Adobe Symbol encoding's real character.
+/// "Symbol" maps its glyphs to real Unicode), the Adobe Symbol encoding's real character. Printable
+/// ASCII with no table entry (the `< = > ?` codes among them) passes through as its own character
+/// when the face covers it.
 fn symbol_font_draw(face: &FontFace, code: u32) -> Option<char> {
-    let pua = char::from_u32(0xF000 | (code & 0xFF))?;
+    let code = code & 0xFF;
+    let pua = char::from_u32(0xF000 | code)?;
     if face.covers(pua) {
         return Some(pua);
     }
-    let real = symbol_unicode(code & 0xFF)?;
-    let real = char::from_u32(real)?;
-    if face.covers(real) {
-        Some(real)
-    } else {
-        None
+    if let Some(real) = symbol_unicode(code) {
+        let real = char::from_u32(real)?;
+        if face.covers(real) {
+            return Some(real);
+        }
+        return None;
     }
+    // 0x20–0x7E with no table entry draw the ASCII character itself (the Symbol font's glyphs for
+    // "< = > ?" etc. sit at their own ASCII codes, not at a remapped Unicode point).
+    if (0x20..=0x7E).contains(&code) {
+        let ascii = char::from_u32(code)?;
+        if face.covers(ascii) {
+            return Some(ascii);
+        }
+    }
+    None
 }
 
 /// The character to draw bullet `c` with the installed symbol font `face`, when `font` names a
