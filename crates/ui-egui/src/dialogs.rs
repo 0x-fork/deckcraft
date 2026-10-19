@@ -3684,3 +3684,7 @@ mod spelling_tests;
 #[cfg(test)]
 #[path = "paragraph_dialog_tests.rs"]
 mod paragraph_dialog_tests;
+
+#[cfg(test)]
+#[path = "preferences_tests.rs"]
+mod preferences_tests;
