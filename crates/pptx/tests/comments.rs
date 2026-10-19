@@ -231,6 +231,15 @@ fn every_written_xml_part_binds_its_prefixes() {
             match r.read_resolved_event() {
                 Ok((ns, Event::Start(e) | Event::Empty(e))) => {
                     assert!(!matches!(ns, ResolveResult::Unknown(_)), "{name}: unbound prefix on <{}>", String::from_utf8_lossy(e.name().as_ref()));
+                    for attr in e.attributes() {
+                        let attr = attr.unwrap_or_else(|err| panic!("{name}: bad attribute: {err}"));
+                        let (ns, _) = r.resolver().resolve_attribute(attr.key);
+                        assert!(
+                            !matches!(ns, ResolveResult::Unknown(_)),
+                            "{name}: unbound prefix on attribute {}",
+                            String::from_utf8_lossy(attr.key.as_ref())
+                        );
+                    }
                 }
                 Ok((_, Event::Eof)) => break,
                 Ok(_) => {}
