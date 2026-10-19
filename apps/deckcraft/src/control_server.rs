@@ -176,15 +176,22 @@ fn is_http_request_line(text: &str) -> bool {
 /// already queued for the peer is discarded and it sees only the reset. Sending the FIN first and
 /// then draining, briefly and boundedly, makes the close orderly and the reason survive.
 fn close_politely(out: &TcpStream, reader: &mut BufReader<TcpStream>, grace: Duration) {
-    if out.shutdown(Shutdown::Write).is_err() || out.set_read_timeout(Some(grace)).is_err() {
+    if out.shutdown(Shutdown::Write).is_err() {
         return;
     }
     // Enough for a pipelined line or two; a peer that keeps talking is dropped at the deadline.
+    // The timeout is what is left of the grace before each read, not the whole of it: a peer that
+    // sends a byte just before each one expires would otherwise hold this thread, and its slot,
+    // for close to twice as long as the deadline says.
     const MAX_DRAIN: usize = 64 << 10;
     let until = Instant::now() + grace;
     let mut sink = [0u8; 4 << 10];
     let mut drained = 0;
-    while drained < MAX_DRAIN && Instant::now() < until {
+    while drained < MAX_DRAIN {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() || out.set_read_timeout(Some(left)).is_err() {
+            break;
+        }
         match reader.read(&mut sink) {
             Ok(0) | Err(_) => break,
             Ok(n) => drained += n,
