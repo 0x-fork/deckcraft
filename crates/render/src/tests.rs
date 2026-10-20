@@ -1972,6 +1972,37 @@ fn text_in_a_scaled_group_keeps_its_point_size() {
 }
 
 #[test]
+fn rounded_corners_in_a_stretched_group_stay_round() {
+    // #1083: a group that stretches its child space 4x across makes a rounded rectangle wider on
+    // the slide, but its corners stay circular, like a plain rounded rectangle of that size.
+    let round = |id: u32, w: f64, h: f64| Shape {
+        id: ShapeId(id),
+        xfrm: Some(Xfrm::new(0.0, 0.0, w, h)),
+        geom: Geom::Preset { name: "roundRect".into(), adj: vec![16667.0] },
+        fill: Some(Fill::solid(ColorRef::rgb(deckcraft_color::Rgba::BLACK))),
+        line: Some(deckcraft_model::style::Line { fill: Some(Fill::None), ..Default::default() }),
+        ..Default::default()
+    };
+    let render = |sh: Shape| {
+        let mut p = Presentation::default();
+        std::sync::Arc::make_mut(&mut p.slides[0]).shapes = vec![sh];
+        render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let mut plain = round(700, 400.0, 100.0);
+    plain.xfrm = Some(Xfrm::new(100.0, 100.0, 400.0, 100.0));
+    let plain = render(plain);
+    let grouped = render(Shape {
+        id: ShapeId(701),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 100.0)),
+        kind: ShapeKind::Group { children: vec![round(702, 100.0, 100.0)], child: Xfrm::new(0.0, 0.0, 100.0, 100.0) },
+        ..Default::default()
+    });
+    for (x, y) in [(120, 102), (102, 120), (480, 102), (498, 180), (120, 198)] {
+        assert_eq!(plain.pixel(x, y), grouped.pixel(x, y), "pixel ({x},{y}) of a roundRect in a stretched group");
+    }
+}
+
+#[test]
 fn a_fill_overlay_blends_over_the_fill() {
     // `a:fillOverlay blend="mult"`: a 50% grey multiplied over a light fill darkens it; "screen"
     // lightens a dark one; the overlay stays inside the shape.
