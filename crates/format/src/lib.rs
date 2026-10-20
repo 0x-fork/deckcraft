@@ -660,6 +660,7 @@ pub fn slides_to_outline(p: &Presentation) -> String {
             if let ShapeKind::Table(t) = &sh.kind {
                 for row in &t.rows {
                     let cells: Vec<String> = row.cells.iter().map(|c| c.text.text().replace(['\u{b}', '\n'], " ")).collect();
+                    out.push('\t');
                     out.push_str(&cells.join("\t"));
                     out.push('\n');
                 }
@@ -1086,4 +1087,28 @@ fn outline_includes_table_text() {
     assert!(out.contains("Text box body"), "{out}");
     assert!(out.contains("Cell A1\tCell B1"), "{out}");
     assert!(out.contains("Cell A2\tCell B2"), "{out}");
+}
+
+#[test]
+fn outline_table_rows_are_indented_and_do_not_become_slides() {
+    use deckcraft_model::table::{Cell, Row, Table};
+    use deckcraft_model::{Shape, ShapeKind, Xfrm};
+    let mut p = defaults::new_presentation(None);
+    let layout = defaults::layout_of_kind(&p, LayoutType::TitleAndContent).unwrap();
+    let mut s = defaults::new_slide(&mut p, layout).expect("slide");
+    s.shapes.retain(|sh| !sh.ph_type().is_some_and(|k| k.is_title()));
+    let mut table = Table { cols: vec![200.0, 200.0], ..Default::default() };
+    for texts in [["A1", "B1"], ["A2", "B2"]] {
+        let cells: Vec<Cell> = texts.iter().map(|t| Cell { text: TextBody::from_text(t), ..Default::default() }).collect();
+        table.rows.push(Row { height: 30.0, cells });
+    }
+    let mut tbl = Shape { xfrm: Some(Xfrm::new(0.0, 100.0, 400.0, 60.0)), ..Default::default() };
+    tbl.kind = ShapeKind::Table(table);
+    s.shapes.push(tbl);
+    p.slides = vec![std::sync::Arc::new(s)];
+
+    let out = slides_to_outline(&p);
+    let mut q = defaults::new_presentation(None);
+    q.slides.clear();
+    assert_eq!(outline_to_slides(&mut q, &out), 0, "table rows became slides: {out:?}");
 }
