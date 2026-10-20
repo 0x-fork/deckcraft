@@ -938,6 +938,27 @@ fn an_installed_symbol_font_draws_its_own_bullet() {
 }
 
 #[test]
+fn symbol_font_char_keeps_covered_non_symbol_bullets() {
+    // `Bullet::Char.char` is unrestricted text; the PPTX reader stores `buChar` directly. A bullet
+    // such as U+2022 • must draw its own covered glyph, never a low-byte remap (0x22 → FOR ALL)
+    // to an unrelated Symbol code. Skipped when the face doesn't cover U+2022.
+    let db = FontDb::global();
+    if !db.has_family("Symbol") {
+        eprintln!("skipped: no Symbol font installed");
+        return;
+    }
+    let face = db.face("Symbol", "Regular");
+    if !face.covers('•') {
+        eprintln!("skipped: installed Symbol face lacks U+2022");
+        return;
+    }
+    assert_eq!(symbol_font_char(&face, "•", Some("Symbol")), Some('•'), "U+2022 draws itself, not a low-byte remap");
+    // A real symbol code still takes the mapping.
+    let f0de = String::from_utf8(vec![0xEF, 0x83, 0x9E]).unwrap(); // U+F0DE
+    assert_eq!(symbol_font_char(&face, &f0de, Some("Symbol")), symbol_font_draw(&face, 0xDE));
+}
+
+#[test]
 fn symbol_char_maps_symbol_font_codes() {
     // Inter is not a symbol font, so the codes map to look-alikes.
     let face = FontDb::global().face("Inter", "Regular");
@@ -998,6 +1019,44 @@ fn symbol_font_draw_falls_back_to_ascii() {
     }
 }
 
+#[test]
+fn symbol_font_draw_tries_apple_alternatives() {
+    // Apple's Symbol maps a few codes differently from Adobe: 0xA4 (fraction slash) to U+2044
+    // instead of Adobe's U+2215, and 0xE1/0xF1 (angle brackets) to U+3008/U+3009 instead of
+    // U+2329/U+232A. When the installed face doesn't cover the Adobe character, the alternative is
+    // tried before giving up. Skipped without an installed Symbol face.
+    let db = FontDb::global();
+    if !db.has_family("Symbol") {
+        eprintln!("skipped: no Symbol font installed");
+        return;
+    }
+    let face = db.face("Symbol", "Regular");
+    for &(code, adobe, alt) in &[(0xA4, '\u{2215}', '\u{2044}'), (0xE1, '\u{2329}', '\u{3008}'), (0xF1, '\u{232A}', '\u{3009}')] {
+        let pua = char::from_u32(0xF000 | code).unwrap();
+        let drawn = symbol_font_draw(&face, code);
+        if face.covers(pua) {
+            assert_eq!(drawn, Some(pua), "the face's private-use glyph wins for 0x{code:02X}");
+        } else if face.covers(adobe) {
+            assert_eq!(drawn, Some(adobe), "Adobe U+{:04X} wins for 0x{code:02X} when covered", adobe as u32);
+        } else {
+            assert_eq!(drawn, Some(alt), "Apple alternative U+{:04X} is tried for 0x{code:02X}", alt as u32);
+        }
+    }
+}
+
+#[test]
+fn symbol_unicode_maps_the_euro() {
+    // Adobe symbol.txt: 20AC A0 # EURO SIGN. The euro is the one currency symbol in the encoding.
+    assert_eq!(symbol_unicode(0xA0), Some(0x20AC));
+    // Apple alternatives are tried in order for 0xA4/0xE1/0xF1.
+    assert_eq!(symbol_unicode_alts(0xA4), &[0x2044u32]);
+    assert_eq!(symbol_unicode_alts(0xE1), &[0x3008u32]);
+    assert_eq!(symbol_unicode_alts(0xF1), &[0x3009u32]);
+    assert_eq!(symbol_unicode_alts(0x44), &[] as &[u32]);
+    assert_eq!(symbol_unicode_alts(0x57), &[] as &[u32]);
+    assert_eq!(symbol_unicode_alts(0x6D), &[] as &[u32]);
+}
+
 /// Every entry of the Adobe Symbol encoding table, in full. Pure and platform-independent: the
 /// table maps a Symbol code to its real Unicode character regardless of any installed font, so this
 /// runs on every machine. Guarded against typos in `symbol_unicode` (e.g. 0x40 must be U+2245, the
@@ -1019,8 +1078,8 @@ fn symbol_unicode_table_covers_the_adobe_encoding() {
         (0x61, 0x03B1), (0x62, 0x03B2), (0x63, 0x03C7), (0x64, 0x03B4), (0x65, 0x03B5), (0x66, 0x03C6), (0x67, 0x03B3), (0x68, 0x03B7), (0x69, 0x03B9), (0x6A, 0x03D5),
         (0x6B, 0x03BA), (0x6C, 0x03BB), (0x6D, 0x03BC), (0x6E, 0x03BD), (0x6F, 0x03BF), (0x70, 0x03C0), (0x71, 0x03B8), (0x72, 0x03C1), (0x73, 0x03C3), (0x74, 0x03C4),
         (0x75, 0x03C5), (0x76, 0x03D6), (0x77, 0x03C9), (0x78, 0x03BE), (0x79, 0x03C8), (0x7A, 0x03B6),
-        // 0xA1–0xAF: Greek upsilon with hook, primes, math, suits and arrows.
-        (0xA1, 0x03D2), (0xA2, 0x2032), (0xA3, 0x2264), (0xA4, 0x2215), (0xA5, 0x221E), (0xA6, 0x0192), (0xA7, 0x2663), (0xA8, 0x2666), (0xA9, 0x2665), (0xAA, 0x2660),
+        // 0xA0–0xAF: euro, Greek upsilon with hook, primes, math, suits and arrows.
+        (0xA0, 0x20AC), (0xA1, 0x03D2), (0xA2, 0x2032), (0xA3, 0x2264), (0xA4, 0x2215), (0xA5, 0x221E), (0xA6, 0x0192), (0xA7, 0x2663), (0xA8, 0x2666), (0xA9, 0x2665), (0xAA, 0x2660),
         (0xAB, 0x2194), (0xAC, 0x2190), (0xAD, 0x2191), (0xAE, 0x2192), (0xAF, 0x2193),
         // 0xB0–0xBC: degree, plus-minus, double prime, math and ellipsis.
         (0xB0, 0x00B0), (0xB1, 0x00B1), (0xB2, 0x2033), (0xB3, 0x2265), (0xB4, 0x00D7), (0xB5, 0x221D), (0xB6, 0x2202), (0xB7, 0x2022), (0xB8, 0x00F7), (0xB9, 0x2260),

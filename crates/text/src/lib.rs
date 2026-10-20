@@ -1168,13 +1168,14 @@ fn symbol_map_char(face: &FontFace, ch: char, sym: Option<&str>) -> Option<char>
 }
 
 /// The real-Unicode character the Symbol font's code `code` (0x00–0xFF) maps to, in the Adobe
-/// Symbol encoding (Unicode, Inc.'s `MAPPINGS/VENDORS/ADOBE/symbol.txt`; Apple's Mac OS Symbol is
-/// laid out identically): the codes a document stores as U+F000 + code draw the same glyphs at
-/// these Unicode points. Apple's "Symbol" on macOS has no private-use mapping at all — it maps the
-/// glyphs to these real characters instead — so a document's U+F0xx symbol characters must be
-/// remapped to them there (PowerPoint does the same against whatever the installed Symbol font
-/// covers). Only the non-ASCII, non-CUS entries are listed: printable ASCII passes through as its
-/// own code, and the CUS (Corporate Use Subarea) fragment glyphs have no standard Unicode point.
+/// Symbol encoding (Unicode, Inc.'s `MAPPINGS/VENDORS/ADOBE/symbol.txt`; Apple's Mac OS Symbol
+/// shares this layout, with a few alternative Unicode choices — see `symbol_unicode_alts`): the
+/// codes a document stores as U+F000 + code draw the same glyphs at these Unicode points. Apple's
+/// "Symbol" on macOS has no private-use mapping at all — it maps the glyphs to these real characters
+/// instead — so a document's U+F0xx symbol characters must be remapped to them there (PowerPoint
+/// does the same against whatever the installed Symbol font covers). Only the non-ASCII, non-CUS
+/// entries are listed: printable ASCII passes through as its own code, and the CUS (Corporate Use
+/// Subarea) fragment glyphs have no standard Unicode point.
 const fn symbol_unicode(code: u32) -> Option<u32> {
     Some(match code {
         // 0x20–0x7E: the few mathematical ones among the ASCII-range characters.
@@ -1241,7 +1242,8 @@ const fn symbol_unicode(code: u32) -> Option<u32> {
         0x78 => 0x03BE,
         0x79 => 0x03C8,
         0x7A => 0x03B6,
-        // 0xA1–0xAF: Greek upsilon with hook, primes, math, suits and arrows.
+        // 0xA0–0xAF: euro, Greek upsilon with hook, primes, math, suits and arrows.
+        0xA0 => 0x20AC,
         0xA1 => 0x03D2,
         0xA2 => 0x2032,
         0xA3 => 0x2264,
@@ -1315,11 +1317,25 @@ const fn symbol_unicode(code: u32) -> Option<u32> {
     })
 }
 
+/// Apple's Mac OS Symbol (which shares the Adobe layout) diverges from the Adobe table on a few
+/// codes: it maps the fraction slash to U+2044 and the angle brackets to U+3008/U+3009 instead of
+/// Adobe's U+2215/U+2329/U+232A. `symbol_font_draw` tries these alternatives after the Adobe
+/// mapping when the installed face doesn't cover the Adobe character. The additional Adobe aliases
+/// for 0x44/0x57/0x6D (U+2206/U+2126/U+00B5) are not Apple alternatives and are deliberately absent.
+const fn symbol_unicode_alts(code: u32) -> &'static [u32] {
+    match code {
+        0xA4 => &[0x2044],
+        0xE1 => &[0x3008],
+        0xF1 => &[0x3009],
+        _ => &[],
+    }
+}
+
 /// The character the symbol font draws the code `code` at, when the installed `face` is that font:
 /// its private-use code U+F000 + code, or, when the face has no private-use mapping (Apple's
-/// "Symbol" maps its glyphs to real Unicode), the Adobe Symbol encoding's real character. Printable
-/// ASCII with no table entry (the `< = > ?` codes among them) passes through as its own character
-/// when the face covers it.
+/// "Symbol" maps its glyphs to real Unicode), the Adobe Symbol encoding's real character (then its
+/// Apple alternative, then, for printable ASCII with no table entry — the `< = > ?` codes among
+/// them — the ASCII character itself) when the face covers it.
 fn symbol_font_draw(face: &FontFace, code: u32) -> Option<char> {
     let code = code & 0xFF;
     let pua = char::from_u32(0xF000 | code)?;
@@ -1327,11 +1343,7 @@ fn symbol_font_draw(face: &FontFace, code: u32) -> Option<char> {
         return Some(pua);
     }
     if let Some(real) = symbol_unicode(code) {
-        let real = char::from_u32(real)?;
-        if face.covers(real) {
-            return Some(real);
-        }
-        return None;
+        return std::iter::once(real).chain(symbol_unicode_alts(code).iter().copied()).filter_map(char::from_u32).find(|c| face.covers(*c));
     }
     // 0x20–0x7E with no table entry draw the ASCII character itself (the Symbol font's glyphs for
     // "< = > ?" etc. sit at their own ASCII codes, not at a remapped Unicode point).
@@ -1352,8 +1364,16 @@ fn symbol_font_char(face: &FontFace, c: &str, font: Option<&str>) -> Option<char
         return None;
     }
     let first = c.chars().next()?;
-    let code = (first as u32) & 0xFF;
-    symbol_font_draw(face, code).or_else(|| face.covers(first).then_some(first))
+    let cp = first as u32;
+    // Only symbol-font codes (low byte, or the U+F000 + code private-use form) take the mapping.
+    // A bullet whose character is a plain Unicode codepoint (e.g. U+2022 •) draws its own glyph
+    // when the face covers it, never a low-byte remap to an unrelated Symbol code.
+    if (cp < 0x100 || (0xF000..=0xF0FF).contains(&cp))
+        && let Some(c) = symbol_font_draw(face, cp & 0xFF)
+    {
+        return Some(c);
+    }
+    face.covers(first).then_some(first)
 }
 
 /// The character that draws `c`, a character of text set in the symbol font `font` (Wingdings,
