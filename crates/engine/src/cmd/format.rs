@@ -1170,6 +1170,15 @@ pub(crate) fn apply_painted(sh: &mut Shape, p: &Painted) {
     }
 }
 
+/// Does the text selection start at a paragraph's start and reach its end?
+fn covers_whole_paragraph(s: &Session) -> bool {
+    let Ok(st) = s.doc() else { return false };
+    let Some(t) = &st.selection.text else { return false };
+    let (a, b) = t.ordered();
+    let n = super::text::body_of(st, t).and_then(|body| body.paragraphs.get(b.0)).map_or(0, |x| x.char_len());
+    a.1 == 0 && (b.0 > a.0 || b.1 >= n)
+}
+
 fn painter_apply(s: &mut Session, p: &Value) -> Result<Value> {
     let Some((painted, sticky)) = s.painter.clone() else { return Err(bad("format.painterApply", "pick formatting with the Format Painter first")) };
     if !sticky {
@@ -1179,7 +1188,9 @@ fn painter_apply(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(r) = painted.run.clone() {
             format_run(s, &move |rp| *rp = r.clone())?;
         }
-        if let Some(pp) = painted.para.clone() {
+        // Paragraph formatting (bullets, alignment, spacing) goes only onto paragraphs the
+        // selection covers whole; painting part of a bulleted line changes just its text.
+        if let Some(pp) = painted.para.clone().filter(|_| covers_whole_paragraph(s)) {
             format_para(s, &move |para| para.props = pp.clone())?;
         }
         return ok();

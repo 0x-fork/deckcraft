@@ -474,16 +474,28 @@ impl Session {
             PointerKind::Down => self.down(p, ev.mods, tol),
             PointerKind::Drag => self.drag(p, ev.mods, tol),
             PointerKind::Up => self.up(p, ev.mods),
-            PointerKind::DoubleClick => self.double_click(p, tol),
+            PointerKind::DoubleClick => {
+                let r = self.double_click(p, tol)?;
+                self.paint_text_selection().map(|a| a.unwrap_or(r))
+            }
             PointerKind::ContextClick => self.context_click(p, tol),
             PointerKind::TripleClick => {
                 if self.active().is_some_and(|d| d.selection.text.is_some()) {
-                    self.execute("text.selectParagraph", &json!({}))
+                    let r = self.execute("text.selectParagraph", &json!({}))?;
+                    self.paint_text_selection().map(|a| a.unwrap_or(r))
                 } else {
                     Ok(Value::Null)
                 }
             }
         }
+    }
+
+    /// Format Painter applies once a text range is selected (drag, word or paragraph click).
+    fn paint_text_selection(&mut self) -> Result<Option<Value>> {
+        if self.painter.is_some() && self.doc()?.selection.text.as_ref().is_some_and(|t| t.is_range()) {
+            return self.execute("format.painterApply", &json!({})).map(Some);
+        }
+        Ok(None)
     }
 
     pub(crate) fn begin(&mut self, label: &str) {
@@ -1103,6 +1115,12 @@ impl Session {
                 self.commit();
                 let _ = cmd::text::fit_text_box(self, id);
                 self.refit_after_resize(id)?;
+            }
+            Some(Drag::TextSelect { .. }) => {
+                if let Some(applied) = self.paint_text_selection()? {
+                    out = applied;
+                }
+                self.commit();
             }
             Some(_) => self.commit(),
             None => {}

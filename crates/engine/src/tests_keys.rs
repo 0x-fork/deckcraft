@@ -437,3 +437,74 @@ fn select_into_another_table_cell_settles_the_composition() {
     let cell = |c| t.cell(0, c).map(|x| x.text.text()).unwrap_or_default();
     assert_eq!((cell(0), cell(1)), ("abhello".to_string(), "X0123456789".to_string()));
 }
+
+/// Bold the first paragraph, select part of it and arm the Format Painter.
+fn painter_armed(sticky: bool) -> (Session, u32) {
+    let (mut s, id) = editing("Hello\nworld", (0, 0));
+    s.execute("text.select", &json!({"anchor": [0, 0], "caret": [0, 5]})).unwrap();
+    s.execute("format.bold", &json!({"on": true})).unwrap();
+    s.execute("format.painter", &json!({"sticky": sticky})).unwrap();
+    (s, id)
+}
+
+fn bold_at(s: &mut Session, at: Pos) -> bool {
+    s.execute("text.select", &json!({"anchor": [at.0, at.1], "caret": [at.0, at.1 + 1]})).unwrap();
+    s.execute("format.state", &json!({})).unwrap()["bold"] == true
+}
+
+fn pointer(s: &mut Session, kind: crate::tools::PointerKind, x: f64, y: f64) {
+    s.pointer(crate::tools::PointerEvent { kind, x, y, tol: 4.0, ..Default::default() }).unwrap();
+}
+
+#[test]
+fn format_painter_applies_to_a_dragged_text_selection() {
+    use crate::tools::PointerKind::{Down, Drag, Up};
+    let (mut s, _) = painter_armed(false);
+    assert!(!bold_at(&mut s, (1, 0)));
+    s.execute("text.move", &json!({"to": "start"})).unwrap();
+    // Drag across the second line's text.
+    pointer(&mut s, Down, 68.0, 90.0);
+    pointer(&mut s, Drag, 110.0, 90.0);
+    pointer(&mut s, Up, 110.0, 90.0);
+    let t = s.doc().unwrap().selection.text.clone().unwrap();
+    assert!(t.is_range(), "the drag should select text");
+    assert!(s.painter.is_none(), "the painter is used up");
+    assert!(bold_at(&mut s, (1, 0)));
+}
+
+#[test]
+fn format_painter_applies_to_a_triple_clicked_paragraph() {
+    use crate::tools::PointerKind::TripleClick;
+    let (mut s, _) = painter_armed(true);
+    s.execute("text.select", &json!({"anchor": [1, 2], "caret": [1, 2]})).unwrap();
+    pointer(&mut s, TripleClick, 70.0, 90.0);
+    assert!(s.painter.is_some(), "a sticky painter stays armed");
+    assert!(bold_at(&mut s, (1, 0)));
+}
+
+#[test]
+fn format_painter_waits_for_a_range_on_a_plain_click() {
+    use crate::tools::PointerKind::{Down, Up};
+    let (mut s, _) = painter_armed(false);
+    pointer(&mut s, Down, 68.0, 90.0);
+    pointer(&mut s, Up, 68.0, 90.0);
+    assert!(s.painter.is_some());
+}
+
+#[test]
+fn format_painter_on_part_of_a_bulleted_line_keeps_its_bullet() {
+    use crate::tools::PointerKind::{Down, Drag, Up};
+    let (mut s, _) = painter_armed(false);
+    s.execute("text.select", &json!({"anchor": [1, 0], "caret": [1, 5]})).unwrap();
+    s.execute("format.bullets", &json!({"on": true})).unwrap();
+    let bulleted = |s: &mut Session| s.execute("format.state", &json!({})).unwrap()["bullets"] == true;
+    assert!(bulleted(&mut s));
+    s.execute("text.select", &json!({"anchor": [0, 0], "caret": [0, 5]})).unwrap();
+    s.execute("format.painter", &json!({})).unwrap();
+    pointer(&mut s, Down, 68.0, 90.0);
+    pointer(&mut s, Drag, 100.0, 90.0);
+    pointer(&mut s, Up, 100.0, 90.0);
+    assert!(s.painter.is_none());
+    assert!(bold_at(&mut s, (1, 0)));
+    assert!(bulleted(&mut s), "the bullet stays");
+}
