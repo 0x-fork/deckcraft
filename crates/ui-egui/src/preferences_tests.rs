@@ -53,6 +53,42 @@ fn options_cancel_undoes_the_changes() {
     assert!(h.state().dialog.is_none(), "and the dialog closes");
 }
 
+/// Every Editing setting and the name field go back on Cancel, not only the first checkbox: a
+/// reporter who changed a different control and saw Cancel do nothing has the same answer.
+#[test]
+fn options_cancel_undoes_every_editing_setting() {
+    let mut h = harness();
+    let before = h.state().session.prefs.clone();
+    open_options(&mut h);
+
+    for label in ["Snap objects to grid", "Replace straight quotes with smart quotes", "AutoCorrect as you type"] {
+        h.query_by_label(label).unwrap_or_else(|| panic!("the {label} checkbox is there")).click();
+        h.run_steps(1);
+    }
+    // The name field: it writes into the settings as it is typed.
+    // The name field is the last text input of the dialog (the label is a separate widget).
+    let name = h.get_all_by_role(egui::accesskit::Role::TextInput).last().expect("the name field is there");
+    name.click();
+    h.run_steps(1);
+    h.event(egui::Event::Text("Z".into()));
+    h.run_steps(1);
+    let changed = h.state().session.prefs.clone();
+    assert_ne!(
+        (changed.snap_to_grid, changed.smart_quotes, changed.autocorrect),
+        (before.snap_to_grid, before.smart_quotes, before.autocorrect),
+        "the settings apply as they are changed"
+    );
+    assert_ne!(changed.author, before.author, "the name applies as it is typed: {:?}", changed.author);
+
+    h.query_by_label("Cancel").expect("the Cancel button is there").click();
+    h.run_steps(2);
+    let after = h.state().session.prefs.clone();
+    assert_eq!(after.snap_to_grid, before.snap_to_grid, "snap to grid is restored");
+    assert_eq!(after.smart_quotes, before.smart_quotes, "smart quotes are restored");
+    assert_eq!(after.autocorrect, before.autocorrect, "autocorrect is restored");
+    assert_eq!(after.author, before.author, "the name is restored");
+}
+
 /// The appearance toggle and the interface size go back on Cancel, too; Esc acts as Cancel.
 #[test]
 fn options_cancel_puts_the_appearance_and_scale_back() {
