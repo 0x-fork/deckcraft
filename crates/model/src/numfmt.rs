@@ -150,7 +150,7 @@ pub fn format(code: &str, v: f64, lang: Option<&str>) -> String {
         ([pos, ..], v) => (*pos, v.abs(), v < 0.0),
         ([], v) => ("General", v.abs(), v < 0.0),
     };
-    if sec.trim().eq_ignore_ascii_case("general") || sec.trim().is_empty() {
+    if sec.trim().eq_ignore_ascii_case("general") || (secs.len() == 1 && sec.trim().is_empty()) {
         let s = general(v, dec);
         return if minus { format!("-{s}") } else { s };
     }
@@ -312,6 +312,36 @@ mod tests {
         assert_eq!(format("0;0", -3.0, None), "3");
         assert_eq!(format("0", -3.0, None), "-3");
         assert_eq!(format("\"x\"0", 5.0, None), "x5");
+    }
+
+    #[test]
+    fn explicit_empty_sections_hide_their_values() {
+        for v in [3.0, -3.0, 0.0, -0.0] {
+            assert_eq!(format(";;;", v, None), "", "all sections empty: {v}");
+        }
+        for (code, positive, negative, zero) in [
+            (";0;0", "", "3", "0"),
+            ("0;;0", "3", "", "0"),
+            ("0;-0;", "3", "-3", ""),
+            (";0", "", "3", ""),
+            (r#"";"0;;"#, ";3", "", ""),
+            (r"\;0;;", ";3", "", ""),
+        ] {
+            assert_eq!(format(code, 3.0, None), positive, "positive: {code}");
+            assert_eq!(format(code, -3.0, None), negative, "negative: {code}");
+            assert_eq!(format(code, 0.0, None), zero, "zero: {code}");
+        }
+        assert_eq!(format("0;-0;", -0.0, None), "");
+    }
+
+    #[test]
+    fn blank_whole_codes_and_general_keep_their_fallback() {
+        for code in ["", " \t", "General", " general "] {
+            assert_eq!(format(code, 2.5, None), "2.5", "{code:?}");
+            assert_eq!(format(code, -2.5, None), "-2.5", "{code:?}");
+            assert_eq!(format(code, 0.0, None), "0", "{code:?}");
+            assert_eq!(format(code, 2.5, Some("de-DE")), "2,5", "{code:?}");
+        }
     }
 
     #[test]
