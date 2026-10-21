@@ -2311,6 +2311,36 @@ fn group_child_scale_does_not_scale_3d_depth_contours_or_bevels() {
 }
 
 #[test]
+fn a_turned_camera_in_a_one_to_one_group_draws_its_3d_sizes_as_outside_one() {
+    // The camera's turn is part of the shape's transform; its foreshortening is not a group scale,
+    // so a 1:1 group must not change extrusion depths, contours or bevels under a turned camera.
+    let mut deck = extruded_deck();
+    let bevelled = Shape {
+        id: ShapeId(705),
+        xfrm: Some(Xfrm::new(40.0, 340.0, 170.0, 130.0)),
+        geom: Geom::preset("rect"),
+        style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)),
+        effects: Some(deckcraft_model::Effects {
+            raw3d: Some(r#"<a:scene3d><a:camera prst="isometricOffAxis1Right"/><a:lightRig rig="threePt" dir="t"/></a:scene3d><a:sp3d extrusionH="254000" contourW="38100"><a:bevelT w="254000" h="254000"/></a:sp3d>"#.into()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    std::sync::Arc::make_mut(&mut deck.slides[0]).shapes.push(bevelled);
+    let opts = RenderOpts { scale: 1.0, ..Default::default() };
+    let alone = render_slide(&deck, 0, &opts);
+    let group = Shape {
+        id: ShapeId(10),
+        xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)),
+        kind: ShapeKind::Group { children: deck.slides[0].shapes.clone(), child: Xfrm::new(0.0, 0.0, 960.0, 540.0) },
+        ..Default::default()
+    };
+    let grouped = render_slide(&deck_with(vec![group]), 0, &opts);
+    let d = differing(&alone, &grouped);
+    assert!(d < 200, "{d} values differ between the shapes alone and in a 1:1 group");
+}
+
+#[test]
 fn table_rows_below_the_slide_are_not_laid_out_and_the_slide_looks_the_same() {
     // A fuzzed deck's 200 x 200 table of long text took 70 s to draw, most of it off the slide.
     let table = |rows: usize| {

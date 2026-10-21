@@ -1056,6 +1056,17 @@ impl Renderer {
             ctx.push_layer(None, None, None, None, None);
             let _ = r;
         }
+        // Shape-space units per point for the 3-D sizes, measured without the camera's turn (which
+        // `shape_at` puts in `m`): its foreshortening is not a child-coordinate scale.
+        let pt = {
+            let turn = effects
+                .as_ref()
+                .and_then(|e| e.raw3d.as_deref())
+                .and_then(camera::from_raw)
+                .and_then(|c| camera::affine(&c, w, h))
+                .filter(|t| t.determinant().abs() > 1e-9);
+            self.per_point(turn.map_or(m, |t| m * t.inverse()), depth)
+        };
         // A 3-D extrusion under a turned camera: the sides, swept behind the face.
         if let Some(raw) = effects.as_ref().and_then(|e| e.raw3d.as_deref())
             && let Some(ex) = extrude::from_raw(raw)
@@ -1069,7 +1080,7 @@ impl Renderer {
             };
             let pre = m * turn.inverse();
             let lit = light::Lighting::from_raw(raw);
-            let d = ex.depth * self.per_point(m, depth);
+            let d = ex.depth * pt;
             extrude::draw(ctx, &outline, w, h, &cam, d, pre, turn, extrude::side_color(rctx, &ex, face), &lit);
         }
         // A 3-D contour: a band around the outline, behind the face (and in front of any sides).
@@ -1081,7 +1092,7 @@ impl Renderer {
                 _ => None,
             };
             let col = c.color.as_ref().map(|k| rctx.color(k, face)).or(face).unwrap_or(Rgba::rgb(0xff, 0xff, 0xff));
-            extrude::draw_contour(ctx, &outline, m, c.width * self.per_point(m, depth), col, &light::Lighting::from_raw(raw));
+            extrude::draw_contour(ctx, &outline, m, c.width * pt, col, &light::Lighting::from_raw(raw));
         }
         // Fill.
         match &s.kind {
@@ -1176,8 +1187,7 @@ impl Renderer {
         };
         // A 3-D bevel: the face and a band inside the outline lit as surfaces.
         if let Some(bv) = effects.as_ref().and_then(|e| e.raw3d.as_deref()).and_then(bevel::from_raw) {
-            let k = self.per_point(m, depth);
-            let bv = bevel::Bevel { w: bv.w * k, h: bv.h * k, ..bv };
+            let bv = bevel::Bevel { w: bv.w * pt, h: bv.h * pt, ..bv };
             let solid = match &fill {
                 Some(Fill::Solid { color: c }) => Some(rctx.color(c, fill_ph)),
                 _ => None,
