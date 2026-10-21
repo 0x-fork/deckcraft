@@ -322,6 +322,36 @@ fn group_ungroup_roundtrip_positions() {
     assert!((v["box"]["x"].as_f64().unwrap() - 310.0).abs() < 1e-6, "{v}");
 }
 
+/// Grouping a group again and again stops at `MAX_GROUP_DEPTH`: past about 39 levels a saved
+/// .deckcraft file no longer opens, and past 64 commands such as format.languageAll miss the text.
+#[test]
+fn groups_nest_only_as_deep_as_a_saved_file_reopens() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    // A table (deeper in the file than a text box) at the bottom of the nesting.
+    let mut g = s.execute("insert.table", &json!({"rows": 2, "cols": 2})).unwrap()["id"].as_u64().unwrap();
+    for _ in 0..cmd::arrange::MAX_GROUP_DEPTH {
+        let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 20, 20], "text": "deep"})).unwrap()["id"].as_u64().unwrap();
+        s.execute("edit.select", &json!({"ids": [g, r]})).unwrap();
+        g = s.execute("arrange.group", &json!({})).unwrap()["id"].as_u64().unwrap();
+    }
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 20, 20]})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [g, r]})).unwrap();
+    let before = s.doc().unwrap().revision;
+    let err = s.execute("arrange.group", &json!({})).unwrap_err().to_string();
+    assert!(err.contains(&format!("nested at most {}", cmd::arrange::MAX_GROUP_DEPTH)), "{err}");
+    assert_eq!(s.doc().unwrap().revision, before, "a refused group leaves the slide as it was");
+    // The deepest deck the command allows saves and opens again.
+    let bytes = deckcraft_format::save(&s.doc().unwrap().doc).unwrap();
+    let back = deckcraft_format::load(&bytes).unwrap();
+    let depth = |shapes: &[deckcraft_model::Shape]| {
+        let mut d = 0;
+        deckcraft_model::walk(shapes, &mut |sh, depth| d = d.max(depth + usize::from(sh.is_group())));
+        d
+    };
+    assert_eq!(depth(&back.slides.last().unwrap().shapes), cmd::arrange::MAX_GROUP_DEPTH);
+}
+
 #[test]
 fn align_and_distribute() {
     let mut s = session();
