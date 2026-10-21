@@ -508,3 +508,56 @@ fn format_painter_on_part_of_a_bulleted_line_keeps_its_bullet() {
     assert!(bold_at(&mut s, (1, 0)));
     assert!(bulleted(&mut s), "the bullet stays");
 }
+
+/// Three bulleted paragraphs "one", "two", "three" and the painter armed from bold plain text.
+fn painter_over_bullets() -> Session {
+    let (mut s, _) = editing("one\ntwo\nthree\nplain", (0, 0));
+    s.execute("text.select", &json!({"anchor": [3, 0], "caret": [3, 5]})).unwrap();
+    s.execute("format.bold", &json!({"on": true})).unwrap();
+    s.execute("text.select", &json!({"anchor": [0, 0], "caret": [2, 5]})).unwrap();
+    s.execute("format.bullets", &json!({"on": true})).unwrap();
+    s.execute("text.select", &json!({"anchor": [3, 0], "caret": [3, 5]})).unwrap();
+    s.execute("format.painter", &json!({})).unwrap();
+    s
+}
+
+fn bulleted(s: &mut Session, para: usize) -> bool {
+    s.execute("text.select", &json!({"anchor": [para, 0], "caret": [para, 0]})).unwrap();
+    s.execute("format.state", &json!({})).unwrap()["bullets"] == true
+}
+
+#[test]
+fn format_painter_paints_only_the_paragraphs_a_selection_covers() {
+    // Mid paragraph 0 to mid paragraph 2: only paragraph 1 is covered, so only it loses its bullet.
+    let mut s = painter_over_bullets();
+    s.execute("text.select", &json!({"anchor": [0, 1], "caret": [2, 2]})).unwrap();
+    s.execute("format.painterApply", &json!({})).unwrap();
+    assert_eq!([bulleted(&mut s, 0), bulleted(&mut s, 1), bulleted(&mut s, 2)], [true, false, true]);
+    // Start of paragraph 0 to mid paragraph 2: the partly covered last paragraph keeps its bullet.
+    let mut s = painter_over_bullets();
+    s.execute("text.select", &json!({"anchor": [0, 0], "caret": [2, 2]})).unwrap();
+    s.execute("format.painterApply", &json!({})).unwrap();
+    assert_eq!([bulleted(&mut s, 0), bulleted(&mut s, 1), bulleted(&mut s, 2)], [false, false, true]);
+}
+
+#[test]
+fn format_painter_triple_click_leaves_the_next_paragraph_alone() {
+    use crate::tools::PointerKind::TripleClick;
+    let mut s = painter_over_bullets();
+    s.execute("text.select", &json!({"anchor": [0, 1], "caret": [0, 1]})).unwrap();
+    pointer(&mut s, TripleClick, 70.0, 70.0);
+    assert!(s.painter.is_none());
+    assert_eq!([bulleted(&mut s, 0), bulleted(&mut s, 1), bulleted(&mut s, 2)], [false, true, true]);
+}
+
+#[test]
+fn format_painter_ignores_a_double_click_that_selects_nothing() {
+    use crate::tools::PointerKind::DoubleClick;
+    let mut s = painter_over_bullets();
+    s.execute("text.select", &json!({"anchor": [0, 0], "caret": [1, 2]})).unwrap();
+    let before = sel(&s);
+    pointer(&mut s, DoubleClick, 900.0, 520.0);
+    assert_eq!(sel(&s), before);
+    assert!(s.painter.is_some(), "a click that left the selection alone keeps the painter");
+    assert!(bulleted(&mut s, 0));
+}

@@ -475,14 +475,16 @@ impl Session {
             PointerKind::Drag => self.drag(p, ev.mods, tol),
             PointerKind::Up => self.up(p, ev.mods),
             PointerKind::DoubleClick => {
+                let before = self.text_selection();
                 let r = self.double_click(p, tol)?;
-                self.paint_text_selection().map(|a| a.unwrap_or(r))
+                self.paint_if_selection_changed(before, r)
             }
             PointerKind::ContextClick => self.context_click(p, tol),
             PointerKind::TripleClick => {
                 if self.active().is_some_and(|d| d.selection.text.is_some()) {
+                    let before = self.text_selection();
                     let r = self.execute("text.selectParagraph", &json!({}))?;
-                    self.paint_text_selection().map(|a| a.unwrap_or(r))
+                    self.paint_if_selection_changed(before, r)
                 } else {
                     Ok(Value::Null)
                 }
@@ -496,6 +498,18 @@ impl Session {
             return self.execute("format.painterApply", &json!({})).map(Some);
         }
         Ok(None)
+    }
+
+    fn text_selection(&self) -> Option<((usize, usize), (usize, usize))> {
+        self.active().and_then(|d| d.selection.text.as_ref()).map(|t| (t.anchor, t.caret))
+    }
+
+    /// A double or triple click paints only the range it selected, not an older one it left alone.
+    fn paint_if_selection_changed(&mut self, before: Option<((usize, usize), (usize, usize))>, r: Value) -> Result<Value> {
+        if self.text_selection() == before {
+            return Ok(r);
+        }
+        self.paint_text_selection().map(|a| a.unwrap_or(r))
     }
 
     pub(crate) fn begin(&mut self, label: &str) {

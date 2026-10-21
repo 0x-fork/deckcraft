@@ -1170,13 +1170,28 @@ pub(crate) fn apply_painted(sh: &mut Shape, p: &Painted) {
     }
 }
 
-/// Does the text selection start at a paragraph's start and reach its end?
-fn covers_whole_paragraph(s: &Session) -> bool {
-    let Ok(st) = s.doc() else { return false };
-    let Some(t) = &st.selection.text else { return false };
+/// The paragraphs the text selection covers whole: it starts at or before their start and
+/// reaches their end. A paragraph the selection only touches the start of (it ends at offset
+/// 0, as after a triple-click) is not covered.
+fn covered_paragraphs(s: &Session) -> Vec<usize> {
+    let Ok(st) = s.doc() else { return vec![] };
+    let Some(t) = &st.selection.text else { return vec![] };
+    let Some(body) = super::text::body_of(st, t) else { return vec![] };
     let (a, b) = t.ordered();
-    let n = super::text::body_of(st, t).and_then(|body| body.paragraphs.get(b.0)).map_or(0, |x| x.char_len());
-    a.1 == 0 && (b.0 > a.0 || b.1 >= n)
+    (a.0..=b.0)
+        .filter(|&pi| {
+            let Some(para) = body.paragraphs.get(pi) else { return false };
+            let starts = pi > a.0 || a.1 == 0;
+            let ends = if pi < b.0 {
+                true
+            } else if b.0 > a.0 && b.1 == 0 {
+                false
+            } else {
+                b.1 >= para.char_len()
+            };
+            starts && ends
+        })
+        .collect()
 }
 
 fn painter_apply(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1190,8 +1205,15 @@ fn painter_apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
         // Paragraph formatting (bullets, alignment, spacing) goes only onto paragraphs the
         // selection covers whole; painting part of a bulleted line changes just its text.
-        if let Some(pp) = painted.para.clone().filter(|_| covers_whole_paragraph(s)) {
-            format_para(s, &move |para| para.props = pp.clone())?;
+        let covered = covered_paragraphs(s);
+        if let (Some(pp), false) = (painted.para.clone(), covered.is_empty()) {
+            super::text::edit_text(s, |body, _| {
+                for &pi in &covered {
+                    if let Some(para) = body.paragraphs.get_mut(pi) {
+                        para.props = pp.clone();
+                    }
+                }
+            })?;
         }
         return ok();
     }
