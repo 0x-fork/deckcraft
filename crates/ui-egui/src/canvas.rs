@@ -97,7 +97,11 @@ pub(crate) fn page_flick(wheel: egui::Vec2) -> Option<bool> {
 
 /// Discrete wheel input must not share the trackpad's gesture cooldown. Keep all the steps,
 /// including several notches delivered in one frame, and clamp at each end of the deck.
-fn wheel_slide_target(events: &[egui::Event], current: usize, slides: usize) -> Option<usize> {
+///
+/// High-resolution and free-spin wheels send fractions of a line (0.125 per event on Windows), so
+/// the delta is accumulated in `carry` and each whole line is one slide; a change of direction
+/// drops what was left over. Returns the target, `None` when no wheel event was read.
+fn wheel_slide_target(events: &[egui::Event], current: usize, slides: usize, carry: &mut f32) -> Option<usize> {
     let last = slides.checked_sub(1)?;
     let mut target = current.min(last);
     let mut handled = false;
@@ -111,7 +115,14 @@ fn wheel_slide_target(events: &[egui::Event], current: usize, slides: usize) -> 
             && delta.y.abs() > 0.0
             && delta.y.abs() >= delta.x.abs()
         {
-            let steps = delta.y.abs().ceil().min(slides as f32) as usize;
+            if *carry * delta.y < 0.0 {
+                *carry = 0.0;
+            }
+            *carry += delta.y;
+            // The small slack keeps sums such as 10 × 0.1 from falling just short of a line.
+            let whole = (carry.abs() + 1e-4).floor();
+            *carry -= whole.copysign(*carry);
+            let steps = whole.min(slides as f32) as usize;
             target = if delta.y < 0.0 { target.saturating_add(steps).min(last) } else { target.saturating_sub(steps) };
             handled = true;
         }
@@ -166,9 +177,17 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         if overflow != egui::Vec2::ZERO {
             offset -= wheel;
         } else if !app.anim_preview_active() && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
-            let target = app.session.active().and_then(|d| ui.input(|i| wheel_slide_target(&i.events, d.selection.slide, d.doc.slides.len())));
-            if let Some(index) = target {
-                let _ = app.run("slide.go", json!({"index": index}));
+            let carry_id = ui.id().with("wheel_carry");
+            let mut carry: f32 = ui.data_mut(|d| d.get_temp(carry_id).unwrap_or_default());
+            let wheel_step = app.session.active().and_then(|d| {
+                let current = d.selection.slide;
+                ui.input(|i| wheel_slide_target(&i.events, current, d.doc.slides.len(), &mut carry)).map(|target| (current, target))
+            });
+            ui.data_mut(|d| d.insert_temp(carry_id, carry));
+            if let Some((current, index)) = wheel_step {
+                if index != current {
+                    let _ = app.run("slide.go", json!({"index": index}));
+                }
             } else if let Some(next) = page_flick(ui.input(|i| trackpad_scroll(&i.events))) {
                 // Point-based trackpad gestures keep their cooldown. Raw input avoids reading
                 // the smoothed tail of a discrete mouse notch as another page turn.
