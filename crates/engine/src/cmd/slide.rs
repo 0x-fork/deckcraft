@@ -28,6 +28,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "slide.previous", "Previous Slide", [], Some("PageUp"), "{}", has_slide, prev),
         cmd!(noundo "slide.first", "First Slide", [], Some("Home"), "{}", has_slide, first),
         cmd!(noundo "slide.last", "Last Slide", [], Some("End"), "{}", has_slide, last),
+        cmd!(noundo "slide.selectRange", "Select Slide Range", [], None, "{to: index, from?: index (default the current slide), add?: bool (keep the slides already selected)}", has_slide, select_range),
         cmd!(noundo "slide.selectSlides", "Select Slides", [], None, "{ids?: [slide id], indices?: [index], add?: bool}", has_slide, select_slides),
         cmd!("slide.hide", "Hide Slide", ["Slide Show", "Set Up"], None, "{index?, hidden?: bool}", has_slide, hide),
         cmd!("slide.layout", "Layout", ["Home", "Slides"], None, "{layout: name or kind, index?}", has_slide, set_layout),
@@ -372,6 +373,37 @@ fn select_slides(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"selected": s.doc()?.selection.slides}))
 }
 
+/// Shift-click in the slide list: select every slide from `from` (default the current one) to `to`.
+/// With `add` the slides already selected stay selected (Ctrl+Shift-click).
+fn select_range(s: &mut Session, p: &Value) -> Result<Value> {
+    let to = usize_param(p, "to").ok_or_else(|| bad("slide.selectRange", "missing `to`"))?;
+    let add = bool_or(p, "add", false);
+    let (from, count) = {
+        let st = s.doc()?;
+        (usize_param(p, "from").unwrap_or(st.selection.slide), st.doc.slides.len())
+    };
+    if to >= count || from >= count {
+        return Err(bad("slide.selectRange", "no such slide"));
+    }
+    let (a, b) = (from.min(to), from.max(to));
+    s.select(|doc, sel| {
+        let range: Vec<SlideId> = doc.slides.iter().skip(a).take(b - a + 1).map(|x| x.id).collect();
+        if add {
+            for id in range {
+                if !sel.slides.contains(&id) {
+                    sel.slides.push(id);
+                }
+            }
+        } else {
+            sel.slides = range;
+        }
+        sel.slide = to;
+        sel.shapes.clear();
+        sel.text = None;
+    })?;
+    Ok(json!({"selected": s.doc()?.selection.slides}))
+}
+
 fn hide(s: &mut Session, p: &Value) -> Result<Value> {
     let targets: Vec<usize> = match opt_usize_param(p, "index", "slide.hide")? {
         Some(i) => vec![i],
@@ -696,5 +728,53 @@ mod tests {
         let got: Vec<(u8, String)> = paras.iter().map(|p| (p.level, p.text())).collect();
         let want = [(0, "Level one"), (1, "Level two"), (2, "Level three"), (0, "Level one again")];
         assert_eq!(got, want.iter().map(|(l, t)| (*l, t.to_string())).collect::<Vec<_>>());
+    }
+
+    fn deck_of(n: usize) -> Session {
+        let mut s = Session::with_new();
+        while s.doc().expect("doc").doc.slides.len() < n {
+            s.execute("slide.new", &json!({})).expect("new slide");
+        }
+        s
+    }
+
+    fn selected_indices(s: &Session) -> Vec<usize> {
+        let st = s.doc().expect("doc");
+        let mut v: Vec<usize> = st.selection.slides.iter().filter_map(|id| st.doc.slide_index(*id)).collect();
+        v.sort_unstable();
+        v
+    }
+
+    #[test]
+    fn select_range_covers_every_slide_between() {
+        let mut s = deck_of(6);
+        s.execute("slide.go", &json!({"index": 1})).expect("go");
+        s.execute("slide.selectRange", &json!({"to": 4})).expect("range");
+        assert_eq!(selected_indices(&s), vec![1, 2, 3, 4]);
+        assert_eq!(s.doc().expect("doc").selection.slide, 4);
+        // Backwards works too, and replaces the earlier selection.
+        s.execute("slide.selectRange", &json!({"from": 5, "to": 3})).expect("range");
+        assert_eq!(selected_indices(&s), vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn select_range_add_keeps_the_existing_selection() {
+        let mut s = deck_of(8);
+        s.execute("slide.selectSlides", &json!({"indices": [0, 1]})).expect("select");
+        s.execute("slide.go", &json!({"index": 4})).expect("go");
+        s.execute("slide.selectSlides", &json!({"indices": [4]})).expect("select");
+        s.execute("slide.selectRange", &json!({"to": 6, "add": true})).expect("range");
+        assert_eq!(selected_indices(&s), vec![4, 5, 6]);
+        s.execute("slide.selectSlides", &json!({"indices": [0]})).expect("select");
+        s.execute("slide.selectRange", &json!({"from": 3, "to": 5, "add": true})).expect("range");
+        assert_eq!(selected_indices(&s), vec![0, 3, 4, 5]);
+    }
+
+    #[test]
+    fn select_range_rejects_out_of_range_slides() {
+        let mut s = deck_of(3);
+        assert!(s.execute("slide.selectRange", &json!({"to": 3})).is_err());
+        assert!(s.execute("slide.selectRange", &json!({"from": 9, "to": 1})).is_err());
+        assert!(s.execute("slide.selectRange", &json!({})).is_err());
     }
 }
