@@ -3767,8 +3767,26 @@ fn language_all_marks_every_text_in_the_deck_with_nothing_selected() {
     s.execute("slide.new", &json!({"title": "world hellow"})).unwrap();
     s.execute("insert.table", &json!({"rows": 1, "cols": 1})).unwrap();
     s.execute("edit.select", &json!({"ids": []})).unwrap();
+    // A layout placeholder with its own list style (a:lstStyle) in another language.
+    let placeholder = s
+        .edit(|doc, _| {
+            let m = std::sync::Arc::make_mut(doc.masters.first_mut().unwrap());
+            let sh = m.layouts[0].shapes.iter_mut().find(|sh| sh.text.is_some()).unwrap();
+            let lv = deckcraft_model::text::LevelStyle {
+                run: deckcraft_model::RunProps { lang: Some("de-DE".into()), ..Default::default() },
+                ..Default::default()
+            };
+            sh.text.as_mut().unwrap().list_style.set(0, lv);
+            Ok(sh.id)
+        })
+        .unwrap();
     s.execute("format.languageAll", &json!({"lang": "xx-AL"})).unwrap();
     let st = s.doc().unwrap();
+    let ph = deckcraft_model::find_shape(&st.doc.masters[0].layouts[0].shapes, placeholder).unwrap();
+    assert_eq!(ph.text.as_ref().unwrap().list_style.level(0).unwrap().run.lang.as_deref(), Some("xx-AL"));
+    // A body without a list style doesn't get one.
+    let boxed = st.doc.slides.iter().find_map(|sl| deckcraft_model::find_shape(&sl.shapes, deckcraft_model::ShapeId(a as u32))).unwrap();
+    assert!(boxed.text.as_ref().unwrap().list_style.is_empty());
     let mut langs = vec![];
     for sl in &st.doc.slides {
         deckcraft_model::walk(&sl.shapes, &mut |sh, _| {

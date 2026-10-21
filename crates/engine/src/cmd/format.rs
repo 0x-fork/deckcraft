@@ -434,16 +434,21 @@ fn language(s: &mut Session, p: &Value) -> Result<Value> {
 /// Every run in the deck, and the text styles new text inherits from, in one language.
 fn language_all(s: &mut Session, p: &Value) -> Result<Value> {
     let f = language_edit("format.languageAll", p)?;
+    // Runs, end marks and the body's own list style levels (never creating one).
+    fn body(t: &mut deckcraft_model::text::TextBody, f: &dyn Fn(&mut RunProps)) {
+        ed::format_all(t, f);
+        t.list_style.levels.iter_mut().flatten().for_each(|lv| f(&mut lv.run));
+    }
     fn shapes(list: &mut [Shape], f: &dyn Fn(&mut RunProps), depth: usize) {
         if depth > 64 {
             return;
         }
         for sh in list {
             if let Some(t) = &mut sh.text {
-                ed::format_all(t, f);
+                body(t, f);
             }
             match &mut sh.kind {
-                deckcraft_model::ShapeKind::Table(t) => t.rows.iter_mut().flat_map(|r| &mut r.cells).for_each(|c| ed::format_all(&mut c.text, f)),
+                deckcraft_model::ShapeKind::Table(t) => t.rows.iter_mut().flat_map(|r| &mut r.cells).for_each(|c| body(&mut c.text, f)),
                 deckcraft_model::ShapeKind::Group { children, .. } => shapes(children, f, depth + 1),
                 _ => {}
             }
@@ -460,7 +465,7 @@ fn language_all(s: &mut Session, p: &Value) -> Result<Value> {
         for sl in &mut doc.slides {
             let sl = Arc::make_mut(sl);
             shapes(&mut sl.shapes, &f, 0);
-            ed::format_all(&mut sl.notes, &f);
+            body(&mut sl.notes, &f);
         }
         let extra = [doc.notes_master.as_mut(), doc.handout_master.as_mut()];
         for m in doc.masters.iter_mut().chain(extra.into_iter().flatten()) {
