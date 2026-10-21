@@ -3756,6 +3756,8 @@ fn language_marks_text_and_no_proof_and_repeats_are_reported() {
     assert!(s.execute("format.language", &json!({"lang": "en US!"})).is_err());
 }
 
+/// Review › Language › Whole presentation: every run, placeholder list style and default text style
+/// takes the language, with nothing selected, in one undo step.
 #[test]
 fn language_all_marks_every_text_in_the_deck_with_nothing_selected() {
     crate::spell::install("xx-AL", crate::spell::Dictionary::parse(b"", b"2\nhello\nworld\n"));

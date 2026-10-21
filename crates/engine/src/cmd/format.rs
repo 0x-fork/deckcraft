@@ -427,6 +427,7 @@ fn language_edit(id: &str, p: &Value) -> Result<impl Fn(&mut RunProps) + Send + 
         }
     })
 }
+/// Review › Language on the selected text (or the selected shapes' text).
 fn language(s: &mut Session, p: &Value) -> Result<Value> {
     let f = language_edit("format.language", p)?;
     format_run(s, &f)
@@ -434,11 +435,12 @@ fn language(s: &mut Session, p: &Value) -> Result<Value> {
 /// Every run in the deck, and the text styles new text inherits from, in one language.
 fn language_all(s: &mut Session, p: &Value) -> Result<Value> {
     let f = language_edit("format.languageAll", p)?;
-    // Runs, end marks and the body's own list style levels (never creating one).
+    /// Runs, end marks and the body's own list style levels (never creating one).
     fn body(t: &mut deckcraft_model::text::TextBody, f: &dyn Fn(&mut RunProps)) {
         ed::format_all(t, f);
         t.list_style.levels.iter_mut().flatten().for_each(|lv| f(&mut lv.run));
     }
+    /// Every text body in `list`: shapes, table cells and groups (nested at most 64 deep).
     fn shapes(list: &mut [Shape], f: &dyn Fn(&mut RunProps), depth: usize) {
         if depth > 64 {
             return;
@@ -454,6 +456,7 @@ fn language_all(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
+    /// A master or presentation text style's levels: what new text inherits.
     fn styles(l: &mut deckcraft_model::text::ListStyle, f: &dyn Fn(&mut RunProps)) {
         // Level 1 always, so a deck without a default text style gets one.
         if l.level(0).is_none() {
