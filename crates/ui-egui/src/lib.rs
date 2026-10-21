@@ -3179,6 +3179,41 @@ mod tests {
         }
     }
 
+    /// With nothing selected, Review > Language applies to the whole presentation without
+    /// choosing it, and Selected text can't be picked.
+    #[test]
+    fn the_language_dialog_marks_the_whole_presentation_with_nothing_selected() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let s = &mut harness.state_mut().session;
+        let title = s.active().unwrap().doc.slides[0].shapes[0].id.0;
+        s.execute("text.edit", &json!({"id": title})).unwrap();
+        s.execute("text.insert", &json!({"text": "Hola"})).unwrap();
+        s.execute("slide.new", &json!({"title": "Adiós"})).unwrap();
+        s.execute("edit.select", &json!({"ids": []})).unwrap();
+        assert!(s.active().unwrap().selection.text.is_none() && s.active().unwrap().selection.shapes.is_empty());
+        harness.state_mut().run("app.dialog", json!({"id": "language"})).unwrap();
+        harness.run_steps(4);
+        assert!(harness.get_by_label("Selected text").accesskit_node().is_disabled());
+        harness.get_by_label("Español (España)").click();
+        harness.run_steps(2);
+        harness.get_by_label("OK").click();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none());
+        let d = harness.state().session.active().unwrap();
+        for sl in &d.doc.slides {
+            let body = sl.shapes[0].text.as_ref().unwrap();
+            assert_eq!(body.paragraphs[0].runs[0].props.lang.as_deref(), Some("es-ES"));
+        }
+    }
+
     /// Speaker notes keep their formatting when edited in the notes pane: typing into a bold
     /// heading, Enter in a bulleted point, then saving as .pptx and reopening.
     #[test]
