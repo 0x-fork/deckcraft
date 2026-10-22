@@ -289,7 +289,7 @@ fn linreg(xs: &[f64], ys: &[f64], intercept: Option<f64>) -> Option<(f64, f64)> 
             sxx += x * x;
             sxy += x * (y - b);
         }
-        if sxx.abs() < 1e-18 {
+        if sxx <= 0.0 {
             return None;
         }
         let m = sxy / sxx;
@@ -304,7 +304,7 @@ fn linreg(xs: &[f64], ys: &[f64], intercept: Option<f64>) -> Option<(f64, f64)> 
         sxy += x * y;
     }
     let den = n * sxx - sx * sx;
-    if den.abs() < 1e-18 {
+    if den.abs() <= 1e-12 * n * sxx {
         return None;
     }
     let m = (n * sxy - sx * sy) / den;
@@ -545,6 +545,14 @@ mod tests {
 
     fn line(kind: TrendlineType) -> Trendline {
         Trendline { kind, ..Default::default() }
+    }
+
+    #[test]
+    fn linear_fits_tiny_x_values() {
+        let xs = [1e-10, 2e-10, 3e-10, 4e-10, 5e-10];
+        let ys = [1.0, 2.0, 3.0, 4.0, 5.0];
+        let fit = line(TrendlineType::Linear).fit(&xs, &ys).expect("fit of tiny x values");
+        assert!((fit.y(3e-10).unwrap() - 3.0).abs() < 1e-6);
     }
 
     #[test]
