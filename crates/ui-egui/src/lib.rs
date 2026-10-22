@@ -3393,6 +3393,7 @@ mod tests {
         mouse_wheel(&mut h, &[-0.75]);
         assert_eq!(slide_at(h.state()), 0);
 
+        let a = h.state().session.active_index().unwrap();
         h.state_mut().run("file.new", json!({})).unwrap();
         h.state_mut().run("slide.new", json!({})).unwrap();
         h.state_mut().run("slide.go", json!({"index": 0})).unwrap();
@@ -3402,6 +3403,23 @@ mod tests {
         assert_eq!(slide_at(h.state()), 0, "a quarter line in the new presentation does not turn the page");
         mouse_wheel(&mut h, &[-0.75]);
         assert_eq!(slide_at(h.state()), 1, "a whole line in the new presentation does");
+
+        // Back in the first one, leave 0.75 of a line, then switch away and back with the pointer
+        // off the canvas (on the tabs): the canvas never sees a hover in the other presentation.
+        let b = h.state().session.active_index().unwrap();
+        h.state_mut().session.set_active(a);
+        h.state_mut().ui.zoom = Some(0.4);
+        h.run_steps(2);
+        mouse_wheel(&mut h, &[-0.75]);
+        assert_eq!(slide_at(h.state()), 0);
+        h.input_mut().events.push(egui::Event::PointerMoved(egui::pos2(-10.0, -10.0)));
+        h.run_steps(1);
+        h.state_mut().session.set_active(b);
+        h.run_steps(2);
+        h.state_mut().session.set_active(a);
+        h.run_steps(2);
+        mouse_wheel(&mut h, &[-0.25]);
+        assert_eq!(slide_at(h.state()), 0, "switching away without a hover still drops the fraction");
     }
 
     #[test]

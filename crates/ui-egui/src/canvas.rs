@@ -142,6 +142,15 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let avail = ui.available_rect_before_wrap();
     app.canvas_rect = Some(avail);
     let Some(st) = app.session.active() else { return };
+    // The leftover fraction of a wheel line belongs to one presentation. Drop it whenever another
+    // one is drawn here, hovered or not, so switching away and back starts from zero.
+    let carry_id = ui.id().with("wheel_carry");
+    let doc_uid = st.uid;
+    ui.data_mut(|d| {
+        if d.get_temp::<(u64, f32)>(carry_id).is_none_or(|(uid, _)| uid != doc_uid) {
+            d.insert_temp(carry_id, (doc_uid, 0.0_f32));
+        }
+    });
     if st.doc.slides.is_empty() && st.selection.target == Target::Slides {
         let resp = ui.allocate_rect(avail, Sense::click());
         ui.painter().text(avail.center(), Align2::CENTER_CENTER, "Click to add first slide", theme::font(22.0), t.text_dim);
@@ -177,13 +186,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         if overflow != egui::Vec2::ZERO {
             offset -= wheel;
         } else if !app.anim_preview_active() && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
-            // The leftover fraction belongs to one presentation: another one starts from zero.
-            let carry_id = ui.id().with("wheel_carry");
-            let (carry_doc, mut carry): (Option<u64>, f32) = ui.data_mut(|d| d.get_temp(carry_id).unwrap_or_default());
-            let doc_uid = app.session.active().map(|d| d.uid);
-            if carry_doc != doc_uid {
-                carry = 0.0;
-            }
+            let (_, mut carry): (u64, f32) = ui.data_mut(|d| d.get_temp(carry_id).unwrap_or_default());
             let wheel_step = app.session.active().and_then(|d| {
                 let current = d.selection.slide;
                 ui.input(|i| wheel_slide_target(&i.events, current, d.doc.slides.len(), &mut carry)).map(|target| (current, target))
