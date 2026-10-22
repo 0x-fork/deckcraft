@@ -57,9 +57,23 @@ fn roles(shapes: &[Shape]) -> Roles {
     r
 }
 
-/// The ideas for slide `index` (none when it has nothing to arrange).
+/// Whether an idea may move this shape: a picture, a placeholder or a plain text box. Diagram
+/// boxes, connectors, groups, tables, charts and media are laid out by their own geometry, which
+/// the ideas do not know, so a slide holding one gets no ideas.
+fn arrangeable(s: &Shape) -> bool {
+    match s.kind {
+        ShapeKind::Picture { .. } => true,
+        ShapeKind::Shape => s.ph.is_some() || s.text_box,
+        _ => false,
+    }
+}
+
+/// The ideas for slide `index` (none when it has nothing to arrange, or other content in the way).
 pub fn ideas_for(doc: &Presentation, index: usize) -> Vec<Idea> {
     let Some(slide) = doc.slides.get(index) else { return vec![] };
+    if slide.shapes.iter().any(|s| !s.hidden && !arrangeable(s)) {
+        return vec![];
+    }
     let r = roles(&slide.shapes);
     if r.picture.is_some() {
         PICTURE_IDEAS.to_vec()
@@ -228,6 +242,7 @@ mod tests {
         };
         let body = Shape {
             id: ShapeId(501),
+            text_box: true,
             xfrm: Some(Xfrm::new(50.0, 140.0, 860.0, 350.0)),
             text: Some(deckcraft_model::text::TextBody::from_text("one\ntwo")),
             ..Default::default()
@@ -312,6 +327,34 @@ mod tests {
         let mut s = deck(false);
         assert!(s.execute("design.applyIdea", &json!({"id": "fullBleed"})).is_err());
         assert!(s.execute("design.applyIdea", &json!({"id": "nope"})).is_err());
+    }
+
+    #[test]
+    fn slides_with_diagrams_or_other_graphics_get_no_ideas() {
+        // A filled autoshape with text (a diagram box) is not text to restack.
+        let mut s = deck(false);
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        slide.shapes.push(Shape {
+            id: ShapeId(510),
+            xfrm: Some(Xfrm::new(300.0, 200.0, 200.0, 80.0)),
+            fill: Some(Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(200, 80, 20, 255)))),
+            text: Some(deckcraft_model::text::TextBody::from_text("Solar wind")),
+            ..Default::default()
+        });
+        assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty());
+        assert!(s.execute("design.applyIdea", &json!({"id": "titleColumn"})).is_err());
+        // A connector too, and a hidden one does not count.
+        let mut s = deck(false);
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        slide.shapes.push(Shape {
+            id: ShapeId(511),
+            kind: ShapeKind::Connector { start: None, end: None },
+            xfrm: Some(Xfrm::new(300.0, 200.0, 100.0, 0.0)),
+            ..Default::default()
+        });
+        assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty());
+        Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]).shapes[2].hidden = true;
+        assert_eq!(ideas_for(&s.doc().unwrap().doc, 0).len(), 3);
     }
 
     #[test]
