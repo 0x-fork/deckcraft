@@ -131,6 +131,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-22 | Animation Pane ▸ Play From: with an effect selected, the pane's play button starts the canvas preview at that effect, with the effects before it already played. With nothing selected it is still Play All |
 | 2026-10-18 | Native chart sidecar bytes move from JSON arrays into referenced ZIP entries, with shared media byte/item limits and bounded reads; older inline sidecars still load. Synthetic format regressions cover large workbooks and malformed members |
 | 2026-10-18 | Slide thumbnails and the Slide Sorter render only the slides in view: on a deck of more than 600 slides they used to evict their own thumbnails, so the pane flashed white and never finished (#969) |
 | 2026-10-17 | Opening a file caps absurd effect sizes (glow, soft edges, shadows, reflections, on shapes, text and table text) at what Format Shape allows: a glow of 10^18 pt in a .pptx made rendering ask for 34 GB and abort |
@@ -241,6 +242,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | trivial | Progress log: Animation Pane ▸ Play From. Scores unchanged |
 | 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
 | 2026-10-15 | trivial | Progress log: chart package parts survive a native save. Scores and milestone names unchanged |
 | 2026-10-18 | trivial | Progress log: thumbnails of huge decks render only the slides in view (#969) |

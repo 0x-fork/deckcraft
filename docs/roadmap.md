@@ -1,6 +1,6 @@
 # DeckCraft roadmap: milestones and what's next
 
-> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-18 · **Change:** minor (native chart payloads stored in bounded ZIP members; previous: major, community PR wave 2026-10-14: PPTX corpus, presenter and show controls, review navigation, starter decks, Grid Options and New Window, WordArt gallery and handles, pen pressure; beta items 9 and 10 narrowed; duplicated rows and headers folded; previous: minor, core-workflow alpha gate added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
+> **Last reviewed:** 2026-10-14 · **Last updated:** 2026-10-22 · **Change:** trivial (beta item 9 drops Play From, now in; previous: minor, native chart payloads stored in bounded ZIP members; previous: major, community PR wave 2026-10-14: PPTX corpus, presenter and show controls, review navigation, starter decks, Grid Options and New Window, WordArt gallery and handles, pen pressure; beta items 9 and 10 narrowed; duplicated rows and headers folded; previous: minor, core-workflow alpha gate added) · **Target:** Microsoft PowerPoint for Mac 16.113 (Microsoft 365)
 
 Forward-looking: where DeckCraft is going and in what order. The one-page summary is
 [ROADMAP.md](../ROADMAP.md); every shortfall is in [gaps.md](gaps.md); numbers are in
@@ -52,7 +52,7 @@ Beta means ~75% ready for real work and opening and saving PowerPoint's `.pptx` 
 | 7 | Font weights (#69), image paste (#53), Tab in text (#78) | 6–11 | Features |
 | 8 | Charts: data grid, elements | 6–10 | Features |
 | 10 | Presenter view on the right display, swap displays | 2–4 | Hardware, Slide show |
-| 9 | Animation Pane: preview from the selected effect, effect options (the timeline is in) | 4–7 | Features |
+| 9 | Animation Pane: effect options (the timeline and Play From are in) | 3–6 | Features |
 | 11 | Native macOS menu bar, Format Shape pane depth, start screen and window chrome fixes | 13–22 | UI/UX 60 → 75% |
 | 12 | Performance baseline and the obvious fixes | 4–8 | Performance |
 | **Total** | | **~120–210** | Ready ~55% → ~75% |
@@ -115,6 +115,7 @@ plan above.
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | trivial | Beta item 9: Animation Pane ▸ Play From landed, the item keeps effect options (3–6 h) |
 | 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
 | 2026-10-15 | trivial | Native save/reopen retains imported chart workbooks and related parts; headless command tests cover a PPTX → native → PPTX cycle and stale-workbook rejection. Milestone scope and scores unchanged |
 | 2026-10-15 | trivial | PPTX trigger click steps survive save, including by-paragraph builds. Interactive-deck gaps remain media actions, audio triggers and click-box geometry; milestone scope and feature scores unchanged |
