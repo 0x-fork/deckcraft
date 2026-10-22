@@ -108,6 +108,9 @@ struct BackKey {
 /// than the shapes: a full-slide picture with a glow in the layout made animations crawl at 2–3
 /// frames a second. `rx` brings it from another thread when it is rendered ahead of time.
 struct Backdrop {
+    /// The presentation it was rendered from, held so its address (in `key`) can't be reused by
+    /// a later edit while the backdrop is kept.
+    doc: std::sync::Arc<Presentation>,
     key: BackKey,
     img: Option<std::sync::Arc<deckcraft_render::Image>>,
     rx: Option<std::sync::mpsc::Receiver<deckcraft_render::Image>>,
@@ -281,8 +284,8 @@ impl Show {
 
     /// The backdrop for `key`: kept from earlier, waited for if it is being rendered ahead of
     /// time, or rendered now.
-    fn backdrop(&mut self, doc: &Presentation, key: BackKey) -> std::sync::Arc<deckcraft_render::Image> {
-        if let Some(b) = self.backdrop.as_mut().filter(|b| b.key == key) {
+    fn backdrop(&mut self, doc: &std::sync::Arc<Presentation>, key: BackKey) -> std::sync::Arc<deckcraft_render::Image> {
+        if let Some(b) = self.backdrop.as_mut().filter(|b| b.key == key && std::sync::Arc::ptr_eq(&b.doc, doc)) {
             if b.img.is_none() {
                 b.img = b.rx.take().and_then(|rx| rx.recv().ok()).map(std::sync::Arc::new);
             }
@@ -291,23 +294,23 @@ impl Show {
             }
         }
         let img = std::sync::Arc::new(render_backdrop(doc, key, render_threads()));
-        self.backdrop = Some(Backdrop { key, img: Some(img.clone()), rx: None });
+        self.backdrop = Some(Backdrop { doc: doc.clone(), key, img: Some(img.clone()), rx: None });
         img
     }
 
     /// Start rendering the backdrop for `key` on another thread, unless it is already there or
     /// on its way. Nothing on the web (no threads): the first animation frame renders it.
     fn prefetch_backdrop(&mut self, doc: &std::sync::Arc<Presentation>, key: BackKey) {
-        if cfg!(target_arch = "wasm32") || self.backdrop.as_ref().is_some_and(|b| b.key == key) {
+        if cfg!(target_arch = "wasm32") || self.backdrop.as_ref().is_some_and(|b| b.key == key && std::sync::Arc::ptr_eq(&b.doc, doc)) {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        let doc = doc.clone();
+        let worker_doc = doc.clone();
         let threads = render_threads().saturating_sub(1).max(1);
         let spawned = std::thread::Builder::new().name("show-backdrop".into()).spawn(move || {
-            let _ = tx.send(render_backdrop(&doc, key, threads));
+            let _ = tx.send(render_backdrop(&worker_doc, key, threads));
         });
-        self.backdrop = spawned.ok().map(|_| Backdrop { key, img: None, rx: Some(rx) });
+        self.backdrop = spawned.ok().map(|_| Backdrop { doc: doc.clone(), key, img: None, rx: Some(rx) });
     }
 
     fn timeline(&mut self, doc: &Presentation) -> &Timeline {
@@ -2141,6 +2144,10 @@ mod tests {
         assert!(worst.is_some_and(|d| d <= 2), "frames differ by up to {worst:?}");
         // The backdrop is kept, not rendered again.
         assert!(std::sync::Arc::ptr_eq(&back, &show.backdrop(&doc, key)));
+        // Another document under the same key (an edit whose copy reused the old address) gets
+        // its own backdrop.
+        let edited = std::sync::Arc::new((*doc).clone());
+        assert!(!std::sync::Arc::ptr_eq(&back, &show.backdrop(&edited, key)));
     }
 
     #[test]
