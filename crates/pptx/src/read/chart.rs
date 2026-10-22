@@ -5,7 +5,7 @@ use deckcraft_model::style::Fill;
 
 use crate::xml::El;
 
-/// Fills of chart parts never reference images we keep; read colour fills only.
+/// Fills of chart parts never reference images we keep; read colour and pattern fills only.
 fn simple_fill(sp: Option<&El>) -> Option<Fill> {
     let sp = sp?;
     for e in sp.elements() {
@@ -13,6 +13,7 @@ fn simple_fill(sp: Option<&El>) -> Option<Fill> {
             "noFill" => return Some(Fill::None),
             "solidFill" => return super::dml::color(e).map(|color| Fill::Solid { color }),
             "gradFill" => return Some(Fill::Gradient(super::dml::gradient(e))),
+            "pattFill" => return Some(Fill::Pattern(super::dml::pattern(e))),
             _ => {}
         }
     }
@@ -555,6 +556,29 @@ mod tests {
         assert!(back.gridlines && back.minor_gridlines);
         c.minor_gridlines = false;
         assert!(!read_chart_xml(&crate::write::chart::chart_xml(&c).0).unwrap().minor_gridlines);
+    }
+
+    #[test]
+    fn series_pattern_fills_are_read_and_written_back() {
+        // A pattern-filled series and an empty one with an outline, as PowerPoint writes them.
+        let xml = br#"<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:ser><c:idx val="0"/><c:spPr><a:pattFill prst="openDmnd"><a:fgClr><a:schemeClr val="accent4"/></a:fgClr><a:bgClr><a:schemeClr val="bg1"/></a:bgClr></a:pattFill></c:spPr><c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>5</c:v></c:pt></c:numLit></c:val></c:ser><c:ser><c:idx val="1"/><c:spPr><a:noFill/><a:ln w="19050"><a:solidFill><a:schemeClr val="accent4"/></a:solidFill></a:ln></c:spPr><c:val><c:numLit><c:ptCount val="1"/><c:pt idx="0"><c:v>3</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>"#;
+        let c = read_chart_xml(xml).unwrap();
+        let accent4 = deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent4);
+        let pattern = deckcraft_model::style::PatternFill {
+            preset: "openDmnd".into(),
+            fg: accent4.clone(),
+            bg: deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Bg1),
+        };
+        assert_eq!(c.series[0].fill, Some(Fill::Pattern(pattern.clone())));
+        assert_eq!(c.series[1].fill, Some(Fill::None));
+        assert_eq!(c.series[1].line.as_ref().and_then(|l| l.fill.clone()), Some(Fill::solid(accent4)));
+        // Written out from the model (an edited chart), the pattern survives.
+        let mut edited = c.clone();
+        edited.raw = None;
+        edited.title = Some("Edited".into());
+        let back = read_chart_xml(&crate::write::chart::chart_xml(&edited).0).unwrap();
+        assert_eq!(back.series[0].fill, Some(Fill::Pattern(pattern)));
+        assert_eq!(back.series[1].fill, Some(Fill::None));
     }
 
     #[test]
