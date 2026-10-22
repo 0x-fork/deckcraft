@@ -3383,6 +3383,27 @@ mod tests {
         assert_eq!(slide_at(h.state()), 0, "a whole line back is one slide back");
     }
 
+    /// A fraction of a line left over in one presentation does not carry into another.
+    #[test]
+    fn mouse_wheel_fraction_does_not_carry_into_another_presentation() {
+        let mut h = flick_harness();
+        h.state_mut().run("slide.new", json!({})).unwrap();
+        h.state_mut().run("slide.go", json!({"index": 0})).unwrap();
+        h.run_steps(1);
+        mouse_wheel(&mut h, &[-0.75]);
+        assert_eq!(slide_at(h.state()), 0);
+
+        h.state_mut().run("file.new", json!({})).unwrap();
+        h.state_mut().run("slide.new", json!({})).unwrap();
+        h.state_mut().run("slide.go", json!({"index": 0})).unwrap();
+        h.state_mut().ui.zoom = Some(0.4);
+        h.run_steps(2);
+        mouse_wheel(&mut h, &[-0.25]);
+        assert_eq!(slide_at(h.state()), 0, "a quarter line in the new presentation does not turn the page");
+        mouse_wheel(&mut h, &[-0.75]);
+        assert_eq!(slide_at(h.state()), 1, "a whole line in the new presentation does");
+    }
+
     #[test]
     fn mouse_wheel_over_a_zoomed_canvas_pans_and_outside_the_canvas_does_not_navigate() {
         let mut h = flick_harness();

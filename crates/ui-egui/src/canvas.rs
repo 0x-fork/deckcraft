@@ -177,13 +177,18 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         if overflow != egui::Vec2::ZERO {
             offset -= wheel;
         } else if !app.anim_preview_active() && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
+            // The leftover fraction belongs to one presentation: another one starts from zero.
             let carry_id = ui.id().with("wheel_carry");
-            let mut carry: f32 = ui.data_mut(|d| d.get_temp(carry_id).unwrap_or_default());
+            let (carry_doc, mut carry): (Option<u64>, f32) = ui.data_mut(|d| d.get_temp(carry_id).unwrap_or_default());
+            let doc_uid = app.session.active().map(|d| d.uid);
+            if carry_doc != doc_uid {
+                carry = 0.0;
+            }
             let wheel_step = app.session.active().and_then(|d| {
                 let current = d.selection.slide;
                 ui.input(|i| wheel_slide_target(&i.events, current, d.doc.slides.len(), &mut carry)).map(|target| (current, target))
             });
-            ui.data_mut(|d| d.insert_temp(carry_id, carry));
+            ui.data_mut(|d| d.insert_temp(carry_id, (doc_uid, carry)));
             if let Some((current, index)) = wheel_step {
                 if index != current {
                     let _ = app.run("slide.go", json!({"index": index}));
