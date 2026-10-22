@@ -28,7 +28,7 @@ ready** (estimated), **10–16 h** to parity.
 | Hyperlinks and action settings followed (slides, web, mail, End Show, Last Viewed, Custom Show) | yes | yes | Only `http(s)` and `mailto` open outside the show, by design (`safe_url`). A Custom Show action plays that show |
 | Media playback with controls, play across slides, full-screen video, Play/Pause/Stop in the click sequence | yes | yes | WMA/WMV not decodable. Click sequence since #116. Slide Show ▸ Show Media Controls (on by default) hides the playback bar. Seeks and loops preserve new-generation video frames and end-of-stream; queue regression and repeated seeks across H.264/HEVC/VP9/AV1 in `crates/media` |
 | Animated GIFs play; pause from their corner button | yes | yes (#39) | The corner button hides with Show Media Controls |
-| See All Slides grid during the show | yes | yes: G, or All on the show bar and in presenter view; click a thumbnail, Esc closes the grid | Hidden slides are labelled; the first 48 slides are shown |
+| See All Slides grid during the show | yes | yes: G, or All on the show bar; click a thumbnail, Esc closes the grid | Hidden slides are labelled; the first 48 slides are shown |
 | Zoom into part of a slide during the show | yes | yes: Z, then click the slide (or the presenter slide); 2×, Esc or another click leaves it | The presenter keeps the whole slide and draws a frame on the zoomed part |
 | Pen and highlighter ink | yes | pen only (Cmd+P pen, Cmd+A arrow, E erases all ink) | No highlighter, per-stroke eraser, ink colours, or keep/discard annotations prompt |
 | Laser pointer | yes | yes in the show | Cmd/Ctrl+L and the on-screen button draw the show's laser colour and leave no ink. The presenter window does not move that dot |
@@ -50,7 +50,7 @@ ready** (estimated), **10–16 h** to parity.
 | Placed on the presenter's display automatically, show on the projector | yes | **no**: opens wherever the OS puts it | Beta blocker, 3–5 h. Open PR #433 places the show on a second display when one is attached. This change does not |
 | Swap displays | yes | no | Still open on #433 |
 | Pen, laser, black screen, zoom from presenter view | yes | Black, White and Zoom buttons; the audience zoom is framed on the presenter slide | Pen and laser are driven from the audience window only; the presenter window does not move the laser dot |
-| See all slides from presenter view | yes | yes: All slides opens the grid on the show | |
+| See all slides from presenter view | yes | yes: All slides (or G) opens the grid in presenter view only, the audience keeps the slide; click a thumbnail to go there, Esc closes it | |
 | Rehearse with Coach (Speaker Coach) | yes (cloud) | no | AI dimension |
 
 ## Rehearse and record
@@ -79,6 +79,7 @@ Reading View in a window with navigation: present (checklist row done).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | minor | See All Slides from presenter view opens in presenter view, not on the audience screen (#1130) |
 | 2026-10-14 | trivial | Community PR wave folded: one media playback row, the presenter pen/laser row matches the laser that exists, estimates keep only the open work (~9–16 h); checklist breadth 68% |
 | 2026-10-13 | minor | Click handling for interactive decks: triggers, per-slide state kept across visits, visible-shape hit testing with hand cursor, advance on click |
 | 2026-10-13 | minor | Video seek handoff no longer discards freshly decoded frames or end-of-stream (upstream #416); deterministic queue and four-codec seek regression tests |
