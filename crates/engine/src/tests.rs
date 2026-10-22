@@ -3673,6 +3673,26 @@ fn table_insert_below_or_right_of_a_huge_index_appends_at_the_end() {
 }
 
 #[test]
+fn table_row_col_commands_reject_an_invalid_index() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"], ["e", "f"]]));
+    for (cmd, key) in [
+        ("table.deleteRow", "row"),
+        ("table.deleteColumn", "col"),
+        ("table.insertRowAbove", "row"),
+        ("table.insertColumnLeft", "col"),
+        ("table.split", "row"),
+    ] {
+        for bad in [json!(-1), json!(1.5), json!("1")] {
+            let r = s.execute(cmd, &json!({"id": id.0, key: bad}));
+            assert!(r.is_err(), "{cmd} {key}={bad} should be rejected, got {r:?}");
+            let t = table_of(&s, id);
+            assert_eq!((t.n_rows(), t.n_cols()), (3, 2), "{cmd} {key}={bad} must leave the table unchanged");
+        }
+    }
+}
+
+#[test]
 fn table_column_width_of_a_huge_column_is_ignored() {
     let mut s = session();
     let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));

@@ -231,10 +231,11 @@ fn cell_param(p: &Value, key: &str) -> Option<(usize, usize)> {
 }
 
 /// The table's row/col to act on: params, the edited cell, or the selected cells.
-fn at(s: &Session, p: &Value) -> (usize, usize) {
+/// A present but invalid `row`/`col` is an error; only an absent one falls back.
+fn at(s: &Session, p: &Value, cmd: &str) -> Result<(usize, usize)> {
     let st = s.active();
     let cell = st.and_then(|d| d.selection.text.as_ref().and_then(|t| t.cell)).or_else(|| st.and_then(|d| d.selection.cells.map(|c| c.1)));
-    (usize_param(p, "row").or(cell.map(|c| c.0)).unwrap_or(0), usize_param(p, "col").or(cell.map(|c| c.1)).unwrap_or(0))
+    Ok((opt_usize_param(p, "row", cmd)?.or(cell.map(|c| c.0)).unwrap_or(0), opt_usize_param(p, "col", cmd)?.or(cell.map(|c| c.1)).unwrap_or(0)))
 }
 
 fn with_table(s: &mut Session, p: &Value, cmd: &str, f: impl Fn(&mut Table) -> Result<()>) -> Result<Value> {
@@ -283,7 +284,7 @@ fn with_table(s: &mut Session, p: &Value, cmd: &str, f: impl Fn(&mut Table) -> R
 }
 
 fn rows_cols(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
-    let (r, c) = at(s, p);
+    let (r, c) = at(s, p, &format!("table.{op}"))?;
     let op = op.to_string();
     with_table(s, p, "table", move |t| {
         match op.as_str() {
@@ -319,7 +320,10 @@ fn merge(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn split(s: &mut Session, p: &Value) -> Result<Value> {
-    let cell = cell_param(p, "cell").unwrap_or_else(|| at(s, p));
+    let cell = match cell_param(p, "cell") {
+        Some(c) => c,
+        None => at(s, p, "table.split")?,
+    };
     with_table(s, p, "table.split", move |t| if t.split(cell.0, cell.1) { Ok(()) } else { Err(bad("table.split", "that cell isn't merged")) })
 }
 
@@ -531,7 +535,7 @@ fn distribute(s: &mut Session, p: &Value, rows: bool) -> Result<Value> {
 }
 
 fn column_width(s: &mut Session, p: &Value) -> Result<Value> {
-    let (_, c) = at(s, p);
+    let (_, c) = at(s, p, "table.columnWidth")?;
     let w = f64_param(p, "width").ok_or_else(|| bad("table.columnWidth", "missing `width`"))?.clamp(4.0, 4000.0);
     let keep_total = bool_or(p, "keepTotal", false);
     with_table(s, p, "table.columnWidth", move |t| {
@@ -560,7 +564,7 @@ fn column_width(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn row_height(s: &mut Session, p: &Value) -> Result<Value> {
-    let (r, _) = at(s, p);
+    let (r, _) = at(s, p, "table.rowHeight")?;
     let h = f64_param(p, "height").ok_or_else(|| bad("table.rowHeight", "missing `height`"))?.clamp(4.0, 4000.0);
     with_table(s, p, "table.rowHeight", move |t| {
         if let Some(x) = t.rows.get_mut(r) {
