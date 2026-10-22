@@ -84,6 +84,11 @@ fn cover_crop(src: f64, dst: f64) -> [f64; 4] {
     }
 }
 
+/// The light fill behind the title in the full-bleed idea.
+fn band_fill() -> Fill {
+    Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220)))
+}
+
 /// Apply idea `id` to slide `index` of `doc` (`sel` resolves inherited placeholder boxes).
 pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &str) -> Result<()> {
     if !ideas_for(doc, index).iter().any(|i| i.0 == id) {
@@ -180,8 +185,13 @@ pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &st
         let pic = slide.shapes.remove(p);
         slide.shapes.insert(0, pic);
     }
-    if band && let Some(t) = slide.shapes.iter_mut().find(|s| s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
-        t.fill = Some(Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220))));
+    if let Some(t) = slide.shapes.iter_mut().find(|s| s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
+        if band {
+            t.fill = Some(band_fill());
+        } else if t.fill == Some(band_fill()) {
+            // The band belongs to full-bleed only: another idea takes it away again.
+            t.fill = None;
+        }
     }
     Ok(())
 }
@@ -312,6 +322,15 @@ mod tests {
         let mut s = deck(false);
         assert!(s.execute("design.applyIdea", &json!({"id": "fullBleed"})).is_err());
         assert!(s.execute("design.applyIdea", &json!({"id": "nope"})).is_err());
+    }
+
+    #[test]
+    fn switching_from_full_bleed_removes_the_title_band() {
+        let mut s = deck(true);
+        s.execute("design.applyIdea", &json!({"id": "fullBleed"})).unwrap();
+        assert!(shape(&s, 500).fill.is_some());
+        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
+        assert!(shape(&s, 500).fill.is_none(), "the band belongs to full-bleed only");
     }
 
     #[test]
