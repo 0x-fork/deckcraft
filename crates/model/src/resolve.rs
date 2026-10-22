@@ -100,7 +100,10 @@ pub fn parents<'a>(ctx: &Ctx<'a>, shape: &Shape) -> (Option<&'a Shape>, Option<&
     }
 }
 
-/// The text style group (title / body / other) a shape draws from.
+/// The text style group (title / body / other) a shape draws from. Text in a table that isn't a
+/// placeholder takes the master's other-text style, as in PowerPoint for Mac (a table cell is 14 pt
+/// under an `otherStyle` of 14 pt and a `defaultTextStyle` of 26 pt, while a shape's or a text
+/// box's text is 26 pt); other shapes take the presentation's default text style.
 pub fn master_list_style<'a>(ctx: &Ctx<'a>, shape: &Shape) -> &'a ListStyle {
     match shape.ph_type() {
         Some(PhType::Title | PhType::CtrTitle) => &ctx.master.title_style,
@@ -116,6 +119,7 @@ pub fn master_list_style<'a>(ctx: &Ctx<'a>, shape: &Shape) -> &'a ListStyle {
             | PhType::ClipArt,
         ) => &ctx.master.body_style,
         Some(_) => &ctx.master.other_style,
+        None if matches!(shape.kind, crate::ShapeKind::Table(_)) => &ctx.master.other_style,
         None => &ctx.pres.default_text_style,
     }
 }
