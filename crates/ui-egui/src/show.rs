@@ -31,6 +31,8 @@ pub struct Show {
     /// The next slide's first frame, rendered in the background while this one is shown so
     /// advancing only uploads it (#240).
     prefetch: Option<Prefetch>,
+    /// The current slide's backdrop, under its animation frames.
+    backdrop: Option<Backdrop>,
     blank: Option<Color32>,
     /// See All Slides covers the show until a slide is chosen.
     pub grid: bool,
@@ -93,8 +95,52 @@ fn render_threads() -> u16 {
     if cfg!(target_arch = "wasm32") { 0 } else { std::thread::available_parallelism().map(|n| n.get().min(8) as u16).unwrap_or(0) }
 }
 
+/// What a slide's backdrop was rendered for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BackKey {
+    slide: usize,
+    size: (u32, u32),
+    doc: usize,
+}
+
+/// A slide's backdrop (background, master and layout graphics), kept while the slide is shown so
+/// animation frames render only the slide's own shapes over it. The backdrop can cost far more
+/// than the shapes: a full-slide picture with a glow in the layout made animations crawl at 2–3
+/// frames a second. `rx` brings it from another thread when it is rendered ahead of time.
+struct Backdrop {
+    key: BackKey,
+    img: Option<std::sync::Arc<deckcraft_render::Image>>,
+    rx: Option<std::sync::mpsc::Receiver<deckcraft_render::Image>>,
+}
+
+fn render_backdrop(doc: &Presentation, key: BackKey, threads: u16) -> deckcraft_render::Image {
+    let opts = RenderOpts { scale: key.size.0 as f64 / doc.slide_size.width.max(1.0), size: Some(key.size), threads, ..Default::default() };
+    deckcraft_render::render_slide_part(doc, key.slide, deckcraft_render::SlidePart::Backdrop, &opts)
+}
+
+/// `top` laid over `back` (both premultiplied RGBA of the same size; `top` alone otherwise).
+fn over(back: &deckcraft_render::Image, top: &deckcraft_render::Image) -> egui::ColorImage {
+    if back.width != top.width || back.height != top.height || back.pixels.len() != top.pixels.len() {
+        return crate::textures::to_color_image(top, false);
+    }
+    let px = back
+        .pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(top.pixels.as_chunks::<4>().0)
+        .map(|(b, t)| {
+            let k = 255 - t[3] as u32;
+            let mix = |i: usize| (t[i] as u32 + (b[i] as u32 * k + 127) / 255).min(255) as u8;
+            Color32::from_rgba_premultiplied(mix(0), mix(1), mix(2), mix(3))
+        })
+        .collect();
+    egui::ColorImage::new([top.width as usize, top.height as usize], px)
+}
+
 #[allow(clippy::too_many_arguments)]
-/// Slide `idx` at `step`, `t` seconds into it, `size` pixels, with `hidden` media hidden.
+/// Slide `idx` at `step`, `t` seconds into it, `size` pixels, with `hidden` media hidden. With a
+/// `backdrop` (of this slide, at this size), only the slide's shapes are rendered, over it.
 fn render_frame(
     doc: &Presentation,
     idx: usize,
@@ -107,6 +153,7 @@ fn render_frame(
     threads: u16,
     plays: &[TriggerPlay],
     stamps: &[StepStamp],
+    backdrop: Option<&deckcraft_render::Image>,
 ) -> egui::ColorImage {
     let f = move |id: ShapeId| {
         let mut st = state_for(&tl, id, step, t, plays, stamps);
@@ -115,19 +162,18 @@ fn render_frame(
         }
         st
     };
-    let img = deckcraft_render::render_slide(
-        doc,
-        idx,
-        &RenderOpts {
-            scale: size.0 as f64 / doc.slide_size.width.max(1.0),
-            size: Some(size),
-            state: Some(&f),
-            gif_times: times,
-            threads,
-            ..Default::default()
-        },
-    );
-    crate::textures::to_color_image(&img, false)
+    let opts = RenderOpts {
+        scale: size.0 as f64 / doc.slide_size.width.max(1.0),
+        size: Some(size),
+        state: Some(&f),
+        gif_times: times,
+        threads,
+        ..Default::default()
+    };
+    match backdrop {
+        Some(back) => over(back, &deckcraft_render::render_slide_part(doc, idx, deckcraft_render::SlidePart::Content, &opts)),
+        None => crate::textures::to_color_image(&deckcraft_render::render_slide(doc, idx, &opts), false),
+    }
 }
 
 /// Media on slide `idx` hidden until it plays, as it is when the slide is entered.
@@ -148,7 +194,7 @@ fn start_prefetch(doc: &std::sync::Arc<Presentation>, next: usize, size: (u32, u
     let threads = render_threads().saturating_sub(1).max(1);
     let spawned = std::thread::Builder::new().name("show-prefetch".into()).spawn(move || {
         let tl = ShowState::timeline(&doc, next);
-        let _ = tx.send(render_frame(&doc, next, tl, 0, 0.0, size, hidden, &[], threads, &[], &[]));
+        let _ = tx.send(render_frame(&doc, next, tl, 0, 0.0, size, hidden, &[], threads, &[], &[], None));
     });
     spawned.ok().map(|_| Prefetch { key, rx })
 }
@@ -185,6 +231,7 @@ impl Show {
             tex: None,
             next_tex: None,
             prefetch: None,
+            backdrop: None,
             blank: None,
             grid: false,
             zoom_arm: false,
@@ -230,6 +277,37 @@ impl Show {
     fn arrow(&mut self) {
         self.pen = false;
         self.laser = false;
+    }
+
+    /// The backdrop for `key`: kept from earlier, waited for if it is being rendered ahead of
+    /// time, or rendered now.
+    fn backdrop(&mut self, doc: &Presentation, key: BackKey) -> std::sync::Arc<deckcraft_render::Image> {
+        if let Some(b) = self.backdrop.as_mut().filter(|b| b.key == key) {
+            if b.img.is_none() {
+                b.img = b.rx.take().and_then(|rx| rx.recv().ok()).map(std::sync::Arc::new);
+            }
+            if let Some(img) = &b.img {
+                return img.clone();
+            }
+        }
+        let img = std::sync::Arc::new(render_backdrop(doc, key, render_threads()));
+        self.backdrop = Some(Backdrop { key, img: Some(img.clone()), rx: None });
+        img
+    }
+
+    /// Start rendering the backdrop for `key` on another thread, unless it is already there or
+    /// on its way. Nothing on the web (no threads): the first animation frame renders it.
+    fn prefetch_backdrop(&mut self, doc: &std::sync::Arc<Presentation>, key: BackKey) {
+        if cfg!(target_arch = "wasm32") || self.backdrop.as_ref().is_some_and(|b| b.key == key) {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let doc = doc.clone();
+        let threads = render_threads().saturating_sub(1).max(1);
+        let spawned = std::thread::Builder::new().name("show-backdrop".into()).spawn(move || {
+            let _ = tx.send(render_backdrop(&doc, key, threads));
+        });
+        self.backdrop = spawned.ok().map(|_| Backdrop { key, img: None, rx: Some(rx) });
     }
 
     fn timeline(&mut self, doc: &Presentation) -> &Timeline {
@@ -714,6 +792,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let gif = crate::media::gif_key(&gifs);
         let done: Vec<(ShapeId, usize)> = plays.iter().map(|p| (p.trigger, p.step)).collect();
         let key = Key { slide: idx, step, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: hidden.clone(), plays: done, gif };
+        let back_key = BackKey { slide: idx, size, doc: key.doc };
         let tex = if !animating && show.tex.as_ref().is_some_and(|(k, _)| *k == key) {
             show.tex.as_ref().map(|(_, t)| t.clone())
         } else {
@@ -726,7 +805,9 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 Some(ci) => ci,
                 None => {
                     let tl = show.timeline(&doc).clone();
-                    render_frame(&doc, idx, tl, step, t, size, hidden.clone(), &times, render_threads(), &plays, &stamps)
+                    // Animating: the backdrop doesn't change, only the shapes over it are drawn.
+                    let back = animating.then(|| show.backdrop(&doc, back_key));
+                    render_frame(&doc, idx, tl, step, t, size, hidden.clone(), &times, render_threads(), &plays, &stamps, back.as_deref())
                 }
             };
             let tex = match show.tex.take() {
@@ -741,6 +822,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         };
         // While this slide rests, render the next one's first frame (not one with GIFs, whose
         // frame depends on when it is entered).
+        // A slide with animations gets its backdrop ready while it rests, so they start smoothly.
+        if !animating && !show.timeline(&doc).is_empty() {
+            show.prefetch_backdrop(&doc, back_key);
+        }
         if !animating && show.trans.is_none() && !show.preview_only {
             let next = show.state.peek_next(&doc);
             let wanted = next.filter(|n| app.media.gifs(doc_uid, &doc, *n, now, &app.session.gif_paused).is_empty());
@@ -2009,9 +2094,53 @@ mod tests {
         let p = start_prefetch(&doc, 1, size).expect("prefetch starts");
         assert_eq!(p.key, Key { slide: 1, step: 0, size, doc: std::sync::Arc::as_ptr(&doc) as usize, hidden: vec![], gif: 0, plays: vec![] });
         let got = p.rx.recv().expect("the frame arrives");
-        let want = render_frame(&doc, 1, ShowState::timeline(&doc, 1), 0, 0.0, size, vec![], &[], 0, &[], &[]);
+        let want = render_frame(&doc, 1, ShowState::timeline(&doc, 1), 0, 0.0, size, vec![], &[], 0, &[], &[], None);
         assert_eq!(got.size, want.size);
         assert_eq!(got.pixels, want.pixels);
+    }
+
+    /// A glowing full-slide picture in a layout made every animation frame re-render (and re-blur)
+    /// the backdrop: 2–3 frames a second. Frames now draw the slide's shapes over the kept
+    /// backdrop, and must look the same as a whole-slide render.
+    #[test]
+    fn an_animation_frame_over_the_kept_backdrop_matches_a_full_render() {
+        let mut s = deckcraft_engine::Session::with_new();
+        let r = s.execute("shape.insert", &json!({"preset": "star5", "rect": [100.0, 100.0, 300.0, 200.0]})).unwrap();
+        s.execute("animation.set", &json!({"effect": "fade", "ids": [r["id"]]})).unwrap();
+        let mut doc = (*s.active().unwrap().doc).clone();
+        // A glowing master graphic under the animated star.
+        let mut deco = doc.slides[0].shapes.last().unwrap().clone();
+        deco.id = ShapeId(9000);
+        deco.xfrm = deco.xfrm.map(|x| deckcraft_geom::Xfrm { x: x.x - 60.0, y: x.y + 40.0, ..x });
+        deco.effects = Some(deckcraft_model::Effects {
+            glow: Some(deckcraft_model::style::Glow {
+                color: deckcraft_model::style::ColorRef::rgb(deckcraft_color::Rgba::rgb(0, 120, 255)),
+                radius: 12.0,
+            }),
+            ..Default::default()
+        });
+        std::sync::Arc::make_mut(&mut doc.masters[0]).shapes.push(deco);
+        let doc = std::sync::Arc::new(doc);
+        let size = (480, 270);
+        let key = BackKey { slide: 0, size, doc: std::sync::Arc::as_ptr(&doc) as usize };
+        let mut show = Show::new(&doc, 0, false, false);
+        show.prefetch_backdrop(&doc, key);
+        let back = show.backdrop(&doc, key);
+        let tl = ShowState::timeline(&doc, 0);
+        assert!(!tl.is_empty());
+        // Half-way through the fade, the star half see-through over the glow.
+        let fast = render_frame(&doc, 0, tl.clone(), 0, 0.25, size, vec![], &[], 0, &[], &[], Some(&back));
+        let full = render_frame(&doc, 0, tl, 0, 0.25, size, vec![], &[], 0, &[], &[], None);
+        assert_eq!(fast.size, full.size);
+        let worst = fast
+            .pixels
+            .iter()
+            .zip(&full.pixels)
+            .map(|(a, b)| a.to_array().iter().zip(b.to_array()).map(|(x, y)| x.abs_diff(y)).max().unwrap_or(0))
+            .max();
+        assert!(worst.is_some_and(|d| d <= 2), "frames differ by up to {worst:?}");
+        // The backdrop is kept, not rendered again.
+        assert!(std::sync::Arc::ptr_eq(&back, &show.backdrop(&doc, key)));
     }
 
     #[test]
