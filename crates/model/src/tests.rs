@@ -273,12 +273,14 @@ fn ink_width_follows_pressure_and_keeps_the_old_placeholder() {
 
 #[test]
 fn table_text_takes_the_masters_other_style_and_shapes_the_default_text_style() {
-    // PowerPoint for Mac, with an otherStyle of 14 pt and a defaultTextStyle of 26 pt: a table
-    // cell's text is 14 pt, a shape's and a text box's 26 pt.
+    // PowerPoint for Mac, with an otherStyle of 14 pt, a defaultTextStyle of 26 pt and a 36 pt
+    // bodyStyle: a table cell's text is 14 pt, also in a table placed in a content placeholder; a
+    // shape's and a text box's is 26 pt.
     let mut p = Presentation::default();
     let size = |pt: f64| crate::text::LevelStyle { run: RunProps { size: Some(pt), ..Default::default() }, ..Default::default() };
     p.default_text_style.set(0, size(26.0));
     std::sync::Arc::make_mut(&mut p.masters[0]).other_style.set(0, size(14.0));
+    std::sync::Arc::make_mut(&mut p.masters[0]).body_style.set(0, size(36.0));
     let s = p.slides[0].clone();
     let ctx = Ctx::for_slide(&p, &s).unwrap();
     let para = Paragraph::default();
@@ -287,6 +289,8 @@ fn table_text_takes_the_masters_other_style_and_shapes_the_default_text_style() 
     assert_eq!(pt(&Shape::table_cell(body.clone())), Some(14.0), "a table cell");
     let table = Shape { kind: ShapeKind::Table(Table::default()), ..Default::default() };
     assert_eq!(pt(&table), Some(14.0), "the table itself (its formatting state)");
+    let in_placeholder = Shape { ph: Some(Placeholder { kind: PhType::Obj, idx: 1, ..Default::default() }), ..table };
+    assert_eq!(pt(&in_placeholder), Some(14.0), "a table in a content placeholder");
     assert_eq!(pt(&Shape { text: Some(body.clone()), ..Default::default() }), Some(26.0), "a shape");
     assert_eq!(pt(&Shape { text: Some(body), text_box: true, ..Default::default() }), Some(26.0), "a text box");
 }
