@@ -5,8 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use deckcraft_engine::{MediaStatus, Session};
+use deckcraft_geom::Xfrm;
 use deckcraft_media::{AudioOut, ClipParams, Frame, PlayState, Player, VideoFeed, VoiceSpec, VoiceStatus};
-use deckcraft_model::{MediaClip, Presentation, ShapeId, ShapeKind};
+use deckcraft_model::{MediaClip, Presentation, Shape, ShapeId, ShapeKind};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, TextureHandle, Ui, pos2, vec2};
 
 use crate::icons::{self, Icon};
@@ -61,6 +62,26 @@ pub struct Gif {
     pub frame: usize,
     pub next: f64,
     pub paused: bool,
+}
+
+/// Pictures in `shapes` and in their groups, each with its xfrm in slide space. `group` is the
+/// enclosing group's slide-space xfrm and child space.
+fn collect_pictures<'a>(shapes: &'a [Shape], group: Option<(Xfrm, Xfrm)>, depth: usize, out: &mut Vec<(&'a Shape, Xfrm)>) {
+    if depth > 32 {
+        return;
+    }
+    for sh in shapes {
+        let Some(x) = sh.xfrm else { continue };
+        let x = match group {
+            Some((gx, ch)) => deckcraft_engine::cmd::arrange::child_to_parent(&gx, &ch, &x),
+            None => x,
+        };
+        match &sh.kind {
+            ShapeKind::Picture { .. } => out.push((sh, x)),
+            ShapeKind::Group { children, child } => collect_pictures(children, Some((x, *child)), depth + 1, out),
+            _ => {}
+        }
+    }
 }
 
 impl Default for MediaHost {
@@ -132,15 +153,17 @@ impl MediaHost {
         duration
     }
 
-    /// The animated GIF pictures directly on slide `index` at `now`: each plays from when it was
+    /// The animated GIF pictures on slide `index` at `now`: each plays from when it was
     /// first shown; a paused one holds its time and resumes from it. Clocks belong to `doc_uid`
     /// and are dropped when the open presentation changes.
     pub fn gifs(&mut self, doc_uid: u64, doc: &Presentation, index: usize, now: f64, paused: &HashSet<ShapeId>) -> Vec<Gif> {
         self.ensure_doc(doc_uid);
         let Some(slide) = doc.slides.get(index) else { return vec![] };
+        let mut pictures = vec![];
+        collect_pictures(&slide.shapes, None, 0, &mut pictures);
         let mut out = vec![];
-        for sh in &slide.shapes {
-            let (ShapeKind::Picture { fill }, Some(rect)) = (&sh.kind, sh.xfrm) else { continue };
+        for (sh, rect) in pictures {
+            let ShapeKind::Picture { fill } = &sh.kind else { continue };
             let Some(item) = doc.media(fill.media).filter(|m| m.data.starts_with(b"GIF8")) else { continue };
             let p = paused.contains(&sh.id);
             let c = self.gifs.entry(sh.id).or_insert((now, None));
@@ -671,5 +694,52 @@ mod tests {
         let mut host = MediaHost::new(None);
         host.play(1, &doc, id, &playing, None, Owner::Show);
         assert_eq!(host.clip(id), Some(&playing), "the voice keeps the clip it was started with");
+    }
+
+    /// Two 1×1 frames (black, then white), 100 ms each.
+    fn two_frame_gif() -> Vec<u8> {
+        let mut b = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff".to_vec();
+        for pixel in [b"\x44\x01", b"\x4c\x01"] {
+            b.extend_from_slice(b"\x21\xf9\x04\x00\x0a\x00\x00\x00");
+            b.extend_from_slice(b"\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02");
+            b.extend_from_slice(pixel);
+            b.push(0);
+        }
+        b.push(0x3b);
+        b
+    }
+
+    #[test]
+    fn grouped_gifs_play_in_slide_space() {
+        let mut doc = Presentation::default();
+        let media = doc.add_media("a.gif", "image/gif", two_frame_gif()).expect("media");
+        let pic = |id: u32, x: f64| Shape {
+            id: ShapeId(id),
+            xfrm: Some(Xfrm::new(x, 0.0, 10.0, 10.0)),
+            kind: ShapeKind::Picture { fill: PictureFill { media, ..Default::default() } },
+            ..Default::default()
+        };
+        // Child space 0..20 × 0..10 maps onto a 40 × 20 group at (100, 50): scale 2.
+        let inner = Shape {
+            id: ShapeId(9),
+            xfrm: Some(Xfrm::new(10.0, 0.0, 10.0, 10.0)),
+            kind: ShapeKind::Group { children: vec![pic(8, 0.0)], child: Xfrm::new(0.0, 0.0, 10.0, 10.0) },
+            ..Default::default()
+        };
+        let group = Shape {
+            id: ShapeId(10),
+            xfrm: Some(Xfrm::new(100.0, 50.0, 40.0, 20.0)),
+            kind: ShapeKind::Group { children: vec![pic(7, 0.0), inner], child: Xfrm::new(0.0, 0.0, 20.0, 10.0) },
+            ..Default::default()
+        };
+        Arc::make_mut(&mut doc.slides[0]).shapes.push(group);
+        let mut host = MediaHost::new(None);
+        host.gifs(1, &doc, 0, 10.0, &HashSet::new());
+        let gifs = host.gifs(1, &doc, 0, 10.15, &HashSet::new()).into_iter().map(|g| (g.id, g)).collect::<HashMap<_, _>>();
+        let a = gifs.get(&ShapeId(7)).expect("grouped GIF plays");
+        let b = gifs.get(&ShapeId(8)).expect("GIF in a nested group plays");
+        assert_eq!(a.frame, 1, "the clock runs");
+        assert_eq!((a.rect.x, a.rect.y, a.rect.w, a.rect.h), (100.0, 50.0, 20.0, 20.0));
+        assert_eq!((b.rect.x, b.rect.y, b.rect.w, b.rect.h), (120.0, 50.0, 20.0, 20.0));
     }
 }
