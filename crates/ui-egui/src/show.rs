@@ -438,7 +438,8 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
     for (k, m) in keys {
         use egui::Key::*;
         let presenter_grid = presenter && show.presenter_grid;
-        if (show.grid || presenter_grid) && !matches!(k, Escape | Minus) {
+        let grid_open = if presenter { show.presenter_grid } else { show.grid };
+        if grid_open && !matches!(k, Escape | Minus) {
             // See All Slides takes no other keys until a slide is chosen.
             if k == G && plain(m) {
                 if presenter_grid {
@@ -453,7 +454,7 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, 
             match k {
                 Escape | Minus => {
                     let cancelled = k == Escape && show.clear_goto();
-                    if !cancelled && !show.back_out() {
+                    if !cancelled && !show.back_out(presenter) {
                         keep = false;
                     }
                 }
@@ -665,7 +666,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let cur_step = show.state.step;
         let n_steps = show.timeline(&doc).steps();
         let step_due = show.autoplay && cur_step < n_steps && idle > 0.3;
-        let holding = show.grid || show.zoom.is_some() || show.zoom_arm;
+        let holding = show.grid || show.presenter_grid || show.zoom.is_some() || show.zoom_arm;
         if !holding && (step_due || (!show.rehearse && show.state.auto_advance_due(&doc, idle) && !show.ended)) {
             actions.push(show.state.next(&doc));
         } else if show.preview_only && cur_step >= n_steps && idle > 0.8 {
@@ -1350,12 +1351,12 @@ impl Show {
         }
     }
 
-    /// Esc closes See All Slides, then a zoom, and only then leaves the show.
-    fn back_out(&mut self) -> bool {
-        if self.presenter_grid {
+    /// Esc closes the See All Slides of the window it was pressed in, then a zoom, and only then leaves the show.
+    fn back_out(&mut self, presenter: bool) -> bool {
+        if presenter && self.presenter_grid {
             self.presenter_grid = false;
             true
-        } else if self.grid {
+        } else if !presenter && self.grid {
             self.grid = false;
             true
         } else {
@@ -2231,6 +2232,24 @@ mod tests {
     }
 
     #[test]
+    fn escape_only_closes_the_grid_of_its_own_window() {
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let mut show = Show::new(&doc, 0, false, true);
+        show.presenter_grid = true;
+        assert!(!show.back_out(false), "audience Esc leaves the show, the Presenter View grid stays");
+        assert!(show.presenter_grid);
+        assert!(show.back_out(true));
+        assert!(!show.presenter_grid);
+        show.grid = true;
+        assert!(!show.back_out(true), "Presenter View Esc does not close the audience grid");
+        assert!(show.grid);
+        assert!(show.back_out(false));
+        assert!(!show.grid);
+    }
+
+    #[test]
     fn escape_leaves_the_grid_then_the_zoom_and_blank_toggles() {
         let mut s = deckcraft_engine::Session::with_new();
         s.execute("slide.new", &json!({})).unwrap();
@@ -2238,12 +2257,12 @@ mod tests {
         let mut show = Show::new(&doc, 0, false, true);
         show.grid = true;
         show.zoom = Some(Zoom::at(0.2, 0.3));
-        assert!(show.back_out());
+        assert!(show.back_out(false));
         assert!(!show.grid);
         assert!(show.zoom.is_some(), "closing the grid leaves the zoom");
-        assert!(show.back_out());
+        assert!(show.back_out(false));
         assert!(show.zoom.is_none());
-        assert!(!show.back_out());
+        assert!(!show.back_out(false));
         show.zoom_key();
         assert!(show.zoom_arm);
         show.zoom_key();
