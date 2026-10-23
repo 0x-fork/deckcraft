@@ -323,6 +323,10 @@ mod tests {
     /// bit-exact for every stream inside it — instead of panicking.
     #[test]
     fn huge_coefficients_are_clamped_to_the_spec_r_range() {
+        assert_eq!(r_clamp(-32769), -32768);
+        assert_eq!(r_clamp(-32768), -32768);
+        assert_eq!(r_clamp(32767), 32767);
+        assert_eq!(r_clamp(32768), 32767);
         let clamp = |v: i32| v.clamp(-(1 << 15), (1 << 15) - 1);
         for d in [[i32::MAX; 16], [i32::MIN; 16], std::array::from_fn(|i| if i % 2 == 0 { i32::MIN } else { i32::MAX })] {
             let clamped = std::array::from_fn(|i| clamp(d[i]));
