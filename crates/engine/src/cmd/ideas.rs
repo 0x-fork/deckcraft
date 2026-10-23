@@ -185,7 +185,7 @@ pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &st
         let pic = slide.shapes.remove(p);
         slide.shapes.insert(0, pic);
     }
-    if let Some(t) = slide.shapes.iter_mut().find(|s| s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
+    if let Some(t) = slide.shapes.iter_mut().find(|s| !s.hidden && s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
         if band {
             t.fill = Some(band_fill());
         } else if t.fill == Some(band_fill()) {
@@ -331,6 +331,28 @@ mod tests {
         assert_eq!(shape(&s, 500).fill, Some(band_fill()));
         s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
         assert!(shape(&s, 500).fill.is_none(), "the band belongs to full-bleed only");
+    }
+
+    #[test]
+    fn the_band_goes_on_the_visible_title_not_a_hidden_one_before_it() {
+        let mut s = deck(true);
+        let st = s.doc_mut().unwrap();
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut st.doc).slides[0]);
+        let hidden = Shape {
+            id: ShapeId(503),
+            hidden: true,
+            ph: Some(Placeholder { kind: PhType::Title, ..Default::default() }),
+            xfrm: Some(Xfrm::new(50.0, 30.0, 860.0, 90.0)),
+            text: Some(deckcraft_model::text::TextBody::from_text("Old title")),
+            ..Default::default()
+        };
+        slide.shapes.insert(0, hidden);
+        s.execute("design.applyIdea", &json!({"id": "fullBleed"})).unwrap();
+        assert_eq!(shape(&s, 500).fill, Some(band_fill()), "visible title gets the band");
+        assert!(shape(&s, 503).fill.is_none(), "hidden title is untouched");
+        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
+        assert!(shape(&s, 500).fill.is_none(), "switching clears the visible title's band");
+        assert!(shape(&s, 503).fill.is_none());
     }
 
     #[test]
