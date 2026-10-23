@@ -159,7 +159,7 @@ fn unsafe_url_links_are_not_exported() {
         .zip(safe.iter().chain(&refused))
         .map(|(i, url)| Shape {
             id: ShapeId(9000 + i),
-            xfrm: Some(Xfrm::new(20.0, 20.0 + 38.0 * f64::from(i), 400.0, 30.0)),
+            xfrm: Some(Xfrm::new(20.0, 20.0 + 32.0 * f64::from(i), 400.0, 26.0)),
             click: Some(Hyperlink {
                 action: Action::Url { url: url.to_string() },
                 tooltip: String::new(),
