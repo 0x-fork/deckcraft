@@ -367,6 +367,11 @@ fn state_for(tl: &Timeline, id: ShapeId, step: usize, t: f64, plays: &[TriggerPl
     }
 }
 
+/// Whether starting the show takes the whole screen. Reading view and "Browsed by an individual (window)" stay in the window.
+fn show_fills_screen(reading: bool, show_type: &str) -> bool {
+    !reading && show_type != "browsed"
+}
+
 fn fit(avail: Rect, doc: &Presentation) -> Rect {
     // Loaded sizes are repaired, but a zero side here would make every rectangle NaN.
     let side = |v: f64| if v.is_finite() { (v as f32).max(1.0) } else { 1.0 };
@@ -533,7 +538,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.show_start = now;
         show.timer = PresenterTimer::start(now);
         show.last_move = now;
-        if !show.reading {
+        if show_fills_screen(show.reading, &doc.show.show_type) {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
         }
         show.after_enter(&doc, now);
@@ -2256,6 +2261,14 @@ mod tests {
         assert_eq!(show.goto.len(), GOTO_DIGITS);
         show.push_slide_number('a', 1.0);
         assert!(show.goto.chars().all(|c| c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn browsed_by_an_individual_stays_in_a_window() {
+        assert!(!show_fills_screen(false, "browsed"));
+        assert!(!show_fills_screen(true, "speaker"));
+        assert!(show_fills_screen(false, "speaker"));
+        assert!(show_fills_screen(false, "kiosk"));
     }
 
     #[test]
