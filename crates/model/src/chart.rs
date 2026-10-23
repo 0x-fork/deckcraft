@@ -800,6 +800,10 @@ pub fn axis_scale(
         Some(m) => m,
         None => {
             let mut step = 10f64.powf(((hi - lo) / n).log10().floor());
+            // Subnormal spans underflow to a zero (or non-finite) step: fall back to the unit.
+            if !(step > 0.0 && step.is_finite()) {
+                step = unit;
+            }
             let mut k = 0;
             // 1, 2, 5, 10, 20… × the magnitude until the intervals fit.
             while ((hi / step).ceil() - (lo / step).floor()) > n && k < 30 {
@@ -852,6 +856,13 @@ mod tests {
         let (min, max, step) = nice_scale(1e-13, 5e-13);
         assert!(min <= 1e-13 && (5e-13..1e-11).contains(&max) && step < 1e-11, "{min} {max} {step}");
         assert_eq!(axis_scale(0.0, 0.0, None, None, None, 8, true).1, 1.0);
+    }
+
+    #[test]
+    fn subnormal_data_gives_a_finite_scale() {
+        let (min, max, step) = axis_scale(0.0, 5e-324, None, None, None, 8, true);
+        assert!(min.is_finite() && max.is_finite() && step.is_finite(), "{min} {max} {step}");
+        assert!(step > 0.0 && max >= min, "{min} {max} {step}");
     }
 
     #[test]
