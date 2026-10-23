@@ -4072,3 +4072,73 @@ fn a_shape_in_front_of_edited_text_takes_the_click() {
     let st = s.doc().unwrap();
     assert!(st.selection.text.as_ref().is_none_or(|t| t.shape.0 as u64 != tb), "the click on the member in front left the text: {:?}", st.selection);
 }
+
+/// A box at `rect` and a second box at `other` on a fresh slide; smart guides on, the grid off.
+/// The first box is selected.
+fn snap_scene(rect: [f64; 4], other: [f64; 4]) -> (Session, u64) {
+    let mut s = session();
+    s.prefs.snap_to_grid = false;
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": other})).unwrap();
+    let id = s.execute("shape.insert", &json!({"preset": "rect", "rect": rect})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.prefs.smart_guides = true;
+    (s, id)
+}
+
+/// The slide box (`x`, `y`, `w`, `h`) of shape `id`, as `shape.inspect` reports it.
+fn box_of(s: &mut Session, id: u64) -> serde_json::Value {
+    s.execute("shape.inspect", &json!({"id": id})).unwrap()["box"].clone()
+}
+
+/// #961: dragging the east handle snaps the dragged (right) edge, even when the fixed left edge
+/// already lines up with another shape. The nearest line used to be the fixed edge's, at distance 0.
+#[test]
+fn resizing_snaps_the_dragged_edge_when_the_fixed_edge_is_already_aligned() {
+    // The box spans x 100..200; the other box starts at 100 too and ends at 300.
+    let (mut s, id) = snap_scene([100.0, 100.0, 100.0, 80.0], [100.0, 300.0, 200.0, 80.0]);
+    drag_gesture(&mut s, (200.0, 140.0), (297.0, 140.0));
+    let b = box_of(&mut s, id);
+    assert_eq!(b["x"], 100.0, "the fixed edge stays: {b}");
+    assert_eq!(b["w"], 200.0, "the right edge snaps to the other box's right edge at 300: {b}");
+}
+
+/// #961: only the dragged edge looks for a line. A fixed edge near a line must not shift the
+/// edge being dragged by its own distance.
+#[test]
+fn resizing_is_not_shifted_by_a_fixed_edge_near_a_line() {
+    // The other box starts at 103, 3 pt from the fixed left edge; the dragged edge ends far from any line.
+    let (mut s, id) = snap_scene([100.0, 100.0, 100.0, 80.0], [103.0, 300.0, 50.0, 80.0]);
+    drag_gesture(&mut s, (200.0, 140.0), (421.0, 140.0));
+    let b = box_of(&mut s, id);
+    assert_eq!(b["x"], 100.0, "the fixed edge stays: {b}");
+    assert_eq!(b["w"], 321.0, "the dragged edge goes where the pointer went: {b}");
+}
+
+/// #961: dragging a handle past the opposite edge flips the box, and the dragged edge becomes the
+/// other side of it: that side snaps, not the fixed one.
+#[test]
+fn resizing_past_the_opposite_edge_snaps_the_dragged_edge() {
+    // East handle of the box at x 100..200, dragged left past its left edge to 3, 3 pt from the
+    // other box's left edge at 0.
+    let (mut s, id) = snap_scene([100.0, 100.0, 100.0, 80.0], [0.0, 300.0, 50.0, 80.0]);
+    drag_gesture(&mut s, (200.0, 140.0), (3.0, 140.0));
+    let b = box_of(&mut s, id);
+    assert_eq!((b["x"].clone(), b["w"].clone()), (json!(0.0), json!(100.0)), "the dragged edge snaps to 0, the fixed edge stays at 100: {b}");
+    // South handle of the box at y 100..180, dragged up past its top edge to 3.
+    let (mut s, id) = snap_scene([100.0, 100.0, 100.0, 80.0], [300.0, 0.0, 80.0, 50.0]);
+    drag_gesture(&mut s, (150.0, 180.0), (150.0, 3.0));
+    let b = box_of(&mut s, id);
+    assert_eq!((b["y"].clone(), b["h"].clone()), (json!(0.0), json!(100.0)), "the dragged edge snaps to 0, the fixed edge stays at 100: {b}");
+}
+
+/// #961: the handles of a flipped box sit on the other side (the east handle draws on the left),
+/// and the edge under the dragged handle snaps.
+#[test]
+fn resizing_a_flipped_box_snaps_the_dragged_edge() {
+    // Flipped box at x 100..200: its east handle is at x 100. Dragged to 3, 3 pt from the other box's left edge at 0.
+    let (mut s, id) = snap_scene([100.0, 100.0, 100.0, 80.0], [0.0, 300.0, 50.0, 80.0]);
+    s.execute("shape.flip", &json!({"axis": "horizontal"})).unwrap();
+    drag_gesture(&mut s, (100.0, 140.0), (3.0, 140.0));
+    let b = box_of(&mut s, id);
+    assert_eq!((b["x"].clone(), b["w"].clone()), (json!(0.0), json!(200.0)), "the dragged edge snaps to 0, the fixed edge stays at 200: {b}");
+}
