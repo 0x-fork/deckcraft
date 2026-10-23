@@ -163,6 +163,33 @@ fn moving_an_effect_forgets_the_clicked_row() {
 }
 
 #[test]
+fn play_from_skips_a_triggered_effect() {
+    let mut h = harness();
+    // The zoomed shape's first effect becomes triggered by the faded shape; its second effect,
+    // after the 1 s fade, is still on the click sequence.
+    let first = h.state().session.active().unwrap().current_slide().unwrap().animations[0].shape.0;
+    h.state_mut().session.execute("animation.timing", &json!({"index": 1, "trigger": first})).unwrap();
+    h.state_mut().session.execute("animation.add", &json!({"effect": "pulse", "start": "afterPrevious", "duration": 1000})).unwrap();
+    h.run_steps(2);
+    let at = play(&mut h, "▶ Play From");
+    assert!((1.0..1.1).contains(&at), "from the shape's first effect on the click sequence: {at}");
+    // A clicked triggered row falls back the same way.
+    click_row(&mut h, 2, egui::PointerButton::Primary);
+    let at = play(&mut h, "▶ Play From");
+    assert!((1.0..1.1).contains(&at), "{at}");
+}
+
+#[test]
+fn preview_rejects_a_from_that_is_not_an_effect_index() {
+    let mut h = harness();
+    for from in [json!("1"), json!(-1), json!(1.5)] {
+        assert!(h.state_mut().run("animation.preview", json!({"from": from})).is_err(), "{from}");
+        assert!(h.state().anim_preview_report().is_none(), "{from}");
+    }
+    assert_eq!(h.state_mut().run("animation.preview", json!({"from": 1})).unwrap()["from"], 1.0);
+}
+
+#[test]
 #[ignore = "writes a screenshot for review"]
 fn screenshot() {
     let mut h = harness();

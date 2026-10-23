@@ -971,7 +971,10 @@ impl SlideApp {
                     self.anim_preview = None;
                     return Ok(json!({"playing": false}));
                 }
-                let from = p.get("from").and_then(Value::as_u64).map(|v| usize::try_from(v).unwrap_or(usize::MAX));
+                let from = match p.get("from") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(v.as_u64().map(|v| usize::try_from(v).unwrap_or(usize::MAX)).ok_or("`from` must be an effect index")?),
+                };
                 return self.start_anim_preview(from);
             }
             "app.home" => {

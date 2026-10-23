@@ -1022,10 +1022,9 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
     // index would point at another effect.
     let pick_id = egui::Id::new(("anim_pane_pick", st.uid, st.selection.slide));
     let pick = ui.data(|m| m.get_temp::<usize>(pick_id));
-    let from = pick
-        .filter(|&i| anims.get(i).is_some_and(|a| selected.contains(&a.shape.0)))
-        .or_else(|| anims.iter().position(|a| selected.contains(&a.shape.0)))
-        .filter(|&i| tl.start_of(i).is_some());
+    // A triggered effect is not on the click sequence, so it can't be played from.
+    let eligible = |i: usize| anims.get(i).is_some_and(|a| selected.contains(&a.shape.0)) && tl.start_of(i).is_some();
+    let from = pick.filter(|&i| eligible(i)).or_else(|| (0..anims.len()).find(|&i| eligible(i)));
     ui.horizontal(|ui| {
         let playing = app.anim_preview_active();
         let label = match (playing, from) {
