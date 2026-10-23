@@ -212,7 +212,12 @@ fn sci(toks: &[Tok], v: f64, sep: char, dec: char) -> Option<String> {
     let (mut m, mut exp) = (0.0, 0i32);
     if v != 0.0 {
         exp = v.log10().floor() as i32;
-        m = v / 10f64.powi(exp);
+        m = if exp < -300 {
+            // 10^exp underflows for subnormals; scale in two steps.
+            v * 1e300 / 10f64.powi(exp + 300)
+        } else {
+            v / 10f64.powi(exp)
+        };
         if !m.is_finite() {
             m = 0.0;
             exp = 0;
@@ -293,6 +298,12 @@ mod tests {
     use super::*;
 
     const RUB: &str = r#"_-* #\ ##0\ "₽"_-;\-* #\ ##0\ "₽"_-;_-* "-"??\ "₽"_-;_-@_-"#;
+
+    #[test]
+    fn scientific_subnormal() {
+        assert_eq!(format("0.00E+00", 5e-324, None), "4.94E-324");
+        assert_eq!(format("0.00E+00", f64::MIN_POSITIVE, None), "2.23E-308");
+    }
 
     #[test]
     fn russian_accounting_roubles() {
