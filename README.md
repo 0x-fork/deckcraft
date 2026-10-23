@@ -241,16 +241,16 @@ artifact will need (#954).
 
 - `mesa-vulkan-swrast` is the software Vulkan driver: it runs anywhere, VMs and containers
   included. On a real GPU install your vendor's driver instead (`mesa-vulkan-intel`,
-  `mesa-vulkan-radeon`, `mesa-vulkan-nouveau`, …).
+  `mesa-vulkan-ati`, `mesa-vulkan-nouveau`, …).
 - Without Vulkan the app falls back to CPU rendering through Mesa's GL drivers. It works, but
   slowly — a driver limit, not a DeckCraft bug.
-- `xdg-desktop-portal` (with `xdg-desktop-portal-gtk`, `-kde` or `-wlr`) is what the Open and Save
-  dialogs talk to; `xkeyboard-config` holds the XKB keyboard data `libxkbcommon` reads.
+- `xdg-desktop-portal` (with `xdg-desktop-portal-gtk` or `-kde`; `-wlr` has no file chooser, so
+  on wlroots compositors install `zenity`) is what the Open and Save dialogs talk to; `xkeyboard-config` holds the XKB keyboard data `libxkbcommon` reads.
 - fontconfig and freetype are not needed: DeckCraft reads `/usr/share/fonts` itself and embeds its
   presentation fonts.
 
-Building from source on musl also needs `build-base pkgconf alsa-lib-dev` beside the ALSA headers
-above.
+Building from source on musl also needs `build-base pkgconf alsa-lib-dev` (`alsa-lib-dev` is the
+ALSA headers).
 
 ### FreeBSD
 
