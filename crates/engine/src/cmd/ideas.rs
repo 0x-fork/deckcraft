@@ -90,6 +90,16 @@ fn band_fill() -> Fill {
     Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgb(255, 255, 255)).with(deckcraft_model::ColorTransform::Alpha(86274)))
 }
 
+/// The band as released versions up to 0.10 stored it (opacity in the colour's own alpha).
+fn legacy_band_fill() -> Fill {
+    Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220)))
+}
+
+/// Whether `f` is a Full-bleed band, in the current or the legacy form.
+fn is_band(f: &Fill) -> bool {
+    *f == band_fill() || *f == legacy_band_fill()
+}
+
 /// Apply idea `id` to slide `index` of `doc` (`sel` resolves inherited placeholder boxes).
 pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &str) -> Result<()> {
     if !ideas_for(doc, index).iter().any(|i| i.0 == id) {
@@ -189,7 +199,7 @@ pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &st
     if let Some(t) = slide.shapes.iter_mut().find(|s| !s.hidden && s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
         if band {
             t.fill = Some(band_fill());
-        } else if t.fill == Some(band_fill()) {
+        } else if t.fill.as_ref().is_some_and(is_band) {
             // The band belongs to full-bleed only: another idea takes it away again.
             t.fill = None;
         }
@@ -368,6 +378,17 @@ mod tests {
         assert_eq!(shape(&s, id).fill, Some(band_fill()), "band survives the save");
         s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
         assert!(shape(&s, id).fill.is_none(), "the band is removed after reopening");
+    }
+
+    #[test]
+    fn switching_ideas_removes_a_band_saved_by_earlier_versions() {
+        let mut s = deck(true);
+        let legacy = Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220)));
+        let st = s.doc_mut().unwrap();
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut st.doc).slides[0]);
+        slide.shapes.iter_mut().find(|x| x.id == ShapeId(500)).unwrap().fill = Some(legacy);
+        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
+        assert!(shape(&s, 500).fill.is_none());
     }
 
     #[test]
