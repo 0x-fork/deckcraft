@@ -2396,6 +2396,136 @@ fn picture_recolor_and_transparent_color() {
 }
 
 #[test]
+fn transparent_color_at_a_point_takes_the_pictures_own_pixel_there() {
+    // Red on the left half, blue on the right.
+    let img = image::RgbaImage::from_fn(4, 2, |x, _| if x < 2 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) });
+    let mut png = vec![];
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = session();
+    let id =
+        s.execute("insert.picture", &json!({"data": cmd::base64_encode(&png), "name": "a.png", "rect": [100, 100, 400, 200]})).unwrap()["id"].clone();
+    let clear = |s: &Session| match &s.doc().unwrap().shapes().iter().find(|sh| json!(sh.id) == id).unwrap().kind {
+        deckcraft_model::ShapeKind::Picture { fill } => fill.adjust.clear_color,
+        _ => panic!("not a picture"),
+    };
+    let red = deckcraft_color::Rgba::rgb(255, 0, 0);
+    let blue = deckcraft_color::Rgba::rgb(0, 0, 255);
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [450, 200]})).unwrap();
+    assert_eq!(clear(&s), Some(blue));
+    // The picture's own colour, not the one drawn after a correction brightened it.
+    s.execute("picture.adjust", &json!({"ids": [id], "brightness": 0.4})).unwrap();
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [150, 200]})).unwrap();
+    assert_eq!(clear(&s), Some(red));
+    // Flipped, the blue half is drawn on the left.
+    s.execute("shape.flip", &json!({"ids": [id], "axis": "horizontal"})).unwrap();
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [150, 200]})).unwrap();
+    assert_eq!(clear(&s), Some(blue));
+    // Beside the picture there is no colour to take, and nothing changes.
+    assert!(s.execute("picture.transparentColor", &json!({"ids": [id], "at": [50, 50]})).is_err());
+    assert_eq!(clear(&s), Some(blue));
+    // A spot that is already transparent hides a colour (black here, as in most PNGs): taking it
+    // would clear the black drawn elsewhere in the picture.
+    let img = image::RgbaImage::from_fn(4, 2, |x, _| if x < 2 { image::Rgba([0, 0, 0, 0]) } else { image::Rgba([0, 0, 0, 255]) });
+    let mut png = vec![];
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let logo =
+        s.execute("insert.picture", &json!({"data": cmd::base64_encode(&png), "name": "b.png", "rect": [100, 400, 400, 200]})).unwrap()["id"].clone();
+    assert!(s.execute("picture.transparentColor", &json!({"ids": [logo], "at": [150, 500]})).is_err());
+    s.execute("picture.transparentColor", &json!({"ids": [logo], "at": [450, 500]})).unwrap();
+}
+
+/// A picture of `n` one-pixel columns whose red channel is 20 * column, inserted at `rect`.
+fn ramp_picture(s: &mut Session, n: u32, rect: [u32; 4]) -> serde_json::Value {
+    let img = image::RgbaImage::from_fn(n, 1, |x, _| image::Rgba([(20 * x) as u8, 0, 0, 255]));
+    let mut png = vec![];
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    s.execute("insert.picture", &json!({"data": cmd::base64_encode(&png), "name": "r.png", "rect": rect})).unwrap()["id"].clone()
+}
+
+fn clear_color_of(s: &Session, id: &serde_json::Value) -> Option<deckcraft_color::Rgba> {
+    fn find(shapes: &[deckcraft_model::Shape], id: &serde_json::Value) -> Option<deckcraft_model::Shape> {
+        shapes.iter().find_map(|sh| {
+            if json!(sh.id) == *id {
+                return Some(sh.clone());
+            }
+            match &sh.kind {
+                deckcraft_model::ShapeKind::Group { children, .. } => find(children, id),
+                _ => None,
+            }
+        })
+    }
+    match find(s.doc().unwrap().shapes(), id).unwrap().kind {
+        deckcraft_model::ShapeKind::Picture { fill } => fill.adjust.clear_color,
+        _ => panic!("not a picture"),
+    }
+}
+
+#[test]
+fn transparent_color_at_a_point_follows_the_pictures_3d_camera() {
+    let mut s = session();
+    let id = ramp_picture(&mut s, 10, [100, 100, 200, 100]);
+    // Turned 60 degrees about the vertical axis the picture is drawn about half as wide, centred
+    // where it was: 149..251 instead of 100..300.
+    s.execute("shape.effects", &json!({"ids": [id], "threeD": {"camera": "orthographicFront", "rotX": 60}})).unwrap();
+    // 175 is a quarter of the way across the drawn picture: column 2, not column 3 (the 75/200
+    // of the unturned box).
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [175, 150]})).unwrap();
+    assert_eq!(clear_color_of(&s, &id), Some(deckcraft_color::Rgba::rgb(40, 0, 0)));
+    // Inside the unturned box but outside the drawn picture: nothing is under the pointer.
+    assert!(s.execute("picture.transparentColor", &json!({"ids": [id], "at": [120, 150]})).is_err());
+}
+
+#[test]
+fn transparent_color_at_a_point_finds_a_grouped_picture_without_its_own_box() {
+    let mut s = session();
+    let pic = ramp_picture(&mut s, 10, [100, 100, 200, 100]);
+    let other = s.execute("shape.insert", &json!({"preset": "rect", "rect": [400, 300, 50, 50]})).unwrap()["id"].clone();
+    s.execute("edit.select", &json!({"ids": [pic, other]})).unwrap();
+    s.execute("arrange.group", &json!({})).unwrap();
+    // A grouped picture that keeps no box of its own is drawn where the default box puts it.
+    let sz = s.doc().unwrap().doc.slide_size;
+    s.edit(|doc, sel| {
+        fn clear(shapes: &mut [deckcraft_model::Shape], id: &serde_json::Value) {
+            for sh in shapes {
+                if json!(sh.id) == *id {
+                    sh.xfrm = None;
+                }
+                if let deckcraft_model::ShapeKind::Group { children, .. } = &mut sh.kind {
+                    clear(children, id);
+                }
+            }
+        }
+        clear(crate::shapes_mut(doc, sel).unwrap(), &pic);
+        Ok(())
+    })
+    .unwrap();
+    // Left tenth of the default box (10%, 10%, 80% x 20% of the slide): column 0.
+    let at = [sz.width * 0.1 + 1.0, sz.height * 0.2];
+    s.execute("picture.transparentColor", &json!({"ids": [pic], "at": at})).unwrap();
+    assert_eq!(clear_color_of(&s, &pic), Some(deckcraft_color::Rgba::rgb(0, 0, 0)));
+    let at = [sz.width * 0.9 - 1.0, sz.height * 0.2];
+    s.execute("picture.transparentColor", &json!({"ids": [pic], "at": at})).unwrap();
+    assert_eq!(clear_color_of(&s, &pic), Some(deckcraft_color::Rgba::rgb(180, 0, 0)));
+}
+
+#[test]
+fn transparent_color_at_a_point_takes_the_topmost_selected_picture() {
+    let mut s = session();
+    // `under` is inserted first (drawn below), `over` after it (drawn on top); they overlap in x 150..300.
+    let under = ramp_picture(&mut s, 10, [100, 100, 200, 100]);
+    let over = ramp_picture(&mut s, 10, [150, 100, 200, 100]);
+    // Selected bottom first: selection order is the opposite of the stacking order.
+    s.execute("edit.select", &json!({"ids": [under, over]})).unwrap();
+    // x = 250 is column 7 of `under` (140) and column 5 of `over` (100): the click is on `over`.
+    s.execute("picture.transparentColor", &json!({"at": [250, 150]})).unwrap();
+    assert_eq!(clear_color_of(&s, &over), Some(deckcraft_color::Rgba::rgb(100, 0, 0)));
+    assert_eq!(clear_color_of(&s, &under), None);
+    // Where `over` is not, the picture below is still found.
+    s.execute("picture.transparentColor", &json!({"at": [120, 150]})).unwrap();
+    assert_eq!(clear_color_of(&s, &under), Some(deckcraft_color::Rgba::rgb(20, 0, 0)));
+}
+
+#[test]
 fn select_all_slides_scope() {
     let mut s = session();
     // One slide: selects it, no panic.

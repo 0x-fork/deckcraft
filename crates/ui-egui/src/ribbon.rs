@@ -2652,18 +2652,12 @@ fn picture_format(app: &mut SlideApp, ui: &mut Ui) {
                 run(app, "picture.recolor", json!({"preset": id}));
             }
             ui.separator();
-            ui.menu_button("Set Transparent Color", |ui| {
-                ui.label("Pixels of this colour become transparent:");
-                if let Some(c) = widgets::color_grid(ui, &sc, Some("None")) {
-                    match c {
-                        Some(c) => {
-                            let rgb = c.resolve(&sc, None);
-                            run(app, "picture.transparentColor", json!({"color": format!("#{}", rgb.hex())}));
-                        }
-                        None => run(app, "picture.transparentColor", json!({"none": true})),
-                    }
-                }
-            });
+            // As in PowerPoint, the pointer picks the colour in the picture itself: a colour
+            // chosen from a grid almost never matches a photo's pixels.
+            if ui.button("Set Transparent Color").on_hover_text("Click a colour in the picture to make it transparent").clicked() {
+                crate::eyedropper::request_transparent_color(ui.ctx());
+                ui.close();
+            }
         });
         let r = big_button(ui, Icon::ArtisticEffects, "Artistic\nEffects", enabled(app, "picture.artisticEffect"));
         egui::Popup::menu(&r).show(|ui| {

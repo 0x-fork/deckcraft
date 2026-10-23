@@ -600,6 +600,16 @@ pub fn parse_path(d: &str) -> BezPath {
     bp
 }
 
+/// The transform a 3-D camera applies to shape `s` of size `w` x `h` (approximated by the affine
+/// map that fits it best), as drawn; `None` for no camera, and for groups, tables and charts.
+pub fn camera_turn(rctx: &Ctx, s: &Shape, w: f64, h: f64) -> Option<Affine> {
+    if matches!(s.kind, ShapeKind::Group { .. } | ShapeKind::Table(_) | ShapeKind::Chart(_)) {
+        return None;
+    }
+    let (e, _) = resolve::effects(rctx, s);
+    e.as_ref().and_then(|e| e.raw3d.as_deref()).and_then(camera::from_raw).and_then(|c| camera::affine(&c, w, h))
+}
+
 /// The rectangle a picture's image occupies given its crop (fractions; negative = padding).
 pub fn crop_dest(bounds: Rect, crop: [f64; 4]) -> Rect {
     let [l, t, r, b] = crop.map(|v| if v.is_finite() { v.clamp(-10.0, 0.99) } else { 0.0 });
@@ -873,15 +883,7 @@ impl Renderer {
                 * Affine::translate(-c.to_vec2());
             m = parent * Affine::translate(st.offset) * x.affine() * around;
         }
-        // A 3-D camera turns the shape (approximated by the affine transform that fits it best).
-        if !matches!(s.kind, ShapeKind::Group { .. } | ShapeKind::Table(_) | ShapeKind::Chart(_))
-            && let Some(a) = resolve::effects(rctx, s)
-                .0
-                .as_ref()
-                .and_then(|e| e.raw3d.as_deref())
-                .and_then(camera::from_raw)
-                .and_then(|c| camera::affine(&c, x.w, x.h))
-        {
+        if let Some(a) = camera_turn(rctx, s, x.w, x.h) {
             m *= a;
         }
         let layered = st.opacity < 0.999 || st.clip.is_some();
