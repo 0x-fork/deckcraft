@@ -1906,6 +1906,8 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
             });
             if ui.input(|i| i.viewport().close_requested()) {
                 show.presenter = false;
+                // A grid left open in the closed window would hold auto-advance for the rest of the show.
+                show.presenter_grid = false;
             }
         },
     );
