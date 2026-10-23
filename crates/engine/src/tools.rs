@@ -34,6 +34,9 @@ pub struct Mods {
     pub cmd: bool,
 }
 
+/// A text selection's shape, table cell, notes flag, anchor and caret.
+type TextTarget = (ShapeId, Option<(usize, usize)>, bool, (usize, usize), (usize, usize));
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PointerEvent {
@@ -191,6 +194,8 @@ enum Drag {
     },
     TextSelect {
         shape: ShapeId,
+        /// The text selection before the press, to tell whether the drag changed it.
+        before: Option<TextTarget>,
     },
     /// Dragging a table border: the right edge of column `index`, or the bottom edge of row
     /// `index`. `start` is the table-local press point, `size` the column's width or the row's
@@ -474,16 +479,43 @@ impl Session {
             PointerKind::Down => self.down(p, ev.mods, tol),
             PointerKind::Drag => self.drag(p, ev.mods, tol),
             PointerKind::Up => self.up(p, ev.mods),
-            PointerKind::DoubleClick => self.double_click(p, tol),
+            PointerKind::DoubleClick => {
+                let before = self.text_selection();
+                let r = self.double_click(p, tol)?;
+                self.paint_if_selection_changed(before, r)
+            }
             PointerKind::ContextClick => self.context_click(p, tol),
             PointerKind::TripleClick => {
                 if self.active().is_some_and(|d| d.selection.text.is_some()) {
-                    self.execute("text.selectParagraph", &json!({}))
+                    let before = self.text_selection();
+                    let r = self.execute("text.selectParagraph", &json!({}))?;
+                    self.paint_if_selection_changed(before, r)
                 } else {
                     Ok(Value::Null)
                 }
             }
         }
+    }
+
+    /// Format Painter applies once a text range is selected (drag, word or paragraph click).
+    fn paint_text_selection(&mut self) -> Result<Option<Value>> {
+        if self.painter.is_some() && self.doc()?.selection.text.as_ref().is_some_and(|t| t.is_range()) {
+            return self.execute("format.painterApply", &json!({})).map(Some);
+        }
+        Ok(None)
+    }
+
+    /// Where the text selection is: its shape, cell or notes, anchor and caret.
+    fn text_selection(&self) -> Option<TextTarget> {
+        self.active().and_then(|d| d.selection.text.as_ref()).map(|t| (t.shape, t.cell, t.notes, t.anchor, t.caret))
+    }
+
+    /// A double or triple click paints only the range it selected, not an older one it left alone.
+    fn paint_if_selection_changed(&mut self, before: Option<TextTarget>, r: Value) -> Result<Value> {
+        if self.text_selection() == before {
+            return Ok(r);
+        }
+        self.paint_text_selection().map(|a| a.unwrap_or(r))
     }
 
     pub(crate) fn begin(&mut self, label: &str) {
@@ -552,8 +584,9 @@ impl Session {
             ToolKind::Select => {}
         }
         // Clicking inside the text being edited moves the caret / starts a text selection.
+        let before = self.text_selection();
         if let Some((shape, pos)) = self.place_caret(p, tol, mods.shift)? {
-            self.tool.drag = Some(Drag::TextSelect { shape });
+            self.tool.drag = Some(Drag::TextSelect { shape, before });
             return Ok(json!({"caret": [pos.0, pos.1]}));
         }
         let hit = self.hit_test(p, tol);
@@ -909,7 +942,7 @@ impl Session {
                 };
                 self.tool.preview = Some(x);
             }
-            Drag::TextSelect { shape } => {
+            Drag::TextSelect { shape, .. } => {
                 // The selection stays in the shape or table cell where it started.
                 let st = self.doc()?;
                 if let Some(t) = st.selection.text.as_ref().filter(|t| t.shape == shape) {
@@ -1103,6 +1136,10 @@ impl Session {
                 self.commit();
                 let _ = cmd::text::fit_text_box(self, id);
                 self.refit_after_resize(id)?;
+            }
+            Some(Drag::TextSelect { before, .. }) => {
+                out = self.paint_if_selection_changed(before, out)?;
+                self.commit();
             }
             Some(_) => self.commit(),
             None => {}
