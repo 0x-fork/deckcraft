@@ -432,6 +432,22 @@ fn glow_of_an_unfilled_shape_follows_its_line() {
 }
 
 #[test]
+fn glow_of_a_shape_with_no_fill_and_no_line_is_not_drawn() {
+    // A text box (no fill, no line) with a glow in its shape properties: PowerPoint shows no halo
+    // round the box (its text carries its own glow), so the box's edge and surroundings stay white.
+    let mut sh = Shape { id: ShapeId(611), xfrm: Some(Xfrm::new(100.0, 100.0, 400.0, 300.0)), fill: Some(Fill::None), ..Default::default() };
+    sh.effects = Some(deckcraft_model::Effects {
+        glow: Some(deckcraft_model::style::Glow { color: ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 255, 0)), radius: 15.0 }),
+        ..Default::default()
+    });
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    for (x, y) in [(300, 250), (300, 100), (300, 95), (96, 250)] {
+        let px = img.pixel(x, y);
+        assert!(px[2] > 245, "({x}, {y}): {px:?}");
+    }
+}
+
+#[test]
 fn placeholder_prompts_only_in_edit_view() {
     let p = Presentation::default();
     let edit = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
