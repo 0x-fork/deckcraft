@@ -150,6 +150,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-18 | Resizing with the mouse snaps the edge being dragged to the slide, guides and other shapes: a fixed edge that already lined up used to take the snap and leave the dragged edge free, and a fixed edge near a line shifted the dragged one (#961) |
 | 2026-10-18 | Slide show: a video or audio clip is looked up on the slide it belongs to, so slides whose shape ids repeat (the PPTX import numbers each slide afresh) no longer play each other's clips (#994) |
 | 2026-10-18 | About: Contributors and Models get their own fixed-size block below the tab row, so the tab row is no longer squeezed into the credits and the tabs keep answering (#843) |
+| 2026-10-19 | README: the Linux runtime libraries a tarball or musl install has to provide — the `dlopen`ed X11/Vulkan/GL/dialog libraries with their Alpine and Void package names, the software-Vulkan fallback, and why fontconfig and freetype are not among them (#955) |
 | 2026-10-17 | Opening a file caps absurd effect sizes (glow, soft edges, shadows, reflections, on shapes, text and table text) at what Format Shape allows: a glow of 10^18 pt in a .pptx made rendering ask for 34 GB and abort |
 | 2026-10-17 | Opening a .deckcraft file whose shapes repeat an id gives the repeats fresh ids (groups, layouts and masters too), so the deck validates and edits by id find one shape |
 | 2026-10-17 | Edit Points: turning a shape into a freeform is one undo step, so Undo brings the original shape back (it used to stay a freeform) |
