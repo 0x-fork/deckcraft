@@ -38,6 +38,8 @@ pub struct Show {
     blank: Option<Color32>,
     /// See All Slides covers the show until a slide is chosen.
     pub grid: bool,
+    /// The Presenter View's own See All Slides: the grid replaces the slide and notes in that window only; the audience keeps the slide.
+    pub presenter_grid: bool,
     /// The next click on the slide zooms in there.
     pub zoom_arm: bool,
     zoom: Option<Zoom>,
@@ -289,6 +291,7 @@ impl Show {
             backdrop: None,
             blank: None,
             grid: false,
+            presenter_grid: false,
             zoom_arm: false,
             zoom: None,
             thumbs: vec![],
@@ -560,7 +563,8 @@ fn part_textures(ctx: &egui::Context, doc: &Presentation, from: Option<usize>, t
 
 /// Read the current viewport's show keys before its widgets can consume them. Both the
 /// audience window and Presenter View use this path, including animation steps and end-of-show.
-fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) -> bool {
+/// `presenter` is true for Presenter View, where G opens that window's own grid (#1130).
+fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64, presenter: bool) -> bool {
     let keys: Vec<(egui::Key, egui::Modifiers)> = ctx.input(|i| {
         i.events
             .iter()
@@ -571,10 +575,16 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
     let mut actions = vec![];
     for (k, m) in keys {
         use egui::Key::*;
-        if show.grid && !matches!(k, Escape | Minus) {
+        let presenter_grid = presenter && show.presenter_grid;
+        let grid_open = if presenter { show.presenter_grid } else { show.grid };
+        if grid_open && !matches!(k, Escape | Minus) {
             // See All Slides takes no other keys until a slide is chosen.
             if k == G && plain(m) {
-                show.grid = false;
+                if presenter_grid {
+                    show.presenter_grid = false;
+                } else {
+                    show.grid = false;
+                }
             } else {
                 continue;
             }
@@ -582,7 +592,7 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
             match k {
                 Escape | Minus => {
                     let cancelled = k == Escape && show.clear_goto();
-                    if !cancelled && !show.back_out() {
+                    if !cancelled && !show.back_out(presenter) {
                         keep = false;
                     }
                 }
@@ -629,7 +639,7 @@ fn keyboard(ctx: &egui::Context, show: &mut Show, doc: &Presentation, now: f64) 
                 B | Period => toggle_blank(show, Color32::BLACK),
                 W | Comma => toggle_blank(show, Color32::WHITE),
                 E => show.strokes.clear(),
-                G if plain(m) => show.grid = true,
+                G if plain(m) => show.open_grid(presenter),
                 Z if plain(m) => show.zoom_key(),
                 T if plain(m) => show.timer.toggle(now),
                 R if plain(m) => show.timer.reset(now),
@@ -676,7 +686,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         }
         show.after_enter(&doc, now);
     }
-    let mut keep = keyboard(&ctx, &mut show, &doc, now);
+    let mut keep = keyboard(&ctx, &mut show, &doc, now, false);
     let (clicked, secondary, moved) = ctx.input(|i| (i.pointer.primary_clicked(), i.pointer.secondary_clicked(), i.pointer.delta().length() > 0.0));
     if moved {
         show.last_move = now;
@@ -794,7 +804,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let cur_step = show.state.step;
         let n_steps = show.timeline(&doc).steps();
         let step_due = show.autoplay && cur_step < n_steps && idle > 0.3;
-        let holding = show.grid || show.zoom.is_some() || show.zoom_arm;
+        let holding = show.grid || show.presenter_grid || show.zoom.is_some() || show.zoom_arm;
         if !holding && (step_due || (!show.rehearse && show.state.auto_advance_due(&doc, idle) && !show.ended)) {
             actions.push(show.state.next(&doc));
         } else if show.preview_only && cur_step >= n_steps && idle > 0.8 {
@@ -1495,6 +1505,15 @@ impl Show {
         }
     }
 
+    /// G opens See All Slides in the window it was pressed in: Presenter View's grid stays off the audience screen (#1130).
+    fn open_grid(&mut self, presenter: bool) {
+        if presenter {
+            self.presenter_grid = true;
+        } else {
+            self.grid = true;
+        }
+    }
+
     /// Z, or the Zoom button: arm a click-to-zoom, or leave a zoom that is already on.
     fn zoom_key(&mut self) {
         if self.zoom.is_some() || self.zoom_arm {
@@ -1505,9 +1524,12 @@ impl Show {
         }
     }
 
-    /// Esc closes See All Slides, then a zoom, and only then leaves the show.
-    fn back_out(&mut self) -> bool {
-        if self.grid {
+    /// Esc closes the See All Slides of the window it was pressed in, then a zoom, and only then leaves the show.
+    fn back_out(&mut self, presenter: bool) -> bool {
+        if presenter && self.presenter_grid {
+            self.presenter_grid = false;
+            true
+        } else if !presenter && self.grid {
             self.grid = false;
             true
         } else {
@@ -1932,7 +1954,7 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
         egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
         |ui, _| {
-            if !keyboard(ui.ctx(), show, doc, now) {
+            if !keyboard(ui.ctx(), show, doc, now, true) {
                 *keep = false;
             }
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
@@ -1974,8 +1996,8 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                     if button(ui, if show.blank == Some(Color32::WHITE) { "White on" } else { "White" }).clicked() {
                         toggle_blank(show, Color32::WHITE);
                     }
-                    if button(ui, if show.grid { "All slides on" } else { "All slides" }).clicked() {
-                        show.grid = !show.grid;
+                    if button(ui, if show.presenter_grid { "All slides on" } else { "All slides" }).clicked() {
+                        show.presenter_grid = !show.presenter_grid;
                     }
                     if button(ui, show.zoom_label()).clicked() {
                         show.zoom_key();
@@ -1983,6 +2005,23 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                 });
                 ui.add_space(8.0);
                 let avail = ui.available_rect_before_wrap();
+                if show.presenter_grid {
+                    // The grid fills this window; the audience keeps seeing the current slide.
+                    paint_grid(ui.painter(), ui.ctx(), show, doc, avail);
+                    let hit = ui.interact(avail, ui.id().with("presenter_grid"), Sense::click());
+                    if hit.clicked()
+                        && let Some(p) = hit.interact_pointer_pos()
+                        && let Some(n) = see_all_hit(avail, grid_indices(doc.slides.len()).len(), slide_aspect(doc), p)
+                        && let Some(&i) = grid_indices(doc.slides.len()).get(n)
+                    {
+                        show.presenter_grid = false;
+                        show.blank = None;
+                        show.zoom = None;
+                        show.zoom_arm = false;
+                        actions.push(show.state.goto(doc, i));
+                    }
+                    return;
+                }
                 let left = Rect::from_min_max(avail.min, pos2(avail.min.x + avail.width() * 0.62, avail.max.y));
                 let right = Rect::from_min_max(pos2(left.max.x + 16.0, avail.min.y), avail.max);
                 let cr = fit(Rect::from_min_max(left.min, pos2(left.max.x, left.min.y + left.height() * 0.8)), doc);
@@ -2039,6 +2078,8 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
             });
             if ui.input(|i| i.viewport().close_requested()) {
                 show.presenter = false;
+                // A grid left open in the closed window would hold auto-advance for the rest of the show.
+                show.presenter_grid = false;
             }
         },
     );
@@ -2113,6 +2154,40 @@ mod tests {
         assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::PointingHand);
         harness.run_steps(12);
         assert_eq!(harness.output().platform_output.cursor_icon, egui::CursorIcon::None, "still for 3 s: hidden");
+    }
+
+    /// #1130: the Presenter View's All slides button opens the grid in that window, not on the audience screen.
+    #[test]
+    fn presenter_all_slides_does_not_cover_the_audience_screen() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut session = deckcraft_engine::Session::with_new();
+        session.execute("slide.new", &json!({})).unwrap();
+        let doc = session.active().unwrap().doc.clone();
+        let show = Show::new(&doc, 0, false, true);
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1100.0, 700.0)).build_ui_state(
+            |ui, (doc, show, keep): &mut (std::sync::Arc<Presentation>, Show, bool)| {
+                let now = ui.input(|i| i.time);
+                presenter_window(ui.ctx(), show, doc, now, keep);
+            },
+            (doc, show, true),
+        );
+        harness.run_steps(2);
+        harness.get_by_label("All slides").click();
+        harness.run_steps(2);
+        assert!(harness.state().1.presenter_grid, "the grid opens in the Presenter View");
+        assert!(!harness.state().1.grid, "the audience screen keeps showing the slide");
+        harness.key_press(egui::Key::Escape);
+        harness.run_steps(2);
+        assert!(!harness.state().1.presenter_grid, "Esc closes the Presenter View grid");
+        assert!(harness.state().2, "and does not end the show");
+        harness.key_press(egui::Key::G);
+        harness.run_steps(2);
+        assert!(harness.state().1.presenter_grid, "G in Presenter View opens its own grid");
+        assert!(!harness.state().1.grid, "G in Presenter View leaves the audience screen alone");
+        harness.key_press(egui::Key::G);
+        harness.run_steps(2);
+        assert!(!harness.state().1.presenter_grid, "G again closes it");
     }
 
     /// Send real egui key events to the presenter UI, without the audience window's handler.
@@ -2413,6 +2488,24 @@ mod tests {
     }
 
     #[test]
+    fn escape_only_closes_the_grid_of_its_own_window() {
+        let mut s = deckcraft_engine::Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        let doc = s.active().unwrap().doc.clone();
+        let mut show = Show::new(&doc, 0, false, true);
+        show.presenter_grid = true;
+        assert!(!show.back_out(false), "audience Esc leaves the show, the Presenter View grid stays");
+        assert!(show.presenter_grid);
+        assert!(show.back_out(true));
+        assert!(!show.presenter_grid);
+        show.grid = true;
+        assert!(!show.back_out(true), "Presenter View Esc does not close the audience grid");
+        assert!(show.grid);
+        assert!(show.back_out(false));
+        assert!(!show.grid);
+    }
+
+    #[test]
     fn escape_leaves_the_grid_then_the_zoom_and_blank_toggles() {
         let mut s = deckcraft_engine::Session::with_new();
         s.execute("slide.new", &json!({})).unwrap();
@@ -2420,12 +2513,12 @@ mod tests {
         let mut show = Show::new(&doc, 0, false, true);
         show.grid = true;
         show.zoom = Some(Zoom::at(0.2, 0.3));
-        assert!(show.back_out());
+        assert!(show.back_out(false));
         assert!(!show.grid);
         assert!(show.zoom.is_some(), "closing the grid leaves the zoom");
-        assert!(show.back_out());
+        assert!(show.back_out(false));
         assert!(show.zoom.is_none());
-        assert!(!show.back_out());
+        assert!(!show.back_out(false));
         show.zoom_key();
         assert!(show.zoom_arm);
         show.zoom_key();
