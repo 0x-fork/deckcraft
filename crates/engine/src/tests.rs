@@ -4142,3 +4142,43 @@ fn resizing_a_flipped_box_snaps_the_dragged_edge() {
     let b = box_of(&mut s, id);
     assert_eq!((b["x"].clone(), b["w"].clone()), (json!(0.0), json!(200.0)), "the dragged edge snaps to 0, the fixed edge stays at 200: {b}");
 }
+
+#[test]
+fn duplicating_a_moved_copy_repeats_the_move() {
+    let mut s = session();
+    let r = s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 50, 50]})).unwrap();
+    let a = r["id"].as_u64().unwrap();
+    let boxed = |s: &mut Session, id: u64| {
+        let v = s.execute("shape.inspect", &json!({"id": id})).unwrap();
+        (v["box"]["x"].as_f64().unwrap(), v["box"]["y"].as_f64().unwrap())
+    };
+    let dup = |s: &mut Session| s.execute("edit.duplicate", &json!({})).unwrap()["ids"][0].as_u64().unwrap();
+    // The first copy gets the usual offset.
+    let b = dup(&mut s);
+    let off = s.prefs.duplicate_offset;
+    assert_eq!(boxed(&mut s, b), (100.0 + off, 100.0 + off));
+    // Moved, then duplicated again: the next copy repeats the move from the original (#966).
+    s.execute("shape.move", &json!({"dx": 80.0 - off, "dy": -off})).unwrap();
+    assert_eq!(boxed(&mut s, b), (180.0, 100.0));
+    let c = dup(&mut s);
+    assert_eq!(boxed(&mut s, c), (260.0, 100.0));
+    let d = dup(&mut s);
+    assert_eq!(boxed(&mut s, d), (340.0, 100.0));
+    // Duplicating something else goes back to the usual offset.
+    s.doc_mut().unwrap().selection.shapes = vec![ShapeId(a as u32)];
+    let e = dup(&mut s);
+    assert_eq!(boxed(&mut s, e), (100.0 + off, 100.0 + off));
+    // Undone, its id can go to a new shape: duplicating that one uses the usual offset too.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let r = s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [400, 300, 40, 40]})).unwrap();
+    let g = r["id"].as_u64().unwrap();
+    assert_eq!(g, e, "the new shape reuses the undone copy's id");
+    let h = dup(&mut s);
+    assert_eq!(boxed(&mut s, h), (400.0 + off, 300.0 + off));
+    // After Undo removed that copy, duplicating the last moved copy gets the usual offset too.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.doc_mut().unwrap().selection.shapes = vec![ShapeId(d as u32)];
+    let f = dup(&mut s);
+    assert_eq!(boxed(&mut s, f), (340.0 + off, 100.0 + off));
+    assert_eq!(s.doc().unwrap().doc.validate(), Vec::<String>::new());
+}
