@@ -84,6 +84,9 @@ fn cover_crop(src: f64, dst: f64) -> [f64; 4] {
     }
 }
 
+/// Marks a title whose fill was put there by the full-bleed idea.
+const BAND_TAG: &str = "deckcraft.ideaBand";
+
 /// The light fill behind the title in the full-bleed idea.
 fn band_fill() -> Fill {
     Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220)))
@@ -186,11 +189,17 @@ pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &st
         slide.shapes.insert(0, pic);
     }
     if let Some(t) = slide.shapes.iter_mut().find(|s| s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
+        let marked = t.tags.iter().any(|(k, _)| k == BAND_TAG);
         if band {
             t.fill = Some(band_fill());
-        } else if t.fill == Some(band_fill()) {
-            // The band belongs to full-bleed only: another idea takes it away again.
+            if !marked {
+                t.tags.push((BAND_TAG.into(), "1".into()));
+            }
+        } else if marked {
+            // The band belongs to full-bleed only: another idea takes it away again. A fill the
+            // user set (no mark) stays.
             t.fill = None;
+            t.tags.retain(|(k, _)| k != BAND_TAG);
         }
     }
     Ok(())
@@ -328,9 +337,36 @@ mod tests {
     fn switching_from_full_bleed_removes_the_title_band() {
         let mut s = deck(true);
         s.execute("design.applyIdea", &json!({"id": "fullBleed"})).unwrap();
-        assert!(shape(&s, 500).fill.is_some());
+        assert_eq!(shape(&s, 500).fill, Some(band_fill()));
         s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
         assert!(shape(&s, 500).fill.is_none(), "the band belongs to full-bleed only");
+    }
+
+    #[test]
+    fn a_title_fill_set_by_the_user_survives_other_ideas() {
+        // Set through the command, and set to exactly the band's own fill.
+        let mut s = deck(true);
+        s.execute("shape.fill", &json!({"id": 500, "color": "#ffffff", "transparency": 0.14})).unwrap();
+        let user = shape(&s, 500).fill;
+        assert!(user.is_some());
+        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
+        assert_eq!(shape(&s, 500).fill, user);
+        let mut s = deck(true);
+        Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]).shapes[0].fill = Some(band_fill());
+        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
+        assert_eq!(shape(&s, 500).fill, Some(band_fill()), "not added by an idea, so not removed by one");
+    }
+
+    #[test]
+    fn full_bleed_twice_keeps_the_band_and_undo_after_switching_brings_it_back() {
+        let mut s = deck(true);
+        s.execute("design.applyIdea", &json!({"id": "fullBleed"})).unwrap();
+        s.execute("design.applyIdea", &json!({"id": "fullBleed"})).unwrap();
+        assert_eq!(shape(&s, 500).fill, Some(band_fill()));
+        s.execute("design.applyIdea", &json!({"id": "framed"})).unwrap();
+        assert!(shape(&s, 500).fill.is_none());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(shape(&s, 500).fill, Some(band_fill()));
     }
 
     #[test]
