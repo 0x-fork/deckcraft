@@ -870,6 +870,27 @@ impl Renderer {
         (tw, th, m * Affine::scale_non_uniform(1.0 / sx, 1.0 / sy))
     }
 
+    /// A shape's geometry in its own `w` × `h` space, built at its size on the slide: inside a
+    /// group whose child coordinates scale the shape unevenly, the preset's rounded corners and
+    /// other size-derived features stay as they would be on a plain shape of that size (#1083).
+    fn scaled_geometry(&self, s: &Shape, m: Affine, depth: usize, w: f64, h: f64) -> Geometry {
+        let (tw, th, _) = self.text_space(m, depth, w, h);
+        if (tw, th) == (w, h) {
+            return shape_geometry(s, w, h);
+        }
+        let mut geo = shape_geometry(s, tw, th);
+        let k = |a: f64, b: f64| if b.abs() > 1e-12 { a / b } else { 1.0 };
+        let back = Affine::scale_non_uniform(k(w, tw), k(h, th));
+        for p in &mut geo.paths {
+            p.path.apply_affine(back);
+        }
+        geo.text_rect = back.transform_rect_bbox(geo.text_rect);
+        for p in &mut geo.sites {
+            *p = back * *p;
+        }
+        geo
+    }
+
     fn shape_at(&mut self, ctx: &mut RenderContext, f: &Frame, rctx: &Ctx, s: &Shape, parent: Affine, depth: usize) {
         if depth > 32 || (s.hidden && !f.opts.show_hidden) || f.opts.skip.contains(&s.id) {
             return;
@@ -1018,7 +1039,7 @@ impl Renderer {
     ) {
         let (geo, fades) = match self.paths.iter().find(|p| p.id == s.id) {
             Some(pm) => self.morphs.geometry(pm, s, w, h),
-            None => (shape_geometry(s, w, h), Vec::new()),
+            None => (self.scaled_geometry(s, m, depth, w, h), Vec::new()),
         };
         let fade = |i: usize| fades.get(i).copied().unwrap_or(deckcraft_geom::morph::Fade { fill: 1.0, stroke: 1.0 });
         let (fill, fill_ph) = resolve::fill(rctx, s);
