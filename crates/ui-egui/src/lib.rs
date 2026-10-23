@@ -433,6 +433,10 @@ struct AnimPreview {
 }
 
 pub struct SlideApp {
+    /// Shape Fill's last colour (a command colour parameter): the button applies it again. Accent 1 until one is picked.
+    pub last_fill: serde_json::Value,
+    /// Shape Outline's last colour, likewise. Text 1 until one is picked.
+    pub last_outline: serde_json::Value,
     /// Table Design's border pen (`color`, `width`, `dash` for `table.borders`).
     pub table_pen: serde_json::Value,
     pub session: Session,
@@ -533,6 +537,8 @@ impl SlideApp {
     pub fn new(session: Session, mut services: Services) -> Self {
         let audio_out = services.audio_out.take();
         SlideApp {
+            last_fill: serde_json::json!("accent1"),
+            last_outline: serde_json::json!("tx1"),
             table_pen: serde_json::json!({"width": 1.0}),
             session,
             services,
@@ -2055,6 +2061,8 @@ mod eyedropper_tests;
 mod huge_deck_tests;
 #[cfg(test)]
 mod ime_tests;
+#[cfg(test)]
+mod last_color_tests;
 #[cfg(test)]
 mod replacefonts_tests;
 #[cfg(test)]
