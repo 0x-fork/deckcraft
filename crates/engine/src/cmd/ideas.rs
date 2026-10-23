@@ -84,9 +84,10 @@ fn cover_crop(src: f64, dst: f64) -> [f64; 4] {
     }
 }
 
-/// The light fill behind the title in the full-bleed idea.
+/// The light fill behind the title in the full-bleed idea. Its opacity is an `alpha` transform
+/// (about 220/255), as PPTX stores it, so the fill compares equal after a save and reopen.
 fn band_fill() -> Fill {
-    Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220)))
+    Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgb(255, 255, 255)).with(deckcraft_model::ColorTransform::Alpha(86274)))
 }
 
 /// Apply idea `id` to slide `index` of `doc` (`sel` resolves inherited placeholder boxes).
@@ -353,6 +354,20 @@ mod tests {
         s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
         assert!(shape(&s, 500).fill.is_none(), "switching clears the visible title's band");
         assert!(shape(&s, 503).fill.is_none());
+    }
+
+    #[test]
+    fn switching_ideas_removes_the_band_after_a_pptx_round_trip() {
+        let mut s = deck(true);
+        s.execute("design.applyIdea", &json!({"id": "fullBleed"})).unwrap();
+        let bytes = deckcraft_pptx::export(&s.doc().unwrap().doc).unwrap();
+        let back = deckcraft_pptx::import(&bytes).unwrap();
+        s.doc_mut().unwrap().doc = Arc::new(back);
+        let title = s.doc().unwrap().doc.slides[0].shapes.iter().position(|x| x.ph.as_ref().is_some_and(|p| p.kind.is_title())).unwrap();
+        let id = s.doc().unwrap().doc.slides[0].shapes[title].id.0;
+        assert_eq!(shape(&s, id).fill, Some(band_fill()), "band survives the save");
+        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
+        assert!(shape(&s, id).fill.is_none(), "the band is removed after reopening");
     }
 
     #[test]
