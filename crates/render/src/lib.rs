@@ -1437,7 +1437,10 @@ impl Renderer {
             }
             ctx.pop_layer();
         }
-        if let Some(g) = &e.glow {
+        // A shape with no fill and no line (a text box) draws nothing to glow around: its text's
+        // own glow is all PowerPoint shows, not a halo round the box.
+        let glows = fill_alpha.is_some() || content.is_some() || outline.is_some();
+        if let Some(g) = e.glow.as_ref().filter(|_| glows) {
             let c = rctx.color(&g.color, ph);
             ctx.set_transform(Affine::IDENTITY);
             // Measured on PowerPoint's export: a glow of radius r is half strength about half of r
