@@ -179,6 +179,11 @@ fn picture_pixel_at(s: &Session, p: &Value, at: &Value) -> Result<(ShapeId, Rgba
         let px = ((u * f64::from(w)) as u32).min(w.saturating_sub(1));
         let py = ((v * f64::from(h)) as u32).min(h.saturating_sub(1));
         let Some(c) = img.get_pixel_checked(px, py) else { continue };
+        // A transparent pixel keeps a colour nobody sees (often black): clearing it would clear
+        // that colour where it is drawn.
+        if c[3] == 0 {
+            return Err(bad(CMD, "that spot of the picture is already transparent"));
+        }
         return Ok((id, Rgba::rgb(c[0], c[1], c[2])));
     }
     Err(bad(CMD, "the point is not on a selected picture"))

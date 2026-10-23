@@ -2380,6 +2380,15 @@ fn transparent_color_at_a_point_takes_the_pictures_own_pixel_there() {
     // Beside the picture there is no colour to take, and nothing changes.
     assert!(s.execute("picture.transparentColor", &json!({"ids": [id], "at": [50, 50]})).is_err());
     assert_eq!(clear(&s), Some(blue));
+    // A spot that is already transparent hides a colour (black here, as in most PNGs): taking it
+    // would clear the black drawn elsewhere in the picture.
+    let img = image::RgbaImage::from_fn(4, 2, |x, _| if x < 2 { image::Rgba([0, 0, 0, 0]) } else { image::Rgba([0, 0, 0, 255]) });
+    let mut png = vec![];
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let logo =
+        s.execute("insert.picture", &json!({"data": cmd::base64_encode(&png), "name": "b.png", "rect": [100, 400, 400, 200]})).unwrap()["id"].clone();
+    assert!(s.execute("picture.transparentColor", &json!({"ids": [logo], "at": [150, 500]})).is_err());
+    s.execute("picture.transparentColor", &json!({"ids": [logo], "at": [450, 500]})).unwrap();
 }
 
 #[test]
