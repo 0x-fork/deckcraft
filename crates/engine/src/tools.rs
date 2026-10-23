@@ -34,6 +34,9 @@ pub struct Mods {
     pub cmd: bool,
 }
 
+/// A text selection's shape, table cell, notes flag, anchor and caret.
+type TextTarget = (ShapeId, Option<(usize, usize)>, bool, (usize, usize), (usize, usize));
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PointerEvent {
@@ -500,12 +503,13 @@ impl Session {
         Ok(None)
     }
 
-    fn text_selection(&self) -> Option<((usize, usize), (usize, usize))> {
-        self.active().and_then(|d| d.selection.text.as_ref()).map(|t| (t.anchor, t.caret))
+    /// Where the text selection is: its shape, cell or notes, anchor and caret.
+    fn text_selection(&self) -> Option<TextTarget> {
+        self.active().and_then(|d| d.selection.text.as_ref()).map(|t| (t.shape, t.cell, t.notes, t.anchor, t.caret))
     }
 
     /// A double or triple click paints only the range it selected, not an older one it left alone.
-    fn paint_if_selection_changed(&mut self, before: Option<((usize, usize), (usize, usize))>, r: Value) -> Result<Value> {
+    fn paint_if_selection_changed(&mut self, before: Option<TextTarget>, r: Value) -> Result<Value> {
         if self.text_selection() == before {
             return Ok(r);
         }
