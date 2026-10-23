@@ -944,7 +944,7 @@ fn drawing_group(app: &mut SlideApp, ui: &mut Ui) {
             let (m, a) = small_button_ex(ui, Icon::ShapeOutline, "Shape Outline", sel, false, true);
             if m.clicked() {
                 let c = app.last_outline.clone();
-                run(app, "shape.line", json!({"color": c, "width": 1}));
+                run(app, "shape.line", json!({"color": c}));
             }
             if let Some(a) = a {
                 widgets::color_popup(&a).show(|ui| outline_menu(app, ui, &sc));
@@ -2467,7 +2467,7 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
             let (m, a) = small_button_ex(ui, Icon::ShapeOutline, "Shape Outline", sel, false, true);
             if m.clicked() {
                 let c = app.last_outline.clone();
-                run(app, "shape.line", json!({"color": c, "width": 1}));
+                run(app, "shape.line", json!({"color": c}));
             }
             if let Some(a) = a {
                 widgets::color_popup(&a).show(|ui| outline_menu(app, ui, &sc));

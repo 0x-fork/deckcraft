@@ -18,7 +18,6 @@ ends and are omitted from thumbnails, slide shows and exports.
 
 | Element | PowerPoint for Mac | DeckCraft | Gap |
 |---|---|---|---|
-| 2026-10-23 | minor | Shape Fill and Shape Outline (Home and Shape Format): the button applies the last colour picked from its menu, Accent 1 and Text 1 until one is picked. Line weight and dashes, Font Color and Highlight stay as they were (#1080) |
 | Title bar: AutoSave, Home, Save, Undo/Redo, document title, Share, search | yes | yes, plus Export; no Share (cloud) | #71 macOS window controls misaligned |
 | Native macOS menu bar (File, Edit, View, Insert, Format, Arrange, Tools, Slide Show, Window, Help) | yes | **no** (`menus::menu_tree()` is defined but not installed) | 3–5 h |
 | Menu-bar items with a DeckCraft equivalent | 217 app-specific items | 128 matched by name (59%, heuristic lower bound) | See [target-app-parity.md](target-app-parity.md) |
@@ -166,6 +165,7 @@ consistency is open (#73, #56).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-23 | minor | Shape Fill and Shape Outline (Home and Shape Format): the button applies the last colour picked from its menu, Accent 1 and Text 1 until one is picked. Line weight and dashes are not changed by the button; Font Color and Highlight stay as they were (#1080) |
 | 2026-10-16 | minor | Export › Change File Type › PNG and the Export… dialog offer a transparent background (#784) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: one row each for Format Shape, Dialogs (41, listed from `dialogs.rs`), Animation Pane (timeline is in), window, Quick Access Toolbar, Format Background, rulers, image paste, context menus, exact size and edit points; estimates re-totalled (~26–46 h) |
