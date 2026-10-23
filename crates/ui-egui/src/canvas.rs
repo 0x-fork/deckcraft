@@ -507,7 +507,7 @@ fn media_frames(app: &SlideApp, painter: &egui::Painter, xf: Xf) {
     }
     for (id, x, clip) in crate::media::slide_media(&d.doc, d.selection.slide) {
         if clip.video {
-            crate::media::paint_frame(painter, &app.media, id, screen_rect(xf, &x));
+            crate::media::paint_frame(painter, &app.media, id, screen_rect(xf, &x), clip.crop);
         }
     }
 }

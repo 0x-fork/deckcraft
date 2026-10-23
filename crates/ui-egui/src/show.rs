@@ -999,7 +999,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 } else {
                     slide_box(srect, uv, sw, sh, x.x as f32, x.y as f32, x.w as f32, x.h as f32)
                 };
-                if crate::media::paint_frame(&painter, &app.media, *id, r) {
+                if crate::media::paint_frame(&painter, &app.media, *id, r, clip.crop) {
                     framed.push(*id);
                 }
             }

@@ -405,9 +405,21 @@ pub fn clock(secs: f64) -> String {
     format!("{:02}:{:05.2}", (s / 60.0) as u32, s % 60.0)
 }
 
-/// Draw the playing video frame of `id` into `rect` (letterboxed to the frame's aspect).
-pub fn paint_frame(painter: &egui::Painter, host: &MediaHost, id: ShapeId, rect: Rect) -> bool {
+/// The part of a video frame a picture crop (left, top, right, bottom fractions) leaves visible.
+fn crop_uv(crop: [f64; 4]) -> Rect {
+    let [l, t, r, b] = crop.map(|v| if v.is_finite() { v.clamp(0.0, 0.99) as f32 } else { 0.0 });
+    Rect::from_min_max(pos2(l, t), pos2((1.0 - r).max(l + 0.01), (1.0 - b).max(t + 0.01)))
+}
+
+/// Draw the playing video frame of `id` into `rect`: letterboxed to the frame's aspect, or, when
+/// the video is cropped, the cropped part stretched over the whole box as PowerPoint shows it.
+pub fn paint_frame(painter: &egui::Painter, host: &MediaHost, id: ShapeId, rect: Rect, crop: [f64; 4]) -> bool {
     let Some(tex) = host.texture(id) else { return false };
+    if crop.iter().any(|v| *v != 0.0) {
+        painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
+        painter.image(tex.id(), rect, crop_uv(crop), Color32::WHITE);
+        return true;
+    }
     let [w, h] = tex.size();
     let (w, h) = (w.max(1) as f32, h.max(1) as f32);
     let k = (rect.width() / w).min(rect.height() / h);
@@ -553,6 +565,12 @@ mod tests {
     use deckcraft_model::{MediaClip, Presentation, Shape, ShapeId, ShapeKind};
 
     use super::*;
+
+    #[test]
+    fn a_video_crop_shows_only_the_cropped_part_of_the_frame() {
+        assert_eq!(crop_uv([0.0; 4]), Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)));
+        assert_eq!(crop_uv([0.25, 0.5, 0.25, 0.0]), Rect::from_min_max(pos2(0.25, 0.5), pos2(0.75, 1.0)));
+    }
 
     /// 16-bit mono WAV of a constant level, `secs` long at 8 kHz.
     fn wav_level(secs: f64, amp: f32) -> Vec<u8> {
