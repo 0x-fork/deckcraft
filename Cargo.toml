@@ -4,7 +4,7 @@ members = ["crates/*", "apps/*", "xtask"]
 default-members = ["crates/*", "apps/deckcraft", "apps/deckcraft-cli"]
 
 [workspace.package]
-version = "0.8.0"
+version = "0.10.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -49,7 +49,9 @@ rayon = "1"
 unicode-bidi = "0.3"
 unicode-segmentation = "1"
 unicode-linebreak = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Base features are wasm-safe (`std` only). The non-wasm `clock` feature is requested
+# per-crate for targets that read the local clock (see crates/text).
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 # text / rendering / formats
 skrifa = "0.47"
@@ -82,11 +84,16 @@ self_named_constructors = "allow"
 large_enum_variant = "allow"
 result_large_err = "allow"
 
+# Line tables keep file and line in panics and backtraces; full debug info
+# for every test binary and dependency would multiply the target dir size.
+# The test profile inherits both settings.
 [profile.dev.package."*"]
 opt-level = 2
+debug = false
 
 [profile.dev]
 opt-level = 1
+debug = "line-tables-only"
 
 [profile.release]
 opt-level = 3
