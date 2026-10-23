@@ -145,7 +145,7 @@ fn transparent_color(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
-/// The first target picture under slide point `at` and the colour of its own pixel there: the
+/// The topmost target picture under slide point `at` and the colour of its own pixel there: the
 /// picture as stored, before corrections and recolouring, so the colour matches the pixels that
 /// `clear_color` is compared with.
 fn picture_pixel_at(s: &Session, p: &Value, at: &Value) -> Result<(ShapeId, Rgba)> {
@@ -154,9 +154,12 @@ fn picture_pixel_at(s: &Session, p: &Value, at: &Value) -> Result<(ShapeId, Rgba
     let (Some(x), Some(y)) = (xy(0), xy(1)) else {
         return Err(bad(CMD, "`at` is [x, y] in slide units"));
     };
-    let ids = targets(s, p)?;
+    let mut ids = targets(s, p)?;
     let st = s.doc()?;
     let shapes = current_shapes(&st.doc, &st.selection).ok_or_else(|| bad(CMD, "no slide"))?;
+    // Same order as the hit-test: later in the shape list is in front, and a group's children sit
+    // where the group is. The selection order says nothing about what is on top.
+    ids.sort_by_cached_key(|id| std::cmp::Reverse(stack_path(shapes, *id)));
     for id in ids {
         let Some((sh, xf, to_slide)) = placed(&st.doc, &st.selection, shapes, id, Affine::IDENTITY, 0) else { continue };
         let ShapeKind::Picture { fill } = &sh.kind else { continue };
@@ -189,6 +192,23 @@ fn picture_pixel_at(s: &Session, p: &Value, at: &Value) -> Result<(ShapeId, Rgba
         return Ok((id, Rgba::rgb(c[0], c[1], c[2])));
     }
     Err(bad(CMD, "the point is not on a selected picture"))
+}
+
+/// Where `id` sits in the paint order: its index in each list from the slide down to it. A larger
+/// path is drawn later, so in front.
+fn stack_path(shapes: &[Shape], id: ShapeId) -> Option<Vec<usize>> {
+    for (i, sh) in shapes.iter().enumerate() {
+        if sh.id == id {
+            return Some(vec![i]);
+        }
+        if let ShapeKind::Group { children, .. } = &sh.kind
+            && let Some(mut rest) = stack_path(children, id)
+        {
+            rest.insert(0, i);
+            return Some(rest);
+        }
+    }
+    None
 }
 
 /// Shape `id` among `shapes` (searched into groups), its box, and the map from that box to slide

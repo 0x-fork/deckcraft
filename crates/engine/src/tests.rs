@@ -2466,6 +2466,23 @@ fn transparent_color_at_a_point_finds_a_grouped_picture_without_its_own_box() {
 }
 
 #[test]
+fn transparent_color_at_a_point_takes_the_topmost_selected_picture() {
+    let mut s = session();
+    // `under` is inserted first (drawn below), `over` after it (drawn on top); they overlap in x 150..300.
+    let under = ramp_picture(&mut s, 10, [100, 100, 200, 100]);
+    let over = ramp_picture(&mut s, 10, [150, 100, 200, 100]);
+    // Selected bottom first: selection order is the opposite of the stacking order.
+    s.execute("edit.select", &json!({"ids": [under, over]})).unwrap();
+    // x = 250 is column 7 of `under` (140) and column 5 of `over` (100): the click is on `over`.
+    s.execute("picture.transparentColor", &json!({"at": [250, 150]})).unwrap();
+    assert_eq!(clear_color_of(&s, &over), Some(deckcraft_color::Rgba::rgb(100, 0, 0)));
+    assert_eq!(clear_color_of(&s, &under), None);
+    // Where `over` is not, the picture below is still found.
+    s.execute("picture.transparentColor", &json!({"at": [120, 150]})).unwrap();
+    assert_eq!(clear_color_of(&s, &under), Some(deckcraft_color::Rgba::rgb(20, 0, 0)));
+}
+
+#[test]
 fn select_all_slides_scope() {
     let mut s = session();
     // One slide: selects it, no panic.
