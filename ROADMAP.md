@@ -141,6 +141,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-23 | A shape with no fill and no line (a text box) no longer draws its shape-level glow as a halo round its box; the text's own glow is all PowerPoint shows |
 | 2026-10-23 | Normal view: a slide zoomed past the window gets a horizontal and a vertical scroll bar on the axes that overflow; drag the thumb or click the track to reach every edge (#1157) |
 | 2026-10-22 | Shape Fill and Shape Outline format the members of a selected group, including nested groups, in one undo step. Fill transparency retains each member's effective colour (#1079) |
+| 2026-10-21 | 3-D contours, extrusion depths and bevels keep their size in points inside a group whose child coordinates scale its shapes: a 1 pt contour on a small extruded cube in a legacy group drew hundreds of points wide, a band across the slide |
 | 2026-10-18 | Native chart sidecar bytes move from JSON arrays into referenced ZIP entries, with shared media byte/item limits and bounded reads; older inline sidecars still load. Synthetic format regressions cover large workbooks and malformed members |
 | 2026-10-18 | Slide thumbnails and the Slide Sorter render only the slides in view: on a deck of more than 600 slides they used to evict their own thumbnails, so the pane flashed white and never finished (#969) |
 | 2026-10-18 | Resizing with the mouse snaps the edge being dragged to the slide, guides and other shapes: a fixed edge that already lined up used to take the snap and leave the dragged edge free, and a fixed edge near a line shifted the dragged one (#961) |
@@ -266,6 +267,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-22 | trivial | Progress log: table text takes the master's other-text style |
 | 2026-10-16 | trivial | Progress log: responsive mouse-wheel navigation on the fitted canvas |
 | 2026-10-21 | trivial | Progress log: theme `spDef` anchor no longer applied to a file's own shapes |
+| 2026-10-21 | trivial | Progress log: 3-D sizes in scaled groups stay in points |
 | 2026-10-14 | trivial | remote MCP checks reply IDs, envelopes and bounded newline framing (#718) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: headline breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) and the feature-area breadths from `cargo xtask parity`; one row per area; Upcoming item 2 merged; per-PR count notes dropped from the progress log. Ready stays ~55%, stage alpha |
