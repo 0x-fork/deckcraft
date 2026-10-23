@@ -63,7 +63,13 @@ fn roles(shapes: &[Shape]) -> Roles {
 fn arrangeable(s: &Shape) -> bool {
     match s.kind {
         ShapeKind::Picture { .. } => true,
-        ShapeKind::Shape => s.ph.is_some() || s.text_box,
+        ShapeKind::Shape => {
+            let is_title = s.ph.as_ref().is_some_and(|p| p.kind.is_title());
+            let has_text = s.text.as_ref().is_some_and(|t| !t.text().trim().is_empty());
+            // Only titles and shapes with text are moved (see `roles`): an empty one that shows
+            // (filled or outlined) would stay where it is, over the rearranged slide.
+            (s.ph.is_some() || s.text_box) && (is_title || has_text || (s.fill.is_none() && s.line.is_none()))
+        }
         _ => false,
     }
 }
@@ -355,6 +361,17 @@ mod tests {
         assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty());
         Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]).shapes[2].hidden = true;
         assert_eq!(ideas_for(&s.doc().unwrap().doc, 0).len(), 3);
+    }
+
+    #[test]
+    fn an_empty_text_box_blocks_ideas_only_when_it_shows() {
+        let mut s = deck(false);
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        slide.shapes.push(Shape { id: ShapeId(512), text_box: true, xfrm: Some(Xfrm::new(10.0, 10.0, 100.0, 40.0)), ..Default::default() });
+        assert_eq!(ideas_for(&s.doc().unwrap().doc, 0).len(), 3, "invisible and empty: nothing in the way");
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        slide.shapes[2].fill = Some(Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(200, 80, 20, 255))));
+        assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty(), "a filled empty box would stay on top");
     }
 
     #[test]
