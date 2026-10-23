@@ -94,7 +94,7 @@ fn text_editing_flow() {
     assert_eq!(s.doc().unwrap().selection.shapes.len(), 1);
 }
 
-/// `text.set` treats CRLF as one paragraph break and keeps no `\r` in the text.
+/// `text.set` treats CRLF (or a lone CR) as one paragraph break and keeps no `\r` in the text.
 #[test]
 fn text_set_crlf_makes_clean_paragraphs() {
     let mut s = session();
@@ -105,6 +105,10 @@ fn text_set_crlf_makes_clean_paragraphs() {
     assert_eq!(t["paragraphs"][0]["text"], "one");
     assert_eq!(t["paragraphs"][1]["text"], "two");
     assert_eq!(t["text"], "one\ntwo");
+    // A lone CR (old Mac line ends) is a paragraph break too, as `edit::insert` treats it.
+    s.execute("text.set", &json!({"id": id, "text": "a\rb"})).unwrap();
+    let t = s.execute("text.get", &json!({"id": id})).unwrap();
+    assert_eq!(t["text"], "a\nb");
 }
 
 /// Cut with only a caret copies nothing, so it must not delete the character after the caret.
