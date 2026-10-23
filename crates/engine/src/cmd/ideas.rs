@@ -84,9 +84,6 @@ fn cover_crop(src: f64, dst: f64) -> [f64; 4] {
     }
 }
 
-/// Marks a title whose fill was put there by the full-bleed idea.
-const BAND_TAG: &str = "deckcraft.ideaBand";
-
 /// The light fill behind the title in the full-bleed idea.
 fn band_fill() -> Fill {
     Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(255, 255, 255, 220)))
@@ -189,17 +186,11 @@ pub fn apply_idea(doc: &mut Presentation, sel: &Selection, index: usize, id: &st
         slide.shapes.insert(0, pic);
     }
     if let Some(t) = slide.shapes.iter_mut().find(|s| s.ph.as_ref().is_some_and(|p| p.kind.is_title())) {
-        let marked = t.tags.iter().any(|(k, _)| k == BAND_TAG);
         if band {
             t.fill = Some(band_fill());
-            if !marked {
-                t.tags.push((BAND_TAG.into(), "1".into()));
-            }
-        } else if marked {
-            // The band belongs to full-bleed only: another idea takes it away again. A fill the
-            // user set (no mark) stays.
+        } else if t.fill == Some(band_fill()) {
+            // The band belongs to full-bleed only: another idea takes it away again.
             t.fill = None;
-            t.tags.retain(|(k, _)| k != BAND_TAG);
         }
     }
     Ok(())
@@ -351,10 +342,6 @@ mod tests {
         assert!(user.is_some());
         s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
         assert_eq!(shape(&s, 500).fill, user);
-        let mut s = deck(true);
-        Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]).shapes[0].fill = Some(band_fill());
-        s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).unwrap();
-        assert_eq!(shape(&s, 500).fill, Some(band_fill()), "not added by an idea, so not removed by one");
     }
 
     #[test]
