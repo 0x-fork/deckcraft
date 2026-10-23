@@ -1096,7 +1096,9 @@ fn outline_table_rows_are_indented_and_do_not_become_slides() {
     let mut p = defaults::new_presentation(None);
     let layout = defaults::layout_of_kind(&p, LayoutType::TitleAndContent).unwrap();
     let mut s = defaults::new_slide(&mut p, layout).expect("slide");
-    s.shapes.retain(|sh| !sh.ph_type().is_some_and(|k| k.is_title()));
+    for sh in s.shapes.iter_mut().filter(|sh| sh.ph_type().is_some_and(|k| k.is_title())) {
+        sh.text = Some(TextBody::from_text("Slide title"));
+    }
     let mut table = Table { cols: vec![200.0, 200.0], ..Default::default() };
     for texts in [["A1", "B1"], ["A2", "B2"]] {
         let cells: Vec<Cell> = texts.iter().map(|t| Cell { text: TextBody::from_text(t), ..Default::default() }).collect();
@@ -1110,5 +1112,9 @@ fn outline_table_rows_are_indented_and_do_not_become_slides() {
     let out = slides_to_outline(&p);
     let mut q = defaults::new_presentation(None);
     q.slides.clear();
-    assert_eq!(outline_to_slides(&mut q, &out), 0, "table rows became slides: {out:?}");
+    assert_eq!(outline_to_slides(&mut q, &out), 1, "table rows became slides: {out:?}");
+    assert_eq!(q.slides.len(), 1, "{out:?}");
+    let body = q.slides[0].shapes.iter().filter_map(|sh| sh.text.as_ref()).map(|t| t.text()).collect::<Vec<_>>().join("\n");
+    assert!(body.contains("A1\tB1"), "{body:?}");
+    assert!(body.contains("A2\tB2"), "{body:?}");
 }
