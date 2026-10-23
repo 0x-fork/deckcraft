@@ -149,6 +149,7 @@ fn unsafe_url_links_are_not_exported() {
         "//attacker.example/share/x",
         "file://attacker.example/share/x",
         "file:////attacker.example/share/x",
+        "smb://attacker.example/share/x",
     ];
     let mut p = deck(1);
     let slide = Arc::make_mut(&mut p.slides[0]);

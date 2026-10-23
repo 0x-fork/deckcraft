@@ -695,9 +695,9 @@ fn to_path(bp: &kurbo::BezPath) -> Option<krilla::geom::Path> {
 
 /// Can a hyperlink from a (possibly untrusted) deck become a PDF link? Scripts (`javascript:`,
 /// `vbscript:`), `data:` and paths to another machine (`\\host\share`, `//host/share`,
-/// `file://host/...`) cannot: on Windows, opening a network path sends the user's NTLM credentials
-/// to that host. Web, mail, local `file:` and relative links can. Read the way a browser reads a
-/// URL: control characters dropped, leading spaces trimmed, any case.
+/// `file://host/...`, `smb://host/...`) cannot: opening one connects to that host, which on Windows
+/// sends the user's NTLM credentials. Web, mail, local `file:` and relative links can. Read the way
+/// a browser reads a URL: control characters dropped, leading spaces trimmed, any case.
 fn exportable_url(url: &str) -> bool {
     let u: String = url.chars().filter(|c| !c.is_ascii_control()).collect();
     let u = u.trim_start().replace('\\', "/");
@@ -706,7 +706,7 @@ fn exportable_url(url: &str) -> bool {
     }
     let Some((scheme, rest)) = u.split_once(':') else { return true };
     match scheme.to_ascii_lowercase().as_str() {
-        "javascript" | "vbscript" | "data" => false,
+        "javascript" | "vbscript" | "data" | "smb" => false,
         "file" => match rest.strip_prefix("//") {
             // `file:///C:/...` and `file://localhost/...` are local; `file://host/...` and `file:////host/...` are not.
             Some(p) => {
