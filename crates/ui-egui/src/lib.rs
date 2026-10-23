@@ -952,11 +952,9 @@ impl SlideApp {
             "show.start" => {
                 if let Some(name) = p.get("custom").and_then(Value::as_str).filter(|s| !s.is_empty()) {
                     self.start_custom_show(name, false);
-                } else if p.get("from").is_some() {
-                    let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
-                    self.start_show(from, false);
                 } else {
-                    self.start_show(self.show_start_index(), false);
+                    let from = self.show_from(p)?.unwrap_or_else(|| self.show_start_index());
+                    self.start_show(from, false);
                 }
             }
             "show.presenter" => self.ui.presenter_view = self.flag(p, self.ui.presenter_view),
@@ -1070,6 +1068,21 @@ impl SlideApp {
     /// First slide Play from Start should open: the custom show or range, skipping hidden slides.
     pub fn show_start_index(&self) -> usize {
         self.session.active().and_then(|d| deckcraft_anim::show_order(&d.doc).first().copied()).unwrap_or(0)
+    }
+
+    /// The slide `show.start {from}` names: `Ok(None)` when absent, `Err` when it is not a slide of
+    /// the open deck (negative, non-integer, past the end), so a bad index never plays slide 0 or
+    /// opens on the end screen. Hidden slides are allowed, as in "from current slide".
+    pub(crate) fn show_from(&self, p: &Value) -> Result<Option<usize>, String> {
+        let from = match p.get("from") {
+            None | Some(Value::Null) => return Ok(None),
+            Some(v) => v.as_u64().and_then(|v| usize::try_from(v).ok()).ok_or_else(|| format!("`from` is not a valid index: {v}"))?,
+        };
+        let count = self.session.active().map_or(0, |d| d.doc.slides.len());
+        if from >= count {
+            return Err(format!("no slide {from}"));
+        }
+        Ok(Some(from))
     }
 
     pub fn start_show(&mut self, from: usize, reading: bool) {
@@ -3351,6 +3364,34 @@ mod tests {
         harness.run_steps(2);
         flick(&mut harness, egui::vec2(-24.0, 0.0));
         assert_eq!(slide_at(harness.state()), 0, "zoomed in, a sideways swipe pans instead of turning the page");
+    }
+
+    /// `show.start {from}` that names no slide of the deck is refused, over `run` and over the
+    /// control channel, instead of starting at slide 0 or on the end screen. A hidden slide is a
+    /// slide: From Current Slide plays it.
+    #[test]
+    fn show_start_refuses_a_from_that_is_not_a_slide() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("slide.new", &json!({})).unwrap();
+        s.execute("slide.hide", &json!({"index": 1, "hidden": true})).unwrap();
+        let mut app = SlideApp::new(s, Services::default());
+        let ctx = egui::Context::default();
+        for from in [json!(-1), json!(1.5), json!("1"), json!(3), json!(u64::MAX)] {
+            assert!(app.run("show.start", json!({"from": from})).is_err(), "{from}");
+            assert!(app.show.is_none(), "{from}");
+            let (req, _rx) = control::ControlRequest::new("show.start", json!({"from": from}));
+            let control::Outcome::Done(answer) = control::handle(&mut app, &ctx, &req) else { panic!("{from}") };
+            assert_eq!(answer["ok"], false, "{from}: {answer}");
+            assert!(app.show.is_none(), "{from}");
+        }
+        app.run("show.start", json!({"from": 1})).unwrap();
+        assert_eq!(app.show.as_ref().map(|s| (s.state.slide, s.state.ended)), Some((1, false)));
+        app.show = None;
+        let (req, _rx) = control::ControlRequest::new("show.start", json!({"from": 2, "reading": true}));
+        let control::Outcome::Done(answer) = control::handle(&mut app, &ctx, &req) else { panic!() };
+        assert_eq!(answer["ok"], true, "{answer}");
+        assert_eq!(app.show.as_ref().map(|s| (s.state.slide, s.reading)), Some((2, true)));
     }
 
     #[test]
