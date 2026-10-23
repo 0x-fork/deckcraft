@@ -15,7 +15,7 @@ points and lead the beta plan.
 
 | Core workflow | Works end to end? | Evidence | Hours to full pass |
 |---|---|---|---|
-| Build a deck from scratch (theme, layouts, titles and bullets, shapes, pictures from file), save, close and reopen it | yes | Commands for all of it; `.deckcraft` and `.pptx` round-trip tests (`crates/pptx/tests/roundtrip.rs`, `crates/format`); AutoRecover. Close discards edits without asking (#60, PR #75); image *paste* fails on Windows/Linux (#53), though insert-from-file works | 1–3 |
+| Build a deck from scratch (theme, layouts, titles and bullets, shapes, pictures from file), save, close and reopen it | yes | Commands for all of it; `.deckcraft` and `.pptx` round-trip tests (`crates/pptx/tests/it/roundtrip.rs`, `crates/format`); AutoRecover. Close discards edits without asking (#60, PR #75); image *paste* fails on Windows/Linux (#53), though insert-from-file works | 1–3 |
 | Open a colleague's `.pptx`, edit it, save it back as `.pptx` that PowerPoint opens | partial (not blocking) | The reader is lenient and keeps unknown objects. Files open in PowerPoint without repair (checked 2026-10-06). But only generated decks have been tested; text inside EMF/WMF pictures is missing; comment threads, media options and rewind are lost (#70, #74, #77) | 31–55 |
 | Present: full-screen show with transitions, animations, media, presenter view with notes, next slide and timer | yes | 48/48 transitions, 64 effects, triggers, builds, media playback, presenter window, See All Slides and zoom. The presenter timer pauses and resets, and notes have a size control. A custom show plays only its slides. Typing a slide number during the show shows it, and Enter goes there. Presenter view isn't placed on the second display automatically (drag it there; #433) | 2–4 |
 | Add business content: tables, charts with their data, simple diagrams | partial (not blocking) | Tables with styles, merge/split, all D or P. Charts insert with the common types and edit data in the Chart Data dialog (P0 partial); SmartArt is basic (pre-drawn shapes) | 12–20 |
@@ -26,7 +26,7 @@ points and lead the beta plan.
 
 1. **Stop losing work and crashing:** land Close's save prompt (#60, PR #75), the Windows GPU
    startup crashes (#40, #59), image paste on Windows/Linux (#53). 6–12 h.
-2. **PPTX on real decks:** the owned corpus (`crates/pptx/tests/corpus*.rs`) round-trips decks we
+2. **PPTX on real decks:** the owned corpus (`crates/pptx/tests/it/corpus*.rs`) round-trips decks we
    author: tables, charts, animations, media, sections, masters and layouts, comments, links and
    actions, custom shows, rotated groups, inherited placeholders, text effects and body layout,
    theme effects, fills, bevels, connectors, 3-D models and animation bounce end, and keeps notes-

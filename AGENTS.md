@@ -136,7 +136,7 @@ Standard: craftrules `standards/never-crash.md`.
 
 ## 5. Quality gates (before every commit)
 
-`cargo xtask ci` = fmt check, clippy `-D warnings`, tests, layering check, asset check, wasm
+`cargo xtask ci` = fmt check, clippy `-D warnings`, tests (nextest when installed) and doctests, layering check, asset check, wasm
 check. Commit after each landed arc with a task id in the message (`M1.2: smart guides`) and push
 to `main`.
 

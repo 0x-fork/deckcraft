@@ -181,7 +181,7 @@ Detail in [file-format-parity.md](file-format-parity.md).
   `Series.secondary_axis`) and is not written back when the chart is rebuilt.
   An unchanged chart's embedded workbook now survives save (#335); editing the chart still
   drops it rather than writing a stale spreadsheet. The workbook and other retained chart parts
-  also survive `.deckcraft` save/reopen (`crates/engine/tests/chart_native.rs`), with binary
+  also survive `.deckcraft` save/reopen (`crates/engine/tests/it/chart_native.rs`), with binary
   payloads in bounded ZIP entries sharing the media load budget (`crates/format` tests).
 - **Impact:** most business decks have charts; editing their data is routine.
 - **Estimate:** 12–20 h. Data and elements are **beta blockers** (6–10 h).
@@ -215,7 +215,7 @@ of the effect gallery. Detail in [animation-parity.md](animation-parity.md). 8�
   shapes in two decks) does nothing; triggers that start on `onStopAudio` or `begin` conditions are
   not read as triggers; click boxes are the shape's bounding box (a hexagon's corners count) and do
   not follow a shape that a motion path has moved. Trigger sequences now keep their separate
-  click steps on PPTX save, including paragraph builds (`crates/pptx/tests/trigger_steps.rs`).
+  click steps on PPTX save, including paragraph builds (`crates/pptx/tests/it/trigger_steps.rs`).
 - **Impact:** games built around sound effects on buttons, audio-triggered effects or moving
   clickable shapes do not play as authored.
 - **Estimate:** 4–8 h.
