@@ -138,18 +138,31 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let mut bar_active = [false; 2];
     for axis in 0..2 {
         let Some((track, thumb, travel)) = scroll_bar(avail, inset, overflow, offset, axis) else { continue };
-        let bar = ui.interact(track, scroll_id.with(("bar", axis)), Sense::click_and_drag());
+        let bar_id = scroll_id.with(("bar", axis));
+        let bar = ui.interact(track, bar_id, Sense::click_and_drag());
         on_bar |= bar.hovered();
         bar_active[axis] = bar.hovered() || bar.dragged();
-        if bar.dragged() && travel > 0.0 {
-            offset[axis] += bar.drag_delta()[axis] * overflow[axis] / travel;
-        } else if bar.clicked()
-            && let Some(p) = bar.interact_pointer_pos()
-            && !thumb.contains(p)
+        // Where the button went down and the offset then: egui calls a press a click until it
+        // moves 6 pt, so the release point can't tell the thumb from the track, and drag_delta
+        // misses those first points.
+        let grab_id = bar_id.with("grab");
+        if bar.is_pointer_button_down_on()
+            && let Some(origin) = ui.input(|i| i.pointer.primary_pressed().then(|| i.pointer.press_origin()).flatten())
         {
-            // A click on the track beside the thumb moves one window's length toward it.
-            let page = avail.size()[axis] * 0.9;
-            offset[axis] += if p[axis] < thumb.min[axis] { -page } else { page };
+            ui.data_mut(|d| d.insert_temp(grab_id, (origin, offset[axis])));
+        }
+        let grab: Option<(Pos2, f32)> = ui.data_mut(|d| d.get_temp(grab_id));
+        if let Some((origin, start)) = grab {
+            if bar.dragged()
+                && travel > 0.0
+                && let Some(p) = bar.interact_pointer_pos()
+            {
+                offset[axis] = start + (p[axis] - origin[axis]) * overflow[axis] / travel;
+            } else if bar.clicked() && !thumb.contains(origin) {
+                // A click on the track beside the thumb moves one window's length toward it.
+                let page = avail.size()[axis] * 0.9;
+                offset[axis] += if origin[axis] < thumb.min[axis] { -page } else { page };
+            }
         }
     }
     if (resp.hovered() || on_bar) && !zooming {
@@ -1555,6 +1568,32 @@ mod tests {
         drag_with(&mut h, right, right + vec2(0.0, 2000.0), |_| {});
         let end = h.state().slide_rect.unwrap();
         assert!((end.max.y - (canvas.max.y - 28.0)).abs() < 2.0, "the bottom of the slide comes into view: {end:?} in {canvas:?}");
+    }
+
+    /// A press on the thumb that ends just past its end is a nudge, not a page: the track click
+    /// is decided where the button went down, not where it came up.
+    #[test]
+    fn a_short_press_on_the_thumb_does_not_page() {
+        let mut h = harness();
+        let fit = h.state().canvas_scale;
+        h.state_mut().ui.zoom = Some(fit * 3.0);
+        h.run_steps(3);
+        let (canvas, before) = (h.state().canvas_rect.unwrap(), h.state().slide_rect.unwrap());
+        let overflow = vec2((before.width() + 56.0 - canvas.width()).max(0.0), (before.height() + 56.0 - canvas.height()).max(0.0));
+        let offset = canvas.min + vec2(28.0, 28.0) - before.min;
+        let (_, thumb, _) = scroll_bar(canvas, 0.0, overflow, offset, 0).unwrap();
+        let (a, b) = (pos2(thumb.max.x - 3.0, canvas.max.y - 4.0), pos2(thumb.max.x + 3.0, canvas.max.y - 4.0));
+        h.hover_at(a);
+        h.run_steps(1);
+        h.event(Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE });
+        h.run_steps(1);
+        h.event(Event::PointerMoved(b));
+        h.run_steps(1);
+        h.event(Event::PointerButton { pos: b, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE });
+        h.run_steps(2);
+        let after = h.state().slide_rect.unwrap();
+        let moved = before.min.x - after.min.x;
+        assert!((0.0..40.0).contains(&moved), "a 6 pt nudge of the thumb, not a page: {before:?} -> {after:?}");
     }
 
     /// A slide that fits has no scroll bars: a drag along the canvas edge is a marquee.
