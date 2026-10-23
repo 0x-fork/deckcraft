@@ -113,7 +113,15 @@ fn general(v: f64, dec: char) -> String {
     }
     let a = v.abs();
     let s = if !(1e-9..1e11).contains(&a) {
-        format!("{v:.5E}")
+        let s = format!("{v:.5E}");
+        match s.split_once('E') {
+            Some((m, e)) => {
+                let m = if m.contains('.') { m.trim_end_matches('0').trim_end_matches('.') } else { m };
+                let e: i32 = e.parse().unwrap_or(0);
+                format!("{m}E{}{:02}", if e < 0 { '-' } else { '+' }, e.abs())
+            }
+            None => s,
+        }
     } else {
         let digits = (10 - (a.log10().floor() as i32 + 1)).clamp(0, 10) as usize;
         let s = format!("{v:.digits$}");
@@ -304,6 +312,10 @@ mod tests {
         assert_eq!(format("0%", 0.0, None), "0%");
         assert_eq!(format("General", 2.5, Some("ru-RU")), "2,5");
         assert_eq!(format("General", 400_000.0, Some("ru-RU")), "400000");
+        assert_eq!(format("General", 1.5e12, None), "1.5E+12");
+        assert_eq!(format("General", 1e-10, None), "1E-10");
+        assert_eq!(format("General", -2.5e-12, None), "-2.5E-12");
+        assert_eq!(format("General", 1e100, None), "1E+100");
         assert_eq!(format("0.00", 1.23456, None), "1.23");
         assert_eq!(format("#,##0.0#", 1234.5, None), "1,234.5");
         assert_eq!(format("#,##0,", 12_345_678.0, None), "12,346");
