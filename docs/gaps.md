@@ -14,8 +14,6 @@ tests (calibration in [target-app-parity.md](target-app-parity.md#calibration-ho
 When a gap closes, delete its entry, update the parity doc it points to, and add a line to the
 revision history.
 
-Chart number-format reliability: explicit empty sections now hide the corresponding numeric labels, including all values with three semicolons. Blank whole-code General fallback remains. Synthetic formatter regressions cover section selection and quoted/escaped semicolons; broader chart-element gaps and readiness estimates below are unchanged.
-
 ## Ranked: the top 15
 
 | # | Gap | Category | Beta | Hours | Doc |
