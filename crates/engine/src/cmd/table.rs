@@ -10,22 +10,40 @@ use crate::{DocState, Result, Session};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         cmd!("table.insertRowAbove", "Insert Above", ["Table Layout", "Rows & Columns"], None, "{row?, id?}", has_selection, |s, p| rows_cols(
-            s, p, "rowAbove"
+            s,
+            p,
+            "rowAbove",
+            "table.insertRowAbove"
         )),
         cmd!("table.insertRowBelow", "Insert Below", ["Table Layout", "Rows & Columns"], None, "{row?, id?}", has_selection, |s, p| rows_cols(
-            s, p, "rowBelow"
+            s,
+            p,
+            "rowBelow",
+            "table.insertRowBelow"
         )),
         cmd!("table.insertColumnLeft", "Insert Left", ["Table Layout", "Rows & Columns"], None, "{col?, id?}", has_selection, |s, p| rows_cols(
-            s, p, "colLeft"
+            s,
+            p,
+            "colLeft",
+            "table.insertColumnLeft"
         )),
         cmd!("table.insertColumnRight", "Insert Right", ["Table Layout", "Rows & Columns"], None, "{col?, id?}", has_selection, |s, p| rows_cols(
-            s, p, "colRight"
+            s,
+            p,
+            "colRight",
+            "table.insertColumnRight"
         )),
         cmd!("table.deleteRow", "Delete Rows", ["Table Layout", "Rows & Columns"], None, "{row?, id?}", has_selection, |s, p| rows_cols(
-            s, p, "delRow"
+            s,
+            p,
+            "delRow",
+            "table.deleteRow"
         )),
         cmd!("table.deleteColumn", "Delete Columns", ["Table Layout", "Rows & Columns"], None, "{col?, id?}", has_selection, |s, p| rows_cols(
-            s, p, "delCol"
+            s,
+            p,
+            "delCol",
+            "table.deleteColumn"
         )),
         cmd!("table.merge", "Merge Cells", ["Table Layout", "Merge"], None, "{from: [r, c], to: [r, c], id?}", has_selection, merge),
         cmd!(
@@ -225,9 +243,18 @@ impl TableFrame {
     }
 }
 
-fn cell_param(p: &Value, key: &str) -> Option<(usize, usize)> {
-    let a = p.get(key)?.as_array()?;
-    Some((a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize))
+/// A `[r, c]` cell param: `Ok(None)` when absent (callers may fall back to the selection), `Err` when
+/// present but not a valid cell, so a bad cell never acts on the selection.
+fn cell_param(p: &Value, key: &str, cmd: &str) -> Result<Option<(usize, usize)>> {
+    let v = match p.get(key) {
+        None | Some(Value::Null) => return Ok(None),
+        Some(v) => v,
+    };
+    let idx = |i: usize| v.as_array().and_then(|a| a.get(i)).and_then(Value::as_u64).and_then(|x| usize::try_from(x).ok());
+    match (idx(0), idx(1)) {
+        (Some(r), Some(c)) => Ok(Some((r, c))),
+        _ => Err(bad(cmd, format!("`{key}` is not a valid cell: {v}"))),
+    }
 }
 
 /// The table's row/col to act on: params, the edited cell, or the selected cells.
@@ -283,10 +310,10 @@ fn with_table(s: &mut Session, p: &Value, cmd: &str, f: impl Fn(&mut Table) -> R
     Ok(r)
 }
 
-fn rows_cols(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
-    let (r, c) = at(s, p, &format!("table.{op}"))?;
+fn rows_cols(s: &mut Session, p: &Value, op: &str, name: &'static str) -> Result<Value> {
+    let (r, c) = at(s, p, name)?;
     let op = op.to_string();
-    with_table(s, p, "table", move |t| {
+    with_table(s, p, name, move |t| {
         match op.as_str() {
             "rowAbove" => t.insert_row(r),
             "rowBelow" => t.insert_row(r.saturating_add(1)),
@@ -294,12 +321,12 @@ fn rows_cols(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
             "colRight" => t.insert_col(c.saturating_add(1)),
             "delRow" => {
                 if !t.delete_row(r) {
-                    return Err(bad("table.deleteRow", "can't delete the last row"));
+                    return Err(bad(name, "can't delete the last row"));
                 }
             }
             _ => {
                 if !t.delete_col(c) {
-                    return Err(bad("table.deleteColumn", "can't delete the last column"));
+                    return Err(bad(name, "can't delete the last column"));
                 }
             }
         }
@@ -309,8 +336,8 @@ fn rows_cols(s: &mut Session, p: &Value, op: &str) -> Result<Value> {
 
 fn merge(s: &mut Session, p: &Value) -> Result<Value> {
     let sel = s.doc()?.selection.cells;
-    let from = cell_param(p, "from").or(sel.map(|c| c.1)).ok_or_else(|| bad("table.merge", "missing `from`"))?;
-    let to = cell_param(p, "to").or(sel.map(|c| c.2)).ok_or_else(|| bad("table.merge", "missing `to`"))?;
+    let from = cell_param(p, "from", "table.merge")?.or(sel.map(|c| c.1)).ok_or_else(|| bad("table.merge", "missing `from`"))?;
+    let to = cell_param(p, "to", "table.merge")?.or(sel.map(|c| c.2)).ok_or_else(|| bad("table.merge", "missing `to`"))?;
     with_table(
         s,
         p,
@@ -320,7 +347,7 @@ fn merge(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn split(s: &mut Session, p: &Value) -> Result<Value> {
-    let cell = match cell_param(p, "cell") {
+    let cell = match cell_param(p, "cell", "table.split")? {
         Some(c) => c,
         None => at(s, p, "table.split")?,
     };
@@ -579,8 +606,8 @@ fn select_cells(s: &mut Session, p: &Value) -> Result<Value> {
         Some(i) => i,
         None => s.doc()?.selection.shapes.first().copied().ok_or_else(|| bad("table.selectCells", "select a table"))?,
     };
-    let from = cell_param(p, "from").unwrap_or((0, 0));
-    let to = cell_param(p, "to").unwrap_or(from);
+    let from = cell_param(p, "from", "table.selectCells")?.unwrap_or((0, 0));
+    let to = cell_param(p, "to", "table.selectCells")?.unwrap_or(from);
     s.select(|_, sel| {
         sel.cells = Some((id, from, to));
         sel.shapes = vec![id];
