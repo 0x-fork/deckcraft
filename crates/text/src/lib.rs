@@ -1342,6 +1342,10 @@ fn symbol_font_draw(face: &FontFace, code: u32) -> Option<char> {
     if face.covers(pua) {
         return Some(pua);
     }
+    // The table below is the Symbol font's encoding; Wingdings, Webdings and the like are not Symbol.
+    if !face.family.eq_ignore_ascii_case("symbol") {
+        return None;
+    }
     if let Some(real) = symbol_unicode(code) {
         return std::iter::once(real).chain(symbol_unicode_alts(code).iter().copied()).filter_map(char::from_u32).find(|c| face.covers(*c));
     }
