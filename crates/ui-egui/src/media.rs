@@ -415,7 +415,7 @@ fn crop_uv(crop: [f64; 4]) -> Rect {
 /// the video is cropped, the cropped part stretched over the whole box as PowerPoint shows it.
 pub fn paint_frame(painter: &egui::Painter, host: &MediaHost, id: ShapeId, rect: Rect, crop: [f64; 4]) -> bool {
     let Some(tex) = host.texture(id) else { return false };
-    if crop.iter().any(|v| *v != 0.0) {
+    if crop.iter().any(|v| *v > 0.0) {
         painter.rect_filled(rect, CornerRadius::ZERO, Color32::BLACK);
         painter.image(tex.id(), rect, crop_uv(crop), Color32::WHITE);
         return true;
