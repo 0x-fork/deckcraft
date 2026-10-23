@@ -95,11 +95,62 @@ pub(crate) fn page_flick(wheel: egui::Vec2) -> Option<bool> {
     (along.abs() > MIN_FLICK).then_some(along < 0.0)
 }
 
+/// Discrete wheel input must not share the trackpad's gesture cooldown. Keep all the steps,
+/// including several notches delivered in one frame, and clamp at each end of the deck.
+///
+/// High-resolution and free-spin wheels send fractions of a line (0.125 per event on Windows), so
+/// the delta is accumulated in `carry` and each whole line is one slide; a change of direction
+/// drops what was left over. Returns the target, `None` when no wheel event was read.
+fn wheel_slide_target(events: &[egui::Event], current: usize, slides: usize, carry: &mut f32) -> Option<usize> {
+    let last = slides.checked_sub(1)?;
+    let mut target = current.min(last);
+    let mut handled = false;
+    for event in events {
+        if let egui::Event::MouseWheel { unit, delta, modifiers, .. } = event
+            && matches!(unit, egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page)
+            && !modifiers.ctrl
+            && !modifiers.command
+            && !modifiers.shift
+            && delta.y.is_finite()
+            && delta.y.abs() > 0.0
+            && delta.y.abs() >= delta.x.abs()
+        {
+            if *carry * delta.y < 0.0 {
+                *carry = 0.0;
+            }
+            *carry += delta.y;
+            // The small slack keeps sums such as 10 × 0.1 from falling just short of a line.
+            let whole = (carry.abs() + 1e-4).floor();
+            *carry -= whole.copysign(*carry);
+            let steps = whole.min(slides as f32) as usize;
+            target = if delta.y < 0.0 { target.saturating_add(steps).min(last) } else { target.saturating_sub(steps) };
+            handled = true;
+        }
+    }
+    handled.then_some(target)
+}
+
+fn trackpad_scroll(events: &[egui::Event]) -> egui::Vec2 {
+    events.iter().fold(egui::Vec2::ZERO, |sum, event| match event {
+        egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta, modifiers, .. } if !modifiers.ctrl && !modifiers.command => sum + *delta,
+        _ => sum,
+    })
+}
+
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let avail = ui.available_rect_before_wrap();
     app.canvas_rect = Some(avail);
     let Some(st) = app.session.active() else { return };
+    // The leftover fraction of a wheel line belongs to one presentation. Drop it whenever another
+    // one is drawn here, hovered or not, so switching away and back starts from zero.
+    let carry_id = ui.id().with("wheel_carry");
+    let doc_uid = st.uid;
+    ui.data_mut(|d| {
+        if d.get_temp::<(u64, f32)>(carry_id).is_none_or(|(uid, _)| uid != doc_uid) {
+            d.insert_temp(carry_id, (doc_uid, 0.0_f32));
+        }
+    });
     if st.doc.slides.is_empty() && st.selection.target == Target::Slides {
         let resp = ui.allocate_rect(avail, Sense::click());
         ui.painter().text(avail.center(), Align2::CENTER_CENTER, "Click to add first slide", theme::font(22.0), t.text_dim);
@@ -134,20 +185,27 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     if resp.hovered() && !zooming {
         if overflow != egui::Vec2::ZERO {
             offset -= wheel;
-        } else if !app.anim_preview_active()
-            && app.session.tool.marquee.is_none()
-            && !app.session.tool.dragging()
-            && let Some(next) = page_flick(wheel)
-        {
-            // A fitted slide: the mouse wheel and a trackpad swipe turn the page. Pinch zoom is
-            // the branch above and is left alone.
-            let gate = ui.id().with("wheel_gate");
-            // No previous flick yet: the first one must turn the page, not wait out the gap.
-            let last: f64 = ui.data_mut(|d| d.get_temp(gate).unwrap_or(f64::NEG_INFINITY));
-            let now = ui.input(|i| i.time);
-            if now - last > 0.35 {
-                ui.data_mut(|d| d.insert_temp(gate, now));
-                let _ = app.run(if next { "slide.next" } else { "slide.previous" }, json!({}));
+        } else if !app.anim_preview_active() && app.session.tool.marquee.is_none() && !app.session.tool.dragging() {
+            let (_, mut carry): (u64, f32) = ui.data_mut(|d| d.get_temp(carry_id).unwrap_or_default());
+            let wheel_step = app.session.active().and_then(|d| {
+                let current = d.selection.slide;
+                ui.input(|i| wheel_slide_target(&i.events, current, d.doc.slides.len(), &mut carry)).map(|target| (current, target))
+            });
+            ui.data_mut(|d| d.insert_temp(carry_id, (doc_uid, carry)));
+            if let Some((current, index)) = wheel_step {
+                if index != current {
+                    let _ = app.run("slide.go", json!({"index": index}));
+                }
+            } else if let Some(next) = page_flick(ui.input(|i| trackpad_scroll(&i.events))) {
+                // Point-based trackpad gestures keep their cooldown. Raw input avoids reading
+                // the smoothed tail of a discrete mouse notch as another page turn.
+                let gate = ui.id().with("wheel_gate");
+                let last: f64 = ui.data_mut(|d| d.get_temp(gate).unwrap_or(f64::NEG_INFINITY));
+                let now = ui.input(|i| i.time);
+                if now - last > 0.35 {
+                    ui.data_mut(|d| d.insert_temp(gate, now));
+                    let _ = app.run(if next { "slide.next" } else { "slide.previous" }, json!({}));
+                }
             }
         }
     }
