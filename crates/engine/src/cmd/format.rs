@@ -1178,7 +1178,8 @@ fn covered_paragraphs(s: &Session) -> Vec<usize> {
     let Some(t) = &st.selection.text else { return vec![] };
     let Some(body) = super::text::body_of(st, t) else { return vec![] };
     let (a, b) = t.ordered();
-    (a.0..=b.0)
+    // A hostile selection can point past the body: walk only the paragraphs it has.
+    (a.0..=b.0.min(body.paragraphs.len().saturating_sub(1)))
         .filter(|&pi| {
             let Some(para) = body.paragraphs.get(pi) else { return false };
             let starts = pi > a.0 || a.1 == 0;
