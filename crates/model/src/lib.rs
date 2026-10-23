@@ -439,6 +439,11 @@ impl Default for Shape {
 }
 
 impl Shape {
+    /// A stand-in shape for laying out one table cell's `body`: a table, so the cell's text takes
+    /// the master's other-text style as PowerPoint's does.
+    pub fn table_cell(body: text::TextBody) -> Shape {
+        Shape { text: Some(body), kind: ShapeKind::Table(Table::default()), ..Default::default() }
+    }
     pub fn is_placeholder(&self) -> bool {
         self.ph.is_some()
     }
