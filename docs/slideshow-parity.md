@@ -41,7 +41,7 @@ ready** (estimated), **10–16 h** to parity.
 
 | Feature | PowerPoint | DeckCraft | Notes |
 |---|---|---|---|
-| Separate presenter window with current slide, next slide, notes | yes | yes (an egui viewport, 1100×700) | |
+| Separate presenter window with current slide, next slide, notes | yes | yes (an egui viewport, 1100×700); the notes keep their bullets, numbers, indents and bold/italic, as in the notes pane | |
 | Elapsed timer | yes | yes | |
 | Pause / reset timer, clock | yes | yes: Pause/Resume and Reset in presenter view (T pauses, R resets); the clock is local time, `--:--` where there is no clock | Pausing the timer does not pause the show, animations or rehearsal |
 | Slide counter, previous/next/end buttons | yes | yes | |
@@ -90,4 +90,5 @@ Reading View in a window with navigation: present (checklist row done).
 | 2026-10-14 | minor | A custom show plays only its slides, from the Custom Shows dialog, from Set Up Slide Show, or from a click action. Checklist breadth stays 66% |
 | 2026-10-14 | minor | Presenter view pauses and resets its timer (T, R) and changes notes size (A-/A+, brackets). The clock shows local time. Second-display placement and swap stay with #433. Checklist breadth stays 66% |
 | 2026-10-14 | minor | See All Slides (G) and click-to-zoom (Z) during the show. Presenter view opens that grid and sets black, white and zoom. Checklist breadth stays 66% |
+| 2026-10-23 | trivial | Presenter view draws the notes with their formatting (bullets, numbers, indents, bold/italic) instead of plain text (#1128) |
 | 2026-10-10 | major | Created: show, presenter view, rehearse and record, compared with PowerPoint 16.113's Slide Show tab and menu |
