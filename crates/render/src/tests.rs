@@ -2718,8 +2718,9 @@ fn empty_bullet_is_gray_only_while_editing_and_never_in_exports() {
     assert!(changed.iter().all(|(px, _)| px[0] >= 179 && px[0] == px[1] && px[1] == px[2]));
 }
 
-/// A chart that has no text colour of its own takes the theme's: light on Nocturne's dark slides
-/// (it used to be a fixed grey, near-invisible there), dark on Harbor's light ones.
+/// A chart that has no text colour of its own takes PowerPoint's default, the theme's text colour
+/// at 65 % plus 35 %: light on Nocturne's dark slides (it used to be a fixed grey, near-invisible
+/// there), 595959 grey on Harbor's light ones.
 #[test]
 fn chart_text_follows_the_theme_when_it_has_no_colour_of_its_own() {
     let draw = |theme: &str, title: Option<&str>| {
@@ -2744,8 +2745,11 @@ fn chart_text_follows_the_theme_when_it_has_no_colour_of_its_own() {
     assert!(light_ink > 100, "the title is light on a dark theme (light pixels added: {light_ink})");
     let (light_bare, light_titled) = (draw("Harbor", None), draw("Harbor", Some("Quarterly revenue")));
     assert!(lum(light_bare.pixel(5, 5)) > 200, "Harbor's slide is light: {:?}", light_bare.pixel(5, 5));
-    let dark_ink = count(&light_titled, &|l| l < 80) as i64 - count(&light_bare, &|l| l < 80) as i64;
+    // 595959 has luminance 89: dark, but not black.
+    let dark_ink = count(&light_titled, &|l| l < 120) as i64 - count(&light_bare, &|l| l < 120) as i64;
     assert!(dark_ink > 100, "the title is dark on a light theme (dark pixels added: {dark_ink})");
+    let black_ink = count(&light_titled, &|l| l < 40) as i64 - count(&light_bare, &|l| l < 40) as i64;
+    assert!(black_ink < 20, "the title is PowerPoint's 595959 grey, not black (black pixels added: {black_ink})");
 }
 
 /// Pie data labels sit on the slices in white; a colour given to the chart's text (chart.options

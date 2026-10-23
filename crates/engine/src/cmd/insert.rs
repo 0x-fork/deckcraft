@@ -118,7 +118,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Chart Elements",
             ["Chart Design", "Chart Layouts"],
             None,
-            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, upDownBars?: bool, textColor?: #RRGGBB|accent1..6|tx1…|null (title, axes, legend and labels; null for the theme's text colour), id?}",
+            "{title?: string|null, legend?: b|t|l|r|null, dataLabels?: bool, gridlines?: bool, palette?, binCount?: n|null, binSize?: n|null, subtotals?: [point index], quartiles?: exclusive|inclusive, upDownBars?: bool, textColor?: #RRGGBB|accent1..6|tx1…|null (title, axes, legend and labels; null for PowerPoint's default: the theme's text colour at 65 % plus 35 %, 595959 on a light theme), id?}",
             has_selection,
             chart_options
         ),
@@ -1771,7 +1771,8 @@ fn chart_options(s: &mut Session, p: &Value) -> Result<Value> {
     // Waterfall total points.
     let subtotals: Option<Vec<usize>> =
         p.get("subtotals").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).map(|i| i as usize).collect());
-    // Colour of the chart's text (title, axes, legend, data labels); null goes back to the theme's.
+    // Colour of the chart's text (title, axes, legend, data labels); null goes back to PowerPoint's
+    // default (tx1 at lumMod 65 % / lumOff 35 %).
     let text_color = match p.get("textColor") {
         None => None,
         Some(Value::Null) => Some(None),
