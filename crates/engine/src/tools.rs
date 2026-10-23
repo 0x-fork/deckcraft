@@ -194,6 +194,8 @@ enum Drag {
     },
     TextSelect {
         shape: ShapeId,
+        /// The text selection before the press, to tell whether the drag changed it.
+        before: Option<TextTarget>,
     },
     /// Dragging a table border: the right edge of column `index`, or the bottom edge of row
     /// `index`. `start` is the table-local press point, `size` the column's width or the row's
@@ -582,8 +584,9 @@ impl Session {
             ToolKind::Select => {}
         }
         // Clicking inside the text being edited moves the caret / starts a text selection.
+        let before = self.text_selection();
         if let Some((shape, pos)) = self.place_caret(p, tol, mods.shift)? {
-            self.tool.drag = Some(Drag::TextSelect { shape });
+            self.tool.drag = Some(Drag::TextSelect { shape, before });
             return Ok(json!({"caret": [pos.0, pos.1]}));
         }
         let hit = self.hit_test(p, tol);
@@ -939,7 +942,7 @@ impl Session {
                 };
                 self.tool.preview = Some(x);
             }
-            Drag::TextSelect { shape } => {
+            Drag::TextSelect { shape, .. } => {
                 // The selection stays in the shape or table cell where it started.
                 let st = self.doc()?;
                 if let Some(t) = st.selection.text.as_ref().filter(|t| t.shape == shape) {
@@ -1134,10 +1137,8 @@ impl Session {
                 let _ = cmd::text::fit_text_box(self, id);
                 self.refit_after_resize(id)?;
             }
-            Some(Drag::TextSelect { .. }) => {
-                if let Some(applied) = self.paint_text_selection()? {
-                    out = applied;
-                }
+            Some(Drag::TextSelect { before, .. }) => {
+                out = self.paint_if_selection_changed(before, out)?;
                 self.commit();
             }
             Some(_) => self.commit(),

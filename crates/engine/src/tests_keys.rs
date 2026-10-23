@@ -561,3 +561,23 @@ fn format_painter_ignores_a_double_click_that_selects_nothing() {
     assert!(s.painter.is_some(), "a click that left the selection alone keeps the painter");
     assert!(bulleted(&mut s, 0));
 }
+
+#[test]
+fn format_painter_ignores_a_shift_press_that_leaves_the_selection() {
+    use crate::tools::PointerKind::{Down, Up};
+    let (mut s, _) = painter_armed(false);
+    // Find the caret position under the point, then select from the line start to it.
+    pointer(&mut s, Down, 110.0, 90.0);
+    pointer(&mut s, Up, 110.0, 90.0);
+    let k = caret(&s);
+    assert!(k.1 > 0);
+    s.execute("text.select", &json!({"anchor": [k.0, 0], "caret": [k.0, k.1]})).unwrap();
+    // Shift-pressing at the caret keeps the range, so there is nothing new to paint.
+    let shift = Mods { shift: true, ..NONE };
+    for kind in [Down, Up] {
+        s.pointer(crate::tools::PointerEvent { kind, x: 110.0, y: 90.0, mods: shift, tol: 4.0, ..Default::default() }).unwrap();
+    }
+    assert_eq!(sel(&s), ((k.0, 0), k));
+    assert!(s.painter.is_some(), "the painter stays armed");
+    assert!(!bold_at(&mut s, (1, 0)));
+}
