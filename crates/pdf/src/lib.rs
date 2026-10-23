@@ -565,7 +565,7 @@ impl Exporter<'_> {
                 slide.and_then(|s| page_of.get(&s)).map(|p| Target::Destination(XyzDestination::new(*p, Point::from_xy(0.0, 0.0)).into()))
             };
             let target = match &l.link.action {
-                ClickAction::Url { url } => Some(Target::Action(Action::Link(LinkAction::new(url.clone())))),
+                ClickAction::Url { url } if exportable_url(url) => Some(Target::Action(Action::Link(LinkAction::new(url.clone())))),
                 ClickAction::Slide { slide } => goto(pres.slides.iter().position(|x| x.id == *slide)),
                 ClickAction::NextSlide => goto(Some(i + 1)),
                 ClickAction::PreviousSlide => goto(i.checked_sub(1)),
@@ -691,6 +691,32 @@ fn to_path(bp: &kurbo::BezPath) -> Option<krilla::geom::Path> {
         }
     }
     pb.finish()
+}
+
+/// Can a hyperlink from a (possibly untrusted) deck become a PDF link? Scripts (`javascript:`,
+/// `vbscript:`), `data:` and paths to another machine (`\\host\share`, `//host/share`,
+/// `file://host/...`) cannot: on Windows, opening a network path sends the user's NTLM credentials
+/// to that host. Web, mail, local `file:` and relative links can. Read the way a browser reads a
+/// URL: control characters dropped, leading spaces trimmed, any case.
+fn exportable_url(url: &str) -> bool {
+    let u: String = url.chars().filter(|c| !c.is_ascii_control()).collect();
+    let u = u.trim_start().replace('\\', "/");
+    if u.starts_with("//") {
+        return false;
+    }
+    let Some((scheme, rest)) = u.split_once(':') else { return true };
+    match scheme.to_ascii_lowercase().as_str() {
+        "javascript" | "vbscript" | "data" => false,
+        "file" => match rest.strip_prefix("//") {
+            // `file:///C:/...` and `file://localhost/...` are local; `file://host/...` and `file:////host/...` are not.
+            Some(p) => {
+                let (host, path) = p.split_once('/').unwrap_or((p, ""));
+                (host.is_empty() || host.eq_ignore_ascii_case("localhost")) && !path.starts_with('/')
+            }
+            None => true,
+        },
+        _ => true,
+    }
 }
 
 #[cfg(test)]
