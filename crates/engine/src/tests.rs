@@ -3495,6 +3495,37 @@ fn find_and_replace_across_shapes_and_notes() {
     assert_eq!(s.execute("text.find", &q).unwrap().as_array().unwrap().len(), n - 1);
 }
 
+/// Find and Replace count a line break as one character, so offsets agree with the editor and no
+/// match spans the break.
+#[test]
+fn find_and_replace_after_a_line_break() {
+    let mut s = session();
+    let id = s.execute("insert.textBox", &json!({"rect": [10, 10, 300, 80], "text": "ab"})).unwrap()["id"].as_u64().unwrap();
+    s.execute("text.edit", &json!({"id": id, "end": true})).unwrap();
+    s.execute("text.insert", &json!({"text": "\u{b}cd"})).unwrap();
+    s.execute("text.exit", &json!({})).unwrap();
+    let text = |s: &Session| {
+        s.doc()
+            .unwrap()
+            .current_slide()
+            .unwrap()
+            .shapes
+            .iter()
+            .find(|x| u64::from(x.id.0) == id)
+            .and_then(|x| x.text.as_ref())
+            .map(|t| t.text())
+            .unwrap()
+    };
+    assert_eq!(text(&s), "ab\u{b}cd");
+    assert!(s.execute("text.find", &json!({"text": "bc"})).unwrap().as_array().unwrap().is_empty(), "no match spans the break");
+    let found = s.execute("text.find", &json!({"text": "cd"})).unwrap();
+    assert_eq!((found[0]["start"].as_u64(), found[0]["end"].as_u64()), (Some(3), Some(5)), "{found}");
+    s.execute("text.replace", &json!({"text": "cd", "with": "X"})).unwrap();
+    assert_eq!(text(&s), "ab\u{b}X");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(text(&s), "ab\u{b}cd");
+}
+
 #[test]
 fn pen_pressure_is_kept_and_a_mouse_draws_at_full_width() {
     let mut s = session();
