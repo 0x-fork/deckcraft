@@ -895,6 +895,7 @@ name = "deckcraft"
 version = "0.10.0"
 dependencies = [
  "arboard",
+ "chrono",
  "cpal",
  "deckcraft-engine",
  "deckcraft-media",
@@ -956,6 +957,7 @@ dependencies = [
 name = "deckcraft-engine"
 version = "0.10.0"
 dependencies = [
+ "chrono",
  "deckcraft-anim",
  "deckcraft-color",
  "deckcraft-fonts",
