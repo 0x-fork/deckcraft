@@ -4,6 +4,7 @@
 //! slide. Everything is computed here, offline.
 
 use deckcraft_geom::Xfrm;
+use deckcraft_model::resolve::{self, Ctx};
 use deckcraft_model::{Fill, Presentation, Rgba, Shape, ShapeKind};
 use serde_json::{Value, json};
 
@@ -57,10 +58,20 @@ fn roles(shapes: &[Shape]) -> Roles {
     r
 }
 
+/// Whether `s` paints a fill or an outline once inherited and style-referenced values are
+/// resolved, as the renderer does (`fill: None` alone means inherited, not invisible).
+fn shows(ctx: Option<&Ctx>, s: &Shape) -> bool {
+    let visible = |f: &Option<Fill>| f.as_ref().is_some_and(|f| !f.is_none());
+    match ctx {
+        Some(ctx) => visible(&resolve::fill(ctx, s).0) || visible(&resolve::line(ctx, s).0.fill),
+        None => visible(&s.fill) || visible(&s.line.as_ref().and_then(|l| l.fill.clone())),
+    }
+}
+
 /// Whether an idea may move this shape: a picture, a placeholder or a plain text box. Diagram
 /// boxes, connectors, groups, tables, charts and media are laid out by their own geometry, which
 /// the ideas do not know, so a slide holding one gets no ideas.
-fn arrangeable(s: &Shape) -> bool {
+fn arrangeable(ctx: Option<&Ctx>, s: &Shape) -> bool {
     match s.kind {
         ShapeKind::Picture { .. } => true,
         ShapeKind::Shape => {
@@ -68,7 +79,7 @@ fn arrangeable(s: &Shape) -> bool {
             let has_text = s.text.as_ref().is_some_and(|t| !t.text().trim().is_empty());
             // Only titles and shapes with text are moved (see `roles`): an empty one that shows
             // (filled or outlined) would stay where it is, over the rearranged slide.
-            (s.ph.is_some() || s.text_box) && (is_title || has_text || (s.fill.is_none() && s.line.is_none()))
+            (s.ph.is_some() || s.text_box) && (is_title || has_text || !shows(ctx, s))
         }
         _ => false,
     }
@@ -77,7 +88,8 @@ fn arrangeable(s: &Shape) -> bool {
 /// The ideas for slide `index` (none when it has nothing to arrange, or other content in the way).
 pub fn ideas_for(doc: &Presentation, index: usize) -> Vec<Idea> {
     let Some(slide) = doc.slides.get(index) else { return vec![] };
-    if slide.shapes.iter().any(|s| !s.hidden && !arrangeable(s)) {
+    let ctx = Ctx::for_slide(doc, slide);
+    if slide.shapes.iter().any(|s| !s.hidden && !arrangeable(ctx.as_ref(), s)) {
         return vec![];
     }
     let r = roles(&slide.shapes);
@@ -372,6 +384,36 @@ mod tests {
         let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
         slide.shapes[2].fill = Some(Fill::solid(deckcraft_model::ColorRef::rgb(Rgba::rgba(200, 80, 20, 255))));
         assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty(), "a filled empty box would stay on top");
+    }
+
+    #[test]
+    fn an_empty_box_with_an_explicit_no_fill_does_not_block_ideas() {
+        let mut s = deck(false);
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        slide.shapes.push(Shape {
+            id: ShapeId(512),
+            text_box: true,
+            xfrm: Some(Xfrm::new(10.0, 10.0, 100.0, 40.0)),
+            fill: Some(Fill::None),
+            ..Default::default()
+        });
+        assert_eq!(ideas_for(&s.doc().unwrap().doc, 0).len(), 3, "an explicit no fill shows nothing");
+    }
+
+    #[test]
+    fn an_empty_box_filled_through_its_style_blocks_ideas() {
+        let mut s = deck(false);
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        let mut style = deckcraft_model::style::ShapeStyle::accent(deckcraft_model::SchemeSlot::Accent1);
+        style.line_ref.0 = 0;
+        slide.shapes.push(Shape {
+            id: ShapeId(512),
+            text_box: true,
+            xfrm: Some(Xfrm::new(10.0, 10.0, 100.0, 40.0)),
+            style: Some(style),
+            ..Default::default()
+        });
+        assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty(), "the theme fill shows, so the box would stay on top");
     }
 
     #[test]
