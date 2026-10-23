@@ -160,7 +160,9 @@ fn picture_pixel_at(s: &Session, p: &Value, at: &Value) -> Result<(ShapeId, Rgba
     for id in ids {
         let Some((sh, xf, to_slide)) = placed(&st.doc, &st.selection, shapes, id, Affine::IDENTITY, 0) else { continue };
         let ShapeKind::Picture { fill } = &sh.kind else { continue };
-        let local = to_slide.inverse() * Point::new(x, y);
+        // The camera turns the picture where it is drawn, so the click is mapped back through it too.
+        let turn = text::ctx_for(&st.doc, &st.selection).and_then(|c| deckcraft_render::camera_turn(&c, sh, xf.w, xf.h)).unwrap_or(Affine::IDENTITY);
+        let local = (to_slide * turn).inverse() * Point::new(x, y);
         if !(local.is_finite() && (0.0..=xf.w).contains(&local.x) && (0.0..=xf.h).contains(&local.y)) {
             continue;
         }
@@ -203,7 +205,7 @@ fn placed<'a>(
         return None;
     }
     for sh in shapes {
-        let Some(x) = (if depth == 0 { Some(xfrm_of(doc, sel, sh)) } else { sh.xfrm }) else { continue };
+        let x = xfrm_of(doc, sel, sh);
         if sh.id == id {
             return Some((sh, x, to_slide * x.affine()));
         }
