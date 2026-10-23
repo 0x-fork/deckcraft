@@ -20,6 +20,8 @@ pub struct Tokens {
     /// The ribbon card and popovers.
     pub card: Color32,
     pub card_border: Color32,
+    /// Text fields. They have no outline, so the fill alone must set them apart from the card.
+    pub text_field: Color32,
     /// Canvas around the slide.
     pub canvas: Color32,
     pub text: Color32,
@@ -51,6 +53,7 @@ impl Tokens {
             chrome: Color32::from_rgb(0xF5, 0xF5, 0xF5),
             card: Color32::WHITE,
             card_border: Color32::from_rgb(0xE3, 0xE3, 0xE3),
+            text_field: Color32::from_rgb(0xEB, 0xEB, 0xEB),
             canvas: Color32::from_rgb(0xF0, 0xF0, 0xF0),
             text: Color32::from_rgb(0x24, 0x24, 0x24),
             text_dim: Color32::from_rgb(0x5C, 0x5C, 0x5C),
@@ -79,6 +82,7 @@ impl Tokens {
             chrome: Color32::from_rgb(0x26, 0x26, 0x26),
             card: Color32::from_rgb(0x33, 0x33, 0x33),
             card_border: Color32::from_rgb(0x44, 0x44, 0x44),
+            text_field: Color32::from_rgb(0x2A, 0x2A, 0x2A),
             canvas: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             text: Color32::from_rgb(0xEE, 0xEE, 0xEE),
             text_dim: Color32::from_rgb(0xBB, 0xBB, 0xBB),
@@ -118,6 +122,7 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     v.panel_fill = t.chrome;
     v.window_fill = t.card;
     v.extreme_bg_color = t.field_bg;
+    v.text_edit_bg_color = Some(t.text_field);
     v.faint_bg_color = t.hover;
     v.window_stroke = Stroke::new(1.0, t.card_border);
     v.window_corner_radius = CornerRadius::same(10);

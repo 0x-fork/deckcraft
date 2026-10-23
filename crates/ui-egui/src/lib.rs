@@ -2052,6 +2052,8 @@ mod compare_tests;
 #[cfg(test)]
 mod eyedropper_tests;
 #[cfg(test)]
+mod field_frame_tests;
+#[cfg(test)]
 mod huge_deck_tests;
 #[cfg(test)]
 mod ime_tests;
