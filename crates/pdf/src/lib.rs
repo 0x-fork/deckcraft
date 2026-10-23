@@ -695,7 +695,8 @@ fn to_path(bp: &kurbo::BezPath) -> Option<krilla::geom::Path> {
 
 /// Can a hyperlink from a (possibly untrusted) deck become a PDF link? Scripts (`javascript:`,
 /// `vbscript:`), `data:` and paths to another machine (`\\host\share`, `//host/share`,
-/// `file://host/...`, `smb://host/...`) cannot: opening one connects to that host, which on Windows
+/// `file://host/...`, `smb://host/...`, and Windows Search's `search:` and `search-ms:`, whose
+/// `crumb=location:` can name one) cannot: opening one connects to that host, which on Windows
 /// sends the user's NTLM credentials. Web, mail, local `file:` and relative links can. Read the way
 /// a browser reads a URL: control characters dropped, leading spaces trimmed, any case.
 fn exportable_url(url: &str) -> bool {
@@ -706,7 +707,7 @@ fn exportable_url(url: &str) -> bool {
     }
     let Some((scheme, rest)) = u.split_once(':') else { return true };
     match scheme.to_ascii_lowercase().as_str() {
-        "javascript" | "vbscript" | "data" | "smb" => false,
+        "javascript" | "vbscript" | "data" | "smb" | "search" | "search-ms" => false,
         "file" => match rest.strip_prefix("//") {
             // `file:///C:/...` and `file://localhost/...` are local; `file://host/...` and `file:////host/...` are not.
             Some(p) => {
