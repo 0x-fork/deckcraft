@@ -1745,7 +1745,8 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
         show.next_tex = Some((n, crate::textures::upload(ctx, "presenter-next", crate::textures::to_color_image(&img, false))));
     }
     let next_tex = show.next_tex.as_ref().filter(|(k, _)| Some(*k) == next).map(|(_, t)| t.clone());
-    let notes = doc.slides.get(cur).map(|s| s.notes_text()).unwrap_or_default();
+    let no_notes = deckcraft_model::text::TextBody::default();
+    let notes = doc.slides.get(cur).map_or(&no_notes, |s| &s.notes);
     let clock = wall_clock();
     // The presenter clock only moves when this window is drawn again.
     ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -1860,9 +1861,7 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                 let notes_rect = Rect::from_min_max(pos2(right.min.x, notes_head.max.y + 4.0), right.max);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
                 egui::ScrollArea::vertical().show(&mut child, |ui| {
-                    ui.label(
-                        egui::RichText::new(if notes.is_empty() { "No notes." } else { &notes }).size(show.notes_px).color(Color32::from_gray(230)),
-                    );
+                    presenter_notes(ui, notes, show.notes_px);
                 });
             });
             if ui.input(|i| i.viewport().close_requested()) {
@@ -1874,6 +1873,16 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
         if !show.apply(a, doc, now) {
             *keep = false;
         }
+    }
+}
+
+/// The current slide's notes in the presenter's notes pane, `px` for 12 pt text.
+fn presenter_notes(ui: &mut Ui, notes: &deckcraft_model::text::TextBody, px: f32) -> egui::Response {
+    let color = Color32::from_gray(230);
+    if notes.text().is_empty() {
+        ui.label(egui::RichText::new("No notes.").size(px).color(color))
+    } else {
+        crate::notes::view(ui, notes, &crate::notes::Look { size: px, color: Some(color) })
     }
 }
 
@@ -2185,6 +2194,55 @@ mod tests {
         show.zoom = Some(Zoom::at(0.4, 0.6));
         assert!(show.apply(ShowAction::Slide(1), &doc, 1.0));
         assert!(show.zoom.is_none(), "a new slide is shown whole");
+    }
+
+    /// #1128: the presenter drew the notes as plain text, so bullets, numbers and bold were lost
+    /// although the notes pane shows them; the notes stay selectable.
+    #[test]
+    fn presenter_notes_keep_bullets_numbers_and_bold() {
+        use deckcraft_model::text::{Bullet, ParaProps, Paragraph, Run, RunProps, TextBody};
+        let point = |text: &str, bullet: Bullet| Paragraph {
+            level: 1,
+            props: ParaProps { bullet: Some(bullet), ..Default::default() },
+            runs: vec![Run::new(text)],
+            ..Default::default()
+        };
+        let num = || Bullet::AutoNum { scheme: "arabicPeriod".into(), start_at: 1 };
+        let notes = TextBody {
+            paragraphs: vec![
+                Paragraph { runs: vec![Run::with("Opening", RunProps { bold: Some(true), ..Default::default() })], ..Default::default() },
+                point("Welcome", Bullet::Char { char: "•".into() }),
+                point("Agenda", num()),
+                point("Demo", num()),
+            ],
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        theme::install_fonts(&ctx);
+        let mut sense = None;
+        let mut out = ctx.run_ui(Default::default(), |ui| sense = Some(presenter_notes(ui, &notes, 24.0).sense));
+        out.textures_delta.clear();
+        assert!(sense.unwrap().senses_drag(), "the notes can be selected, as the plain label could");
+        let mut texts = vec![];
+        let mut stack: Vec<egui::Shape> = out.shapes.into_iter().map(|c| c.shape).collect();
+        while let Some(shape) = stack.pop() {
+            match shape {
+                egui::Shape::Vec(v) => stack.extend(v),
+                egui::Shape::Text(t) => texts.push(t.galley),
+                _ => {}
+            }
+        }
+        let painted: Vec<&str> = texts.iter().map(|g| g.job.text.as_str()).collect();
+        for marker in ["•", "1.", "2."] {
+            assert!(painted.contains(&marker), "{marker} is drawn: {painted:?}");
+        }
+        let notes_galley = texts.iter().find(|g| g.job.text.contains("Agenda")).expect("the notes are drawn");
+        let font_of = |s: &str| {
+            let b = notes_galley.job.text.find(s).unwrap();
+            notes_galley.job.sections.iter().find(|x| (x.byte_range.start.0..x.byte_range.end.0).contains(&b)).unwrap().format.font_id.clone()
+        };
+        assert_eq!(font_of("Opening"), theme::bold(24.0), "bold runs stay bold at the pane's size");
+        assert_eq!(font_of("Agenda"), theme::font(24.0));
     }
 
     #[test]
