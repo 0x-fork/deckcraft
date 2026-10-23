@@ -2353,6 +2353,36 @@ fn picture_recolor_and_transparent_color() {
 }
 
 #[test]
+fn transparent_color_at_a_point_takes_the_pictures_own_pixel_there() {
+    // Red on the left half, blue on the right.
+    let img = image::RgbaImage::from_fn(4, 2, |x, _| if x < 2 { image::Rgba([255, 0, 0, 255]) } else { image::Rgba([0, 0, 255, 255]) });
+    let mut png = vec![];
+    image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+    let mut s = session();
+    let id =
+        s.execute("insert.picture", &json!({"data": cmd::base64_encode(&png), "name": "a.png", "rect": [100, 100, 400, 200]})).unwrap()["id"].clone();
+    let clear = |s: &Session| match &s.doc().unwrap().shapes().iter().find(|sh| json!(sh.id) == id).unwrap().kind {
+        deckcraft_model::ShapeKind::Picture { fill } => fill.adjust.clear_color,
+        _ => panic!("not a picture"),
+    };
+    let red = deckcraft_color::Rgba::rgb(255, 0, 0);
+    let blue = deckcraft_color::Rgba::rgb(0, 0, 255);
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [450, 200]})).unwrap();
+    assert_eq!(clear(&s), Some(blue));
+    // The picture's own colour, not the one drawn after a correction brightened it.
+    s.execute("picture.adjust", &json!({"ids": [id], "brightness": 0.4})).unwrap();
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [150, 200]})).unwrap();
+    assert_eq!(clear(&s), Some(red));
+    // Flipped, the blue half is drawn on the left.
+    s.execute("shape.flip", &json!({"ids": [id], "axis": "horizontal"})).unwrap();
+    s.execute("picture.transparentColor", &json!({"ids": [id], "at": [150, 200]})).unwrap();
+    assert_eq!(clear(&s), Some(blue));
+    // Beside the picture there is no colour to take, and nothing changes.
+    assert!(s.execute("picture.transparentColor", &json!({"ids": [id], "at": [50, 50]})).is_err());
+    assert_eq!(clear(&s), Some(blue));
+}
+
+#[test]
 fn select_all_slides_scope() {
     let mut s = session();
     // One slide: selects it, no panic.
