@@ -153,15 +153,23 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         }
         let grab: Option<(Pos2, f32)> = ui.data_mut(|d| d.get_temp(grab_id));
         if let Some((origin, start)) = grab {
-            if bar.dragged()
+            if bar.dragged_by(egui::PointerButton::Primary)
                 && travel > 0.0
                 && let Some(p) = bar.interact_pointer_pos()
             {
-                offset[axis] = start + (p[axis] - origin[axis]) * overflow[axis] / travel;
+                if last.is_some_and(|(_, s)| (scale - s).abs() > 1e-6) {
+                    // A zoom during the drag moved the slide about its anchor: carry on from there.
+                    ui.data_mut(|d| d.insert_temp(grab_id, (p, offset[axis])));
+                } else {
+                    offset[axis] = start + (p[axis] - origin[axis]) * overflow[axis] / travel;
+                }
             } else if bar.clicked() && !thumb.contains(origin) {
                 // A click on the track beside the thumb moves one window's length toward it.
                 let page = avail.size()[axis] * 0.9;
                 offset[axis] += if origin[axis] < thumb.min[axis] { -page } else { page };
+            }
+            if bar.drag_stopped() || bar.clicked() {
+                ui.data_mut(|d| d.remove_temp::<(Pos2, f32)>(grab_id));
             }
         }
     }
@@ -1594,6 +1602,35 @@ mod tests {
         let after = h.state().slide_rect.unwrap();
         let moved = before.min.x - after.min.x;
         assert!((0.0..40.0).contains(&moved), "a 6 pt nudge of the thumb, not a page: {before:?} -> {after:?}");
+    }
+
+    /// Only the primary button drags a thumb: a right or middle drag after a left one leaves the
+    /// slide where it is.
+    #[test]
+    fn only_the_primary_button_drags_a_thumb() {
+        let mut h = harness();
+        let fit = h.state().canvas_scale;
+        h.state_mut().ui.zoom = Some(fit * 3.0);
+        h.run_steps(3);
+        let canvas = h.state().canvas_rect.unwrap();
+        let bottom = pos2(canvas.center().x, canvas.max.y - 4.0);
+        drag_with(&mut h, bottom, bottom + vec2(40.0, 0.0), |_| {});
+        let before = h.state().slide_rect.unwrap();
+        for button in [egui::PointerButton::Secondary, egui::PointerButton::Middle] {
+            let a = pos2(canvas.center().x + 40.0, canvas.max.y - 4.0);
+            h.hover_at(a);
+            h.run_steps(1);
+            h.event(Event::PointerButton { pos: a, button, pressed: true, modifiers: Modifiers::NONE });
+            h.run_steps(1);
+            for i in 1..=4 {
+                h.event(Event::PointerMoved(a + vec2(30.0 * i as f32, 0.0)));
+                h.run_steps(1);
+            }
+            h.event(Event::PointerButton { pos: a + vec2(120.0, 0.0), button, pressed: false, modifiers: Modifiers::NONE });
+            h.run_steps(2);
+            let after = h.state().slide_rect.unwrap();
+            assert!((before.min - after.min).length() < 1.0, "{button:?} drag moved the slide: {before:?} -> {after:?}");
+        }
     }
 
     /// A slide that fits has no scroll bars: a drag along the canvas edge is a marquee.
