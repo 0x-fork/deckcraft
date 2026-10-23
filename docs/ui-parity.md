@@ -167,6 +167,7 @@ consistency is open (#73, #56).
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-23 | trivial | Scroll bars on the zoomed slide pane (#1157) |
+| 2026-10-23 | minor | Shape Fill and Shape Outline (Home and Shape Format): the button applies the last colour picked from its menu, Accent 1 and Text 1 until one is picked. Line weight and dashes are not changed by the button; Font Color and Highlight stay as they were (#1080) |
 | 2026-10-16 | minor | Export › Change File Type › PNG and the Export… dialog offer a transparent background (#784) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: one row each for Format Shape, Dialogs (41, listed from `dialogs.rs`), Animation Pane (timeline is in), window, Quick Access Toolbar, Format Background, rulers, image paste, context menus, exact size and edit points; estimates re-totalled (~26–46 h) |

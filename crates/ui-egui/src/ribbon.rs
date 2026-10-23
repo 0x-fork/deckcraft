@@ -925,13 +925,17 @@ fn drawing_group(app: &mut SlideApp, ui: &mut Ui) {
             let sc = scheme(app);
             let (m, a) = small_button_ex(ui, Icon::ShapeFill, "Shape Fill", sel, false, true);
             if m.clicked() {
-                run(app, "shape.fill", json!({"color": "accent1"}));
+                let c = app.last_fill.clone();
+                run(app, "shape.fill", json!({"color": c}));
             }
             if let Some(a) = a {
                 widgets::color_popup(&a).show(|ui| {
                     if let Some(c) = widgets::color_grid(ui, &sc, Some("No Fill")) {
                         match c {
-                            Some(c) => run(app, "shape.fill", json!({"color": cref_param(&c)})),
+                            Some(c) => {
+                                app.last_fill = cref_param(&c);
+                                run(app, "shape.fill", json!({"color": cref_param(&c)}));
+                            }
                             None => run(app, "shape.fill", json!({"none": true})),
                         }
                     }
@@ -939,7 +943,8 @@ fn drawing_group(app: &mut SlideApp, ui: &mut Ui) {
             }
             let (m, a) = small_button_ex(ui, Icon::ShapeOutline, "Shape Outline", sel, false, true);
             if m.clicked() {
-                run(app, "shape.line", json!({"color": "tx1", "width": 1}));
+                let c = app.last_outline.clone();
+                run(app, "shape.line", json!({"color": c}));
             }
             if let Some(a) = a {
                 widgets::color_popup(&a).show(|ui| outline_menu(app, ui, &sc));
@@ -955,7 +960,10 @@ fn drawing_group(app: &mut SlideApp, ui: &mut Ui) {
 pub fn outline_menu(app: &mut SlideApp, ui: &mut Ui, sc: &deckcraft_color::ColorScheme) {
     if let Some(c) = widgets::color_grid(ui, sc, Some("No Outline")) {
         match c {
-            Some(c) => run(app, "shape.line", json!({"color": cref_param(&c)})),
+            Some(c) => {
+                app.last_outline = cref_param(&c);
+                run(app, "shape.line", json!({"color": cref_param(&c)}));
+            }
             None => run(app, "shape.line", json!({"none": true})),
         }
     }
@@ -2436,13 +2444,17 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
         rows(ui, |ui| {
             let (m, a) = small_button_ex(ui, Icon::ShapeFill, "Shape Fill", sel, false, true);
             if m.clicked() {
-                run(app, "shape.fill", json!({"color": "accent1"}));
+                let c = app.last_fill.clone();
+                run(app, "shape.fill", json!({"color": c}));
             }
             if let Some(a) = a {
                 widgets::color_popup(&a).show(|ui| {
                     if let Some(c) = widgets::color_grid(ui, &sc, Some("No Fill")) {
                         match c {
-                            Some(c) => run(app, "shape.fill", json!({"color": cref_param(&c)})),
+                            Some(c) => {
+                                app.last_fill = cref_param(&c);
+                                run(app, "shape.fill", json!({"color": cref_param(&c)}));
+                            }
                             None => run(app, "shape.fill", json!({"none": true})),
                         }
                     }
@@ -2452,7 +2464,11 @@ fn shape_format(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 });
             }
-            let (_, a) = small_button_ex(ui, Icon::ShapeOutline, "Shape Outline", sel, false, true);
+            let (m, a) = small_button_ex(ui, Icon::ShapeOutline, "Shape Outline", sel, false, true);
+            if m.clicked() {
+                let c = app.last_outline.clone();
+                run(app, "shape.line", json!({"color": c}));
+            }
             if let Some(a) = a {
                 widgets::color_popup(&a).show(|ui| outline_menu(app, ui, &sc));
             }
