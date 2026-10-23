@@ -382,7 +382,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("show.start", "Slide Show", Some("F5"), "{from?: index, custom?: name}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
-    ("animation.preview", "Preview Animations", None, "{on?: bool}"),
+    ("animation.preview", "Preview Animations", None, "{on?: bool, from?: effect index}"),
     ("app.home", "Home", None, "{on?}"),
     ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
@@ -428,6 +428,8 @@ struct AnimPreview {
     slide_ptr: usize,
     /// egui time when the first frame latched the clock (`None` until then).
     started: Option<f64>,
+    /// Where on the play-everything clock playback began (Play From the selected effect).
+    from: f64,
     elapsed: f64,
     timeline: deckcraft_anim::Timeline,
 }
@@ -967,7 +969,11 @@ impl SlideApp {
                     self.anim_preview = None;
                     return Ok(json!({"playing": false}));
                 }
-                return self.start_anim_preview();
+                let from = match p.get("from") {
+                    None | Some(Value::Null) => None,
+                    Some(v) => Some(v.as_u64().map(|v| usize::try_from(v).unwrap_or(usize::MAX)).ok_or("`from` must be an effect index")?),
+                };
+                return self.start_anim_preview(from);
             }
             "app.home" => {
                 let on = self.flag(p, self.backstage_open());
@@ -1142,7 +1148,7 @@ impl SlideApp {
         let Some(p) = self.anim_preview.as_mut() else { return false };
         let now = if now.is_finite() { now } else { p.started.unwrap_or(0.0) };
         let start = *p.started.get_or_insert(now);
-        let elapsed = (now - start).max(0.0);
+        let elapsed = p.from + (now - start).max(0.0);
         if !elapsed.is_finite() || elapsed > p.timeline.total_duration() + preview::HOLD_SECS {
             self.anim_preview = None;
             return false;
@@ -1151,7 +1157,9 @@ impl SlideApp {
         true
     }
 
-    fn start_anim_preview(&mut self) -> Result<Value, String> {
+    /// Play the current slide's animations on the canvas, from effect `from` (index into the slide's
+    /// animations) or from the start.
+    fn start_anim_preview(&mut self, from: Option<usize>) -> Result<Value, String> {
         let (uid, slide, ptr, timeline) = {
             let Some(d) = self.session.active() else {
                 return Err("no presentation is open".into());
@@ -1172,14 +1180,18 @@ impl SlideApp {
             self.set_status("This slide has no animations");
             return Ok(json!({"playing": false}));
         }
+        let from_secs = match from {
+            Some(i) => timeline.start_of(i).ok_or_else(|| format!("no effect {i} in this slide's click sequence"))?,
+            None => 0.0,
+        };
         if matches!(self.ui.view, ViewMode::Sorter | ViewMode::NotesPage) {
             self.ui.view = ViewMode::Normal;
         }
         self.close_backstage();
         let duration = timeline.total_duration();
-        self.anim_preview = Some(AnimPreview { uid, slide, slide_ptr: ptr, started: None, elapsed: 0.0, timeline });
+        self.anim_preview = Some(AnimPreview { uid, slide, slide_ptr: ptr, started: None, from: from_secs, elapsed: from_secs, timeline });
         self.set_status("Previewing animations");
-        Ok(json!({"playing": true, "slide": slide, "duration": duration}))
+        Ok(json!({"playing": true, "slide": slide, "duration": duration, "from": from_secs}))
     }
 
     fn pick_and_open(&mut self) {

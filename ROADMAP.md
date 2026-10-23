@@ -135,6 +135,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-18 | Find (Ctrl+F): "Find what:" has the keyboard as soon as the dialog opens, and keeps it after Enter finds a match, so the search can be typed and changed without clicking the field (#951) |
 | 2026-10-18 | Duplicate (Ctrl+D) repeats a move: duplicate a shape, move the copy, and the next Duplicate places its copy the same distance further on, as in PowerPoint (#966) |
 | 2026-10-22 | Slide Show: while animations play, each frame draws only the slide's shapes over the slide's backdrop (background, master and layout graphics), rendered once and ahead of time. A full-slide picture with a glow in the layout re-rendered at every frame held animations to 2–3 frames a second (~390 ms a frame at 1080p); now ~28 ms |
+| 2026-10-22 | Animation Pane ▸ Play From: with an effect selected, the pane's play button starts the canvas preview at that effect, with the effects before it already played. With nothing selected it is still Play All |
 | 2026-10-18 | Native chart sidecar bytes move from JSON arrays into referenced ZIP entries, with shared media byte/item limits and bounded reads; older inline sidecars still load. Synthetic format regressions cover large workbooks and malformed members |
 | 2026-10-18 | Slide thumbnails and the Slide Sorter render only the slides in view: on a deck of more than 600 slides they used to evict their own thumbnails, so the pane flashed white and never finished (#969) |
 | 2026-10-18 | Resizing with the mouse snaps the edge being dragged to the slide, guides and other shapes: a fixed edge that already lined up used to take the snap and leave the dragged edge free, and a fixed edge near a line shifted the dragged one (#961) |
@@ -249,6 +250,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-22 | trivial | Progress log: Animation Pane ▸ Play From. Scores unchanged |
 | 2026-10-18 | minor | Native chart payloads use referenced ZIP members and share media byte/item limits; old inline sidecars remain readable. Synthetic tests cover multi-megabyte layout, all shape owners, shared budgets, missing/corrupt members and invalid references. Scores and milestone scope unchanged |
 | 2026-10-15 | trivial | Progress log: chart package parts survive a native save. Scores and milestone names unchanged |
 | 2026-10-18 | trivial | Progress log: thumbnails of huge decks render only the slides in view (#969) |
