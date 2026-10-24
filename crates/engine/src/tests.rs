@@ -2289,6 +2289,26 @@ fn edit_points_right_click_picks_the_point_or_the_segment() {
     assert_eq!((s.tool.edit_segment, s.tool.edit_vertex), (None, None));
 }
 
+/// A right-click on a control handle keeps the point menu: the vertex stays picked.
+#[test]
+fn edit_points_right_click_on_a_handle_keeps_the_picked_vertex() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    // The right-most point of the ellipse.
+    right_click(&mut s, 300.0, 150.0);
+    let (path, index) = s.tool.edit_vertex.expect("the point is picked");
+    let st = s.doc().unwrap();
+    let id = s.tool.editing_points(st).unwrap();
+    let handle = cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), path, index)
+        .and_then(|(hin, hout, _)| hout.or(hin))
+        .expect("a smooth point has a handle");
+    let r = right_click(&mut s, handle.x, handle.y);
+    assert_eq!(r["hit"]["kind"], "handle", "{r}");
+    assert_eq!((s.tool.edit_segment, s.tool.edit_vertex), (None, Some((path, index))));
+}
+
 /// #392: a `.deckcraft` whose embedded picture is damaged opens as an untitled "(Repaired)"
 /// copy with a message, so Save can't overwrite the original with the empty media.
 #[test]

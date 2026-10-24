@@ -1254,6 +1254,7 @@ impl Session {
         // Edit Points: the point or else the segment under the pointer picks the menu.
         let picked = self.tool.editing_points(st).and_then(|eid| st.shape(eid)).map(|sh| match &hit {
             Some(Hit::Vertex { path, index, .. }) => (Some((*path, *index)), None),
+            Some(Hit::Handle { .. }) => (None, None),
             _ => (None, cmd::points::segment_at(&st.doc, &st.selection, sh, p, tol * 1.6).map(|(path, seg, _)| (path, seg))),
         });
         if !id.is_some_and(|id| st.selection.shapes.contains(&id)) {
@@ -1264,7 +1265,10 @@ impl Session {
             })?;
         }
         if let Some((vertex, segment)) = picked {
-            self.tool.edit_vertex = vertex;
+            // A control handle belongs to the picked point: its menu stays.
+            if !matches!(hit, Some(Hit::Handle { .. })) {
+                self.tool.edit_vertex = vertex;
+            }
             self.tool.edit_segment = segment;
         }
         let st = self.doc()?;
