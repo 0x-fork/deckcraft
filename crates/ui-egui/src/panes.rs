@@ -475,11 +475,18 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 }
             }
-            color_button(app, ui, "Color", Some("No Fill"), |c| match c {
-                Some(c) => ("shape.fill".into(), json!({"color": cref_param(&c)})),
-                None => ("shape.fill".into(), json!({"none": true})),
-            });
+            // A pattern takes its colors from its own Foreground and Background menus below.
+            let pattern = matches!(sh.fill, Some(Fill::Pattern(_)));
+            if !pattern {
+                color_button(app, ui, "Color", Some("No Fill"), |c| match c {
+                    Some(c) => ("shape.fill".into(), json!({"color": cref_param(&c)})),
+                    None => ("shape.fill".into(), json!({"none": true})),
+                });
+            }
             ui.horizontal(|ui| {
+                if pattern {
+                    return;
+                }
                 ui.label("Transparency");
                 // Seed from this shape. A shared temp defaulted to 0, so a shape that was
                 // already 40% transparent showed as opaque, and leaving the slider wrote 0.
@@ -509,6 +516,11 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                     let ng = deckcraft_model::style::Gradient { rotate_with_shape: rot, ..g.clone() };
                     run(app, "shape.fill", json!({"gradient": crate::fillui::gradient_json(&ng)}));
                 }
+            }
+            if let Some(Fill::Pattern(pt)) = &sh.fill
+                && let Some(np) = crate::fillui::pattern_editor(ui, pt, &scheme(app))
+            {
+                run(app, "shape.fill", json!({"pattern": crate::fillui::pattern_json(&np)}));
             }
             ui.add_space(8.0);
             ui.label(egui::RichText::new("Line").font(theme::bold(13.0)));
@@ -871,25 +883,9 @@ fn background(app: &mut SlideApp, ui: &mut Ui) {
             }
         }
         Some(Fill::Pattern(pt)) => {
-            current = Some(json!({"pattern": {"preset": pt.preset, "fg": cref_param(&pt.fg), "bg": cref_param(&pt.bg)}}));
-            ui.horizontal_wrapped(|ui| {
-                for preset in ["pct5", "pct20", "pct50", "ltHorz", "ltVert", "smGrid", "dkDnDiag", "wave", "dotGrid", "weave"] {
-                    if ui.selectable_label(pt.preset == preset, preset).clicked() {
-                        run(app, "design.background", json!({"pattern": {"preset": preset, "fg": cref_param(&pt.fg), "bg": cref_param(&pt.bg)}}));
-                    }
-                }
-            });
-            for (label, fg) in [("Foreground", true), ("Background", false)] {
-                ui.horizontal(|ui| {
-                    ui.label(label);
-                    let r = widgets::drop_button(ui, "Color", vec2(70.0, 20.0), true);
-                    widgets::color_popup(&r).show(|ui| {
-                        if let Some(Some(c)) = widgets::color_grid(ui, &sc, None) {
-                            let (f, b) = if fg { (c, pt.bg.clone()) } else { (pt.fg.clone(), c) };
-                            run(app, "design.background", json!({"pattern": {"preset": pt.preset, "fg": cref_param(&f), "bg": cref_param(&b)}}));
-                        }
-                    });
-                });
+            current = Some(json!({"pattern": crate::fillui::pattern_json(pt)}));
+            if let Some(np) = crate::fillui::pattern_editor(ui, pt, &sc) {
+                run(app, "design.background", json!({"pattern": crate::fillui::pattern_json(&np)}));
             }
         }
         Some(Fill::Picture(pf)) => {
@@ -1478,6 +1474,10 @@ mod smartart_tests;
 #[cfg(test)]
 #[path = "background_tests.rs"]
 mod background_tests;
+
+#[cfg(test)]
+#[path = "pattern_fill_tests.rs"]
+mod pattern_fill_tests;
 
 #[cfg(test)]
 mod tests {
