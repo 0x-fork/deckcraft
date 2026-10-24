@@ -134,6 +134,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | What landed |
 |---|---|
+| 2026-10-24 | Tables: while the caret is in a cell, dragging into another cell selects that range of cells (shaded, merged cells taken in whole), and Shift+arrow grows or shrinks it; formatting applies to the selected cells only, and Delete clears their text and keeps the table |
 | 2026-10-23 | Format Background ▸ Apply to All also sets the background of the slide masters the slides use (and clears their layouts' overrides), so new slides keep it (#891) |
 | 2026-10-22 | Table text takes the master's other-text style (`otherStyle`), shapes and text boxes the presentation's default text style, as PowerPoint for Mac draws them (synthetic probe: 14 pt cells under a 14 pt `otherStyle` and a 26 pt `defaultTextStyle`); a private deck's table had been drawn 20 pt instead of 18 |
 | 2026-10-18 | Find (Ctrl+F): "Find what:" has the keyboard as soon as the dialog opens, and keeps it after Enter finds a match, so the search can be typed and changed without clicking the field (#951) |
@@ -262,6 +263,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 
 | Date | Change | Summary |
 |---|---|---|
+| 2026-10-24 | trivial | Progress log: selecting a range of table cells by dragging. Scores and milestone names unchanged |
 | 2026-10-22 | trivial | Progress log: Animation Pane ▸ Play From. Scores unchanged |
 | 2026-10-23 | trivial | Progress log: scroll bars on the zoomed slide pane (#1157). Scores and milestone names unchanged |
 | 2026-10-20 | trivial | Explicit empty chart number-format sections hide their values; blank whole-code General fallback is retained. Synthetic formatter regressions; chart-element scores and readiness estimates unchanged |
