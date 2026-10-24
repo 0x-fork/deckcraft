@@ -4,7 +4,7 @@
 use deckcraft_color::Rgba;
 use deckcraft_engine::Session;
 use deckcraft_model::style::PatternFill;
-use deckcraft_model::{Background, ColorRef, Fill, ShapeId};
+use deckcraft_model::{Background, ColorBase, ColorRef, Fill, ShapeId};
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton};
 use egui_kittest::Harness;
@@ -94,6 +94,45 @@ fn shape_pattern_fill_picks_a_preset_from_the_gallery() {
 }
 
 #[test]
+fn shape_pattern_fill_keeps_preset_and_system_colors() {
+    let (mut s, id) = patterned_shape();
+    let fg = json!({"preset": "red", "lumMod": 50000});
+    let bg = json!({"system": "window", "last": "#F0F0F0"});
+    s.execute("shape.fill", &json!({"pattern": {"preset": "pct25", "fg": fg, "bg": bg}})).unwrap();
+    let mut h = harness(SlideApp::new(s, Services::default()), "format");
+    let before = shape_pattern(&h, id);
+    assert!(matches!(before.fg.base, ColorBase::Preset { .. }) && matches!(before.bg.base, ColorBase::System { .. }));
+    h.get_by_label("Zig zag").click();
+    h.run_steps(2);
+    let pt = shape_pattern(&h, id);
+    assert_eq!(pt.preset, "zigZag");
+    assert_eq!((&pt.fg, &pt.bg), (&before.fg, &before.bg), "a preset change keeps both colors");
+    pick_hex(&mut h, "Foreground color", "00FF00");
+    assert_eq!(shape_pattern(&h, id).bg, before.bg, "a foreground change keeps the background");
+}
+
+#[test]
+fn pattern_gallery_shows_which_swatch_has_keyboard_focus() {
+    let (s, _) = patterned_shape();
+    let mut h = harness(SlideApp::new(s, Services::default()), "format");
+    let r = h.get_by_label("Zig zag").rect();
+    let accent = crate::theme::Tokens::get(&h.ctx).accent;
+    let outlined = |h: &Harness<'_, SlideApp>| {
+        h.output().shapes.iter().any(|c| match &c.shape {
+            egui::Shape::Rect(rs) => {
+                rs.stroke.width == 2.0 && rs.stroke.color == accent && (rs.rect.center() - r.center()).length() < 0.5 && rs.rect.width() < r.width()
+            }
+            _ => false,
+        })
+    };
+    assert!(!outlined(&h), "an unselected swatch has a plain border");
+    h.get_by_label("Zig zag").focus();
+    h.run_steps(2);
+    assert!(h.get_by_label("Zig zag").is_focused());
+    assert!(outlined(&h), "the focused swatch is outlined");
+}
+
+#[test]
 fn shape_solid_fill_keeps_its_transparency_without_a_pattern_gallery() {
     let (mut s, _) = patterned_shape();
     s.execute("shape.fill", &json!({"color": "accent2"})).unwrap();
@@ -128,4 +167,18 @@ fn background_pattern_fill_offers_every_preset_and_both_colors() {
     pick_hex(&mut h, "Background color", "FFEE00");
     let pt = background_pattern(&h);
     assert_eq!((pt.preset.as_str(), pt.bg), ("zigZag", ColorRef::rgb(Rgba::from_hex("FFEE00").unwrap())));
+}
+
+#[test]
+fn background_pattern_fill_keeps_a_system_color() {
+    let mut s = Session::with_new();
+    let bg = json!({"system": "window", "last": "#F0F0F0"});
+    s.execute("design.background", &json!({"pattern": {"preset": "pct20", "fg": "accent1", "bg": bg}})).unwrap();
+    let mut h = harness(SlideApp::new(s, Services::default()), "background");
+    let before = background_pattern(&h).bg;
+    assert!(matches!(before.base, ColorBase::System { .. }));
+    h.get_by_label("Zig zag").click();
+    h.run_steps(2);
+    let pt = background_pattern(&h);
+    assert_eq!((pt.preset.as_str(), pt.bg), ("zigZag", before));
 }

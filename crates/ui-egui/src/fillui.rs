@@ -420,7 +420,7 @@ pub fn pattern_editor(ui: &mut Ui, pt: &PatternFill, sc: &ColorScheme) -> Option
             let on = pt.preset == name;
             let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
             paint_pattern(ui.painter(), r.shrink(2.0), name, fg, bg);
-            let stroke = if on || resp.hovered() { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.border) };
+            let stroke = if on || resp.hovered() || resp.has_focus() { Stroke::new(2.0, t.accent) } else { Stroke::new(1.0, t.border) };
             ui.painter().rect_stroke(r.shrink(1.0), CornerRadius::same(2), stroke, egui::StrokeKind::Inside);
             let label = pattern_label(name);
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, label));
