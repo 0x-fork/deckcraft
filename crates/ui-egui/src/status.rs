@@ -8,6 +8,8 @@ use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens};
 use crate::{SlideApp, ViewMode};
 
+/// The status bar: slide counter, proofing language and status message on the left; notes,
+/// comments, views and zoom on the right.
 pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     egui::Panel::bottom("status").exact_size(28.0).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
@@ -19,22 +21,31 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
             _ => "Slide Master".to_string(),
         };
         let p = ui.painter();
-        p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
+        // Left to right: slide counter, language, status message. Each starts at its usual column, or
+        // after the one before it when that runs long ("Slide 100 of 120", "… (not checked)").
+        let sr = p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
+        // Where the controls on the right begin; nothing on the left paints or clicks past it.
+        let right_x = rect.max.x - 560.0;
         // The selection's proofing language; a click opens Review › Language.
         let (lang, no_proof) = crate::dialogs::selected_language(app);
         let name = crate::squiggles::lang_name(&lang) + if no_proof { " (not checked)" } else { "" };
-        let lr = p.text(pos2(rect.min.x + 120.0, rect.center().y), Align2::LEFT_CENTER, &name, theme::font(12.0), t.text_dim);
-        if ui.interact(lr.expand(3.0), ui.id().with("status_lang"), Sense::click()).on_hover_text("Language").clicked() {
+        let lx = (rect.min.x + 120.0).max(sr.max.x + 16.0);
+        let lclip = Rect::from_min_max(pos2(lx - 3.0, rect.min.y), pos2(right_x.max(lx - 3.0), rect.max.y));
+        let lr = p.with_clip_rect(lclip).text(pos2(lx, rect.center().y), Align2::LEFT_CENTER, &name, theme::font(12.0), t.text_dim);
+        let hit = lr.expand(3.0).intersect(lclip);
+        if hit.is_positive() && ui.interact(hit, ui.id().with("status_lang"), Sense::click()).on_hover_text("Language").clicked() {
             app.dialog = Some(crate::dialogs::Dialog::new("language"));
         }
-        // Transient status message.
+        // Transient status message, clipped before the controls on the right.
         if let Some(msg) = app.fresh_status() {
-            p.text(pos2(rect.min.x + 290.0, rect.center().y), Align2::LEFT_CENTER, &msg, theme::font(12.0), t.accent);
+            let mx = (rect.min.x + 290.0).max(lr.max.x + 16.0);
+            let clip = Rect::from_min_max(pos2(mx, rect.min.y), pos2(right_x.max(mx), rect.max.y));
+            p.with_clip_rect(clip).text(pos2(mx, rect.center().y), Align2::LEFT_CENTER, &msg, theme::font(12.0), t.accent);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
         }
         let mut right = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(Rect::from_min_max(pos2(rect.max.x - 560.0, rect.min.y), pos2(rect.max.x - 8.0, rect.max.y)))
+                .max_rect(Rect::from_min_max(pos2(right_x, rect.min.y), pos2(rect.max.x - 8.0, rect.max.y)))
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         right.spacing_mut().item_spacing.x = 4.0;
