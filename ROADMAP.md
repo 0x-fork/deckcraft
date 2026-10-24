@@ -165,6 +165,9 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-18 | Charts: a series' own data-label setting is honoured — numbers PowerPoint shows on a graph no longer disappear, and a bare `c:showVal` means on (#868) |
 | 2026-10-15 | Render: quick styles render on empty placeholders — the fill gate now checks for style and line overrides too (#832) |
 | 2026-10-15 | Canvas: the resize cursor follows the handle's rotated diagonal — rotated shapes showed the wrong diagonal cursor (#745) |
+| 2026-10-20 | Tests: the Options dialog's Cancel, Esc and close button put the settings back the way they were (#878) |
+| 2026-10-20 | Tests: Ctrl+A in the slide sorter selects every slide, as in PowerPoint (#936) |
+| 2026-10-18 | Thumbnails: navigating slides with the arrow keys scrolls the thumbnail pane to keep the current slide visible (#917) |
 | 2026-10-15 | PPTX trigger sequences keep separate On Click steps, including paragraph builds; synthetic import/edit/save/reopen and headless show regressions |
 | 2026-10-16 | Export: PNG with a transparent background — the slide background is left out, only the slide's content is drawn (Export… dialog, File › Export, web download, `file.export`/`file.render` `transparentBackground`, `deckcraft-cli render --transparent`) (#784) |
 | 2026-10-16 | Arrange ▸ Align: Align to Slide and Align Selected Objects, as in PowerPoint. One object aligns to the slide and several to each other until the other choice is ticked; the choice holds for that selection and also drives Distribute |
@@ -176,6 +179,8 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-15 | Canvas: the Format and Animation Painter override the cursor to show the tool is armed (#830) |
 | 2026-10-15 | Edit Points: right-click a segment for Straight/Curved Segment, a point for Open/Close Path (`shape.segmentType`, `shape.openPath`, `shape.closePath`); Delete Segment and Add Point in the menu still to come |
 | 2026-10-15 | Design › Browse for Themes… with a `.pptx` or `.potx` brings its slide master and layouts, not just the theme: the master the current slide uses is replaced (a preserved one stays beside it), the template stretches to the deck's slide size, and each slide moves to the layout with the same name or kind and keeps its content. One undo step (#807) |
+| 2026-10-15 | Clicking the frame of a text box or placeholder selects the box whole, so it can be moved, duplicated or deleted; only a click inside puts the caret in the text (#787) |
+| 2026-10-15 | Review › Compare: Reject and Reject All drop revisions without applying them (`review.reject`); Accept All skips what was rejected |
 | 2026-10-15 | PDF export and rendering: `anchorCtr` centres the drawn text block — right-aligned text no longer ran past the box edge (#736) |
 | 2026-10-14 | connected MCP rejects unrelated, malformed, incomplete and oversized replies without replay; buffered unsolicited bytes force a fresh connection before sending (#718) |
 | 2026-10-14 | Empty bulleted and numbered paragraphs show gray markers while editing, including on first click and after Enter. Markers use the list style and stay out of slide shows and exports. |
@@ -289,6 +294,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-21 | trivial | Progress log: 3-D sizes in scaled groups stay in points |
 | 2026-10-22 | trivial | Progress log: chart series pattern and no fills |
 | 2026-10-15 | trivial | Progress log: Browse for Themes applies a template's master and layouts (#807) |
+| 2026-10-15 | trivial | Progress log: Compare Reject and Reject All |
 | 2026-10-14 | trivial | remote MCP checks reply IDs, envelopes and bounded newline framing (#718) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: headline breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) and the feature-area breadths from `cargo xtask parity`; one row per area; Upcoming item 2 merged; per-PR count notes dropped from the progress log. Ready stays ~55%, stage alpha |

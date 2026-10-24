@@ -389,6 +389,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     });
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(page_bg)).show(ui, |ui| {
         // Fields, boxes and buttons sit on the page's own colour: outline them, as PowerPoint does.
+        ui.visuals_mut().text_edit_bg_color = Some(t.field_bg);
         let w = &mut ui.visuals_mut().widgets;
         w.inactive.bg_fill = t.field_bg;
         w.inactive.weak_bg_fill = t.field_bg;
