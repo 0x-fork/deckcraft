@@ -44,8 +44,15 @@ impl ChangeKey {
 /// The revisions still to review: [`diff`] without the rejected ones.
 pub fn pending(doc: &Presentation, c: &Compare) -> Vec<Change> {
     let mut out = diff(doc, &c.revised, c.by_position);
-    out.retain(|ch| !c.rejected.contains(&ChangeKey::of(doc, ch)));
+    out.retain(|ch| !is_rejected(doc, c, ch));
     out
+}
+
+/// Whether `ch` was rejected. Positional matching re-pairs slides by index when the open deck gains
+/// or loses a slide, which changes the open half of the key; the revised index stays put, so any
+/// rejected key for the same revised slide counts.
+fn is_rejected(doc: &Presentation, c: &Compare, ch: &Change) -> bool {
+    c.rejected.contains(&ChangeKey::of(doc, ch)) || (c.by_position && ch.revised.is_some() && c.rejected.iter().any(|k| k.revised == ch.revised))
 }
 
 /// Whether `cur` and `rev` share no slide id (then slides match by position).
@@ -523,5 +530,39 @@ mod tests {
         assert!(s.execute("review.compare", &json!({"name": "x.bin", "data": "AAAA"})).is_err());
         assert!(s.execute("review.compare", &json!({})).is_err());
         assert!(s.execute("review.accept", &json!({"index": 999})).is_err());
+    }
+
+    fn slide_texts(s: &Session) -> Vec<String> {
+        s.doc().unwrap().doc.slides.iter().map(|sl| sl.shapes.iter().filter_map(|x| x.text.as_ref()).map(|t| t.text()).collect::<String>()).collect()
+    }
+
+    /// By position, a rejected revision stays rejected when a slide is inserted into the open deck
+    /// and the same revised slide now pairs with a different open slide.
+    #[test]
+    fn a_rejected_positional_revision_stays_rejected_after_a_slide_is_inserted() {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "title", "title": "A"})).unwrap();
+        let mut other = Session::with_new();
+        other.execute("slide.new", &json!({"layout": "title", "title": "B"})).unwrap();
+        let data = other.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].as_str().unwrap().to_string();
+        let v = s.execute("review.compare", &json!({"name": "o.pptx", "data": data})).unwrap();
+        assert_eq!(v["byPosition"], true, "{v}");
+        let changed = |v: &Value| -> Vec<u64> {
+            v["changes"].as_array().unwrap().iter().filter(|c| c["kind"] == "changed").map(|c| c["revised"].as_u64().unwrap()).collect()
+        };
+        let revised = changed(&v);
+        let last = *revised.last().expect("a changed slide");
+        let at = v["changes"].as_array().unwrap().iter().position(|c| c["revised"] == last).unwrap();
+        s.execute("review.reject", &json!({"index": at})).unwrap();
+        // A new slide at the front shifts every open slide down by one.
+        s.execute("slide.new", &json!({"layout": "title", "title": "N"})).unwrap();
+        let n_at = slide_texts(&s).iter().position(|t| t.contains('N')).unwrap();
+        s.execute("slide.move", &json!({"from": n_at, "to": 0})).unwrap();
+        assert_eq!(slide_texts(&s).iter().position(|t| t.contains('N')), Some(0));
+        let now = s.execute("review.revisions", &json!({})).unwrap();
+        assert!(!changed(&now).contains(&last), "{now}");
+        s.execute("review.accept", &json!({"all": true})).unwrap();
+        let texts = slide_texts(&s);
+        assert!(!texts.iter().any(|t| t.contains('B')), "{texts:?}");
     }
 }
