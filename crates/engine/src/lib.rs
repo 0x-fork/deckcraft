@@ -163,6 +163,8 @@ pub struct HistoryEntry {
     pub label: String,
     pub doc: Arc<Presentation>,
     pub selection: Selection,
+    /// The point type Edit Points remembered with `doc` (`ToolState::vertex_kind`).
+    pub vertex_kind: Option<(ShapeId, usize, usize, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -184,6 +186,8 @@ pub struct Interaction {
     pub label: String,
     pub doc: Arc<Presentation>,
     pub selection: Selection,
+    /// The point type Edit Points remembered when it began.
+    pub vertex_kind: Option<(ShapeId, usize, usize, String)>,
 }
 
 /// Text an input method is composing (#101): its preedit sits in the edited text body, at `start`
@@ -599,6 +603,7 @@ impl Session {
             }
         }
         let before = self.active().map(|d| (d.uid, d.doc.clone(), d.selection.clone()));
+        let vertex_kind = self.tool.vertex_kind.clone();
         let outer = self.depth == 0;
         self.depth += 1;
         let r = (spec.run)(self, params);
@@ -617,6 +622,9 @@ impl Session {
                     st.selection = sel;
                     st.revision += 1;
                 }
+                if outer {
+                    self.tool.vertex_kind = vertex_kind;
+                }
                 return Err(e);
             }
         };
@@ -630,7 +638,7 @@ impl Session {
             && spec.undoable
             && outer
         {
-            push_undo(st, HistoryEntry { label: spec.label.to_string(), doc: old, selection: sel });
+            push_undo(st, HistoryEntry { label: spec.label.to_string(), doc: old, selection: sel, vertex_kind });
         }
         if spec.journal && outer {
             self.journal.push((id.to_string(), params.clone()));
@@ -661,10 +669,11 @@ impl Session {
     /// Keep an input method's composition as it stands (#101): its text stays and the whole
     /// composition becomes one undo step. Nothing happens without one.
     pub fn end_composition(&mut self) {
+        let vertex_kind = self.tool.vertex_kind.clone();
         let Some(st) = self.active_mut() else { return };
         let Some(c) = st.composition.take() else { return };
         if !Arc::ptr_eq(&c.before, &st.doc) {
-            push_undo(st, HistoryEntry { label: "Type Text".into(), doc: c.before, selection: c.before_selection });
+            push_undo(st, HistoryEntry { label: "Type Text".into(), doc: c.before, selection: c.before_selection, vertex_kind });
         }
     }
 
