@@ -337,7 +337,12 @@ fn decode_text(raw: &str) -> String {
 
 fn numeric_char(digits: &str) -> Option<char> {
     let hex = digits.strip_prefix('x').or_else(|| digits.strip_prefix('X'));
-    let n = if let Some(hex) = hex { u32::from_str_radix(hex, 16).ok()? } else { digits.parse().ok()? };
+    // `parse` and `from_str_radix` accept a leading '+', which is not a valid reference.
+    let (body, radix) = hex.map_or((digits, 10), |h| (h, 16));
+    if body.is_empty() || !body.chars().all(|c| c.is_digit(radix)) {
+        return None;
+    }
+    let n = u32::from_str_radix(body, radix).ok()?;
     char::from_u32(n).filter(|c| !c.is_control() || *c == '\n')
 }
 
@@ -355,6 +360,13 @@ fn fold(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_numeric_entities_are_kept_as_typed() {
+        assert_eq!(decode_text("a&#+65;b"), "a&#+65;b");
+        assert_eq!(decode_text("a&#x+41;b"), "a&#x+41;b");
+        assert_eq!(decode_text("a&#65;b&#x41;"), "aAbA");
+    }
 
     #[test]
     fn google_docs_normal_weight_wrapper_is_not_bold() {

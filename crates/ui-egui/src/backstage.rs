@@ -214,11 +214,12 @@ impl Backstage {
 }
 
 /// Save As and Change File Type: (id for [`SlideApp::export_as`], label, detail).
-pub const SAVE_TYPES: [(&str, &str, &str); 6] = [
+pub const SAVE_TYPES: [(&str, &str, &str); 7] = [
     ("pptx", "PowerPoint Presentation (*.pptx)", "Opens in PowerPoint and other presentation apps"),
     ("deckcraft", "DeckCraft Presentation (*.deckcraft)", "DeckCraft's own format: everything is kept"),
     ("pdf", "PDF (*.pdf)", "A fixed copy that keeps its layout on any device"),
     ("outline", "Outline (*.txt)", "The slide titles and bullet text as plain text"),
+    ("rtf", "Outline/RTF (*.rtf)", "The slide titles and bullet text for word processors"),
     ("png", "PNG Picture (*.png)", "The current slide as a picture"),
     ("jpeg", "JPEG Picture (*.jpg)", "The current slide as a compressed picture"),
 ];
@@ -388,6 +389,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     });
     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(page_bg)).show(ui, |ui| {
         // Fields, boxes and buttons sit on the page's own colour: outline them, as PowerPoint does.
+        ui.visuals_mut().text_edit_bg_color = Some(t.field_bg);
         let w = &mut ui.visuals_mut().widgets;
         w.inactive.bg_fill = t.field_bg;
         w.inactive.weak_bg_fill = t.field_bg;
