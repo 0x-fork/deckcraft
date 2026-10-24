@@ -138,8 +138,14 @@ fn unsafe_url_links_are_not_exported() {
     use deckcraft_model::text::{Action, Hyperlink};
     use deckcraft_model::{Shape, ShapeId, Xfrm};
     use hayro_syntax::object::{Array, Dict, String as PdfString};
-    let safe = ["https://example.com/deck", "mailto:someone@example.com", "file:///C:/talks/notes.pdf", "notes.pdf"];
+    let safe = ["https://example.com/deck", "mailto:someone@example.com"];
     let refused = [
+        "file:///C:/talks/notes.pdf",
+        "notes.pdf",
+        "ms-msdt:/id PCWDiagnostic /skip force",
+        "ms-word:ofe|u|\\\\attacker.example\\share\\x.docx",
+        "ldap://attacker.example/x",
+        "file:///%5C%5Cattacker.example/share/x",
         "javascript:alert(1)",
         "\t JavaScript:alert(1)",
         "java\nscript:alert(1)",
