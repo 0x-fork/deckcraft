@@ -2,7 +2,7 @@ use super::*;
 use deckcraft_model::chart::{ChartType, Trendline, TrendlineType};
 use deckcraft_model::style::ColorRef;
 use deckcraft_model::text::TextBody;
-use deckcraft_model::{Chart, Geom, Presentation, Shape, ShapeId, ShapeKind, ShapeStyle, Table, Xfrm};
+use deckcraft_model::{Chart, Geom, PhType, Placeholder, Presentation, Shape, ShapeId, ShapeKind, ShapeStyle, Table, Xfrm};
 
 fn deck_with(shapes: Vec<Shape>) -> Presentation {
     let mut p = Presentation::default();
@@ -33,6 +33,33 @@ fn shape_fill_uses_theme_accent() {
     let px = img.pixel(200, 150);
     assert!((px[0] as i32 - accent.r as i32).abs() <= 2 && (px[2] as i32 - accent.b as i32).abs() <= 2, "{px:?} vs {accent:?}");
     assert_eq!(img.pixel(50, 50), [255, 255, 255, 255]);
+}
+
+/// #832: a quick style on an empty placeholder paints its fill. The style reference
+/// (`s.style`) carries the fill, but the empty-placeholder gate skipped the fill whenever the
+/// shape had no local fill, so the quick style only appeared once text was added. A
+/// placeholder with no style at all still shows nothing but its dashed outline.
+#[test]
+fn a_quick_style_fills_an_empty_placeholder() {
+    let placeholder = || Shape {
+        id: ShapeId(910),
+        xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 100.0)),
+        ph: Some(Placeholder { kind: PhType::Body, idx: 1, ..Default::default() }),
+        ..Default::default()
+    };
+    let p = deck_with(vec![Shape { style: Some(ShapeStyle::accent(deckcraft_color::SchemeSlot::Accent1)), ..placeholder() }]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, edit: true, ..Default::default() });
+    let accent = p.masters[0].theme.colors.get(deckcraft_color::SchemeSlot::Accent1);
+    // Lower right of the shape: the prompt text sits at the top of the text rect.
+    let px = img.pixel(280, 185);
+    assert!(
+        (px[0] as i32 - accent.r as i32).abs() <= 2 && (px[1] as i32 - accent.g as i32).abs() <= 2 && (px[2] as i32 - accent.b as i32).abs() <= 2,
+        "the quick style's fill is drawn on the empty placeholder: {px:?} vs {accent:?}"
+    );
+    // An unformatted empty placeholder stays empty: the gate is not simply gone.
+    let p = deck_with(vec![placeholder()]);
+    let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, edit: true, ..Default::default() });
+    assert_eq!(img.pixel(280, 185), [255, 255, 255, 255], "an unformatted placeholder has no fill");
 }
 
 #[test]
