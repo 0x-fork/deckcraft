@@ -172,6 +172,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-16 | Export: PNG with a transparent background — the slide background is left out, only the slide's content is drawn (Export… dialog, File › Export, web download, `file.export`/`file.render` `transparentBackground`, `deckcraft-cli render --transparent`) (#784) |
 | 2026-10-16 | Arrange ▸ Align: Align to Slide and Align Selected Objects, as in PowerPoint. One object aligns to the slide and several to each other until the other choice is ticked; the choice holds for that selection and also drives Distribute |
 | 2026-10-16 | Fitted canvas: discrete mouse-wheel steps navigate immediately, including rapid and batched input, while trackpad gestures retain their cooldown and zoomed slides still pan. |
+| 2026-10-16 | PPTX import: a paragraph build edited in PowerPoint (paragraphs with their own start, other shapes' effects in between, builds by 2nd-level paragraphs) takes PowerPoint's clicks in the show; it used to be rebuilt as one build, 34 clicks instead of 10 on the reporter's slide. Paragraph builds with sub-points save as PowerPoint writes them (#844) |
 | 2026-10-15 | CLI: .txt and .md export includes table cell text, which it used to skip silently (#814) |
 | 2026-10-15 | A `.pptx` slide that can't be read is reported, not dropped in silence: `lostSlides` from `file.open`, a message and a repaired copy in the app, a warning from `deckcraft-cli` (#203) |
 | 2026-10-16 | AutoFormat as you type: ordinals (1st, 22nd, 103rd) get superscript suffixes after a space or punctuation; Tools ▸ AutoCorrect and `text.autocorrect {ordinals}` turn it off |
@@ -295,6 +296,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-22 | trivial | Progress log: chart series pattern and no fills |
 | 2026-10-15 | trivial | Progress log: Browse for Themes applies a template's master and layouts (#807) |
 | 2026-10-15 | trivial | Progress log: Compare Reject and Reject All |
+| 2026-10-16 | trivial | Progress log: PPTX paragraph builds edited in PowerPoint keep their clicks (#844) |
 | 2026-10-14 | trivial | remote MCP checks reply IDs, envelopes and bounded newline framing (#718) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: headline breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) and the feature-area breadths from `cargo xtask parity`; one row per area; Upcoming item 2 merged; per-PR count notes dropped from the progress log. Ready stays ~55%, stage alpha |
