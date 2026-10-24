@@ -109,11 +109,7 @@ const SKIP: &[&str] = &[
 /// `i + n`, or one character on when that would land inside a multi-byte character (a fallback
 /// run after `\uN` or `\'hh` may be followed by non-ASCII text).
 fn advance(rtf: &str, i: usize, n: usize) -> usize {
-    if rtf.is_char_boundary(i + n) {
-        i + n
-    } else {
-        i + rtf.get(i..).and_then(|r| r.chars().next()).map_or(1, char::len_utf8)
-    }
+    if rtf.is_char_boundary(i + n) { i + n } else { i + rtf.get(i..).and_then(|r| r.chars().next()).map_or(1, char::len_utf8) }
 }
 
 /// Read an RTF outline into tab-indented outline text: a paragraph's outline level (or its left
