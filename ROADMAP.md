@@ -174,6 +174,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-16 | A PowerPoint Show (`.ppsx`) opened from the command line or the file association starts its slide show, as in PowerPoint; File › Open still opens it for editing (#862) |
 | 2026-10-15 | Canvas: the Format and Animation Painter override the cursor to show the tool is armed (#830) |
 | 2026-10-15 | Edit Points: right-click a segment for Straight/Curved Segment, a point for Open/Close Path (`shape.segmentType`, `shape.openPath`, `shape.closePath`); Delete Segment and Add Point in the menu still to come |
+| 2026-10-15 | Design › Browse for Themes… with a `.pptx` or `.potx` brings its slide master and layouts, not just the theme: the master the current slide uses is replaced (a preserved one stays beside it), the template stretches to the deck's slide size, and each slide moves to the layout with the same name or kind and keeps its content. One undo step (#807) |
 | 2026-10-15 | PDF export and rendering: `anchorCtr` centres the drawn text block — right-aligned text no longer ran past the box edge (#736) |
 | 2026-10-14 | connected MCP rejects unrelated, malformed, incomplete and oversized replies without replay; buffered unsolicited bytes force a fresh connection before sending (#718) |
 | 2026-10-14 | Empty bulleted and numbered paragraphs show gray markers while editing, including on first click and after Enter. Markers use the list style and stay out of slide shows and exports. |
@@ -285,6 +286,7 @@ app's JSON control channel (`deckcraft --control PORT`).
 | 2026-10-21 | trivial | Progress log: theme `spDef` anchor no longer applied to a file's own shapes |
 | 2026-10-21 | trivial | Progress log: 3-D sizes in scaled groups stay in points |
 | 2026-10-22 | trivial | Progress log: chart series pattern and no fills |
+| 2026-10-15 | trivial | Progress log: Browse for Themes applies a template's master and layouts (#807) |
 | 2026-10-14 | trivial | remote MCP checks reply IDs, envelopes and bounded newline framing (#718) |
 | 2026-10-14 | minor | Gray list markers on empty paragraphs while editing; caret keeps the list indent before typing |
 | 2026-10-14 | minor | Community PR wave folded: headline breadth 84% over 191 features (P0 92%, P1 82%, P2 55%) and the feature-area breadths from `cargo xtask parity`; one row per area; Upcoming item 2 merged; per-PR count notes dropped from the progress log. Ready stays ~55%, stage alpha |
