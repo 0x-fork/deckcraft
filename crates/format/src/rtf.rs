@@ -249,10 +249,10 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                 while i < b.len() && !matches!(b[i], b'{' | b'}' | b'\\' | b'\r' | b'\n') {
                     i += 1;
                 }
-                if !st.skip {
-                    if let Some(t) = rtf.get(s..i) {
-                        line.push_str(t);
-                    }
+                if !st.skip
+                    && let Some(t) = rtf.get(s..i)
+                {
+                    line.push_str(t);
                 }
             }
         }
