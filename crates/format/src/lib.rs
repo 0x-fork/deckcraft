@@ -6,6 +6,7 @@
 
 mod chart_parts;
 mod finite;
+pub mod rtf;
 
 #[cfg(test)]
 mod chart_parts_tests;
