@@ -171,6 +171,22 @@ pub(crate) fn union_bounds(xs: &[Xfrm]) -> Option<Rect> {
     Some(it.fold(first, |a, b| a.union(b)))
 }
 
+/// How deep groups may nest: as deep as the PPTX reader reads and the renderer draws. A saved
+/// .deckcraft file stops opening at about 39 (the JSON reader's recursion limit), and walks over
+/// the shape tree stop at 64.
+pub const MAX_GROUP_DEPTH: usize = 32;
+
+/// How many groups deep `shapes` nest (0 without groups).
+fn group_depth(shapes: &[Shape]) -> usize {
+    let mut d = 0;
+    deckcraft_model::walk(shapes, &mut |sh, depth| {
+        if sh.is_group() {
+            d = d.max(depth + 1);
+        }
+    });
+    d
+}
+
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = targets(s, p)?;
     s.edit(|doc, sel| {
@@ -178,6 +194,9 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
         let mut members: Vec<Shape> = current.iter().filter(|x| ids.contains(&x.id)).cloned().collect();
         if members.len() < 2 {
             return Err(bad("arrange.group", "select two or more objects on the slide"));
+        }
+        if group_depth(&members) + 1 > MAX_GROUP_DEPTH {
+            return Err(bad("arrange.group", format!("groups can be nested at most {MAX_GROUP_DEPTH} deep")));
         }
         for m in &mut members {
             if m.xfrm.is_none() {
