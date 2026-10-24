@@ -259,3 +259,44 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
             app.notes_buf.2 = draft;
         });
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use deckcraft_engine::Session;
+    use egui::{Event, Modifiers, PointerButton};
+    use egui_kittest::Harness;
+    use serde_json::json;
+
+    use crate::{Services, SlideApp};
+
+    /// A long proofing language in a narrow window must not take clicks meant for the controls on
+    /// the right: Notes toggles the notes pane and the Language dialog stays closed.
+    #[test]
+    fn a_long_language_name_leaves_the_notes_button_clickable() {
+        let mut app = SlideApp::new(Session::with_new(), Services::default());
+        app.session.execute("shape.insert", &json!({"preset": "rect", "rect": [80, 120, 400, 100], "text": "hello"})).unwrap();
+        app.session.execute("format.language", &json!({"lang": "en-US-x-a-very-long-private-use-tag"})).unwrap();
+        let size = egui::vec2(700.0, 800.0);
+        let mut h = Harness::builder().with_size(size).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        assert!(!h.state().ui.notes);
+        // The Notes button is the rightmost control, 8 points in from the right edge.
+        let at = egui::pos2(size.x - 8.0 - 20.0, size.y - 14.0);
+        h.hover_at(at);
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+        }
+        h.run_steps(3);
+        assert!(h.state().ui.notes, "the click reached the Notes button");
+        assert!(h.state().dialog.is_none(), "the Language dialog stayed closed");
+    }
+}
