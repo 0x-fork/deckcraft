@@ -2243,6 +2243,9 @@ mod tests {
         let seen = on_bar.clone();
         let slide = std::rc::Rc::new(std::cell::Cell::new(Rect::NOTHING));
         let slide_seen = slide.clone();
+        // Presenter view opens an embedded window over the whole screen here, which takes the clicks.
+        let mut app = SlideApp::new(session, crate::Services::default());
+        app.ui.presenter_view = false;
         let mut harness = egui_kittest::Harness::builder().with_size(size).with_step_dt(0.25).build_ui_state(
             move |ui, app: &mut SlideApp| {
                 app.logic(ui.ctx());
@@ -2253,7 +2256,7 @@ mod tests {
                 }
                 app.ui(ui);
             },
-            SlideApp::new(session, crate::Services::default()),
+            app,
         );
         harness.run_steps(3);
         harness.state_mut().start_show(0, false);
