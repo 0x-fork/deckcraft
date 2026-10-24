@@ -343,6 +343,9 @@ pub struct Prefs {
     pub undo_limit: usize,
     /// Minutes between AutoRecover saves of unsaved presentations.
     pub recovery_minutes: f64,
+    /// The unit the rulers, the Format pane and the size dialogs show (Preferences); the deck
+    /// itself always stores points.
+    pub units: deckcraft_geom::Unit,
 }
 
 impl Default for Prefs {
@@ -365,6 +368,7 @@ impl Default for Prefs {
             author: "Presenter".into(),
             undo_limit: 500,
             recovery_minutes: 1.0,
+            units: deckcraft_geom::Unit::Inches,
         }
     }
 }

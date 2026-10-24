@@ -209,6 +209,16 @@ fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> 
     v
 }
 
+/// The unit's abbreviation in a field label, "Width (cm):".
+fn unit_abbr(unit: deckcraft_geom::Unit) -> &'static str {
+    match unit {
+        deckcraft_geom::Unit::Inches => "in",
+        deckcraft_geom::Unit::Centimeters => "cm",
+        deckcraft_geom::Unit::Points => "pt",
+        deckcraft_geom::Unit::Pixels => "px",
+    }
+}
+
 fn num(d: &mut Dialog, key: &str, default: f64) -> f64 {
     d.get(key, "").trim().trim_end_matches(['"', '%', ' ']).parse::<f64>().ok().filter(|v| v.is_finite()).unwrap_or(default)
 }
@@ -1055,20 +1065,24 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         }
         "slideSize" => {
             let cur = app.session.active().map(|s| s.doc.slide_size).unwrap_or(deckcraft_model::defaults::WIDE);
+            let len = app.session.prefs.units;
+            let ppu = len.points_per_unit();
+            let shown = |pt: f64| format!("{:.2}", pt / ppu);
             ui.label("Slides sized for:");
             let preset = d.get("preset", "");
             egui::ComboBox::from_id_salt("sizes").selected_text(if preset.is_empty() { "Custom" } else { &preset }).show_ui(ui, |ui| {
                 for (label, w, h) in deckcraft_model::defaults::SLIDE_SIZES {
                     if ui.selectable_label(preset == *label, *label).clicked() {
                         d.fields.insert("preset".into(), label.to_string());
-                        d.fields.insert("w".into(), format!("{:.2}", w / 72.0));
-                        d.fields.insert("h".into(), format!("{:.2}", h / 72.0));
+                        d.fields.insert("w".into(), shown(*w));
+                        d.fields.insert("h".into(), shown(*h));
                     }
                 }
             });
-            field(ui, d, "Width (in):", "w", &format!("{:.2}", cur.width / 72.0));
-            field(ui, d, "Height (in):", "h", &format!("{:.2}", cur.height / 72.0));
-            let (w, h) = (num(d, "w", cur.width / 72.0), num(d, "h", cur.height / 72.0));
+            let abbr = unit_abbr(len);
+            field(ui, d, &format!("Width ({abbr}):"), "w", &shown(cur.width));
+            field(ui, d, &format!("Height ({abbr}):"), "h", &shown(cur.height));
+            let (w, h) = (num(d, "w", cur.width / ppu), num(d, "h", cur.height / ppu));
             ui.horizontal(|ui| {
                 ui.label("Orientation:");
                 let portrait = ui.radio(h > w, "Portrait").clicked();
@@ -1082,7 +1096,10 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let maximize = check(ui, d, "Maximize content (else ensure fit)", "max", false);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
-                let (w, h) = (num(d, "w", cur.width / 72.0) * 72.0, num(d, "h", cur.height / 72.0) * 72.0);
+                // A field still showing the current size keeps it exactly: the two decimals shown
+                // (13.33", 33.87 cm) would otherwise nudge the slide off 960 pt.
+                let mut points = |key: &str, cur: f64| if d.get(key, "") == shown(cur) { cur } else { num(d, key, cur / ppu) * ppu };
+                let (w, h) = (points("w", cur.width), points("h", cur.height));
                 run(app, "design.slideSize", json!({"w": w, "h": h, "scale": if maximize { "maximize" } else { "ensureFit" }}));
             }
             ok || cancel
@@ -2274,6 +2291,13 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 }
                 d.fields.remove("uiScale");
             }
+            // PowerPoint takes the unit from the system's measurement setting; DeckCraft asks here.
+            ui.horizontal(|ui| {
+                ui.label("Measurement units:");
+                let units = &mut app.session.prefs.units;
+                ui.radio_value(units, deckcraft_geom::Unit::Inches, "Inches");
+                ui.radio_value(units, deckcraft_geom::Unit::Centimeters, "Centimeters");
+            });
             ui.label(egui::RichText::new("Editing").font(theme::bold(13.0)));
             ui.checkbox(&mut app.session.prefs.smart_guides, "Show smart guides");
             ui.checkbox(&mut app.session.prefs.snap_to_grid, "Snap objects to grid");
