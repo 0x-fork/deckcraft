@@ -1373,6 +1373,41 @@ fn a_table_fill_shows_behind_cells_without_their_own() {
     assert_eq!(img.pixel(50, 50)[..3], [255, 255, 255]);
 }
 
+#[test]
+fn table_body_text_is_dark_on_the_tinted_cells_of_a_dark_theme() {
+    // The default style (medium2) tints body cells towards white, so their text must be the
+    // theme's dark colour, as PowerPoint's medium styles set it (dk1): inheriting the text colour
+    // leaves it light, and unreadable, on a dark theme such as Nocturne.
+    let fill_and_darkest = |theme: &str| {
+        let mut t = Table::new(2, 2, 200.0, 40.0);
+        for (r, c) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+            t.cell_mut(r, c).unwrap().text = TextBody::from_text("Body");
+        }
+        let tbl = Shape { id: ShapeId(796), xfrm: Some(Xfrm::new(100.0, 100.0, 200.0, 80.0)), kind: ShapeKind::Table(t), ..Default::default() };
+        let mut p = deck_with(vec![tbl]);
+        let th = deckcraft_model::theme::builtin_themes().into_iter().find(|th| th.name == theme).unwrap();
+        std::sync::Arc::make_mut(&mut p.masters[0]).theme = th;
+        let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() });
+        let lum = |x, y| {
+            let px = img.pixel(x, y);
+            deckcraft_color::Rgba::rgb(px[0], px[1], px[2]).luminance()
+        };
+        // Body cell (1, 1) covers (200, 140)–(300, 180); its top-left corner is clear of the text
+        // (cell margins) and of the white grid line.
+        let fill = lum(203, 143);
+        let darkest = (143..177).flat_map(|y| (203..297).map(move |x| (x, y))).map(|(x, y)| lum(x, y)).fold(1.0_f64, f64::min);
+        (fill, darkest)
+    };
+    for theme in ["Nocturne", "Harbor"] {
+        let (fill, darkest) = fill_and_darkest(theme);
+        assert!(fill > 0.4, "{theme}: the body cell's fill is a light tint, luminance {fill}");
+        assert!(
+            darkest < 0.15 && darkest < fill / 3.0,
+            "{theme}: darkest pixel in the body cell has luminance {darkest} on a fill of {fill}: its text is not dark"
+        );
+    }
+}
+
 /// A white 280x200 pt rectangle at (20, 20) with `effects`, rendered at 1 px/pt.
 fn effect_box(effects: deckcraft_model::Effects) -> Image {
     use deckcraft_model::style::{Fill, Line};
