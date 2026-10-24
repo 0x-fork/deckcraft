@@ -2189,6 +2189,59 @@ fn edit_points_types_and_handles() {
     assert!((ho3.unwrap() - ho).hypot() < 1e-3);
 }
 
+/// Alt, Shift or Ctrl held while dragging a handle makes the point a corner, smooth or straight
+/// point, and the point keeps that type for the next drag.
+#[test]
+fn edit_points_handle_drag_modifiers_set_the_point_type() {
+    use crate::tools::{Mods, PointerEvent, PointerKind};
+    use deckcraft_geom::Vec2;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    let id = deckcraft_model::ShapeId(s.execute("shape.points", &json!({})).unwrap()["id"].as_u64().unwrap() as u32);
+    let handles = |s: &Session| {
+        let st = s.doc().unwrap();
+        let (hi, ho, v) = crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 0).unwrap();
+        (hi.unwrap(), ho.unwrap(), v)
+    };
+    let ev = |kind, p: deckcraft_geom::Point, mods: Mods| PointerEvent { kind, x: p.x, y: p.y, mods, ..Default::default() };
+    let drag = |s: &mut Session, from: deckcraft_geom::Point, to: deckcraft_geom::Point, mods: Mods| {
+        s.pointer(ev(PointerKind::Down, from, Mods::default())).unwrap();
+        s.pointer(ev(PointerKind::Drag, to, mods)).unwrap();
+        s.pointer(ev(PointerKind::Up, to, mods)).unwrap();
+    };
+    // Click the point to show its handles.
+    let (hi, ho, v) = handles(&s);
+    drag(&mut s, v, v, Mods::default());
+    assert_eq!(s.tool.edit_vertex, Some((0, 0)));
+    // Alt: only the dragged handle moves.
+    let to = ho + Vec2::new(10.0, -25.0);
+    drag(&mut s, ho, to, Mods { alt: true, ..Default::default() });
+    let (hi1, ho1, _) = handles(&s);
+    assert!((ho1 - to).hypot() < 1e-3, "{ho1:?}");
+    assert!((hi1 - hi).hypot() < 1e-3, "the other handle stays: {hi1:?} {hi:?}");
+    assert_eq!(s.execute("shape.points", &json!({})).unwrap()["types"][0][0], "corner");
+    // A plain drag afterwards keeps it a corner point.
+    let to2 = ho1 + Vec2::new(5.0, 5.0);
+    drag(&mut s, ho1, to2, Mods::default());
+    assert!((handles(&s).0 - hi).hypot() < 1e-3);
+    // Shift: the other handle mirrors the dragged one at the same length.
+    let to3 = v + Vec2::new(0.0, 40.0);
+    drag(&mut s, to2, to3, Mods { shift: true, ..Default::default() });
+    let (hi3, ho3, _) = handles(&s);
+    assert!((ho3 - to3).hypot() < 1e-3, "{ho3:?}");
+    assert!((hi3 - (v - Vec2::new(0.0, 40.0))).hypot() < 1e-3, "{hi3:?}");
+    assert_eq!(s.execute("shape.points", &json!({})).unwrap()["types"][0][0], "smooth");
+    // Ctrl: the other handle turns in line and keeps its length.
+    let to4 = v + Vec2::new(30.0, 0.0);
+    drag(&mut s, ho3, to4, Mods { cmd: true, ..Default::default() });
+    let (hi4, ho4, _) = handles(&s);
+    assert!((ho4 - to4).hypot() < 1e-3, "{ho4:?}");
+    assert!((hi4 - (v - Vec2::new(40.0, 0.0))).hypot() < 1e-3, "{hi4:?}");
+    assert_eq!(s.execute("shape.points", &json!({})).unwrap()["types"][0][0], "straight");
+}
+
 #[test]
 fn edit_points_straight_and_curved_segments() {
     let mut s = Session::with_new();
