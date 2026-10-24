@@ -154,7 +154,7 @@ fn open_command(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
     if is_presentation_name(&lower) {
         Some("file.openBytes")
-    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".rtf") {
         Some("slide.fromOutline")
     } else {
         None
@@ -175,7 +175,7 @@ fn infer_command(name: &str, bytes: &[u8]) -> Option<&'static str> {
         Some("insert.audio")
     } else if ct.starts_with("video/") {
         Some("insert.video")
-    } else if lower.ends_with(".txt") || lower.ends_with(".md") {
+    } else if lower.ends_with(".txt") || lower.ends_with(".md") || lower.ends_with(".rtf") {
         Some("slide.fromOutline")
     } else {
         None
@@ -244,6 +244,10 @@ pub struct UiState {
     pub notes: bool,
     pub notes_height: f32,
     pub thumbs_width: f32,
+    /// Vertical scroll offset of the thumbnail pane, recorded each frame for the control
+    /// channel and tests; not persisted.
+    #[serde(skip)]
+    pub thumbs_scroll: f32,
     /// Open task pane: `format`, `animation`, `selection`, `comments`, `designer`, `background`,
     /// `smartart` (Text Pane).
     pub pane: Option<String>,
@@ -286,6 +290,7 @@ impl Default for UiState {
             notes: true,
             notes_height: 52.0,
             thumbs_width: 236.0,
+            thumbs_scroll: 0.0,
             pane: None,
             pane_width: 300.0,
             ruler: false,
@@ -752,6 +757,7 @@ impl SlideApp {
             "jpeg" | "jpg" => ("jpg", "jpeg", false),
             "pptx" => ("pptx", "pptx", false),
             "outline" | "txt" => ("txt", "outline", false),
+            "rtf" => ("rtf", "rtf", false),
             "deckcraft" => ("deckcraft", "deckcraft", false),
             "gif" => ("gif", "gif", false),
             other => {
@@ -1264,7 +1270,20 @@ impl SlideApp {
             return;
         };
         let Some(path) = pick("open") else { return };
-        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep})) {
+        // Offer the file's slides to choose from; all of them are ticked to begin with.
+        match self.session.execute("slide.reuseList", &json!({"path": path})) {
+            Ok(list) => {
+                let mut d = dialogs::Dialog::new("reuseSlides");
+                d.params = json!({"path": path, "keep": keep, "slides": list["slides"]});
+                self.dialog = Some(d);
+            }
+            Err(e) => self.set_status(e.to_string()),
+        }
+    }
+
+    /// Insert the slides `picked` (indices) of the presentation at `path` after the current slide.
+    pub fn reuse_slides(&mut self, path: &str, keep: bool, picked: &[usize]) {
+        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep, "slides": picked})) {
             Ok(r) => self.set_status(format!("Inserted {} slides from {path}", r["slides"])),
             Err(e) => self.set_status(e.to_string()),
         }
@@ -1474,7 +1493,7 @@ impl SlideApp {
             }
         };
         let params = if cmd == "slide.fromOutline" {
-            json!({"text": String::from_utf8_lossy(bytes), "markdown": name.to_ascii_lowercase().ends_with(".md")})
+            json!({"text": deckcraft_engine::cmd::file::outline_text(bytes), "markdown": name.to_ascii_lowercase().ends_with(".md")})
         } else {
             json!({"name": name, "data": deckcraft_engine::cmd::base64_encode(bytes)})
         };
@@ -1714,7 +1733,20 @@ impl SlideApp {
                 _ => {}
             }
         }
-        if ctx.memory(|m| m.focused().is_some()) || self.dialog.as_ref().is_some_and(|d| d.modal()) || self.palette.is_some() {
+        let modal = self.dialog.as_ref().is_some_and(|d| d.modal()) || self.palette.is_some();
+        // While slide text is being edited, the text owns the keyboard (#93). Tab and the arrow
+        // keys move egui's keyboard focus onto ordinary widgets (the window's drag handle, ribbon
+        // buttons), and that stray focus would swallow every later key and end text entry. Let it
+        // go; a real text field or an open menu keeps its keys.
+        if !modal
+            && self.session.active().is_some_and(|d| d.selection.text.is_some())
+            && !ctx.text_edit_focused()
+            && !ctx.any_popup_open()
+            && let Some(id) = ctx.memory(|m| m.focused())
+        {
+            ctx.memory_mut(|m| m.surrender_focus(id));
+        }
+        if ctx.memory(|m| m.focused().is_some()) || modal {
             return;
         }
         if self.backstage.is_some() {
@@ -2083,6 +2115,8 @@ mod browsetheme_tests;
 mod compare_tests;
 #[cfg(test)]
 mod eyedropper_tests;
+#[cfg(test)]
+mod field_frame_tests;
 #[cfg(test)]
 mod find_dialog_tests;
 #[cfg(test)]
@@ -2555,6 +2589,39 @@ mod tests {
         assert_eq!(level(&harness), 1);
     }
 
+    /// #93: Tab in an edited list indented the item but handed the keyboard to egui's focus
+    /// cycle: the stray focus (e.g. on the window's drag handle) swallowed every later key, so the
+    /// list could neither be typed into nor continued with Enter.
+    #[test]
+    fn tab_in_an_edited_list_keeps_the_keyboard() {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        let title = harness.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+        harness.state_mut().session.execute("text.edit", &json!({"id": title})).unwrap();
+        harness.event(egui::Event::Text("one".into()));
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Tab); // Increase List Level
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("sub".into()));
+        harness.run_steps(2);
+        harness.key_press(egui::Key::Enter); // continues the list
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("two".into()));
+        harness.run_steps(2);
+        assert_eq!(title_text(harness.state()), "one\nsub\ntwo", "typing after Tab must reach the text");
+        let body = harness.state().session.active().unwrap().doc.slides[0].shapes[0].text.clone().unwrap();
+        let levels: Vec<u8> = body.paragraphs.iter().map(|p| p.level).collect();
+        assert_eq!(levels, vec![0, 1, 1], "Tab indents one level; Enter keeps the level");
+    }
+
     #[test]
     fn home_needs_an_open_presentation() {
         let mut app = SlideApp::new(Session::new(), Services::default());
@@ -2733,6 +2800,41 @@ mod tests {
         assert_ne!(s.ui.brightness, dark_before, "Done keeps the appearance");
         assert_ne!(s.session.prefs.smart_guides, before.smart_guides, "Done keeps smart guides");
         assert_ne!(s.session.prefs.snap_to_grid, before.snap_to_grid, "Done keeps snap to grid");
+    }
+
+    /// About dialog: Close and Cancel each close the dialog.
+    #[test]
+    fn about_dialog_close_and_cancel_close_it() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.run_steps(2);
+        harness.state_mut().run("app.about", json!({})).unwrap();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_some());
+        harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, "Cancel")
+            .next()
+            .unwrap_or_else(|| panic!("no Cancel button in About dialog"))
+            .click_accesskit();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none(), "Cancel closes About dialog");
+
+        harness.state_mut().run("app.about", json!({})).unwrap();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_some());
+        harness
+            .query_all_by_role_and_label(egui::accesskit::Role::Button, "Close")
+            .next()
+            .unwrap_or_else(|| panic!("no Close button in About dialog"))
+            .click_accesskit();
+        harness.run_steps(2);
+        assert!(harness.state().dialog.is_none(), "Close closes About dialog");
     }
 
     fn canvas_harness() -> egui_kittest::Harness<'static, SlideApp> {
