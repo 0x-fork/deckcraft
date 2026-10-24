@@ -131,7 +131,7 @@ pub fn rtf_to_outline(rtf: &str) -> String {
     let flush = |line: &mut String, level: Option<u32>, indent: i64, out: &mut String| {
         let text = line.trim();
         if !text.is_empty() {
-            let n = level.map(|l| l as i64).unwrap_or((indent + 180) / 360).clamp(0, 9) as usize;
+            let n = level.map(|l| l as i64).unwrap_or(indent.saturating_add(180) / 360).clamp(0, 9) as usize;
             out.push_str(&"\t".repeat(n));
             out.push_str(text);
             out.push('\n');
@@ -335,6 +335,13 @@ mod tests {
         assert_eq!(rtf_to_outline(r"{\rtf1 a\'00bé\par}"), "abé\n");
         assert_eq!(rtf_to_outline("{\\rtf1 a\0b\\par}\0\0"), "ab\n");
         assert_eq!(rtf_to_outline(r"{\rtf1 x\u-70000?y\par}"), "x\u{ee90}y\n");
+    }
+
+    /// A hostile `\li` near `i64::MAX` overflowed the rounding addend in debug builds.
+    #[test]
+    fn huge_left_indent_gives_the_deepest_level() {
+        let out = rtf_to_outline(r"{\rtf1\pard\li9223372036854775807 deep\par\pard\li-9223372036854775808 flat\par}");
+        assert_eq!(out, format!("{}deep\nflat\n", "\t".repeat(9)));
     }
 
     #[test]
