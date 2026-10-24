@@ -1264,7 +1264,20 @@ impl SlideApp {
             return;
         };
         let Some(path) = pick("open") else { return };
-        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep})) {
+        // Offer the file's slides to choose from; all of them are ticked to begin with.
+        match self.session.execute("slide.reuseList", &json!({"path": path})) {
+            Ok(list) => {
+                let mut d = dialogs::Dialog::new("reuseSlides");
+                d.params = json!({"path": path, "keep": keep, "slides": list["slides"]});
+                self.dialog = Some(d);
+            }
+            Err(e) => self.set_status(e.to_string()),
+        }
+    }
+
+    /// Insert the slides `picked` (indices) of the presentation at `path` after the current slide.
+    pub fn reuse_slides(&mut self, path: &str, keep: bool, picked: &[usize]) {
+        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep, "slides": picked})) {
             Ok(r) => self.set_status(format!("Inserted {} slides from {path}", r["slides"])),
             Err(e) => self.set_status(e.to_string()),
         }
