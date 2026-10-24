@@ -1,5 +1,5 @@
 //! Review › Compare: the differences between the open presentation and a revised copy of it, slide
-//! by slide, and accepting a revised slide into the open one.
+//! by slide, and accepting a revised slide into the open one or rejecting it.
 //!
 //! Slides match by id (a revised copy of the same deck keeps them); when the two decks share no
 //! slide id at all, by position. Shapes match by id, then by name.
@@ -18,6 +18,34 @@ pub struct Compare {
     /// Slides match by position (the decks shared no slide id when the compare started); fixed
     /// for the session so accepting slides doesn't switch the matching half way.
     pub by_position: bool,
+    /// Revisions rejected: no longer listed and never accepted, the open deck left as it is.
+    pub rejected: HashSet<ChangeKey>,
+}
+
+/// What a revision is about, stable while slides move: the open slide (for changed and deleted)
+/// and the revised slide (for changed and inserted).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ChangeKey {
+    kind: ChangeKind,
+    open: Option<SlideId>,
+    revised: Option<usize>,
+}
+
+impl ChangeKey {
+    pub fn of(doc: &Presentation, change: &Change) -> ChangeKey {
+        let open = match change.kind {
+            ChangeKind::Inserted => None,
+            ChangeKind::Changed | ChangeKind::Deleted => doc.slides.get(change.slide).map(|s| s.id),
+        };
+        ChangeKey { kind: change.kind, open, revised: change.revised }
+    }
+}
+
+/// The revisions still to review: [`diff`] without the rejected ones.
+pub fn pending(doc: &Presentation, c: &Compare) -> Vec<Change> {
+    let mut out = diff(doc, &c.revised, c.by_position);
+    out.retain(|ch| !c.rejected.contains(&ChangeKey::of(doc, ch)));
+    out
 }
 
 /// Whether `cur` and `rev` share no slide id (then slides match by position).
@@ -26,7 +54,7 @@ pub fn unrelated(cur: &Presentation, rev: &Presentation) -> bool {
     !cur.slides.iter().any(|s| ids.contains(&s.id))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeKind {
     /// Only in the revised deck.
@@ -432,6 +460,50 @@ mod tests {
         s.execute("review.endCompare", &json!({})).unwrap();
         assert!(s.execute("review.revisions", &json!({})).is_err());
         assert!(s.execute("review.accept", &json!({"all": true})).is_err());
+    }
+
+    #[test]
+    fn reject_keeps_the_open_deck_and_accept_all_skips_rejected_revisions() {
+        let (mut s, rev, n) = decks();
+        s.execute("review.compare", &json!({"name": "rev.deckcraft", "data": rev})).unwrap();
+        let before = s.execute("review.revisions", &json!({})).unwrap()["changes"].as_array().unwrap().clone();
+        let ins = before.iter().position(|c| c["kind"] == "inserted").unwrap();
+        let doc = s.doc().unwrap().doc.clone();
+        let undo = s.doc().unwrap().history.undo.len();
+        assert_eq!(s.execute("review.reject", &json!({"index": ins})).unwrap()["rejected"], 1);
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc().unwrap().doc), "rejecting leaves the open deck as it is");
+        let left = s.execute("review.revisions", &json!({})).unwrap();
+        assert_eq!(kinds(&left).len(), before.len() - 1);
+        assert!(!kinds(&left).contains(&"inserted".into()), "{left}");
+        // Accept All takes the rest, never the rejected slide.
+        s.execute("review.accept", &json!({"all": true})).unwrap();
+        let st = s.doc().unwrap();
+        assert_eq!(st.doc.slides.len(), n - 1, "the deleted slide goes, the rejected insertion never comes");
+        assert!(!st.doc.slides.iter().any(|x| super::slide_title(x) == "Brand new"));
+        assert!(s.execute("review.revisions", &json!({})).unwrap()["changes"].as_array().unwrap().is_empty());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc().unwrap().doc));
+        assert_eq!(s.doc().unwrap().history.undo.len(), undo, "rejecting is not an undo step");
+        // Reject All: nothing left to review, the deck as it was; Accept All then has nothing to take.
+        assert_eq!(s.execute("review.reject", &json!({"all": true})).unwrap()["rejected"], before.len() - 1);
+        assert!(s.execute("review.revisions", &json!({})).unwrap()["changes"].as_array().unwrap().is_empty());
+        assert!(s.execute("review.accept", &json!({"all": true})).is_err());
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc().unwrap().doc));
+        assert!(s.execute("review.reject", &json!({"all": true})).is_err(), "nothing left to reject");
+        assert!(s.execute("review.reject", &json!({})).is_err());
+        s.execute("review.endCompare", &json!({})).unwrap();
+        assert!(s.execute("review.reject", &json!({"index": 0})).is_err());
+    }
+
+    #[test]
+    fn rejecting_one_revision_keeps_the_others_in_order() {
+        let (mut s, rev, _) = decks();
+        s.execute("review.compare", &json!({"name": "rev.deckcraft", "data": rev})).unwrap();
+        let before = s.execute("review.revisions", &json!({})).unwrap()["changes"].as_array().unwrap().clone();
+        assert!(s.execute("review.reject", &json!({"index": before.len()})).is_err());
+        s.execute("review.reject", &json!({"index": 0})).unwrap();
+        let left = s.execute("review.revisions", &json!({})).unwrap()["changes"].as_array().unwrap().clone();
+        assert_eq!(left.as_slice(), &before[1..], "the rejected one goes, the others stay in order");
     }
 
     #[test]
