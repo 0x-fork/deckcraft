@@ -713,7 +713,12 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         && !show.zoom_arm
         && !show.reading_bar_hit(&ctx)
         && !pointer_on_media_bar(&ctx, ui, &doc, &show, now);
-    let gif_click = if clicked && on_slide && doc.show.show_media_controls { gif_hit(&ctx, ui, &show, doc_uid, &doc, app) } else { None };
+    // The button is drawn only while the pointer is awake; a hidden button takes no click.
+    let gif_click = if clicked && on_slide && doc.show.show_media_controls && show.pointer_awake(now) {
+        gif_hit(&ctx, ui, &show, doc_uid, &doc, app)
+    } else {
+        None
+    };
     let media_click = if clicked && on_slide && gif_click.is_none() { media_hit(&ctx, ui, &show, &doc) } else { None };
     let under = if on_slide && gif_click.is_none() && media_click.is_none() { shapes_under_pointer(&ctx, ui, &mut show, &doc, now) } else { None };
     let pointing = under.as_ref().is_some_and(|u| u.pick.is_some());
@@ -2304,6 +2309,90 @@ mod tests {
         assert!(harness.state().media.is_playing(id), "the click reached the clip");
         let at = harness.state().media.status(id).map_or(0.0, |s| s.position);
         assert!(at < 5.0, "the click did not seek along the timeline, position {at}");
+    }
+
+    /// Two 1×1 frames (black, then white), 100 ms each.
+    fn two_frame_gif() -> Vec<u8> {
+        let mut b = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff".to_vec();
+        for pixel in [b"\x44\x01", b"\x4c\x01"] {
+            b.extend_from_slice(b"\x21\xf9\x04\x00\x0a\x00\x00\x00");
+            b.extend_from_slice(b"\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02");
+            b.extend_from_slice(pixel);
+            b.push(0);
+        }
+        b.push(0x3b);
+        b
+    }
+
+    /// A running show on the first of two slides; slide 1 holds a large animated GIF. Returns the
+    /// harness, the GIF, and its play/pause button's centre.
+    fn show_with_gif() -> (egui_kittest::Harness<'static, SlideApp>, ShapeId, Pos2) {
+        let mut session = deckcraft_engine::Session::with_new();
+        // The GIF is on slide 1, the slide the editor has selected, with a slide after it.
+        session.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        session.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        session.execute("slide.go", &json!({"index": 1})).unwrap();
+        let id = ShapeId(4100);
+        session
+            .edit(|doc, _| {
+                let media = doc.add_media("a.gif", "image/gif", two_frame_gif()).unwrap();
+                let (w, h) = (doc.slide_size.width, doc.slide_size.height);
+                let slide = std::sync::Arc::make_mut(&mut doc.slides[1]);
+                slide.shapes.push(deckcraft_model::Shape {
+                    id,
+                    xfrm: Some(deckcraft_geom::Xfrm::new(w * 0.2, h * 0.2, w * 0.6, h * 0.6)),
+                    kind: deckcraft_model::ShapeKind::Picture { fill: deckcraft_model::style::PictureFill { media, ..Default::default() } },
+                    ..Default::default()
+                });
+                Ok(())
+            })
+            .unwrap();
+        let slide = std::rc::Rc::new(std::cell::Cell::new(Rect::NOTHING));
+        let slide_seen = slide.clone();
+        let mut app = SlideApp::new(session, crate::Services::default());
+        app.ui.presenter_view = false;
+        let mut harness = egui_kittest::Harness::builder().with_size(vec2(1000.0, 700.0)).with_step_dt(0.25).build_ui_state(
+            move |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                if let (Some(show), Some(d)) = (app.show.as_ref(), app.session.active()) {
+                    slide_seen.set(shown_slide_rect(ui, show, &d.doc));
+                }
+                app.ui(ui);
+            },
+            app,
+        );
+        harness.run_steps(3);
+        harness.state_mut().start_show(1, false);
+        harness.run_steps(2);
+        let doc = harness.state().session.active().unwrap().doc.clone();
+        let srect = slide.get();
+        let k = srect.width() / doc.slide_size.width.max(1.0) as f32;
+        let rect = doc.slides[1].shapes.last().unwrap().xfrm.unwrap();
+        let button = crate::media::gif_button_rect(on_screen(srect, k, &rect)).center();
+        (harness, id, button)
+    }
+
+    /// The GIF's play/pause button is drawn only while the pointer is awake, so a click on its
+    /// spot after 2.5 s without movement advances the show instead of pausing the GIF.
+    #[test]
+    fn gif_button_click_needs_an_awake_pointer() {
+        let (mut harness, id, button) = show_with_gif();
+        harness.hover_at(button);
+        harness.run_steps(2);
+        click_at(&mut harness, button);
+        harness.run_steps(2);
+        assert!(harness.state().session.gif_paused.contains(&id), "an awake pointer's click pauses the GIF");
+        assert_eq!(harness.state().show.as_ref().unwrap().state.slide, 1);
+
+        let (mut harness, id, button) = show_with_gif();
+        harness.hover_at(button);
+        harness.run_steps(2);
+        harness.run_steps(12);
+        assert!(!harness.state().show.as_ref().unwrap().pointer_awake(harness.ctx.input(|i| i.time)));
+        click_at(&mut harness, button);
+        harness.run_steps(2);
+        assert!(!harness.state().session.gif_paused.contains(&id), "the hidden button is not clickable");
+        assert_eq!(harness.state().show.as_ref().unwrap().state.slide, 2, "the click advanced the show");
     }
 
     /// Send real egui key events to the presenter UI, without the audience window's handler.
