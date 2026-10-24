@@ -2171,6 +2171,106 @@ fn edit_points_types_and_handles() {
     assert!((ho3.unwrap() - ho).hypot() < 1e-3);
 }
 
+#[test]
+fn edit_points_straight_and_curved_segments() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    let q = |s: &mut Session| s.execute("shape.points", &json!({})).unwrap();
+    let before = q(&mut s)["paths"].clone();
+    // The closing edge ends on the first point, so it is segment 0; an outline starts straight.
+    assert_eq!(q(&mut s)["segments"][0], json!(["straight", "straight", "straight", "straight"]));
+    // Curved Segment: the top edge gets handles at its thirds, so it looks the same until dragged.
+    s.execute("shape.segmentType", &json!({"segment": 1, "type": "curved"})).unwrap();
+    assert_eq!(q(&mut s)["segments"][0], json!(["straight", "curved", "straight", "straight"]));
+    assert_eq!(q(&mut s)["paths"], before);
+    let id = deckcraft_model::ShapeId(q(&mut s)["id"].as_u64().unwrap() as u32);
+    let handles = |s: &Session, i| {
+        let st = s.doc().unwrap();
+        crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, i).unwrap()
+    };
+    let (out0, in1) = (handles(&s, 0).1.unwrap(), handles(&s, 1).0.unwrap());
+    assert!((out0 - deckcraft_geom::Point::new(100.0 + 200.0 / 3.0, 100.0)).hypot() < 1e-3, "{out0:?}");
+    assert!((in1 - deckcraft_geom::Point::new(100.0 + 400.0 / 3.0, 100.0)).hypot() < 1e-3, "{in1:?}");
+    // Bend it, then Straight Segment drops its handles; the points stay where they are.
+    s.execute("shape.moveHandle", &json!({"index": 1, "side": "in", "x": in1.x, "y": 60})).unwrap();
+    let bent = q(&mut s)["paths"].clone();
+    s.execute("shape.segmentType", &json!({"segment": 1, "type": "straight"})).unwrap();
+    assert_eq!(q(&mut s)["segments"][0][1], "straight");
+    assert_eq!((handles(&s, 0).1, handles(&s, 1).0), (None, None));
+    assert_eq!(q(&mut s)["paths"], before);
+    // Each change is one undo step.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(q(&mut s)["segments"][0][1], "curved");
+    assert_eq!(q(&mut s)["paths"], bent);
+    // The closing edge is segment 0.
+    s.execute("shape.segmentType", &json!({"segment": 0, "type": "curved"})).unwrap();
+    assert_eq!(q(&mut s)["segments"][0][0], "curved");
+    // Asking for the type a segment already has is not an undo step.
+    let depth = s.doc().unwrap().history.undo.len();
+    s.execute("shape.segmentType", &json!({"segment": 2, "type": "straight"})).unwrap();
+    assert_eq!(s.doc().unwrap().history.undo.len(), depth);
+    assert!(s.execute("shape.segmentType", &json!({"segment": 9, "type": "curved"})).is_err());
+    assert!(s.execute("shape.segmentType", &json!({"segment": 1, "type": "wavy"})).is_err());
+}
+
+#[test]
+fn edit_points_open_and_close_path() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    let pts =
+        |s: &mut Session| -> Vec<[f64; 2]> { serde_json::from_value(s.execute("shape.points", &json!({})).unwrap()["paths"][0].clone()).unwrap() };
+    let d = |s: &Session| match &s.doc().unwrap().selected_shapes()[0].geom {
+        deckcraft_model::Geom::Custom { paths } => paths[0].d.clone(),
+        g => panic!("{g:?}"),
+    };
+    assert!(s.execute("shape.closePath", &json!({"index": 0})).is_err(), "the outline is closed already");
+    // A point type remembered for handle drags belongs to the old numbering: opening forgets it.
+    s.execute("shape.pointType", &json!({"index": 2, "type": "straight"})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.tool.vertex_kind.is_some());
+    // Open Path at the bottom-right corner: the outline now starts and ends there, as two points.
+    s.execute("shape.openPath", &json!({"index": 2})).unwrap();
+    assert!(!d(&s).contains('Z'), "{}", d(&s));
+    assert_eq!(s.tool.vertex_kind, None);
+    let v = pts(&mut s);
+    assert_eq!(v, vec![[300.0, 200.0], [100.0, 200.0], [100.0, 100.0], [300.0, 100.0], [300.0, 200.0]]);
+    assert!(s.execute("shape.openPath", &json!({"index": 1})).is_err(), "the outline is open already");
+    // The two ends move apart; Close Path joins them with a straight segment.
+    s.execute("shape.movePoint", &json!({"index": 4, "x": 320, "y": 180})).unwrap();
+    s.execute("shape.closePath", &json!({"index": 1})).unwrap();
+    assert!(d(&s).ends_with('Z'), "{}", d(&s));
+    assert_eq!(pts(&mut s).len(), 5);
+    assert_eq!(s.execute("shape.points", &json!({})).unwrap()["segments"][0][0], "straight");
+    // Ends that meet become one point again.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("shape.closePath", &json!({"index": 4})).unwrap();
+    assert_eq!(pts(&mut s), vec![[300.0, 200.0], [100.0, 200.0], [100.0, 100.0], [300.0, 100.0]]);
+    // Opening at the first point keeps the order.
+    s.execute("shape.openPath", &json!({"index": 0})).unwrap();
+    assert_eq!(pts(&mut s), vec![[300.0, 200.0], [100.0, 200.0], [100.0, 100.0], [300.0, 100.0], [300.0, 200.0]]);
+    assert!(s.execute("shape.openPath", &json!({"index": 9})).is_err());
+}
+
+#[test]
+fn edit_points_right_click_picks_the_point_or_the_segment() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    // The middle of the right edge: the segment ending at point 2.
+    right_click(&mut s, 300.0, 150.0);
+    assert_eq!((s.tool.edit_segment, s.tool.edit_vertex), (Some((0, 2)), None));
+    right_click(&mut s, 300.0, 100.0);
+    assert_eq!((s.tool.edit_segment, s.tool.edit_vertex), (None, Some((0, 1))));
+    right_click(&mut s, 200.0, 150.0);
+    assert_eq!((s.tool.edit_segment, s.tool.edit_vertex), (None, None));
+}
+
 /// #392: a `.deckcraft` whose embedded picture is damaged opens as an untitled "(Repaired)"
 /// copy with a message, so Save can't overwrite the original with the empty media.
 #[test]
