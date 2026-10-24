@@ -197,8 +197,8 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                         "uc" => st.uc = arg.unwrap_or(1).clamp(0, 8) as usize,
                         "u" => {
                             let v = arg.unwrap_or(0);
-                            let v = if v < 0 { v + 65536 } else { v } as u32;
-                            push_utf16(&mut line, v);
+                            // RTF writes UTF-16 units as signed 16-bit values.
+                            push_utf16(&mut line, (v & 0xffff) as u32);
                             pending_skip = 0;
                             // Skip the fallback characters.
                             let mut k = st.uc;
@@ -227,6 +227,7 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                     i = advance(rtf, i, 3);
                     if !st.skip
                         && let Some(h) = hex
+                        && h != 0
                     {
                         line.push(cp1252(h));
                     }
@@ -252,7 +253,7 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                 if !st.skip
                     && let Some(t) = rtf.get(s..i)
                 {
-                    line.push_str(t);
+                    line.push_str(&t.replace('\u{0}', ""));
                 }
             }
         }
@@ -261,8 +262,12 @@ pub fn rtf_to_outline(rtf: &str) -> String {
     finish_surrogates(out)
 }
 
-/// Push a UTF-16 unit; surrogate halves are parked as private markers and joined afterwards.
+/// Push a UTF-16 unit; surrogate halves are parked as private markers (NUL plus four hex digits)
+/// and joined afterwards. NUL itself is the marker, so a NUL unit is dropped.
 fn push_utf16(line: &mut String, v: u32) {
+    if v == 0 {
+        return;
+    }
     match char::from_u32(v) {
         Some(c) => line.push(c),
         None => line.push_str(&format!("\u{0}{v:04x}")),
@@ -286,7 +291,10 @@ fn finish_surrogates(s: String) -> String {
             }
             _ => {
                 out.push('\u{fffd}');
-                rest = rest.get(p + 5..).unwrap_or("");
+                // Skip the NUL and, when four hex digits follow, the digits; otherwise
+                // resume right after the NUL so no following character is lost.
+                let skip = if hi.is_some() { p + 5 } else { p + 1 };
+                rest = rest.get(skip..).unwrap_or("");
             }
         }
     }
@@ -318,6 +326,15 @@ mod tests {
         for rtf in [r"{\rtf1 \u233é€ z\par}", r"{\rtf1 \'é\par}", r"{\rtf1 \'4", r"{\rtf1 \u233"] {
             let _ = rtf_to_outline(rtf);
         }
+    }
+
+    /// NUL is the surrogate marker, so NULs from `\u0`, `\'00` or raw bytes must not reach `finish_surrogates`.
+    #[test]
+    fn nul_escapes_do_not_drop_text_or_add_a_slide() {
+        assert_eq!(rtf_to_outline(r"{\rtf1 \u0?abcé\par}"), "abcé\n");
+        assert_eq!(rtf_to_outline(r"{\rtf1 a\'00bé\par}"), "abé\n");
+        assert_eq!(rtf_to_outline("{\\rtf1 a\0b\\par}\0\0"), "ab\n");
+        assert_eq!(rtf_to_outline(r"{\rtf1 x\u-70000?y\par}"), "x\u{ee90}y\n");
     }
 
     #[test]
