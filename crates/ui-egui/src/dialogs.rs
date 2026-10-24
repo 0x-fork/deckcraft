@@ -1095,7 +1095,8 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             // The format applies to an automatic date; a fixed one is the text as typed.
             let automatic = d.get("dateText", &hf.date_text).is_empty();
             let fmt_now = if hf.date_format.is_empty() { "datetime1".to_string() } else { hf.date_format.clone() };
-            let fmt = d.get("dateFormat", &fmt_now);
+            // Not `d.get`: that stores the default as if the user had picked it.
+            let fmt = d.fields.get("dateFormat").cloned().unwrap_or_else(|| fmt_now.clone());
             let rows = date_rows("en-US");
             let label = rows.iter().find(|(k, _)| *k == fmt).map(|(_, s)| s.clone()).unwrap_or_else(|| fmt.clone());
             ui.add_enabled_ui(date && automatic, |ui| {
