@@ -2084,6 +2084,8 @@ mod compare_tests;
 #[cfg(test)]
 mod eyedropper_tests;
 #[cfg(test)]
+mod field_frame_tests;
+#[cfg(test)]
 mod find_dialog_tests;
 #[cfg(test)]
 mod huge_deck_tests;
