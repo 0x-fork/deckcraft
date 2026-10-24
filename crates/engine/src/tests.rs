@@ -3389,6 +3389,71 @@ fn autocorrect_superscripts_ordinals_as_you_type() {
 }
 
 #[test]
+fn autoformat_starts_bulleted_and_numbered_lists_as_you_type() {
+    use deckcraft_model::text::Bullet;
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    let para = |s: &Session| {
+        let st = s.doc().unwrap();
+        let sh = st.current_slide().unwrap().shapes.iter().find(|sh| sh.id.0 == title).unwrap();
+        let p = sh.text.as_ref().unwrap().paragraphs[0].clone();
+        (p.text(), p.props.bullet)
+    };
+    // Clear the title (and its paragraph formatting) and type `text` one character at a time.
+    let typed = |s: &mut Session, text: &str| {
+        s.execute("text.edit", &json!({"id": title})).unwrap();
+        s.execute("text.selectAll", &json!({})).ok();
+        s.execute("text.delete", &json!({"dir": "backward"})).ok();
+        s.execute("format.bullets", &json!({"on": false})).unwrap();
+        for c in text.chars() {
+            s.execute("text.insert", &json!({"text": c.to_string()})).unwrap();
+        }
+        para(s)
+    };
+    let ch = |c: &str| Some(Bullet::Char { char: c.into() });
+    let num = |scheme: &str| Some(Bullet::AutoNum { scheme: scheme.into(), start_at: 1 });
+    for (text, bullet) in [
+        ("* x", ch("•")),
+        ("- x", ch("–")),
+        ("– x", ch("–")),
+        ("-- x", ch("■")),
+        ("— x", ch("■")),
+        ("> x", ch("➢")),
+        ("<> x", ch("◆")),
+        ("*\tx", ch("•")),
+        ("1. x", num("arabicPeriod")),
+        ("1) x", num("arabicParenR")),
+        ("I. x", num("romanUcPeriod")),
+        ("i. x", num("romanLcPeriod")),
+        ("A. x", num("alphaUcPeriod")),
+        ("a. x", num("alphaLcPeriod")),
+        ("a) x", num("alphaLcParenR")),
+    ] {
+        assert_eq!(typed(&mut s, text), ("x".to_string(), bullet), "{text:?}");
+    }
+    // Only a lead at the start of the paragraph, and only before a space or tab.
+    let none = Some(Bullet::None);
+    assert_eq!(typed(&mut s, "9 * x"), ("9 * x".to_string(), none.clone()));
+    assert_eq!(typed(&mut s, "*, x"), ("*, x".to_string(), none.clone()));
+    assert_eq!(typed(&mut s, "2. x"), ("2. x".to_string(), none.clone()));
+    assert_eq!(typed(&mut s, "b) x"), ("b) x".to_string(), none.clone()));
+    // Backspace right after puts the lead and the space back, with the paragraph as it was.
+    assert_eq!(typed(&mut s, "* "), (String::new(), ch("•")));
+    s.execute("text.delete", &json!({"dir": "backward"})).unwrap();
+    assert_eq!(para(&s), ("* ".to_string(), none.clone()));
+    s.execute("text.insert", &json!({"text": "x"})).unwrap();
+    assert_eq!(para(&s), ("* x".to_string(), none.clone()));
+    // After anything else Backspace deletes as usual.
+    assert_eq!(typed(&mut s, "1. xy"), ("xy".to_string(), num("arabicPeriod")));
+    s.execute("text.delete", &json!({"dir": "backward"})).unwrap();
+    assert_eq!(para(&s), ("x".to_string(), num("arabicPeriod")));
+    // The AutoCorrect option turns it off.
+    assert_eq!(s.execute("text.autocorrect", &json!({})).unwrap()["lists"], true);
+    s.execute("text.autocorrect", &json!({"lists": false})).unwrap();
+    assert_eq!(typed(&mut s, "* x"), ("* x".to_string(), none));
+}
+
+#[test]
 fn theme_variants_apply_and_report_the_current_one() {
     let mut s = session();
     let name = deckcraft_model::theme::builtin_themes()[1].name.clone();
