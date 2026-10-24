@@ -891,6 +891,8 @@ pub fn nice_scale(lo: f64, hi: f64) -> (f64, f64, f64) {
     } else {
         10.0
     } * mag;
+    // Subnormal spans underflow to a zero or NaN step: use the span itself.
+    let step = if step > 0.0 && step.is_finite() { step } else { span };
     let min = (lo / step).floor() * step;
     let max = (hi / step).ceil() * step;
     let max = if (max - min).abs() <= 1e-12 * data_mag { min + step } else { max };
@@ -916,6 +918,8 @@ mod tests {
         let (min, max, step) = axis_scale(0.0, 5e-324, None, None, None, 8, true);
         assert!(min.is_finite() && max.is_finite() && step.is_finite(), "{min} {max} {step}");
         assert!(step > 0.0 && max >= min, "{min} {max} {step}");
+        let (min, max, step) = nice_scale(0.0, f64::from_bits(1));
+        assert!(min.is_finite() && max.is_finite() && step > 0.0 && step.is_finite() && max > min, "{min} {max} {step}");
     }
 
     #[test]
