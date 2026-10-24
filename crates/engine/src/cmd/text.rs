@@ -425,6 +425,8 @@ pub(crate) fn insert_text(s: &mut Session, text: &str, props: Option<RunProps>) 
         c
     })?;
     autocorrect(s, text.chars().count() == 1)?;
+    // AutoCorrect can move the caret: a replaced word, or a list lead it removed.
+    let pos = s.doc()?.selection.text.as_ref().map_or(pos, |t| t.caret);
     Ok(json!({"caret": [pos.0, pos.1]}))
 }
 

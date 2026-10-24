@@ -3335,6 +3335,10 @@ fn autocorrect_options_as_you_type() {
     };
     assert_eq!(typed(&mut s, "hello world. see you monday, i think. "), "Hello world. See you Monday, I think. ");
     assert_eq!(typed(&mut s, "THe tHIS 1/2 recieved... "), "The This ½ received… ");
+    // `text.insert` reports the caret after the correction.
+    assert_eq!(typed(&mut s, "(c)"), "(c)");
+    assert_eq!(s.execute("text.insert", &json!({"text": " "})).unwrap()["caret"], json!([0, 2]));
+    assert_eq!(s.execute("text.get", &json!({"id": title})).unwrap()["text"], "© ");
     // Options turn rules off.
     s.execute("text.autocorrect", &json!({"sentenceCaps": false, "days": false})).unwrap();
     assert_eq!(typed(&mut s, "hello monday "), "hello monday ");
@@ -3437,8 +3441,11 @@ fn autoformat_starts_bulleted_and_numbered_lists_as_you_type() {
     assert_eq!(typed(&mut s, "*, x"), ("*, x".to_string(), none.clone()));
     assert_eq!(typed(&mut s, "2. x"), ("2. x".to_string(), none.clone()));
     assert_eq!(typed(&mut s, "b) x"), ("b) x".to_string(), none.clone()));
+    // The space that starts the list reports the caret at the start of the emptied paragraph.
+    assert_eq!(typed(&mut s, "*"), ("*".to_string(), none.clone()));
+    assert_eq!(s.execute("text.insert", &json!({"text": " "})).unwrap()["caret"], json!([0, 0]));
+    assert_eq!(para(&s), (String::new(), ch("•")));
     // Backspace right after puts the lead and the space back, with the paragraph as it was.
-    assert_eq!(typed(&mut s, "* "), (String::new(), ch("•")));
     s.execute("text.delete", &json!({"dir": "backward"})).unwrap();
     assert_eq!(para(&s), ("* ".to_string(), none.clone()));
     s.execute("text.insert", &json!({"text": "x"})).unwrap();
