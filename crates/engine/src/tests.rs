@@ -339,6 +339,19 @@ fn align_and_distribute() {
 }
 
 #[test]
+fn distribute_wide_middle_stays_in_selection_bounds() {
+    let mut s = session();
+    let mut ids = vec![];
+    for (x, w) in [(0.0, 10.0), (20.0, 100.0), (30.0, 10.0)] {
+        ids.push(s.execute("shape.insert", &json!({"preset": "rect", "rect": [x, 10, w, 10]})).unwrap()["id"].as_u64().unwrap());
+    }
+    s.execute("edit.select", &json!({"ids": ids})).unwrap();
+    s.execute("arrange.distribute", &json!({"dir": "horizontal", "to": "selection"})).unwrap();
+    let xs: Vec<f64> = ids.iter().map(|i| s.execute("shape.inspect", &json!({"id": i})).unwrap()["box"]["x"].as_f64().unwrap()).collect();
+    assert!(xs.iter().all(|x| (*x - [0.0, 10.0, 110.0][xs.iter().position(|y| y == x).unwrap()]).abs() < 1e-6), "{xs:?}");
+}
+
+#[test]
 fn pointer_draw_move_resize() {
     let mut s = session();
     s.set_tool(ToolKind::Shape { preset: "rect".into() });
