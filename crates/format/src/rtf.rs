@@ -106,6 +106,16 @@ const SKIP: &[&str] = &[
     "fldinst",
 ];
 
+/// `i + n`, or one character on when that would land inside a multi-byte character (a fallback
+/// run after `\uN` or `\'hh` may be followed by non-ASCII text).
+fn advance(rtf: &str, i: usize, n: usize) -> usize {
+    if rtf.is_char_boundary(i + n) {
+        i + n
+    } else {
+        i + rtf.get(i..).and_then(|r| r.chars().next()).map_or(1, char::len_utf8)
+    }
+}
+
 /// Read an RTF outline into tab-indented outline text: a paragraph's outline level (or its left
 /// indent in 0.25" steps) becomes its number of tabs.
 pub fn rtf_to_outline(rtf: &str) -> String {
@@ -198,11 +208,11 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                             let mut k = st.uc;
                             while k > 0 && i < b.len() {
                                 if b[i] == b'\\' && b.get(i + 1) == Some(&b'\'') {
-                                    i += 4;
+                                    i = advance(rtf, i, 4);
                                 } else if b[i] == b'{' || b[i] == b'}' || b[i] == b'\\' {
                                     break;
                                 } else {
-                                    i += 1;
+                                    i = advance(rtf, i, 1);
                                 }
                                 k -= 1;
                             }
@@ -218,7 +228,7 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                     }
                 } else if n == b'\'' {
                     let hex = rtf.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok());
-                    i += 3;
+                    i = advance(rtf, i, 3);
                     if !st.skip
                         && let Some(h) = hex
                     {
@@ -244,7 +254,9 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                     i += 1;
                 }
                 if !st.skip {
-                    line.push_str(&rtf[s..i]);
+                    if let Some(t) = rtf.get(s..i) {
+                        line.push_str(t);
+                    }
                 }
             }
         }
@@ -301,6 +313,16 @@ fn cp1252(b: u8) -> char {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    /// Non-ASCII text after a `\\uN` or `\\'hh` escape used to split a character and panic.
+    #[test]
+    fn non_ascii_text_after_escapes_does_not_panic() {
+        let out = rtf_to_outline(r"{\rtf1\pard \u233é x \'€y\par}");
+        assert!(out.contains('x'), "{out:?}");
+        for rtf in [r"{\rtf1 \u233é€ z\par}", r"{\rtf1 \'é\par}", r"{\rtf1 \'4", r"{\rtf1 \u233"] {
+            let _ = rtf_to_outline(rtf);
+        }
+    }
 
     #[test]
     fn export_reads_back_as_the_same_outline() {
