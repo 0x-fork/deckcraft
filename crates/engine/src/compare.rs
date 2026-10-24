@@ -50,9 +50,22 @@ pub fn pending(doc: &Presentation, c: &Compare) -> Vec<Change> {
 
 /// Whether `ch` was rejected. Positional matching re-pairs slides by index when the open deck gains
 /// or loses a slide, which changes the open half of the key; the revised index stays put, so any
-/// rejected key for the same revised slide counts.
+/// rejected key for the same revised slide counts. An open slide pushed past the end of the revised
+/// deck turns into a deletion; it stays kept when a rejected key names it.
 fn is_rejected(doc: &Presentation, c: &Compare, ch: &Change) -> bool {
-    c.rejected.contains(&ChangeKey::of(doc, ch)) || (c.by_position && ch.revised.is_some() && c.rejected.iter().any(|k| k.revised == ch.revised))
+    if c.rejected.contains(&ChangeKey::of(doc, ch)) {
+        return true;
+    }
+    if !c.by_position {
+        return false;
+    }
+    match ch.kind {
+        ChangeKind::Deleted => {
+            let open = doc.slides.get(ch.slide).map(|s| s.id);
+            open.is_some() && c.rejected.iter().any(|k| k.open == open)
+        }
+        _ => ch.revised.is_some() && c.rejected.iter().any(|k| k.revised == ch.revised),
+    }
 }
 
 /// Whether `cur` and `rev` share no slide id (then slides match by position).
@@ -564,5 +577,32 @@ mod tests {
         s.execute("review.accept", &json!({"all": true})).unwrap();
         let texts = slide_texts(&s);
         assert!(!texts.iter().any(|t| t.contains('B')), "{texts:?}");
+    }
+
+    /// By position, inserting a slide before a rejected pair pushes the pair's open slide past the
+    /// end of the revised deck; it must not turn into a deletion that Accept All carries out.
+    #[test]
+    fn a_rejected_positional_revision_does_not_become_a_deletion_when_a_slide_is_inserted() {
+        let mut s = Session::with_new();
+        let mut other = Session::with_new();
+        for t in ["A", "X"] {
+            s.execute("slide.new", &json!({"layout": "title", "title": t})).unwrap();
+        }
+        for t in ["B", "Y"] {
+            other.execute("slide.new", &json!({"layout": "title", "title": t})).unwrap();
+        }
+        let data = other.execute("file.saveBytes", &json!({"format": "pptx"})).unwrap()["data"].as_str().unwrap().to_string();
+        let v = s.execute("review.compare", &json!({"name": "o.pptx", "data": data})).unwrap();
+        assert_eq!(v["byPosition"], true, "{v}");
+        let changes = v["changes"].as_array().unwrap();
+        let last = changes.iter().filter(|c| c["kind"] == "changed").map(|c| c["revised"].as_u64().unwrap()).max().expect("a changed slide");
+        let at = changes.iter().position(|c| c["kind"] == "changed" && c["revised"] == last).unwrap();
+        let open_id = s.doc().unwrap().doc.slides[last as usize].id;
+        s.execute("review.reject", &json!({"index": at})).unwrap();
+        s.execute("slide.new", &json!({"layout": "title", "title": "N"})).unwrap();
+        let n_at = slide_texts(&s).iter().position(|t| t.contains('N')).unwrap();
+        s.execute("slide.move", &json!({"from": n_at, "to": 0})).unwrap();
+        s.execute("review.accept", &json!({"all": true})).unwrap();
+        assert!(s.doc().unwrap().doc.slides.iter().any(|sl| sl.id == open_id), "the open slide whose revision was rejected was deleted");
     }
 }
