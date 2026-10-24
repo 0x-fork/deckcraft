@@ -346,6 +346,8 @@ fn master_list(app: &mut SlideApp, ui: &mut Ui) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use egui_kittest::Harness;
 
     use super::*;
