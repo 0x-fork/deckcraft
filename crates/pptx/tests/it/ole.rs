@@ -131,8 +131,19 @@ fn an_ole_objects_fallback_picture_gives_it_its_fill_and_outline() {
         r#"<a:solidFill><a:srgbClr val="FF9900"/></a:solidFill><a:ln w="12700"><a:solidFill><a:srgbClr val="0000FF"/></a:solidFill></a:ln>"#,
     )));
     let orange = deckcraft_model::style::Fill::solid(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(0xFF, 0x99, 0)));
-    assert_eq!(filled.fill, Some(orange));
+    assert_eq!(filled.fill, Some(orange.clone()));
     assert_eq!(filled.line.as_ref().and_then(|l| l.width), Some(1.0));
+    // Saved as its preview picture (its kept XML can't be written back), it keeps the fill.
+    let mut p = deckcraft_pptx::import(&deck(pic(r#"<a:solidFill><a:srgbClr val="FF9900"/></a:solidFill>"#))).expect("import");
+    for s in &mut std::sync::Arc::make_mut(&mut p.slides[0]).shapes {
+        if let ShapeKind::Opaque { xml, .. } = &mut s.kind {
+            xml.clear();
+        }
+    }
+    let back = deckcraft_pptx::import(&deckcraft_pptx::export(&p).expect("export")).expect("reimport");
+    let saved = back.slides[0].shapes.iter().find(|s| s.name == "Object 3").expect("object");
+    assert!(matches!(saved.kind, ShapeKind::Picture { .. }), "{:?}", saved.kind);
+    assert_eq!(saved.fill, Some(orange));
     // Without a fill of its own the object stays unfilled.
     assert_eq!(object(deck(pic(""))).fill, None);
 }
