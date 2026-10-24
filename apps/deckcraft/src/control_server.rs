@@ -66,9 +66,12 @@ pub fn start(port: u16, ctx: egui::Context) -> Receiver<ControlRequest> {
 /// core busy until it recovers.
 const ACCEPT_RETRY: Duration = Duration::from_millis(100);
 
-/// The longest the accepting thread drains a connection it refused as busy before closing it.
-/// It accepts no other connection meanwhile.
+/// The longest a connection refused as busy is drained before it is closed.
 const REFUSED_GRACE: Duration = Duration::from_millis(250);
+
+/// Refused connections drained at once, each on a thread of its own. Past this many, a refused
+/// connection gets the busy reply and is closed without a drain.
+const MAX_REFUSING: usize = 16;
 
 /// The connections `incoming` accepts, calling `wait` after each failed accept.
 fn accepted<T>(incoming: impl Iterator<Item = std::io::Result<T>>, mut wait: impl FnMut()) -> impl Iterator<Item = T> {
@@ -79,16 +82,14 @@ fn accepted<T>(incoming: impl Iterator<Item = std::io::Result<T>>, mut wait: imp
 fn serve_listener(listener: TcpListener, limits: Limits, ctx: egui::Context) -> Receiver<ControlRequest> {
     let (tx, rx) = sync_channel::<ControlRequest>(limits.queue.max(1));
     let active = Arc::new(AtomicUsize::new(0));
+    let refusing = Arc::new(AtomicUsize::new(0));
     std::thread::spawn(move || {
         for mut stream in accepted(listener.incoming(), || std::thread::sleep(ACCEPT_RETRY)) {
             let _ = stream.set_write_timeout(Some(limits.write_timeout));
             if active.fetch_add(1, Ordering::SeqCst) >= limits.max_clients {
                 active.fetch_sub(1, Ordering::SeqCst);
                 let _ = writeln!(stream, "{}", json!({"ok": false, "error": "busy: too many control connections"}));
-                // A peer that wrote a line before it read this reply would see only a reset.
-                if let Ok(read) = stream.try_clone() {
-                    close_politely(&stream, &mut BufReader::new(read), limits.write_timeout.min(REFUSED_GRACE));
-                }
+                refuse(stream, &refusing, limits.write_timeout.min(REFUSED_GRACE));
                 continue;
             }
             let slot = Slot(Arc::clone(&active));
@@ -104,6 +105,27 @@ fn serve_listener(listener: TcpListener, limits: Limits, ctx: egui::Context) -> 
         }
     });
     rx
+}
+
+/// Close a connection that was told it is refused. A peer that wrote a line before it read the
+/// reply would see only a reset, so the connection is drained for up to `grace` first, on a
+/// thread of its own: the accepting thread goes straight back to accepting. Past
+/// [`MAX_REFUSING`] drains at once, the connection is closed without one.
+fn refuse(stream: TcpStream, refusing: &Arc<AtomicUsize>, grace: Duration) {
+    if refusing.fetch_add(1, Ordering::SeqCst) >= MAX_REFUSING {
+        refusing.fetch_sub(1, Ordering::SeqCst);
+        return;
+    }
+    let slot = Slot(Arc::clone(refusing));
+    let spawned = std::thread::Builder::new().name("control-refused".into()).spawn(move || {
+        let _slot = slot;
+        if let Ok(read) = stream.try_clone() {
+            close_politely(&stream, &mut BufReader::new(read), grace);
+        }
+    });
+    if spawned.is_err() {
+        log::warn!("control server could not start a thread to close a refused connection");
+    }
 }
 
 /// Holds one connection slot; gives it back when the client thread ends, however it ends.
@@ -436,6 +458,26 @@ mod tests {
         }
     }
 
+    /// Peers refused as busy that stay connected without sending anything do not hold up the
+    /// connections after them: each one's drain runs to its deadline on a thread of its own, and
+    /// past `MAX_REFUSING` drains at once a refused connection is closed without one.
+    #[test]
+    fn silent_refused_peers_do_not_delay_the_next_refusal() {
+        let (addr, rx) = server(Limits { max_clients: 1, idle_timeout: Duration::from_secs(30), ..small() });
+        ui(rx);
+        let (mut hr, mut hw) = client(addr);
+        writeln!(hw, r#"{{"id":1,"method":"m"}}"#).unwrap();
+        assert!(reply(&mut hr).is_some());
+        // Twenty drains of 250 ms each, one after another, would take five seconds.
+        let silent: Vec<_> = (0..MAX_REFUSING + 4).map(|_| client(addr)).collect();
+        let start = Instant::now();
+        let (mut r, _w) = client(addr);
+        let refused = reply(&mut r).unwrap();
+        assert!(refused["error"].as_str().unwrap_or_default().starts_with("busy"), "{refused}");
+        assert!(start.elapsed() < Duration::from_secs(1), "refused after {:?}", start.elapsed());
+        drop(silent);
+    }
+
     /// A peer that keeps its connection open after its line was rejected gives its slot back at
     /// the drain deadline (the write timeout), not at the idle timeout.
     #[test]
@@ -483,7 +525,9 @@ mod tests {
 
     #[test]
     fn connection_limit_refuses_then_frees_slot() {
-        let (addr, rx) = server(small());
+        // `a` sends nothing. Under a 300 ms idle timeout, a slow run could close it before the
+        // third peer connected, and that peer then took its slot instead of reading `busy`.
+        let (addr, rx) = server(Limits { idle_timeout: Duration::from_secs(30), ..small() });
         ui(rx);
         let a = client(addr);
         let (mut br, mut bw) = client(addr);
