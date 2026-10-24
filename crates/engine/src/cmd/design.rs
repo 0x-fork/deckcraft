@@ -961,8 +961,6 @@ fn header_footer(s: &mut Session, p: &Value) -> Result<Value> {
     ok()
 }
 
-/// Point a slide's date placeholder at a fixed date (its own plain text) or, for an empty
-/// `fixed`, at an automatic date field (one it already has keeps its format).
 /// The date field type `format` names, `datetime1` when it is empty or unknown.
 fn date_kind(format: &str) -> &str {
     if deckcraft_text::datetime::DATE_KINDS.contains(&format) { format } else { "datetime1" }
@@ -974,6 +972,8 @@ fn date_now(format: &str) -> String {
     deckcraft_text::datetime::DateTime::now_local().and_then(|now| deckcraft_text::datetime::field_text(kind, None, now)).unwrap_or_else(today)
 }
 
+/// Point a slide's date placeholder at a fixed date (its own plain text) or, for an empty
+/// `fixed`, at an automatic date field (one it already has keeps its format).
 fn set_date(sh: &mut Shape, fixed: &str, format: &str) {
     let runs = || sh.text.iter().flat_map(|t| &t.paragraphs).flat_map(|p| &p.runs);
     let field_now = runs().find_map(|r| match &r.kind {
