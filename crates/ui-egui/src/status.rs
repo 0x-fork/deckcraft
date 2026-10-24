@@ -278,6 +278,7 @@ mod tests {
         let mut app = SlideApp::new(Session::with_new(), Services::default());
         app.session.execute("shape.insert", &json!({"preset": "rect", "rect": [80, 120, 400, 100], "text": "hello"})).unwrap();
         app.session.execute("format.language", &json!({"lang": "en-US-x-a-very-long-private-use-tag"})).unwrap();
+        app.ui.notes = false;
         let size = egui::vec2(700.0, 800.0);
         let mut h = Harness::builder().with_size(size).build_ui_state(
             |ui, app: &mut SlideApp| {
@@ -288,14 +289,23 @@ mod tests {
         );
         h.run_steps(3);
         assert!(!h.state().ui.notes);
-        // The Notes button is the rightmost control, 8 points in from the right edge.
-        let at = egui::pos2(size.x - 8.0 - 20.0, size.y - 14.0);
-        h.hover_at(at);
-        h.run_steps(1);
-        for pressed in [true, false] {
-            h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
-        }
-        h.run_steps(3);
+        // The controls on the right start 560 points from the bar's right edge (x 132); the Notes
+        // button is the leftmost of them (x 167..231 at this width). The bar ends 8 points above
+        // the bottom edge and is 28 points high.
+        let y = size.y - 8.0 - 14.0;
+        let click = |h: &mut Harness<'_, SlideApp>, x: f32| {
+            let at = egui::pos2(x, y);
+            h.hover_at(at);
+            h.run_steps(1);
+            for pressed in [true, false] {
+                h.event(Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE });
+            }
+            h.run_steps(3);
+        };
+        // The gap before the controls is outside the language name's clickable area.
+        click(&mut h, 150.0);
+        assert!(h.state().dialog.is_none(), "the Language dialog stayed closed");
+        click(&mut h, 200.0);
         assert!(h.state().ui.notes, "the click reached the Notes button");
         assert!(h.state().dialog.is_none(), "the Language dialog stayed closed");
     }
