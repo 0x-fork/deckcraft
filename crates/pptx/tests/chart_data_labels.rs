@@ -152,3 +152,24 @@ fn a_combo_chart_keeps_each_groups_own_label_setting() {
     assert!(!c.series_data_labels(&c.series[0]), "so the bars stay quiet");
     assert!(c.series_data_labels(&c.series[1]), "the line takes the chart-wide on");
 }
+
+/// Turning Data Labels on through `chart.options` shows the labels of series that the file
+/// switched off one by one.
+#[test]
+fn chart_options_data_labels_on_overrides_series_off() {
+    use deckcraft_engine::Session;
+    let p = reimport(&bar_chart_pptx(), |xml| xml.replace("<c:cat>", r#"<c:dLbls><c:showVal val="0"/></c:dLbls><c:cat>"#));
+    assert!(chart_of(&p).series.iter().all(|s| !chart_of(&p).series_data_labels(s)), "every series starts quiet");
+    let path = std::env::temp_dir().join("deckcraft_series_labels_off.pptx");
+    std::fs::write(&path, deckcraft_pptx::export(&p).expect("export")).expect("write");
+    let mut s = Session::with_new();
+    s.execute("file.open", &serde_json::json!({"path": path.to_string_lossy()})).expect("open");
+    let doc = s.doc().unwrap().doc.clone();
+    let id = doc.slides[0].shapes.iter().find(|sh| matches!(sh.kind, ShapeKind::Chart(_))).expect("chart").id.0;
+    assert!(chart_of(&doc).series.iter().all(|x| !chart_of(&doc).series_data_labels(x)));
+    s.execute("chart.options", &serde_json::json!({"id": id, "dataLabels": true})).expect("options");
+    let doc = s.doc().unwrap().doc.clone();
+    let c = chart_of(&doc);
+    assert!(c.series.iter().all(|x| c.series_data_labels(x)), "every series shows its labels");
+    let _ = std::fs::remove_file(path);
+}

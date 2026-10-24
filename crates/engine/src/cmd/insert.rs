@@ -1818,6 +1818,10 @@ fn chart_options(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(v) = bool_param(p, "dataLabels") {
             c.data_labels = v;
+            // A series' own setting would otherwise keep overriding the chart-wide switch.
+            for series in &mut c.series {
+                series.data_labels = None;
+            }
         }
         if let Some(v) = bool_param(p, "gridlines") {
             c.gridlines = v;
