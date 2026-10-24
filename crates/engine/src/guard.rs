@@ -42,7 +42,9 @@ impl Session {
             Ok(r) => r,
             Err(payload) => {
                 self.depth = depth;
-                self.tool.vertex_kind = vertex_kind;
+                // The remembered point type names a shape of the document it was chosen in.
+                let same = before.as_ref().is_some_and(|b| self.active().is_some_and(|st| st.uid == b.0));
+                self.tool.vertex_kind = if same { vertex_kind } else { None };
                 let msg = panic_message(payload.as_ref());
                 // Keep the document as it was before the command.
                 if let (Some((uid, doc, selection, revision)), Some(st)) = (before, self.active_mut())
@@ -105,6 +107,15 @@ mod tests {
         });
         assert!(r.is_err());
         assert_eq!(s.tool.vertex_kind, kept);
+        // A command that opens another document and then panics leaves no point type behind: the
+        // one from before names a shape of the other document.
+        let r = s.guarded("test.panic", |s| {
+            s.execute("file.new", &json!({}))?;
+            s.tool.vertex_kind = Some((deckcraft_model::ShapeId(1), 0, 0, "corner".to_string()));
+            panic!("boom");
+        });
+        assert!(r.is_err());
+        assert_eq!(s.tool.vertex_kind, None);
     }
 
     #[test]
