@@ -561,22 +561,35 @@ impl Session {
         self.active_mut().ok_or(EngineError::NoDocument)
     }
     pub fn set_active(&mut self, i: usize) {
+        let was = self.active().map(|d| d.uid);
         if i < self.docs.len() {
             self.active = Some(i);
         }
+        self.forget_vertex_kind_unless(was);
     }
     pub fn add_document(&mut self, d: DocState) -> usize {
+        let was = self.active().map(|d| d.uid);
         self.docs.push(d);
         self.active = Some(self.docs.len() - 1);
+        self.forget_vertex_kind_unless(was);
         self.docs.len() - 1
     }
     pub fn close_document(&mut self, i: usize) {
+        let was = self.active().map(|d| d.uid);
         if i < self.docs.len() {
             let d = self.docs.remove(i);
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
             }
             self.active = if self.docs.is_empty() { None } else { Some(i.min(self.docs.len() - 1)) };
+        }
+        self.forget_vertex_kind_unless(was);
+    }
+    /// The point type Edit Points remembers names a shape of the active document, and another
+    /// document can have a shape with the same id: a change of active document forgets it.
+    fn forget_vertex_kind_unless(&mut self, was: Option<u64>) {
+        if self.active().map(|d| d.uid) != was {
+            self.tool.vertex_kind = None;
         }
     }
     pub fn next_untitled(&mut self) -> String {

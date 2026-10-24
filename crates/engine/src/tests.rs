@@ -2324,6 +2324,17 @@ fn edit_points_remembered_point_type_follows_undo_redo_and_its_shape() {
     drag(&mut s, ho6, to6, Mods::default());
     let (hi6, _, _) = handles_of(&s);
     assert!((hi6 - (v6 - Vec2::new(0.0, 40.0))).hypot() < 1e-3, "the other handle mirrors the dragged one: {hi6:?}");
+    // Another document can have a shape with the same id: a change of active document forgets the
+    // remembered type, and choosing the active document again keeps it.
+    s.execute("shape.pointType", &json!({"index": 0, "type": "corner"})).unwrap();
+    s.execute("file.new", &json!({})).unwrap();
+    assert_eq!(s.tool.vertex_kind, None);
+    s.tool.vertex_kind = Some((other, 0, 0, "corner".to_string()));
+    let new_doc = s.active_index().unwrap();
+    s.set_active(new_doc);
+    assert!(s.tool.vertex_kind.is_some());
+    s.set_active(0);
+    assert_eq!(s.tool.vertex_kind, None);
 }
 
 #[test]
