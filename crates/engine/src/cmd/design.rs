@@ -2360,6 +2360,20 @@ mod header_footer_date_tests {
         deckcraft_text::datetime::field_text(kind, None, now).expect("a sample")
     }
 
+    /// Runs `design.headerFooter` and checks the slide's date run is an automatic `kind` field.
+    /// The clock is read before and after the command, so a second ticking over between the
+    /// command and the read cannot fail the comparison. Returns the run text.
+    fn run_automatic(s: &mut Session, params: serde_json::Value, kind: &str) -> String {
+        let before = sample(kind);
+        s.execute("design.headerFooter", &params).unwrap();
+        let after = sample(kind);
+        let got = dates(s);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].1.as_deref(), Some(kind));
+        assert!(got[0].0 == before || got[0].0 == after, "{got:?} is neither {before:?} nor {after:?}");
+        got[0].0.clone()
+    }
+
     /// Header & Footer's automatic date takes the format it is given. `HeaderFooter::date_format`
     /// existed for this and was never read: the placeholder was always `datetime1`, and a
     /// `dateFormat` parameter was accepted and silently dropped.
@@ -2368,36 +2382,34 @@ mod header_footer_date_tests {
         let mut s = Session::with_new();
 
         // Default: the short date, as before.
-        s.execute("design.headerFooter", &json!({"date": true, "dateText": "", "all": true})).unwrap();
-        assert_eq!(dates(&s), vec![(sample("datetime1"), Some("datetime1".into()))]);
+        run_automatic(&mut s, json!({"date": true, "dateText": "", "all": true}), "datetime1");
 
         // A format: the field type changes and the saved text is that format's.
-        s.execute("design.headerFooter", &json!({"date": true, "dateFormat": "datetime5", "all": true})).unwrap();
-        assert_eq!(dates(&s), vec![(sample("datetime5"), Some("datetime5".into()))]);
+        run_automatic(&mut s, json!({"date": true, "dateFormat": "datetime5", "all": true}), "datetime5");
         assert_eq!(s.doc().unwrap().doc.header_footer.date_format, "datetime5");
 
         // A time format works the same way, and these two differ, so the format is really read.
-        s.execute("design.headerFooter", &json!({"date": true, "dateFormat": "datetime11", "all": true})).unwrap();
-        assert_eq!(dates(&s), vec![(sample("datetime11"), Some("datetime11".into()))]);
-        assert_ne!(sample("datetime11"), sample("datetime5"));
+        let time = run_automatic(&mut s, json!({"date": true, "dateFormat": "datetime11", "all": true}), "datetime11");
+        assert_ne!(time, sample("datetime5"));
 
         // Asking again changes nothing (and does not rewrite the run).
-        s.execute("design.headerFooter", &json!({"date": true, "dateFormat": "datetime11", "all": true})).unwrap();
-        assert_eq!(dates(&s), vec![(sample("datetime11"), Some("datetime11".into()))]);
+        let again = run_automatic(&mut s, json!({"date": true, "dateFormat": "datetime11", "all": true}), "datetime11");
+        assert_eq!(again, time);
 
         // A fixed date still wins: plain text, no field.
         s.execute("design.headerFooter", &json!({"date": true, "dateText": "4 July 1776", "all": true})).unwrap();
         assert_eq!(dates(&s), vec![("4 July 1776".to_string(), None)]);
 
         // Back to automatic: the remembered format comes back, not datetime1.
-        s.execute("design.headerFooter", &json!({"date": true, "dateText": "", "dateFormat": "datetime11", "all": true})).unwrap();
-        assert_eq!(dates(&s), vec![(sample("datetime11"), Some("datetime11".into()))]);
+        run_automatic(&mut s, json!({"date": true, "dateText": "", "dateFormat": "datetime11", "all": true}), "datetime11");
 
         // An unknown format is refused rather than ignored, and changes nothing.
         for bad in ["datetime0", "datetime14", "nonsense", ""] {
             assert!(s.execute("design.headerFooter", &json!({"date": true, "dateFormat": bad})).is_err(), "{bad}");
         }
         assert_eq!(s.doc().unwrap().doc.header_footer.date_format, "datetime11");
-        assert_eq!(dates(&s), vec![(sample("datetime11"), Some("datetime11".into()))]);
+        let got = dates(&s);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!(got[0].1.as_deref(), Some("datetime11"));
     }
 }
