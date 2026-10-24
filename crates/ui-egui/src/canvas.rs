@@ -2026,9 +2026,6 @@ mod tests {
         // The middle of the right edge: the segment ending at point 2.
         let p = screen(h.state(), 500.0, 250.0);
         right_click(&mut h, p);
-        if let (Ok(path), Ok(img)) = (std::env::var("DECKCRAFT_PNG_OUT_SEGMENTS"), h.render()) {
-            let _ = img.save(path);
-        }
         h.get_by_label("Curved Segment").click();
         h.run_steps(3);
         assert_eq!(q(&mut h)["segments"][0], json!(["straight", "straight", "curved", "straight"]));
