@@ -1165,9 +1165,12 @@ impl Renderer {
         // Fill.
         match &s.kind {
             ShapeKind::Picture { fill: pf } => {
-                // The picture's own fill shows behind its transparent pixels, as in PowerPoint.
-                if let Some(fl) = s.fill.as_ref().filter(|f| !f.is_none()) {
-                    self.fill_geometry(ctx, f, rctx, fl, None, &geo, (w, h), m, &fade);
+                // The picture's own fill shows behind its transparent pixels, as in PowerPoint (an
+                // emphasis tint recolours it, as it does any shape's fill).
+                if s.fill.as_ref().is_some_and(|f| !f.is_none())
+                    && let Some(fl) = &fill
+                {
+                    self.fill_geometry(ctx, f, rctx, fl, fill_ph, &geo, (w, h), m, &fade);
                 }
                 ctx.set_transform(m);
                 let bounds = Rect::new(0.0, 0.0, w, h);
@@ -1181,8 +1184,10 @@ impl Renderer {
             ShapeKind::Opaque { preview: Some(media), .. } => {
                 // An embedded object's fallback picture can carry a fill (old equation objects
                 // drawn on coloured boxes): behind the preview, as for a picture.
-                if let Some(fl) = s.fill.as_ref().filter(|f| !f.is_none()) {
-                    self.fill_geometry(ctx, f, rctx, fl, None, &geo, (w, h), m, &fade);
+                if s.fill.as_ref().is_some_and(|f| !f.is_none())
+                    && let Some(fl) = &fill
+                {
+                    self.fill_geometry(ctx, f, rctx, fl, fill_ph, &geo, (w, h), m, &fade);
                 }
                 ctx.set_transform(m);
                 let pf = deckcraft_model::style::PictureFill { media: *media, ..Default::default() };

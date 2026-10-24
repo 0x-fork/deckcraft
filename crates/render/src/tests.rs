@@ -1936,6 +1936,10 @@ fn a_picture_and_an_embedded_objects_preview_draw_their_fill_behind_transparent_
         assert!(opaque[2] > 140 && opaque[0] < 40, "the picture's own pixels ({object}): {opaque:?}");
         if fill.is_some() {
             assert_eq!(clear[..3], [255, 153, 0], "the fill behind the clear half ({object})");
+            // A fill-colour emphasis recolours that fill, as it does any shape's.
+            let tint = |_: ShapeId| ShapeState { tint: Some(deckcraft_color::Rgba::rgb(0, 160, 60)), ..Default::default() };
+            let img = render_slide(&p, 0, &RenderOpts { scale: 1.0, state: Some(&tint), ..Default::default() });
+            assert_eq!(img.pixel(200, 200)[..3], [0, 160, 60], "the tinted fill behind the clear half ({object})");
         } else {
             assert!(clear[..3].iter().all(|v| *v > 240), "no fill: the slide shows through: {clear:?}");
         }
