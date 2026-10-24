@@ -4403,3 +4403,38 @@ fn duplicating_a_moved_copy_repeats_the_move() {
     assert_eq!(boxed(&mut s, f), (340.0 + off, 100.0 + off));
     assert_eq!(s.doc().unwrap().doc.validate(), Vec::<String>::new());
 }
+
+fn chart_of(s: &Session, id: u64) -> deckcraft_model::Chart {
+    match &s.doc().unwrap().shape(deckcraft_model::ShapeId(id as u32)).unwrap().kind {
+        deckcraft_model::ShapeKind::Chart(c) => (**c).clone(),
+        k => panic!("not a chart: {k:?}"),
+    }
+}
+
+/// A chart's text (title, axes, legend, labels) can be coloured: `chart.options {textColor}` sets
+/// it, `null` goes back to the default, and a colour that isn't one is refused.
+#[test]
+fn chart_options_text_color_sets_clears_and_refuses() {
+    let mut s = session();
+    let id = s.execute("insert.chart", &json!({"type": "column", "title": "Sales"})).unwrap()["id"].as_u64().unwrap();
+    assert_eq!(chart_of(&s, id).text_color, None);
+    s.execute("chart.options", &json!({"id": id, "textColor": "#FF0000"})).unwrap();
+    assert_eq!(chart_of(&s, id).text_color, Some(deckcraft_model::ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0))));
+    s.execute("chart.options", &json!({"id": id, "textColor": "accent2"})).unwrap();
+    assert_eq!(chart_of(&s, id).text_color, Some(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)));
+    let e = s.execute("chart.options", &json!({"id": id, "textColor": "reddish"})).unwrap_err().to_string();
+    assert!(e.contains("textColor"), "{e}");
+    assert_eq!(chart_of(&s, id).text_color, Some(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)), "refused: unchanged");
+    s.execute("chart.options", &json!({"id": id, "textColor": null})).unwrap();
+    assert_eq!(chart_of(&s, id).text_color, None);
+}
+
+/// Font Color on a selected chart colours the chart's text (it used to answer and change nothing).
+#[test]
+fn format_color_on_a_selected_chart_sets_its_text_color() {
+    let mut s = session();
+    let id = s.execute("insert.chart", &json!({"type": "column", "title": "Sales"})).unwrap()["id"].as_u64().unwrap();
+    s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+    s.execute("format.color", &json!({"color": "accent2"})).unwrap();
+    assert_eq!(chart_of(&s, id).text_color, Some(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)));
+}

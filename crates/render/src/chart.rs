@@ -255,9 +255,19 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h
     }
 }
 
+/// PowerPoint's default chart text colour: `tx1` with `lumMod` 65000 and `lumOff` 35000, which
+/// is 595959 on a light theme and a light grey on a dark one.
+pub fn default_text_color() -> ColorRef {
+    use deckcraft_color::ColorTransform;
+    ColorRef::scheme(SchemeSlot::Tx1).with(ColorTransform::LumMod(65000)).with(ColorTransform::LumOff(35000))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h: f64, boxes: Option<&crate::chartex::Boxes>) {
-    let text_col = c.text_color.as_ref().map(|t| rctx.color(t, None)).unwrap_or(Rgba::rgb(0x59, 0x59, 0x59));
+    // Text without a colour of its own takes PowerPoint's default, the theme's text colour at
+    // lumMod 65 % / lumOff 35 % (595959 on a light theme, light grey on a dark one), so a chart
+    // on a dark theme is readable (a fixed grey used to vanish there).
+    let text_col = rctx.color(c.text_color.as_ref().unwrap_or(&default_text_color()), None);
     let grid_col = Rgba::rgb(0xD9, 0xD9, 0xD9);
     if let Some(f) = &c.chart_fill {
         crate::paint::fill_path(
@@ -389,7 +399,8 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
                     base,
                     Align::Center,
                     Anchor::Middle,
-                    Rgba::WHITE,
+                    // On the slices themselves: white, unless the chart's text was given a colour.
+                    if c.text_color.is_some() { text_col } else { Rgba::WHITE },
                     false,
                 );
             }

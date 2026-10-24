@@ -2754,3 +2754,61 @@ fn empty_bullet_is_gray_only_while_editing_and_never_in_exports() {
     assert!(changed.iter().any(|(px, _)| px[0] == 179 && px[1] == 179 && px[2] == 179));
     assert!(changed.iter().all(|(px, _)| px[0] >= 179 && px[0] == px[1] && px[1] == px[2]));
 }
+
+/// A chart that has no text colour of its own takes PowerPoint's default, the theme's text colour
+/// at 65 % plus 35 %: light on Nocturne's dark slides (it used to be a fixed grey, near-invisible
+/// there), 595959 grey on Harbor's light ones.
+#[test]
+fn chart_text_follows_the_theme_when_it_has_no_colour_of_its_own() {
+    let draw = |theme: &str, title: Option<&str>| {
+        let mut c = Chart::sample(ChartType::Column);
+        c.title = title.map(String::from);
+        c.legend = None;
+        c.data_labels = false;
+        let sh = Shape { id: ShapeId(630), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        let mut p = deck_with(vec![sh]);
+        let t = deckcraft_model::theme::builtin_themes().into_iter().find(|t| t.name == theme).expect("theme");
+        std::sync::Arc::make_mut(&mut p.masters[0]).theme = t;
+        render_slide(&p, 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let lum = |px: [u8; 4]| (px[0] as u32 * 299 + px[1] as u32 * 587 + px[2] as u32 * 114) / 1000;
+    // Pixels in the title band that pass `f`.
+    let count = |img: &Image, f: &dyn Fn(u32) -> bool| {
+        (200..760u32).flat_map(|x| (4..70u32).map(move |y| (x, y))).filter(|(x, y)| f(lum(img.pixel(*x, *y)))).count()
+    };
+    let (dark_bare, dark_titled) = (draw("Nocturne", None), draw("Nocturne", Some("Quarterly revenue")));
+    assert!(lum(dark_bare.pixel(5, 5)) < 60, "Nocturne's slide is dark: {:?}", dark_bare.pixel(5, 5));
+    let light_ink = count(&dark_titled, &|l| l > 200) as i64 - count(&dark_bare, &|l| l > 200) as i64;
+    assert!(light_ink > 100, "the title is light on a dark theme (light pixels added: {light_ink})");
+    let (light_bare, light_titled) = (draw("Harbor", None), draw("Harbor", Some("Quarterly revenue")));
+    assert!(lum(light_bare.pixel(5, 5)) > 200, "Harbor's slide is light: {:?}", light_bare.pixel(5, 5));
+    // 595959 has luminance 89: dark, but not black.
+    let dark_ink = count(&light_titled, &|l| l < 120) as i64 - count(&light_bare, &|l| l < 120) as i64;
+    assert!(dark_ink > 100, "the title is dark on a light theme (dark pixels added: {dark_ink})");
+    let black_ink = count(&light_titled, &|l| l < 40) as i64 - count(&light_bare, &|l| l < 40) as i64;
+    assert!(black_ink < 20, "the title is PowerPoint's 595959 grey, not black (black pixels added: {black_ink})");
+}
+
+/// Pie data labels sit on the slices in white; a colour given to the chart's text (chart.options
+/// textColor, Font Color on the chart) colours them too, as it does the title and legend.
+#[test]
+fn pie_data_labels_take_the_chart_text_colour_when_it_has_one() {
+    let draw = |colour: Option<ColorRef>| {
+        let mut c = Chart::sample(ChartType::Pie);
+        c.title = None;
+        c.legend = None;
+        c.data_labels = true;
+        c.text_color = colour;
+        let sh = Shape { id: ShapeId(632), xfrm: Some(Xfrm::new(0.0, 0.0, 400.0, 400.0)), kind: ShapeKind::Chart(Box::new(c)), ..Default::default() };
+        render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() })
+    };
+    let count = |img: &Image, f: &dyn Fn([u8; 4]) -> bool| {
+        (0..400u32).flat_map(|x| (0..400u32).map(move |y| (x, y))).filter(|(x, y)| f(img.pixel(*x, *y))).count()
+    };
+    let red = |p: [u8; 4]| p[0] > 200 && p[1] < 60 && p[2] < 60;
+    let white = |p: [u8; 4]| p[0] > 245 && p[1] > 245 && p[2] > 245;
+    let (plain, coloured) = (draw(None), draw(Some(ColorRef::rgb(deckcraft_color::Rgba::rgb(255, 0, 0)))));
+    assert_eq!(count(&plain, &red), 0, "no red without a text colour");
+    assert!(count(&coloured, &red) > 30, "the labels take the chart's red: {} red pixels", count(&coloured, &red));
+    assert!(count(&plain, &white) > count(&coloured, &white), "the labels were white before");
+}
