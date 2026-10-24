@@ -149,25 +149,30 @@ fn default_rect(s: &Session, w: f64, h: f64) -> Xfrm {
     Xfrm::new((size.width - w) / 2.0, (size.height - h) / 2.0, w, h)
 }
 
+/// The word an automatic shape name starts with ("Rectangle" in "Rectangle 3").
+pub(crate) fn auto_name_base(shape: &Shape) -> String {
+    match &shape.kind {
+        ShapeKind::Picture { .. } => "Picture".to_string(),
+        ShapeKind::Table(_) => "Table".to_string(),
+        ShapeKind::Chart(_) => "Chart".to_string(),
+        ShapeKind::Media(m) if m.video => "Video".to_string(),
+        ShapeKind::Media(_) => "Audio".to_string(),
+        ShapeKind::Model3d { .. } => "3D Model".to_string(),
+        _ if shape.text_box => "TextBox".to_string(),
+        _ => shape
+            .geom
+            .preset_name()
+            .and_then(deckcraft_geom::preset::info)
+            .map(|i| i.label.split(':').next().unwrap_or(i.label).trim().to_string())
+            .unwrap_or_else(|| "Shape".into()),
+    }
+}
+
 pub(crate) fn add_shape(s: &mut Session, cmd: &str, mut shape: Shape, select: bool) -> Result<ShapeId> {
     s.edit(|doc, sel| {
         shape.id = ShapeId(doc.alloc_id().ok_or_else(|| bad(cmd, NO_ID_SPACE))?);
         if shape.name.is_empty() {
-            let base = match &shape.kind {
-                ShapeKind::Picture { .. } => "Picture".to_string(),
-                ShapeKind::Table(_) => "Table".to_string(),
-                ShapeKind::Chart(_) => "Chart".to_string(),
-                ShapeKind::Media(m) if m.video => "Video".to_string(),
-                ShapeKind::Media(_) => "Audio".to_string(),
-                ShapeKind::Model3d { .. } => "3D Model".to_string(),
-                _ if shape.text_box => "TextBox".to_string(),
-                _ => shape
-                    .geom
-                    .preset_name()
-                    .and_then(deckcraft_geom::preset::info)
-                    .map(|i| i.label.split(':').next().unwrap_or(i.label).trim().to_string())
-                    .unwrap_or_else(|| "Shape".into()),
-            };
+            let base = auto_name_base(&shape);
             let n = super::current_shapes(doc, sel).map(|v| v.len()).unwrap_or(0) + 1;
             shape.name = format!("{base} {n}");
         }

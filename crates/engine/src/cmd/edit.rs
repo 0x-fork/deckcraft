@@ -358,7 +358,15 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             let mut shapes = clip.shapes.clone();
             reid("edit.paste", doc, &mut shapes)?;
             remap_media(&mut shapes, &media);
-            for sh in &mut shapes {
+            let taken = super::current_shapes(doc, sel).map_or(0, Vec::len);
+            for (k, sh) in shapes.iter_mut().enumerate() {
+                // An automatic name ("Rectangle 3") counts on from this slide, as a new shape would;
+                // a name the user typed stays.
+                let base = super::insert::auto_name_base(sh);
+                let numbered = sh.name.strip_prefix(base.as_str()).and_then(|r| r.strip_prefix(' '));
+                if numbered.is_some_and(|d| !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())) {
+                    sh.name = format!("{base} {}", taken + k + 1);
+                }
                 if let Some(x) = sh.xfrm.as_mut() {
                     x.x += off;
                     x.y += off;

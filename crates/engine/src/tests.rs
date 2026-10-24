@@ -211,6 +211,29 @@ fn clipboard_copy_paste_shapes_and_slides() {
 }
 
 #[test]
+fn pasted_shapes_get_the_next_automatic_name() {
+    let mut s = session();
+    let names = |s: &Session| s.doc().unwrap().current_slide().unwrap().shapes.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
+    let before = names(&s).len();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 50, 50]})).unwrap();
+    let auto = names(&s)[before].clone();
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    let all = names(&s);
+    let base = auto.rsplit_once(' ').unwrap().0;
+    assert_eq!(all[before + 1], format!("{base} {}", before + 2));
+    assert_eq!(all[before + 2], format!("{base} {}", before + 3));
+
+    // A name the user chose is not an automatic one and stays on the copy.
+    let id = s.doc().unwrap().selection.shapes[0].0;
+    s.execute("shape.rename", &json!({"id": id, "name": "Hero"})).unwrap();
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    assert_eq!(names(&s).last().unwrap(), "Hero");
+}
+
+#[test]
 fn bold_copy_is_html_and_pages_html_pastes_bold() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
