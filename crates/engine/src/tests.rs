@@ -4403,3 +4403,18 @@ fn duplicating_a_moved_copy_repeats_the_move() {
     assert_eq!(boxed(&mut s, f), (340.0 + off, 100.0 + off));
     assert_eq!(s.doc().unwrap().doc.validate(), Vec::<String>::new());
 }
+
+#[test]
+fn slide_hide_and_layout_reject_invalid_index() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.selectSlides", &json!({"indices": [0]})).unwrap();
+    for bad in [json!(-1), json!(1.5)] {
+        let e = s.execute("slide.hide", &json!({"index": bad})).unwrap_err().to_string();
+        assert!(e.contains("not a valid index"), "{e}");
+        let e = s.execute("slide.layout", &json!({"layout": "blank", "index": bad})).unwrap_err().to_string();
+        assert!(e.contains("not a valid index"), "{e}");
+    }
+    assert!(s.doc().unwrap().doc.slides.iter().all(|x| !x.hidden));
+}
