@@ -209,6 +209,24 @@ fn check(ui: &mut Ui, d: &mut Dialog, label: &str, key: &str, default: bool) -> 
     v
 }
 
+/// A Slide Size field set to `pt`: two decimals of the unit shown, the exact points kept beside.
+fn put_slide_dim(d: &mut Dialog, key: &str, pt: f64, ppu: f64) {
+    d.fields.insert(key.into(), format!("{:.2}", pt / ppu));
+    d.fields.insert(format!("{key}Pt"), pt.to_string());
+}
+
+/// A Slide Size field in points: the exact value while the text is still its rendering, else
+/// the number typed (`default` when it is not one).
+fn slide_dim_points(d: &Dialog, key: &str, ppu: f64, default: f64) -> f64 {
+    let text = field_of(d, key);
+    if let Some(pt) = exact_of(d, key)
+        && text == format!("{:.2}", pt / ppu)
+    {
+        return pt;
+    }
+    text.trim().trim_end_matches(['"', '%', ' ']).parse::<f64>().ok().filter(|v| v.is_finite()).map_or(default, |v| v * ppu)
+}
+
 /// The unit's abbreviation in a field label, "Width (cm):".
 fn unit_abbr(unit: deckcraft_geom::Unit) -> &'static str {
     match unit {
@@ -1067,39 +1085,43 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             let cur = app.session.active().map(|s| s.doc.slide_size).unwrap_or(deckcraft_model::defaults::WIDE);
             let len = app.session.prefs.units;
             let ppu = len.points_per_unit();
-            let shown = |pt: f64| format!("{:.2}", pt / ppu);
+            // Each field keeps its exact size in points (`wPt`) beside the two decimals shown, so
+            // a preset, Portrait or an untouched field is not nudged off by the rounding (13.33",
+            // 33.87 cm read back would make the slide 959.76 or 960.09 pt wide).
+            if !d.fields.contains_key("wPt") {
+                put_slide_dim(d, "w", cur.width, ppu);
+                put_slide_dim(d, "h", cur.height, ppu);
+            }
             ui.label("Slides sized for:");
             let preset = d.get("preset", "");
             egui::ComboBox::from_id_salt("sizes").selected_text(if preset.is_empty() { "Custom" } else { &preset }).show_ui(ui, |ui| {
                 for (label, w, h) in deckcraft_model::defaults::SLIDE_SIZES {
                     if ui.selectable_label(preset == *label, *label).clicked() {
                         d.fields.insert("preset".into(), label.to_string());
-                        d.fields.insert("w".into(), shown(*w));
-                        d.fields.insert("h".into(), shown(*h));
+                        put_slide_dim(d, "w", *w, ppu);
+                        put_slide_dim(d, "h", *h, ppu);
                     }
                 }
             });
             let abbr = unit_abbr(len);
-            field(ui, d, &format!("Width ({abbr}):"), "w", &shown(cur.width));
-            field(ui, d, &format!("Height ({abbr}):"), "h", &shown(cur.height));
-            let (w, h) = (num(d, "w", cur.width / ppu), num(d, "h", cur.height / ppu));
+            let (w_seed, h_seed) = (field_of(d, "w"), field_of(d, "h"));
+            field(ui, d, &format!("Width ({abbr}):"), "w", &w_seed);
+            field(ui, d, &format!("Height ({abbr}):"), "h", &h_seed);
+            let (w, h) = (slide_dim_points(d, "w", ppu, cur.width), slide_dim_points(d, "h", ppu, cur.height));
             ui.horizontal(|ui| {
                 ui.label("Orientation:");
                 let portrait = ui.radio(h > w, "Portrait").clicked();
                 let landscape = ui.radio(w >= h, "Landscape").clicked();
                 // Picking the other orientation swaps the width and height fields.
                 if portrait && w > h || landscape && h > w {
-                    d.fields.insert("w".into(), format!("{h:.2}"));
-                    d.fields.insert("h".into(), format!("{w:.2}"));
+                    put_slide_dim(d, "w", h, ppu);
+                    put_slide_dim(d, "h", w, ppu);
                 }
             });
             let maximize = check(ui, d, "Maximize content (else ensure fit)", "max", false);
             let (ok, cancel) = buttons(ui, "OK");
             if ok {
-                // A field still showing the current size keeps it exactly: the two decimals shown
-                // (13.33", 33.87 cm) would otherwise nudge the slide off 960 pt.
-                let mut points = |key: &str, cur: f64| if d.get(key, "") == shown(cur) { cur } else { num(d, key, cur / ppu) * ppu };
-                let (w, h) = (points("w", cur.width), points("h", cur.height));
+                let (w, h) = (slide_dim_points(d, "w", ppu, cur.width), slide_dim_points(d, "h", ppu, cur.height));
                 run(app, "design.slideSize", json!({"w": w, "h": h, "scale": if maximize { "maximize" } else { "ensureFit" }}));
             }
             ok || cancel

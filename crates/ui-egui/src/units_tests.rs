@@ -145,6 +145,51 @@ fn ok_in_the_slide_size_dialog_without_edits_keeps_the_size() {
     }
 }
 
+fn slide_size_dialog(units: Unit, w: f64, h: f64) -> Harness<'static, SlideApp> {
+    let mut app = app_with_shape(units);
+    app.session.execute("design.slideSize", &json!({"w": w, "h": h, "scale": "none"})).unwrap();
+    app.dialog = Some(crate::dialogs::Dialog::new("slideSize"));
+    let mut h = harness(app);
+    h.run_steps(3);
+    h
+}
+
+fn ok_and_size(h: &mut Harness<'_, SlideApp>) -> (f64, f64) {
+    h.get_by_label("OK").click();
+    h.run_steps(3);
+    let size = h.state().session.active().unwrap().doc.slide_size;
+    (size.width, size.height)
+}
+
+/// A preset is the preset's exact size, not its two-decimal rendering read back (33.87 cm would
+/// be 960.09 pt; in inches 16:9, A4, B4 and B5 drift the same way).
+#[test]
+fn a_slide_size_preset_gives_its_exact_size() {
+    for (units, label, size) in [
+        (Unit::Centimeters, "Widescreen (16:9)", (960.0, 540.0)),
+        (Unit::Inches, "Widescreen (16:9)", (960.0, 540.0)),
+        (Unit::Inches, "A4 Paper (210x297 mm)", (780.0, 540.0)),
+    ] {
+        let mut h = slide_size_dialog(units, 720.0, 540.0);
+        h.get_by_role(Role::ComboBox).click();
+        h.run_steps(2);
+        h.get_by_label(label).click();
+        h.run_steps(2);
+        assert_eq!(ok_and_size(&mut h), size, "{units:?} {label}");
+    }
+}
+
+/// Portrait swaps the exact width and height.
+#[test]
+fn portrait_swaps_the_exact_slide_size() {
+    for units in [Unit::Centimeters, Unit::Inches] {
+        let mut h = slide_size_dialog(units, 960.0, 540.0);
+        h.get_by_label("Portrait").click();
+        h.run_steps(2);
+        assert_eq!(ok_and_size(&mut h), (540.0, 960.0), "{units:?}");
+    }
+}
+
 #[test]
 fn preferences_choose_the_units_and_cancel_puts_them_back() {
     let mut app = app_with_shape(Unit::Inches);
