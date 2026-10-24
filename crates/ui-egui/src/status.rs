@@ -69,12 +69,12 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         }
         // Slider 10%–400% (log scale).
         let mut z = app.ui.zoom.unwrap_or(app.canvas_scale).clamp(0.1, 4.0);
-        let mut lz = z.ln();
-        let s = right.add_sized(vec2(110.0, 18.0), egui::Slider::new(&mut lz, (0.1f32).ln()..=(4.0f32).ln()).show_value(false));
-        let shown = format!("{}%", (z * 100.0).round());
-        s.widget_info(|| egui::WidgetInfo { current_text_value: Some(shown.clone()), ..egui::WidgetInfo::slider(true, f64::from(lz), "Zoom") });
+        let mut zp = z * 100.0;
+        let s = right.add_sized(vec2(110.0, 18.0), egui::Slider::new(&mut zp, 10.0..=400.0).logarithmic(true).show_value(false));
+        let shown = format!("{}%", zp.round());
+        s.widget_info(|| egui::WidgetInfo { current_text_value: Some(shown.clone()), ..egui::WidgetInfo::slider(true, f64::from(zp), "Zoom") });
         if s.changed() {
-            z = lz.exp();
+            z = zp / 100.0;
             app.ui.zoom = Some(z);
         }
         if small_icon(&mut right, Icon::ZoomOut, "Zoom Out", false).clicked() {
@@ -86,7 +86,7 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
             let i = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
             app.start_show(i, false);
         }
-        if view_icon(&mut right, Icon::ViewReadingSmall, "Reading View", false).clicked() {
+        if view_icon(&mut right, Icon::ViewReadingSmall, "Reading View", view == ViewMode::Reading).clicked() {
             let _ = app.run("view.reading", json!({}));
         }
         if view_icon(&mut right, Icon::ViewSorterSmall, "Slide Sorter", view == ViewMode::Sorter).clicked() {
@@ -366,7 +366,12 @@ mod tests {
         }
         let pct = format!("{}%", (h.state().canvas_scale * 100.0).round());
         assert_eq!(h.get_by_role_and_label(Role::Button, "Zoom level").value().as_deref(), Some(pct.as_str()));
-        assert_eq!(h.get_by_role_and_label(Role::Slider, "Zoom").value().as_deref(), Some(pct.as_str()));
+        let zoom = h.get_by_role_and_label(Role::Slider, "Zoom");
+        assert_eq!(zoom.value().as_deref(), Some(pct.as_str()));
+        // Its number and range are in percent, as the value text is.
+        let node = zoom.accesskit_node();
+        assert_eq!(node.numeric_value().map(f64::round), Some((h.state().canvas_scale * 100.0).round().into()));
+        assert_eq!((node.min_numeric_value(), node.max_numeric_value()), (Some(10.0), Some(400.0)));
         assert_eq!(h.get_by_role_and_label(Role::Button, "Language").value().as_deref(), Some("English (United States)"));
         let toggled = |h: &Harness<'_, SlideApp>, name: &str| h.get_by_role_and_label(Role::Button, name).accesskit_node().toggled();
         assert_eq!(toggled(&h, "Normal"), Some(Toggled::True));
@@ -376,6 +381,11 @@ mod tests {
         assert_eq!(h.state().ui.view, ViewMode::Sorter, "the click by name reached the Slide Sorter button");
         assert_eq!(toggled(&h, "Slide Sorter"), Some(Toggled::True));
         assert_eq!(toggled(&h, "Normal"), Some(Toggled::False));
+        assert_eq!(toggled(&h, "Reading View"), Some(Toggled::False));
+        h.state_mut().ui.view = ViewMode::Reading;
+        h.run_steps(3);
+        assert_eq!(toggled(&h, "Reading View"), Some(Toggled::True));
+        assert_eq!(toggled(&h, "Slide Sorter"), Some(Toggled::False));
         assert_eq!(h.get_by_value("Slide 1 of 1").accesskit_node().role(), Role::Label);
         h.state_mut().set_status("Saved a copy");
         h.run_steps(3);
