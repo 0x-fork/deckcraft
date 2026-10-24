@@ -120,7 +120,7 @@ pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, area: Rec
                 }
             }
         }
-        if c.data_labels || s.data_labels == Some(true) {
+        if c.series_data_labels(s) {
             for (i, q) in pts.iter().enumerate() {
                 if let Some(v) = s.values.get(i).copied().flatten() {
                     let t = c.data_label(s, v);
