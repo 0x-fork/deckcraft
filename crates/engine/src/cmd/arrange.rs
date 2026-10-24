@@ -341,9 +341,9 @@ fn distribute(s: &mut Session, p: &Value) -> Result<Value> {
     let (start, end) = if to_slide {
         if horiz { (0.0, size.width) } else { (0.0, size.height) }
     } else {
-        let f = boxes.first().map(|b| b.1).unwrap_or_default();
-        let l = boxes.last().map(|b| b.1).unwrap_or_default();
-        if horiz { (f.x0, l.x1) } else { (f.y0, l.y1) }
+        let lo = |f: fn(&Rect) -> f64| boxes.iter().map(|b| f(&b.1)).fold(f64::INFINITY, f64::min);
+        let hi = |f: fn(&Rect) -> f64| boxes.iter().map(|b| f(&b.1)).fold(f64::NEG_INFINITY, f64::max);
+        if horiz { (lo(|r| r.x0), hi(|r| r.x1)) } else { (lo(|r| r.y0), hi(|r| r.y1)) }
     };
     let n = boxes.len();
     let gap = if n > 1 { ((end - start) - total) / (n - 1) as f64 } else { 0.0 };
