@@ -52,6 +52,7 @@ fn title(id: &str) -> &'static str {
         "preferences" => "Preferences",
         "autocorrect" => "AutoCorrect",
         "gridOptions" => "Grid Options",
+        "columns" => "Columns",
         "export" => "Export",
         "symbol" => "Symbol",
         "photoAlbum" => "Photo Album",
@@ -2247,6 +2248,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok || cancel
         }
         "gridOptions" => grid_options(app, ui, d),
+        "columns" => columns_dialog(app, ui, d),
         "preferences" => {
             // The controls apply as they change, so the dialog remembers what it opened with and
             // Cancel (or Esc, or the close button: see `show`) puts that back.
@@ -2652,6 +2654,53 @@ fn grid_options(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     if ok {
         let spacing = num(d, "spacing", app.session.prefs.grid_spacing);
         match app.run("view.gridOptions", json!({"spacing": spacing, "snap": snap, "smartGuides": smart, "gridlines": gridlines, "guides": guides})) {
+            Ok(_) => return true,
+            Err(e) => {
+                d.fields.insert("error".into(), e);
+                return false;
+            }
+        }
+    }
+    cancel
+}
+
+/// The Columns dialog's fields as `format.columns` params: Number and Spacing (inches, sent in points).
+/// A Spacing left as the dialog showed it sends the text box's own spacing, unrounded.
+fn columns_value(d: &Dialog, shown_spacing: &str) -> Result<Value, String> {
+    let count =
+        field_of(d, "count").trim().parse::<u32>().ok().filter(|n| (1..=16).contains(n)).ok_or("Number must be a whole number from 1 to 16")?;
+    let typed = field_of(d, "spacing");
+    if typed == shown_spacing
+        && let Some(pt) = d.params.get("spacing").and_then(Value::as_f64).filter(|v| v.is_finite())
+    {
+        return Ok(json!({"count": count, "spacing": pt}));
+    }
+    let spacing = typed
+        .trim()
+        .trim_end_matches("in")
+        .trim_end_matches('"')
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|v| v.is_finite() && (0.0..=22.0).contains(v))
+        .ok_or("Spacing must be from 0 to 22 inches")?;
+    Ok(json!({"count": count, "spacing": spacing * 72.0}))
+}
+
+/// Columns: the number of columns in the text box and the space between them. OK applies one
+/// `format.columns` call; Cancel leaves the text box as it was.
+fn columns_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
+    let count = d.params.get("count").and_then(Value::as_u64).unwrap_or(1).to_string();
+    let spacing = num_text(d.params.get("spacing").and_then(Value::as_f64).unwrap_or(0.0) / 72.0);
+    field(ui, d, "Number:", "count", &count);
+    field(ui, d, "Spacing (in):", "spacing", &spacing);
+    if let Some(err) = d.fields.get("error").cloned().filter(|s| !s.is_empty()) {
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(err).color(Color32::from_rgb(0xB0, 0x30, 0x30)));
+    }
+    let (ok, cancel) = buttons(ui, "OK");
+    if ok {
+        match columns_value(d, &spacing).and_then(|p| app.run("format.columns", p)) {
             Ok(_) => return true,
             Err(e) => {
                 d.fields.insert("error".into(), e);
@@ -3377,6 +3426,10 @@ mod font_dialog_tests;
 #[cfg(test)]
 #[path = "size_position_tests.rs"]
 mod size_position_tests;
+
+#[cfg(test)]
+#[path = "columns_dialog_tests.rs"]
+mod columns_dialog_tests;
 
 #[cfg(test)]
 #[path = "photo_album_tests.rs"]
