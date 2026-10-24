@@ -4581,3 +4581,18 @@ fn format_color_on_a_selected_chart_sets_its_text_color() {
     s.execute("format.color", &json!({"color": "accent2"})).unwrap();
     assert_eq!(chart_of(&s, id).text_color, Some(deckcraft_model::ColorRef::scheme(deckcraft_color::SchemeSlot::Accent2)));
 }
+
+#[test]
+fn slide_hide_and_layout_reject_invalid_index() {
+    let mut s = session();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("slide.selectSlides", &json!({"indices": [0]})).unwrap();
+    for bad in [json!(-1), json!(1.5)] {
+        let e = s.execute("slide.hide", &json!({"index": bad})).unwrap_err().to_string();
+        assert!(e.contains("not a valid index"), "{e}");
+        let e = s.execute("slide.layout", &json!({"layout": "blank", "index": bad})).unwrap_err().to_string();
+        assert!(e.contains("not a valid index"), "{e}");
+    }
+    assert!(s.doc().unwrap().doc.slides.iter().all(|x| !x.hidden));
+}
