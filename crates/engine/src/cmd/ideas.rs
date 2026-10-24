@@ -92,6 +92,10 @@ pub fn ideas_for(doc: &Presentation, index: usize) -> Vec<Idea> {
     if slide.shapes.iter().any(|s| !s.hidden && !arrangeable(ctx.as_ref(), s)) {
         return vec![];
     }
+    // The ideas move one picture; a second would stay put, over the rearranged text.
+    if slide.shapes.iter().filter(|s| !s.hidden && matches!(s.kind, ShapeKind::Picture { .. })).count() > 1 {
+        return vec![];
+    }
     let r = roles(&slide.shapes);
     if r.picture.is_some() {
         PICTURE_IDEAS.to_vec()
@@ -473,6 +477,22 @@ mod tests {
         assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty());
         Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]).shapes[2].hidden = true;
         assert_eq!(ideas_for(&s.doc().unwrap().doc, 0).len(), 3);
+    }
+
+    #[test]
+    fn two_visible_pictures_get_no_ideas_but_a_hidden_second_one_does_not_count() {
+        let mut s = deck(true);
+        let slide = Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]);
+        slide.shapes.push(Shape {
+            id: ShapeId(503),
+            kind: ShapeKind::Picture { fill: PictureFill::default() },
+            xfrm: Some(Xfrm::new(600.0, 300.0, 200.0, 100.0)),
+            ..Default::default()
+        });
+        assert!(ideas_for(&s.doc().unwrap().doc, 0).is_empty());
+        assert!(s.execute("design.applyIdea", &json!({"id": "pictureLeft"})).is_err());
+        Arc::make_mut(&mut Arc::make_mut(&mut s.doc_mut().unwrap().doc).slides[0]).shapes[3].hidden = true;
+        assert_eq!(ideas_for(&s.doc().unwrap().doc, 0).len(), 4);
     }
 
     #[test]
