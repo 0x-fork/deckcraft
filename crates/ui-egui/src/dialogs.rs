@@ -3762,3 +3762,7 @@ mod about_credits_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "preferences_tests.rs"]
+mod preferences_tests;
