@@ -232,6 +232,17 @@ fn legend_layout(pos: &str, size: (f64, f64), area: Rect, base: f64, overlay: bo
     (origin, if overlay { area } else { plot })
 }
 
+/// An axis span to divide by: the span itself when positive, else 1 (no absolute floor, so tiny data keeps its scale).
+pub(crate) fn positive_span(s: f64) -> f64 {
+    if s > 0.0 && s.is_finite() { s } else { 1.0 }
+}
+
+/// The tick values of an axis (min, max, major step), one per step (at most 51).
+fn axis_ticks((lo, hi, st): (f64, f64, f64)) -> impl Iterator<Item = f64> {
+    let n = if st > 0.0 { (((hi - lo) / st).round() as i64).clamp(1, 50) } else { 1 };
+    (0..=n).map(move |k| lo + k as f64 * st)
+}
+
 pub fn draw(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64, h: f64) {
     match c.kind {
         // Histograms and Pareto charts are drawn as the column (and line) chart of their bins.
@@ -435,10 +446,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     };
     // A combo chart's secondary value axis, on the right (vertical value axes only).
     let second = if horiz { None } else { c.axis_scale(true, max_intervals) };
-    let ticks = |(lo, hi, st): (f64, f64, f64)| {
-        let n = (((hi - lo) / st.max(1e-12)).round() as i64).clamp(1, 50);
-        (0..=n).map(move |k| lo + k as f64 * st)
-    };
+    let ticks = axis_ticks;
     // Label gutters as wide as the longest value label.
     let primary_ticks: Vec<f64> = ticks((min, max, step)).map(|k| log.map_or(k, |(b, _)| b.powf(k))).collect();
     let label_w = |sec: bool, sc: (f64, f64, f64)| {
@@ -461,7 +469,7 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     if let Some(f) = &c.plot_fill {
         crate::paint::fill_path(ctx, rctx, f, None, &plot.to_path(0.1), plot, m, deckcraft_geom::preset::FillMode::Norm, 1.0, rctx.pres);
     }
-    let span = (max - min).max(1e-9);
+    let span = positive_span(max - min);
     // Values past the axis limits (fixed ones, or zero on an axis that starts above it) stop at
     // the plot's edge.
     let to_v = |v: f64| {
@@ -470,13 +478,13 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     };
     // A series' value as a position on its own axis.
     let to_axis = |sec: bool, v: f64| match (sec, second) {
-        (true, Some((min2, max2, _))) => plot.y1 - (v.max(min2).min(max2) - min2) / (max2 - min2).max(1e-9) * plot.height(),
+        (true, Some((min2, max2, _))) => plot.y1 - (v.max(min2).min(max2) - min2) / positive_span(max2 - min2) * plot.height(),
         _ => to_v(v),
     };
     // Minor gridlines, under the major ones: five to a major unit.
     if c.minor_gridlines {
         let minor = step / 5.0;
-        let n = (((max - min) / minor.max(1e-12)).round() as i64).clamp(1, 500);
+        let n = if minor > 0.0 { (((max - min) / minor).round() as i64).clamp(1, 500) } else { 1 };
         let mut g = BezPath::new();
         for k in (0..=n).filter(|k| k % 5 != 0) {
             // On a logarithmic axis `min`, `max` and `step` are exponents of the base.
@@ -570,10 +578,10 @@ fn draw_inner(ctx: &mut RenderContext, rctx: &Ctx, c: &Chart, m: Affine, w: f64,
     // Scatter and bubble charts have a value x axis: one scale over every series' x values, with its
     // own tick labels in place of category names.
     let xscale = if horiz { None } else { value_x_scale(c, (plot.width() / (base * 2.5)).floor().clamp(2.0, 12.0) as usize) };
-    let to_x = |v: f64| xscale.map(|(lo, hi, _)| plot.x0 + (v - lo) / (hi - lo).max(1e-9) * plot.width());
+    let to_x = |v: f64| xscale.map(|(lo, hi, _)| plot.x0 + (v - lo) / positive_span(hi - lo) * plot.width());
     if let Some(sc) = xscale {
         for v in ticks(sc) {
-            let pos = plot.x0 + (v - sc.0) / (sc.1 - sc.0).max(1e-9) * plot.width();
+            let pos = plot.x0 + (v - sc.0) / positive_span(sc.1 - sc.0) * plot.width();
             label(
                 ctx,
                 rctx,
@@ -1113,6 +1121,12 @@ mod tests {
     use super::*;
 
     const AREA: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+
+    #[test]
+    fn tiny_data_gets_several_ticks() {
+        let sc = deckcraft_model::chart::axis_scale(1e-13, 5e-13, None, None, None, 8, true);
+        assert!(axis_ticks(sc).count() >= 3, "{sc:?}");
+    }
 
     #[test]
     fn scatter_x_is_a_value_scale_over_all_series() {
