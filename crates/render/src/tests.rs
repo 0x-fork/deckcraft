@@ -341,6 +341,43 @@ fn chart_axis_titles_are_drawn() {
 }
 
 #[test]
+fn column_series_draw_their_pattern_fill_and_no_fill_with_their_outline() {
+    // Three column series, as PowerPoint draws them: a red-on-yellow pattern, no fill with a blue
+    // outline, and no fill at all. None takes a palette colour; the legend keys match the bars.
+    use deckcraft_model::style::{Fill, PatternFill};
+    let rgb = |r, g, b| ColorRef::rgb(deckcraft_color::Rgba::rgb(r, g, b));
+    let mut c = Chart::sample(ChartType::Column);
+    c.title = None;
+    c.series.truncate(3);
+    c.categories = vec!["A".into()];
+    for s in &mut c.series {
+        s.values = vec![Some(10.0)];
+    }
+    c.series[0].fill = Some(Fill::Pattern(PatternFill { preset: "dkDnDiag".into(), fg: rgb(255, 0, 0), bg: rgb(255, 255, 0) }));
+    c.series[1].fill = Some(Fill::None);
+    c.series[1].line = Some(deckcraft_model::style::Line { width: Some(3.0), fill: Some(Fill::solid(rgb(0, 0, 255))), ..Default::default() });
+    c.series[2].fill = Some(Fill::None);
+    let sh =
+        Shape { id: ShapeId(625), xfrm: Some(Xfrm::new(0.0, 0.0, 960.0, 540.0)), kind: ShapeKind::Chart(Box::new(c.clone())), ..Default::default() };
+    let img = render_slide(&deck_with(vec![sh]), 0, &RenderOpts { scale: 1.0, ..Default::default() });
+    let count =
+        |f: &dyn Fn([u8; 4]) -> bool| (0..img.width).flat_map(|x| (0..img.height).map(move |y| (x, y))).filter(|(x, y)| f(img.pixel(*x, *y))).count();
+    let red = count(&|p| p[0] > 220 && p[1] < 40 && p[2] < 40);
+    let yellow = count(&|p| p[0] > 220 && p[1] > 220 && p[2] < 40);
+    let blue = count(&|p| p[0] < 40 && p[1] < 40 && p[2] > 220);
+    assert!(red > 1000 && yellow > 1000, "the pattern's two colours: {red} red, {yellow} yellow");
+    assert!(blue > 300, "the empty series' outline: {blue}");
+    // No palette colour: the theme's accents would show for any series drawn the old way.
+    let p = deck_with(vec![]);
+    let ctx = deckcraft_model::resolve::Ctx::for_slide(&p, &p.slides[0]).unwrap();
+    for i in 0..3 {
+        let a = crate::chart::series_color(&ctx, &c, i);
+        let n = count(&|q| q[0].abs_diff(a.r) < 6 && q[1].abs_diff(a.g) < 6 && q[2].abs_diff(a.b) < 6);
+        assert!(n < 50, "palette colour {i} drawn on {n} pixels");
+    }
+}
+
+#[test]
 fn column_points_take_their_own_fill_and_smooth_lines_curve() {
     // One column series where only the middle point is given a red c:dPt fill.
     let mut c = Chart::sample(ChartType::Column);

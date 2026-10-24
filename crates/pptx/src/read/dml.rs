@@ -86,14 +86,19 @@ pub fn fill_el(imp: &mut Imp, part: &Part, f: &El) -> Option<Fill> {
             Some(p) => Fill::Picture(p),
             None => Fill::None,
         },
-        "pattFill" => Fill::Pattern(PatternFill {
-            preset: f.attr("prst").unwrap_or("pct5").to_string(),
-            fg: f.child("fgClr").and_then(color).unwrap_or(ColorRef::rgb(Rgba::BLACK)),
-            bg: f.child("bgClr").and_then(color).unwrap_or(ColorRef::rgb(Rgba::WHITE)),
-        }),
+        "pattFill" => Fill::Pattern(pattern(f)),
         "grpFill" => Fill::Group,
         _ => return None,
     })
+}
+
+/// An `a:pattFill`: its preset (5 % dots when unset), foreground (black) and background (white).
+pub fn pattern(f: &El) -> PatternFill {
+    PatternFill {
+        preset: f.attr("prst").unwrap_or("pct5").to_string(),
+        fg: f.child("fgClr").and_then(color).unwrap_or(ColorRef::rgb(Rgba::BLACK)),
+        bg: f.child("bgClr").and_then(color).unwrap_or(ColorRef::rgb(Rgba::WHITE)),
+    }
 }
 
 pub fn gradient(f: &El) -> Gradient {

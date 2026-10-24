@@ -30,7 +30,17 @@ fn simple_fill(w: &mut W, f: &Fill) {
     match f {
         Fill::None => w.empty0("a:noFill"),
         Fill::Solid { color } => super::dml::solid(w, color),
-        Fill::Gradient(_) | Fill::Picture(_) | Fill::Pattern(_) | Fill::Group | Fill::Background => {
+        Fill::Pattern(p) => {
+            w.open("a:pattFill", A::new().a("prst", if p.preset.is_empty() { "pct5" } else { &p.preset }));
+            w.open0("a:fgClr");
+            super::dml::color(w, &p.fg);
+            w.close("a:fgClr");
+            w.open0("a:bgClr");
+            super::dml::color(w, &p.bg);
+            w.close("a:bgClr");
+            w.close("a:pattFill");
+        }
+        Fill::Gradient(_) | Fill::Picture(_) | Fill::Group | Fill::Background => {
             if let Fill::Gradient(g) = f
                 && let Some(s) = g.stops.first()
             {
