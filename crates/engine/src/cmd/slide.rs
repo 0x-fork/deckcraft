@@ -304,6 +304,7 @@ fn go_to(s: &mut Session, i: usize) -> Result<Value> {
         sel.shapes.clear();
         sel.text = None;
         sel.cells = None;
+        sel.range_anchor = None;
         sel.target = Target::Slides;
     })?;
     Ok(json!({"index": s.doc()?.selection.slide}))
@@ -369,18 +370,24 @@ fn select_slides(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sel.shapes.clear();
         sel.text = None;
+        sel.range_anchor = None;
     })?;
     Ok(json!({"selected": s.doc()?.selection.slides}))
 }
 
-/// Shift-click in the slide list: select every slide from `from` (default the current one) to `to`.
+/// Shift-click in the slide list: select every slide from `from` to `to`. Without `from` the range
+/// starts at the anchor of the previous Shift-click (so a second Shift-click extends from the same
+/// slide, as in PowerPoint), else at the current slide.
 /// With `add` the slides already selected stay selected (Ctrl+Shift-click).
 fn select_range(s: &mut Session, p: &Value) -> Result<Value> {
     let to = usize_param(p, "to").ok_or_else(|| bad("slide.selectRange", "missing `to`"))?;
+    let given = opt_usize_param(p, "from", "slide.selectRange")?;
     let add = bool_or(p, "add", false);
     let (from, count) = {
         let st = s.doc()?;
-        (usize_param(p, "from").unwrap_or(st.selection.slide), st.doc.slides.len())
+        let sel = &st.selection;
+        let anchor = sel.range_anchor.filter(|(_, end)| *end == sel.slide).map(|(a, _)| a);
+        (given.or(anchor).unwrap_or(sel.slide), st.doc.slides.len())
     };
     if to >= count || from >= count {
         return Err(bad("slide.selectRange", "no such slide"));
@@ -398,8 +405,11 @@ fn select_range(s: &mut Session, p: &Value) -> Result<Value> {
             sel.slides = range;
         }
         sel.slide = to;
+        sel.range_anchor = Some((from, to));
         sel.shapes.clear();
         sel.text = None;
+        sel.cells = None;
+        sel.target = Target::Slides;
     })?;
     Ok(json!({"selected": s.doc()?.selection.slides}))
 }
@@ -776,5 +786,46 @@ mod tests {
         assert!(s.execute("slide.selectRange", &json!({"to": 3})).is_err());
         assert!(s.execute("slide.selectRange", &json!({"from": 9, "to": 1})).is_err());
         assert!(s.execute("slide.selectRange", &json!({})).is_err());
+    }
+
+    #[test]
+    fn select_range_rejects_an_invalid_from_instead_of_using_the_current_slide() {
+        let mut s = deck_of(4);
+        s.execute("slide.go", &json!({"index": 2})).expect("go");
+        assert!(s.execute("slide.selectRange", &json!({"from": -1, "to": 3})).is_err());
+        assert!(s.execute("slide.selectRange", &json!({"from": "x", "to": 3})).is_err());
+        assert_eq!(selected_indices(&s), vec![2]);
+    }
+
+    #[test]
+    fn a_second_range_extends_from_the_original_anchor() {
+        let mut s = deck_of(8);
+        s.execute("slide.go", &json!({"index": 2})).expect("go");
+        s.execute("slide.selectRange", &json!({"to": 5})).expect("range");
+        assert_eq!(selected_indices(&s), vec![2, 3, 4, 5]);
+        // Shift-click further on: still anchored at 2, not at 5.
+        s.execute("slide.selectRange", &json!({"to": 7})).expect("range");
+        assert_eq!(selected_indices(&s), vec![2, 3, 4, 5, 6, 7]);
+        // Shift-click back across the anchor.
+        s.execute("slide.selectRange", &json!({"to": 0})).expect("range");
+        assert_eq!(selected_indices(&s), vec![0, 1, 2]);
+        // A plain click on another slide starts a new anchor.
+        s.execute("slide.go", &json!({"index": 4})).expect("go");
+        s.execute("slide.selectRange", &json!({"to": 6})).expect("range");
+        assert_eq!(selected_indices(&s), vec![4, 5, 6]);
+    }
+
+    #[test]
+    fn select_range_clears_a_table_cell_selection_and_returns_to_the_slides() {
+        let mut s = deck_of(3);
+        s.select(|_, sel| {
+            sel.cells = Some((deckcraft_model::ShapeId(1), (0, 0), (1, 1)));
+            sel.target = crate::Target::Master { master: 0 };
+        })
+        .expect("cells");
+        s.execute("slide.selectRange", &json!({"to": 2})).expect("range");
+        let sel = &s.doc().expect("doc").selection;
+        assert!(sel.cells.is_none());
+        assert_eq!(sel.target, crate::Target::Slides);
     }
 }
