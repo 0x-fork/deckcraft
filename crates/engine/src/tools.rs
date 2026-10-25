@@ -705,10 +705,13 @@ impl Session {
                 }
             }
             Some(Hit::Shape { id, .. })
-                if !(mods.shift || mods.cmd) && st.selection.cells.is_some_and(|c| c.0 == id && st.selection.shapes == [id]) =>
+                if !(mods.shift || mods.cmd)
+                    && st.selection.cells.is_some_and(|c| c.0 == id && st.selection.shapes == [id])
+                    && in_table_cell(st, id, p) =>
             {
                 // A press in a table whose cells are selected starts again in the cell under the
-                // pointer: a click puts the caret there and a drag selects another range.
+                // pointer: a click puts the caret there and a drag selects another range. A press
+                // on the table outside its cells selects and moves the table like any shape.
                 let before = self.text_selection();
                 if self.edit_text_at(id, p)? {
                     self.select(|_, sel| sel.cells = None)?;
@@ -736,15 +739,17 @@ impl Session {
                 let origs: Vec<(ShapeId, Xfrm)> =
                     ids.iter().filter_map(|i| st.shape(*i).filter(|s| !s.locked).map(|s| (*i, xfrm_of(&st.doc, &st.selection, s)))).collect();
                 // A click (no drag) on text puts the caret there; unselected text boxes and
-                // placeholders take the caret straight away like PowerPoint. A click in a selected
-                // table puts the caret in the clicked cell.
+                // placeholders take the caret straight away like PowerPoint. A click in a cell of a
+                // selected table puts the caret there; a click on its grab band keeps the table selected.
                 let table = st.shape(id).is_some_and(|s| matches!(s.kind, ShapeKind::Table(_)));
                 // A click on the frame band of a text box selects the box whole, as PowerPoint
                 // does, so it can be moved, duplicated or deleted; only the inside takes the caret.
                 let on_frame = text
                     && is_text_first(st, id)
                     && st.shape(id).is_some_and(|s| edit_zone(&xfrm_of(&st.doc, &st.selection, s), p, tol) == EditZone::Frame);
-                let enter_text = (!toggle && !on_frame && ((text && (selected || is_text_first(st, id))) || (table && selected))).then_some((id, p));
+                let enter_text =
+                    (!toggle && !on_frame && ((text && (selected || is_text_first(st, id))) || (table && selected && in_table_cell(st, id, p))))
+                        .then_some((id, p));
                 let ids2 = ids.clone();
                 self.select(|_, sel| {
                     sel.shapes = ids2;
@@ -1988,6 +1993,15 @@ pub fn resize_box(o: &Xfrm, h: u8, d: Vec2, keep_aspect: bool, from_center: bool
     let local_c = Point::new((l + r) / 2.0 * sx + if sx < 0.0 { o.w } else { 0.0 }, (t + b) / 2.0 * sy + if sy < 0.0 { o.h } else { 0.0 });
     let c = o.affine() * Point::new(if o.flip_h { o.w - local_c.x } else { local_c.x }, if o.flip_v { o.h - local_c.y } else { local_c.y });
     Xfrm { x: c.x - nw / 2.0, y: c.y - nh / 2.0, w: nw, h: nh, rot: o.rot, flip_h: fh, flip_v: fv }
+}
+
+/// Whether `p` lies in a cell of table `id`, not in the grab band around it (`cell_at` would take
+/// the nearest cell).
+fn in_table_cell(st: &crate::DocState, id: ShapeId, p: Point) -> bool {
+    st.shape(id).and_then(|sh| cmd::table::table_frame(st, sh)).is_some_and(|f| {
+        let q = f.local(p);
+        (0.0..=f.width()).contains(&q.x) && (0.0..=f.height()).contains(&q.y) && f.cell_at(q).is_some()
+    })
 }
 
 fn hit_shape(st: &crate::DocState, sh: &Shape, p: Point, tol: f64) -> Option<Hit> {

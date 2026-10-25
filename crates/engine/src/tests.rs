@@ -948,6 +948,34 @@ fn dragging_across_cells_selects_a_range_of_cells() {
 }
 
 #[test]
+fn pressing_a_table_outside_its_cells_with_a_range_selected_moves_the_table() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
+    let drag = |s: &mut Session, kind, x: f64, y: f64| s.pointer(tev(kind, x, y)).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [0, 0]})).unwrap();
+    drag(&mut s, PointerKind::Down, 150.0, 120.0);
+    drag(&mut s, PointerKind::Drag, 250.0, 160.0);
+    drag(&mut s, PointerKind::Up, 250.0, 160.0);
+    assert_eq!(s.doc().unwrap().selection.cells, Some((id, (0, 0), (1, 1))));
+    // Just left of the table's edge, where a press still hits the table but no cell.
+    drag(&mut s, PointerKind::Down, 98.0, 120.0);
+    assert_eq!(s.doc().unwrap().selection.cells, None, "the range ends");
+    drag(&mut s, PointerKind::Drag, 148.0, 170.0);
+    drag(&mut s, PointerKind::Up, 148.0, 170.0);
+    let st = s.doc().unwrap();
+    assert!(st.selection.text.is_none());
+    assert_eq!(st.selection.shapes, vec![id]);
+    let x = st.shape(id).unwrap().xfrm.unwrap();
+    assert!((x.x - 150.0).abs() < 10.0 && (x.y - 150.0).abs() < 10.0, "the table moves: {x:?}");
+    // A click (no drag) there keeps the table selected and puts no caret in the nearest cell.
+    let (x0, y0) = (x.x - 2.0, x.y + 20.0);
+    drag(&mut s, PointerKind::Down, x0, y0);
+    drag(&mut s, PointerKind::Up, x0, y0);
+    let st = s.doc().unwrap();
+    assert_eq!((st.selection.shapes.clone(), st.selection.text.is_none()), (vec![id], true));
+}
+
+#[test]
 fn a_click_in_a_selected_table_enters_the_clicked_cell() {
     let mut s = session();
     let id = table_at(&mut s, &[200.0, 200.0], json!([["a", "b"], ["c", "Hello world"]]));
@@ -1968,6 +1996,45 @@ mod copy_remap {
         let img = deckcraft_render::decode_image(&picture_bytes(&b, &shape(&b, 0, id))).unwrap();
         // The middle of the drawing is the middle of the copied picture.
         assert_eq!(img.get_pixel(img.width() / 2, img.height() / 2).0, [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn pictures_inserted_after_a_paste_from_another_deck_get_media_ids_of_their_own() {
+        let mut a = Session::with_new();
+        let mut b = Session::with_new();
+        let (pa, ..) = populate(&mut a, b"deck a picture");
+        // Deck a's picture uses a media id above its shape ids that deck b has not handed out yet.
+        {
+            let doc = Arc::make_mut(&mut a.doc_mut().unwrap().doc);
+            let high = MediaId(doc.next_id + 20);
+            doc.next_id = high.0;
+            doc.media[0].id = high;
+            let slide = Arc::make_mut(&mut doc.slides[0]);
+            let Some(ShapeKind::Picture { fill }) = slide.shapes.iter_mut().find(|x| x.id == pa).map(|x| &mut x.kind) else { panic!() };
+            fill.media = high;
+        }
+        assert_eq!(picture_bytes(&a, &shape(&a, 0, pa)), b"deck a picture");
+        select(&mut a, &[pa]);
+        a.execute("edit.copy", &json!({})).unwrap();
+        b.clipboard = a.clipboard.clone();
+        b.doc_mut().unwrap().selection.shapes.clear();
+        let r = b.execute("edit.paste", &json!({})).unwrap();
+        let pasted = ShapeId(r["ids"][0].as_u64().unwrap() as u32);
+        let mut inserted = vec![];
+        for i in 0..12u8 {
+            let png = solid_png([i, 0, 0]);
+            let r = b.execute("insert.picture", &json!({"data": cmd::base64_encode(&png), "name": "a.png"})).unwrap();
+            inserted.push((ShapeId(r["id"].as_u64().unwrap() as u32), png));
+        }
+        assert_eq!(picture_bytes(&b, &shape(&b, 0, pasted)), b"deck a picture");
+        for (id, png) in inserted {
+            assert_eq!(picture_bytes(&b, &shape(&b, 0, id)), png);
+        }
+        let d = b.doc().unwrap();
+        let mut ids: Vec<_> = d.doc.media.iter().map(|m| m.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), d.doc.media.len(), "media ids are unique");
     }
 
     /// Slide 0 of `s` gets a table whose first cell, background and second cell's picture bullet
