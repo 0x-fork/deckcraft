@@ -386,7 +386,8 @@ fn select_range(s: &mut Session, p: &Value) -> Result<Value> {
     let (from, count) = {
         let st = s.doc()?;
         let sel = &st.selection;
-        let anchor = sel.range_anchor.filter(|(_, end)| *end == sel.slide).map(|(a, _)| a);
+        let current = st.doc.slides.get(sel.slide).map(|x| x.id);
+        let anchor = sel.range_anchor.filter(|(_, end)| Some(*end) == current).and_then(|(a, _)| st.doc.slide_index(a));
         (given.or(anchor).unwrap_or(sel.slide), st.doc.slides.len())
     };
     if to >= count || from >= count {
@@ -405,7 +406,7 @@ fn select_range(s: &mut Session, p: &Value) -> Result<Value> {
             sel.slides = range;
         }
         sel.slide = to;
-        sel.range_anchor = Some((from, to));
+        sel.range_anchor = doc.slides.get(from).zip(doc.slides.get(to)).map(|(a, b)| (a.id, b.id));
         sel.shapes.clear();
         sel.text = None;
         sel.cells = None;
@@ -813,6 +814,19 @@ mod tests {
         s.execute("slide.go", &json!({"index": 4})).expect("go");
         s.execute("slide.selectRange", &json!({"to": 6})).expect("range");
         assert_eq!(selected_indices(&s), vec![4, 5, 6]);
+    }
+
+    #[test]
+    fn moving_a_slide_drops_the_range_anchor() {
+        let mut s = deck_of(6);
+        s.execute("slide.go", &json!({"index": 0})).expect("go");
+        s.execute("slide.selectRange", &json!({"to": 2})).expect("range");
+        // Slide 0 moves to index 2 and stays current; index 0 now holds another slide, so the
+        // next Shift-click starts at the moved slide instead of at index 0.
+        s.execute("slide.move", &json!({"from": 0, "to": 2})).expect("move");
+        assert_eq!(s.doc().expect("doc").selection.slide, 2);
+        s.execute("slide.selectRange", &json!({"to": 4})).expect("range");
+        assert_eq!(selected_indices(&s), vec![2, 3, 4]);
     }
 
     #[test]
