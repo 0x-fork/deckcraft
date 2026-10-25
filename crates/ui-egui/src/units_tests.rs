@@ -50,9 +50,6 @@ fn the_format_pane_shows_and_takes_centimetres() {
     app.ui.tab = "Shape Format".into();
     let mut h = harness(app);
     h.run_steps(3);
-    if let (Ok(path), Ok(img)) = (std::env::var("DECKCRAFT_PNG_OUT_UNITS"), h.render()) {
-        let _ = img.save(path);
-    }
     h.state_mut().ui.tab = "Home".into();
     h.run_steps(3);
     let shown = text_values(&h);

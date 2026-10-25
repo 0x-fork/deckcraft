@@ -139,8 +139,9 @@ fn text_layer_links_and_bookmarks_survive_serialization() {
     }
 }
 
-/// Links from an untrusted deck: scripts, `data:` and network shares (a UNC path leaks the user's
-/// NTLM credentials on Windows) do not become PDF links; web, mail, local and relative links do.
+/// Links from an untrusted deck: only web and mail links become PDF links. Scripts, `data:`,
+/// local and relative files, OS protocol handlers and network shares (a UNC path leaks the user's
+/// NTLM credentials on Windows) do not.
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn unsafe_url_links_are_not_exported() {
