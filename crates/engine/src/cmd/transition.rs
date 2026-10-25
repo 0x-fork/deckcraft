@@ -111,7 +111,11 @@ fn timing(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 match p.get("after") {
                     Some(Value::Null) => t.advance_after_ms = None,
-                    Some(v) => t.advance_after_ms = v.as_u64().map(|x| x.min(86_400_000) as u32),
+                    Some(v) => {
+                        if let Some(x) = v.as_u64() {
+                            t.advance_after_ms = Some(x.min(86_400_000) as u32);
+                        }
+                    }
                     None => {}
                 }
             }
