@@ -534,6 +534,8 @@ pub struct SlideApp {
     pub show: Option<show::Show>,
     /// Current slide's animations playing on the editor canvas (not the full-screen show).
     anim_preview: Option<AnimPreview>,
+    /// Where the Reuse Slides picker inserts: the presentation and slide current when it opened.
+    reuse_target: Option<FileTarget>,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
@@ -806,6 +808,7 @@ impl SlideApp {
             thesaurus_query: String::new(),
             show: None,
             anim_preview: None,
+            reuse_target: None,
             media: media::MediaHost::new(audio_out),
             status: None,
             opening: None,
@@ -1609,22 +1612,55 @@ impl SlideApp {
             return;
         };
         let Some(path) = pick("open") else { return };
+        // Read the file once: the list shown and the slides inserted come from the same bytes, even
+        // if the file changes while the dialog is open. Without a reader the path is used as is.
+        let mut source = json!({});
+        match self.services.read.as_ref().map(|r| r(&path)) {
+            Some(Ok(bytes)) => {
+                let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                source["name"] = json!(name);
+                source["data"] = json!(deckcraft_engine::cmd::base64_encode(&bytes));
+            }
+            Some(Err(e)) => {
+                self.set_status(e.to_string());
+                return;
+            }
+            None => source["path"] = json!(path),
+        }
         // Offer the file's slides to choose from; all of them are ticked to begin with.
-        match self.session.execute("slide.reuseList", &json!({"path": path})) {
+        match self.session.execute("slide.reuseList", &source) {
             Ok(list) => {
                 let mut d = dialogs::Dialog::new("reuseSlides");
-                d.params = json!({"path": path, "keep": keep, "slides": list["slides"]});
+                d.params = json!({"path": path, "source": source, "keep": keep, "slides": list["slides"]});
+                self.reuse_target = Some(self.capture_file_target());
                 self.dialog = Some(d);
             }
             Err(e) => self.set_status(e.to_string()),
         }
     }
 
-    /// Insert the slides `picked` (indices) of the presentation at `path` after the current slide.
-    pub fn reuse_slides(&mut self, path: &str, keep: bool, picked: &[usize]) {
-        match self.session.execute("slide.reuse", &json!({"path": path, "keepFormatting": keep, "slides": picked})) {
-            Ok(r) => self.set_status(format!("Inserted {} slides from {path}", r["slides"])),
-            Err(e) => self.set_status(e.to_string()),
+    /// Insert the slides `picked` (indices) of `source` (the `name` + `data`, or `path`, that
+    /// `slide.reuseList` listed) after the slide that was current when the picker opened, in that
+    /// presentation, even if another one is active now; if it is closed or the slide is gone,
+    /// nothing is inserted. Returns whether they were inserted.
+    pub fn reuse_slides(&mut self, source: &Value, keep: bool, picked: &[usize]) -> bool {
+        let mut args = if source.is_object() { source.clone() } else { json!({}) };
+        args["keepFormatting"] = json!(keep);
+        args["slides"] = json!(picked);
+        let result = match self.reuse_target {
+            Some(target) if !self.viewing_target(&target) => self.execute_on_target(&target, "Reuse Slides", "slide.reuse", &args),
+            _ => self.session.execute("slide.reuse", &args).map(|_| ()).map_err(|e| e.to_string()),
+        };
+        match result {
+            Ok(()) => {
+                self.reuse_target = None;
+                self.set_status(format!("Inserted {} slides", picked.len()));
+                true
+            }
+            Err(e) => {
+                self.set_status(e);
+                false
+            }
         }
     }
 
@@ -3512,6 +3548,8 @@ mod ime_tests;
 mod last_color_tests;
 #[cfg(test)]
 mod replacefonts_tests;
+#[cfg(test)]
+mod reuse_picker_tests;
 #[cfg(test)]
 mod slide_size_tests;
 #[cfg(test)]

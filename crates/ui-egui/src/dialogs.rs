@@ -1645,9 +1645,11 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                     app.set_status("Tick at least one slide to insert".to_string());
                     return false;
                 }
-                app.reuse_slides(&path, keep, &picked);
+                // A failed insert keeps the dialog (and the ticked slides) open; the error is in the status bar.
+                let source = d.params.get("source").cloned().unwrap_or_default();
+                return app.reuse_slides(&source, keep, &picked);
             }
-            ok || cancel
+            cancel
         }
         "renameSection" | "renameShape" | "renameLayout" => {
             let cur = d.params.get("name").and_then(Value::as_str).unwrap_or("").to_string();
