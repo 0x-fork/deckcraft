@@ -297,7 +297,7 @@ fn percent_decode(s: &str) -> String {
 
 /// Resolve a relative target against a base directory into a part name.
 pub fn resolve(base: &str, target: &str) -> String {
-    let target = percent_decode(target.split('#').next().unwrap_or(""));
+    let target = percent_decode(target.split('#').next().unwrap_or("")).replace('\\', "/");
     let target = target.as_str();
     let mut segs: Vec<&str> = if target.starts_with('/') { vec![] } else { base.split('/').filter(|s| !s.is_empty()).collect() };
     for s in target.split('/') {
@@ -505,6 +505,12 @@ mod tests {
         let p = Package::open(&z).unwrap();
         assert_eq!(p.xml_bytes("small.xml").map(<[u8]>::len), Some(10));
         assert!(p.xml_bytes("missing.xml").is_none());
+    }
+
+    #[test]
+    fn resolve_backslash_target() {
+        assert_eq!(resolve("ppt/slides", "..\\media\\image1.png"), "ppt/media/image1.png");
+        assert_eq!(resolve("ppt/slides", "\\ppt\\media\\a.png"), "ppt/media/a.png");
     }
 
     #[test]
