@@ -2974,7 +2974,13 @@ mod tests {
 
     #[test]
     fn wheel_zoom_reads_only_the_wheel_with_ctrl_or_cmd() {
-        let wheel = |unit, y: f32, modifiers| egui::Event::MouseWheel { unit, delta: vec2(0.0, y), phase: egui::TouchPhase::Move, modifiers };
+        let wheel = |unit, y: f32, modifiers| egui::Event::MouseWheel {
+            unit,
+            delta: vec2(0.0, y),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
+            modifiers,
+        };
         use egui::MouseWheelUnit::{Line, Point};
         assert_eq!(wheel_zoom_lines(&[wheel(Line, 1.0, egui::Modifiers::CTRL)], 40.0), Some(1.0));
         assert_eq!(wheel_zoom_lines(&[wheel(Line, -2.0, egui::Modifiers::COMMAND)], 40.0), Some(-2.0));
@@ -3011,6 +3017,7 @@ mod tests {
             unit: egui::MouseWheelUnit::Line,
             delta: vec2(0.0, y),
             phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Wheel,
             modifiers,
         });
         harness.run_steps(40);

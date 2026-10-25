@@ -763,7 +763,8 @@ mod tests {
         let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
         assert!(peak > 0.04, "the audio track sounds: peak {peak}");
         assert!(host.videos.get(&id).is_some_and(|v| v.feed.is_none()), "VP8 opens no video feed");
-        host.tick(&egui::Context::default(), &mut s);
+        host.tick_clock(0.1, &mut s);
+        host.sync_video_textures(&egui::Context::default());
         assert!(host.texture(id).is_none(), "no VP8 frame exists to show");
     }
 
