@@ -88,8 +88,7 @@ menu colours taken from the theme tokens (menu `chrome`, page `card`).
 | Nudge (arrows), fine nudge (Option+arrows) | yes | yes |
 | Shift-constrained move, Option-drag to duplicate | yes | yes |
 | Connector glue and rerouting | yes | yes |
-| Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices and their Bézier handles (hold Shift, Ctrl/Cmd or Alt/Option while dragging a handle for a smooth, straight or corner point), Ctrl/Cmd-click to add or delete, right-click a point for Smooth/Straight/Corner Point, Delete Point and Open/Close Path, or a segment for Straight/Curved Segment; no Delete Segment or Add Point in the menu yet |
-| Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices and their Bézier handles, Ctrl/Cmd-click to add or delete, right-click a point for Smooth/Straight/Corner Point, Delete Point and Open/Close Path, or a segment for Straight/Curved Segment, Add Point, Delete Segment (grayed out on an open outline) and Open/Close Path |
+| Edit points on freeforms | yes | partial: Edit Shape ▸ Edit Points turns any shape into a freeform; drag vertices and their Bézier handles (hold Shift, Ctrl/Cmd or Alt/Option while dragging a handle for a smooth, straight or corner point), Ctrl/Cmd-click to add or delete, right-click a point for Smooth/Straight/Corner Point, Delete Point and Open/Close Path, or a segment for Straight/Curved Segment, Add Point, Delete Segment (grayed out on an open outline) and Open/Close Path |
 | WordArt adjust handles | yellow handles on transformed text | yes, one per adjust when the text has a warp; dragging sets that guide value |
 | Crop handles, crop to shape, aspect ratio | yes | partial |
 | Text caret, selection, double/triple click, drag-select | yes | yes |
@@ -172,8 +171,8 @@ consistency is open (#73, #56).
 |---|---|---|
 | 2026-10-24 | trivial | Table cells: dragging across cells selects a range of cells |
 | 2026-10-24 | trivial | Edit Points: Shift, Ctrl/Cmd or Alt/Option held while dragging a handle makes the point smooth, straight or corner |
-| 2026-10-23 | trivial | Scroll bars on the zoomed slide pane (#1157) |
 | 2026-10-24 | trivial | Columns dialog: the number of text columns and the spacing between them. Dialog count 41 → 42 |
+| 2026-10-23 | trivial | Scroll bars on the zoomed slide pane (#1157) |
 | 2026-10-23 | minor | Shape Fill and Shape Outline (Home and Shape Format): the button applies the last colour picked from its menu, Accent 1 and Text 1 until one is picked. Line weight and dashes are not changed by the button; Font Color and Highlight stay as they were (#1080) |
 | 2026-10-22 | trivial | Group fill and outline commands reach members, including nested groups; selection and single-step undo are preserved (#1079). The existing Arrange / Group checklist score stays D |
 | 2026-10-16 | minor | Export › Change File Type › PNG and the Export… dialog offer a transparent background (#784) |
