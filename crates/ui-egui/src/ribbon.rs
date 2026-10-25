@@ -604,7 +604,27 @@ pub fn cref_param(c: &deckcraft_model::ColorRef) -> Value {
             }
             Value::Object(o)
         }
-        _ => json!("#000000"),
+        deckcraft_model::ColorBase::Preset { name } => {
+            let mut o = serde_json::Map::new();
+            o.insert("preset".into(), json!(name));
+            for m in &c.mods {
+                if let Some(v) = m.value() {
+                    o.insert(m.xml_name().into(), json!(v));
+                }
+            }
+            Value::Object(o)
+        }
+        deckcraft_model::ColorBase::System { name, last } => {
+            let mut o = serde_json::Map::new();
+            o.insert("system".into(), json!(name));
+            o.insert("last".into(), json!(format!("#{}", last.hex())));
+            for m in &c.mods {
+                if let Some(v) = m.value() {
+                    o.insert(m.xml_name().into(), json!(v));
+                }
+            }
+            Value::Object(o)
+        }
     }
 }
 
