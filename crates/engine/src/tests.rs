@@ -5636,7 +5636,6 @@ fn transition_timing_invalid_after_keeps_value() {
     assert_eq!(after(&s), None);
 }
 
-
 #[test]
 fn invalid_ids_array_never_falls_back_to_the_selection() {
     let mut s = session();
