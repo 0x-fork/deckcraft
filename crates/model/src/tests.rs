@@ -1,4 +1,8 @@
-use super::*;
+use super::{
+    ColorRef, Fill, LayoutType, Paragraph, PhType, Placeholder, Presentation, Run, RunProps, SchemeSlot, Shape, ShapeId, ShapeKind, ShapeStyle,
+    Slide, Table, TextBody, Theme, Xfrm, defaults, ink_pressure_is_legacy, ink_sample_width, parent_of, resolve, sibling_list_mut, style, text,
+    theme, walk,
+};
 use crate::resolve::Ctx;
 
 #[test]

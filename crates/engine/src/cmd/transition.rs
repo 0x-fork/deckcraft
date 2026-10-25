@@ -6,7 +6,7 @@ use deckcraft_model::Transition;
 use deckcraft_model::anim::TRANSITIONS;
 use serde_json::{Value, json};
 
-use super::*;
+use super::{CommandSpec, NO_ID_SPACE, always, bad, bool_param, cmd, has_slide, ok, str_param, usize_param};
 use crate::{Result, Session};
 
 pub fn specs() -> Vec<CommandSpec> {

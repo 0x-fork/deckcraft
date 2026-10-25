@@ -1,6 +1,10 @@
 use serde_json::json;
 
-use crate::*;
+use crate::tools::{Mods, PointerEvent, PointerKind};
+use crate::{
+    DocState, History, Presentation, Session, Target, TextSel, ToolKind, Value, cmd, command_specs, connect, find_command, model, sample, tools,
+};
+use deckcraft_model::ShapeId;
 
 fn session() -> Session {
     Session::with_new()

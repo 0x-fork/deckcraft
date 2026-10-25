@@ -10,7 +10,10 @@ use deckcraft_model::theme::{builtin_color_schemes, builtin_font_schemes, builti
 use deckcraft_model::{Background, Fill, PhType, Presentation, Shape, ShapeId, defaults};
 use serde_json::{Value, json};
 
-use super::*;
+use super::{
+    CommandSpec, NO_ID_SPACE, always, bad, bool_or, bool_param, cmd, color_param, color_value, f64_param, has_doc, has_slide, ok, rect_param,
+    str_param, usize_param, with_param,
+};
 use crate::{Result, Session, Target};
 
 pub fn specs() -> Vec<CommandSpec> {
