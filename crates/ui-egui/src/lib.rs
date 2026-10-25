@@ -459,6 +459,8 @@ pub struct SlideApp {
     pub show: Option<show::Show>,
     /// Current slide's animations playing on the editor canvas (not the full-screen show).
     anim_preview: Option<AnimPreview>,
+    /// Where the Reuse Slides picker inserts: the presentation and slide current when it opened.
+    reuse_target: Option<FileTarget>,
     /// Audio/video playback (editor control bar, slide show, `media.*` commands).
     pub media: media::MediaHost,
     pub status: Option<(String, f64)>,
@@ -557,6 +559,7 @@ impl SlideApp {
             thesaurus_query: String::new(),
             show: None,
             anim_preview: None,
+            reuse_target: None,
             media: media::MediaHost::new(audio_out),
             status: None,
             opening: None,
@@ -1290,6 +1293,7 @@ impl SlideApp {
             Ok(list) => {
                 let mut d = dialogs::Dialog::new("reuseSlides");
                 d.params = json!({"path": path, "source": source, "keep": keep, "slides": list["slides"]});
+                self.reuse_target = Some(self.capture_file_target());
                 self.dialog = Some(d);
             }
             Err(e) => self.set_status(e.to_string()),
@@ -1297,18 +1301,25 @@ impl SlideApp {
     }
 
     /// Insert the slides `picked` (indices) of `source` (the `name` + `data`, or `path`, that
-    /// `slide.reuseList` listed) after the current slide. Returns whether they were inserted.
+    /// `slide.reuseList` listed) after the slide that was current when the picker opened, in that
+    /// presentation, even if another one is active now; if it is closed or the slide is gone,
+    /// nothing is inserted. Returns whether they were inserted.
     pub fn reuse_slides(&mut self, source: &Value, keep: bool, picked: &[usize]) -> bool {
         let mut args = if source.is_object() { source.clone() } else { json!({}) };
         args["keepFormatting"] = json!(keep);
         args["slides"] = json!(picked);
-        match self.session.execute("slide.reuse", &args) {
-            Ok(r) => {
-                self.set_status(format!("Inserted {} slides", r["slides"]));
+        let result = match self.reuse_target {
+            Some(target) if !self.viewing_target(&target) => self.execute_on_target(&target, "Reuse Slides", "slide.reuse", &args),
+            _ => self.session.execute("slide.reuse", &args).map(|_| ()).map_err(|e| e.to_string()),
+        };
+        match result {
+            Ok(()) => {
+                self.reuse_target = None;
+                self.set_status(format!("Inserted {} slides", picked.len()));
                 true
             }
             Err(e) => {
-                self.set_status(e.to_string());
+                self.set_status(e);
                 false
             }
         }

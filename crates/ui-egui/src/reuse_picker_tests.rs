@@ -89,6 +89,38 @@ fn inserts_what_was_listed_even_if_the_file_changed_meanwhile() {
 }
 
 #[test]
+fn inserts_into_the_presentation_the_picker_was_opened_for() {
+    let file = Rc::new(RefCell::new(deck_bytes(&["Alpha"])));
+    let mut h = harness(&file);
+    open_dialog(&mut h);
+    let first = h.state().session.active().unwrap().uid;
+    // Another presentation becomes active while the dialog is open.
+    h.state_mut().session.execute("file.new", &json!({})).unwrap();
+    let second = h.state().session.active().unwrap().uid;
+    assert_ne!(first, second);
+    press_insert(&mut h);
+    assert!(h.state().dialog.is_none());
+    let s = &h.state().session;
+    let doc = |uid: u64| s.documents().iter().find(|d| d.uid == uid).unwrap();
+    assert!(doc(first).doc.slides.iter().any(|x| x.title() == "Alpha"), "inserted where the picker was opened");
+    assert_eq!(doc(second).doc.slides.len(), 1, "the other presentation is untouched");
+    assert_eq!(s.active().unwrap().uid, second, "the view stays on the presentation the user moved to");
+}
+
+#[test]
+fn nothing_is_inserted_once_that_presentation_is_closed() {
+    let file = Rc::new(RefCell::new(deck_bytes(&["Alpha"])));
+    let mut h = harness(&file);
+    open_dialog(&mut h);
+    h.state_mut().session.execute("file.new", &json!({})).unwrap();
+    h.state_mut().session.close_document(0);
+    press_insert(&mut h);
+    assert_eq!(h.state().session.documents().len(), 1);
+    assert!(!titles(&h).iter().any(|x| x == "Alpha"), "{:?}", titles(&h));
+    assert_eq!(h.state().dialog.as_ref().map(|d| d.id.as_str()), Some("reuseSlides"), "the dialog stays open with the reason");
+}
+
+#[test]
 fn a_failed_insert_keeps_the_dialog_open() {
     let file = Rc::new(RefCell::new(deck_bytes(&["Alpha"])));
     let mut h = harness(&file);
