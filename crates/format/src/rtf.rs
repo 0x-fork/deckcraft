@@ -223,7 +223,7 @@ pub fn rtf_to_outline(rtf: &str) -> String {
                         _ => {}
                     }
                 } else if n == b'\'' {
-                    let hex = rtf.get(i + 1..i + 3).and_then(|h| u8::from_str_radix(h, 16).ok());
+                    let hex = rtf.get(i + 1..i + 3).filter(|h| h.bytes().all(|b| b.is_ascii_hexdigit())).and_then(|h| u8::from_str_radix(h, 16).ok());
                     i = advance(rtf, i, 3);
                     if !st.skip
                         && let Some(h) = hex
@@ -317,6 +317,12 @@ fn cp1252(b: u8) -> char {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    /// A sign in a `\'hh` escape is not a hex digit and must be ignored.
+    #[test]
+    fn hex_escape_rejects_sign() {
+        assert_eq!(rtf_to_outline(r"{\rtf1 a\'+5b\par}"), "ab\n");
+    }
 
     /// Non-ASCII text after a `\\uN` or `\\'hh` escape used to split a character and panic.
     #[test]
