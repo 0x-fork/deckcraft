@@ -5406,3 +5406,17 @@ fn slide_hide_and_layout_reject_invalid_index() {
     }
     assert!(s.doc().unwrap().doc.slides.iter().all(|x| !x.hidden));
 }
+
+#[test]
+fn transition_timing_invalid_after_keeps_value() {
+    let mut s = session();
+    let after = |s: &Session| s.doc().unwrap().doc.slides[0].transition.as_ref().and_then(|t| t.advance_after_ms);
+    s.execute("transition.timing", &json!({"after": 5000})).unwrap();
+    assert_eq!(after(&s), Some(5000));
+    for bad in [json!(-5), json!(1.5), json!("abc")] {
+        let _ = s.execute("transition.timing", &json!({"after": bad}));
+        assert_eq!(after(&s), Some(5000), "after:{bad} must not clear the auto-advance");
+    }
+    s.execute("transition.timing", &json!({"after": null})).unwrap();
+    assert_eq!(after(&s), None);
+}
