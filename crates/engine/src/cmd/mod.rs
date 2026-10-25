@@ -515,6 +515,10 @@ pub(crate) fn current_shapes<'a>(doc: &'a deckcraft_model::Presentation, sel: &c
     }
 }
 
+pub(crate) fn current_names(doc: &deckcraft_model::Presentation, sel: &crate::Selection) -> std::collections::HashSet<String> {
+    current_shapes(doc, sel).map(|v| v.iter().map(|s| s.name.clone()).collect()).unwrap_or_default()
+}
+
 /// The command palette runs a command with `{}`. True when the params doc names a value that
 /// call would have to supply (`path`, `rows`, `path? | data`), so the palette must not offer it.
 /// A name ending in `?` is optional. Text after `→` is the result, not an input.

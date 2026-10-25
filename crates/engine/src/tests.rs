@@ -215,6 +215,77 @@ fn clipboard_copy_paste_shapes_and_slides() {
 }
 
 #[test]
+fn pasted_shapes_get_the_next_automatic_name() {
+    let mut s = session();
+    let names = |s: &Session| s.doc().unwrap().current_slide().unwrap().shapes.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
+    let before = names(&s).len();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 50, 50]})).unwrap();
+    let auto = names(&s)[before].clone();
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    let all = names(&s);
+    let base = auto.rsplit_once(' ').unwrap().0;
+    assert_eq!(all[before + 1], format!("{base} {}", before + 2));
+    assert_eq!(all[before + 2], format!("{base} {}", before + 3));
+
+    // A name the user chose is not an automatic one and stays on the copy.
+    let id = s.doc().unwrap().selection.shapes[0].0;
+    s.execute("shape.rename", &json!({"id": id, "name": "Hero"})).unwrap();
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    assert_eq!(names(&s).last().unwrap(), "Hero");
+}
+
+#[test]
+fn pasting_after_a_deleted_shape_does_not_repeat_a_name() {
+    let mut s = session();
+    let names = |s: &Session| s.doc().unwrap().current_slide().unwrap().shapes.iter().map(|x| x.name.clone()).collect::<Vec<_>>();
+    let mut ids = vec![];
+    for _ in 0..3 {
+        s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 50, 50]})).unwrap();
+        ids.push(s.doc().unwrap().selection.shapes[0].0);
+    }
+    s.execute("edit.delete", &json!({"ids": [ids[1]]})).unwrap();
+    s.execute("slide.go", &json!({"index": 0})).unwrap();
+    s.doc_mut().unwrap().selection.shapes = vec![deckcraft_model::ShapeId(ids[2])];
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    let all = names(&s);
+    let mut unique = all.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), all.len(), "{all:?}");
+}
+
+#[test]
+fn pasting_on_another_slide_keeps_names_so_morph_still_pairs_them() {
+    let mut s = session();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [0, 0, 20, 20]})).unwrap();
+    let first = s.doc().unwrap().selection.shapes[0].0;
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 50, 50]})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [200, 200, 80, 80]})).unwrap();
+    s.execute("edit.delete", &json!({"ids": [first]})).unwrap();
+    s.execute("edit.selectAll", &json!({})).unwrap();
+    s.execute("edit.copy", &json!({})).unwrap();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("edit.paste", &json!({})).unwrap();
+    let st = s.doc().unwrap();
+    let (a, b) = (&st.doc.slides[1], &st.doc.slides[2]);
+    let an: Vec<_> = a.shapes.iter().map(|x| x.name.clone()).collect();
+    let bn: Vec<_> = b.shapes.iter().map(|x| x.name.clone()).collect();
+    assert_eq!(an, bn);
+    let pairs = deckcraft_anim::morph_pairs(a, b);
+    assert_eq!(pairs.len(), 2);
+    for (ia, ib) in pairs {
+        let na = &a.shapes.iter().find(|x| x.id == ia).unwrap().name;
+        let nb = &b.shapes.iter().find(|x| x.id == ib).unwrap().name;
+        assert_eq!(na, nb);
+    }
+}
+
+#[test]
 fn bold_copy_is_html_and_pages_html_pastes_bold() {
     let mut s = session();
     let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
