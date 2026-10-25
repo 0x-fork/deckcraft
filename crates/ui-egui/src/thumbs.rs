@@ -8,6 +8,7 @@ use serde_json::json;
 use crate::SlideApp;
 use crate::theme::{self, Tokens};
 
+/// Render the slide thumbnail pane, including section headers, selection, and scroll state.
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let in_master = app.session.active().is_some_and(|d| d.selection.target != Target::Slides);
@@ -32,7 +33,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 ui.add_space(20.0);
             });
             // Where the pane is scrolled to, for the control channel and tests (#917).
-            app.ui.thumbs_scroll = out.state.offset.y;
+            app.ui.thumbs_scroll = out.state.clamped_offset().y;
         });
     // Focus follows the last press: inside the pane keeps it, anywhere else (canvas, ribbon) drops it.
     if let Some(pos) = ui.input(|i| if i.pointer.primary_pressed() { i.pointer.interact_pos() } else { None }) {
@@ -40,6 +41,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
 }
 
+/// Render the scrollable thumbnail list, scrolling the current slide into view when it changes.
 fn list(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let Some(st) = app.session.active() else { return };
@@ -53,7 +55,7 @@ fn list(app: &mut SlideApp, ui: &mut Ui) {
     // along in the pane (#917). The scroll itself is minimal, only when the thumbnail leaves
     // the view, as in PowerPoint, so the user's own scrolling stands; the first frame only
     // records the slide.
-    let scroll_key = ui.id().with("thumb_scrolled_to");
+    let scroll_key = ui.scope_id().with("thumb_scrolled_to");
     let slide_changed = ui.data_mut(|d| {
         let last: Option<usize> = d.get_temp(scroll_key);
         d.insert_temp(scroll_key, cur);

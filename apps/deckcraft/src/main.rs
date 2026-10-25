@@ -42,8 +42,9 @@ impl eframe::App for App {
         apple_events::poll(&self.1, &mut self.0, ctx);
         self.0.logic(ctx);
     }
-    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
-        self.0.raw_input_hook(raw);
+    /// Forward native raw input to the wrapped application once per pass.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.0.raw_input_hook(ctx, raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
@@ -180,6 +181,8 @@ fn app_icon() -> Option<egui::IconData> {
     eframe::icon_data::from_png_bytes(png).map_err(|e| log::warn!("app icon: {e}")).ok()
 }
 
+/// Install logging, parse startup arguments and environment, launch the native app, and
+/// propagate an eframe startup failure.
 fn main() -> eframe::Result {
     // First, so every start-up record (and the engine's panic hook, installed with the first
     // Session) is captured; see `logging`.
@@ -255,6 +258,7 @@ fn main() -> eframe::Result {
         "DeckCraft",
         options,
         Box::new(move |cc| {
+            deckcraft_ui_egui::install_ime_pass_hooks(&cc.egui_ctx);
             let mut app = SlideApp::new(Session::new(), services());
             load_prefs(&mut app);
             // AutoRecover: reopen what a previous run left unsaved, then keep it current.
