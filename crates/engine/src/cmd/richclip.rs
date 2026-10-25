@@ -350,7 +350,7 @@ fn numeric_char(digits: &str) -> Option<char> {
         return None;
     }
     let n = u32::from_str_radix(body, radix).ok()?;
-    char::from_u32(n).filter(|c| !c.is_control() || *c == '\n')
+    char::from_u32(n).filter(|c| !c.is_control() || matches!(*c, '\n' | '\t'))
 }
 
 /// Do the HTML's words and the paste's plain text say the same thing?
@@ -381,6 +381,12 @@ mod tests {
         assert_eq!(decode_text("a&#+65;b"), "a&#+65;b");
         assert_eq!(decode_text("a&#x+41;b"), "a&#x+41;b");
         assert_eq!(decode_text("a&#65;b&#x41;"), "aAbA");
+    }
+
+    #[test]
+    fn numeric_tab_entity_decodes_to_tab() {
+        assert_eq!(decode_text("a&#9;b"), "a\tb");
+        assert_eq!(decode_text("a&#x9;b"), "a\tb");
     }
 
     #[test]
