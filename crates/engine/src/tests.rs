@@ -842,6 +842,25 @@ fn clicks_while_editing_a_cell_move_the_caret_between_cells() {
     assert!(text_sel(&s).is_none());
 }
 
+/// Editing text in a cell ends a selected cell range, so Delete after leaving the text deletes the
+/// table rather than clearing the cells of the old range.
+#[test]
+fn editing_a_cell_ends_the_selected_cell_range() {
+    let mut s = session();
+    let id = table_at(&mut s, &[100.0, 100.0], json!([["a", "b"], ["c", "d"]]));
+    s.execute("table.selectCells", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 1]})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.cells, None);
+    s.execute("table.selectCells", &json!({"id": id, "from": [0, 0], "to": [0, 1]})).unwrap();
+    s.execute("text.edit", &json!({"notes": true})).unwrap();
+    s.execute("text.exit", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().selection.cells, None);
+    s.execute("text.edit", &json!({"id": id, "cell": [1, 1]})).unwrap();
+    s.execute("text.exit", &json!({})).unwrap();
+    s.execute("edit.delete", &json!({})).unwrap();
+    assert!(s.doc().unwrap().shape(id).is_none(), "the table is deleted");
+}
+
 #[test]
 fn dragging_across_cells_selects_a_range_of_cells() {
     let mut s = session();

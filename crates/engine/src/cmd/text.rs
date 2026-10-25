@@ -339,6 +339,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         s.select(|_, sel| {
             sel.text = Some(TextSel { notes: true, anchor: end, caret: end, ..Default::default() });
             sel.shapes.clear();
+            sel.cells = None;
         })?;
         return ok();
     }
@@ -369,6 +370,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     s.select(|_, sel| {
         sel.shapes = vec![id];
         sel.text = Some(TextSel { shape: id, anchor: at, caret: at, cell, notes: false, line_end: None });
+        sel.cells = None;
     })?;
     Ok(json!({"id": id, "at": [at.0, at.1]}))
 }
