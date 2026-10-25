@@ -331,10 +331,12 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             let lock_id = egui::Id::unique("fmt-lock-aspect");
             let mut lock: bool = ui.data_mut(|d| d.get_temp(lock_id).unwrap_or(false));
             let locked = lock;
-            let mut fields = |ui: &mut Ui, label: &str, id: &str, v: f64, key: &str, cmd: &str, unit: f64| {
+            let len = app.session.prefs.units;
+            let mut fields = |ui: &mut Ui, label: &str, id: &str, v: f64, key: &str, cmd: &str, angle: bool| {
+                let (unit, suffix) = if angle { (1.0, "°") } else { (len.points_per_unit(), len.suffix()) };
                 ui.horizontal(|ui| {
                     ui.add_sized(vec2(90.0, 20.0), egui::Label::new(label));
-                    if let Some(nv) = widgets::spinner(ui, id, label, v / unit, 0.1, if unit == 72.0 { "\"" } else { "°" }, 70.0) {
+                    if let Some(nv) = widgets::spinner(ui, id, label, v / unit, 0.1, suffix, 70.0) {
                         let mut p = json!({key: nv * unit});
                         if cmd == "shape.resize" && locked {
                             p["lockAspect"] = json!(true);
@@ -344,16 +346,16 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
                 });
             };
             ui.label(egui::RichText::new("Size").font(theme::bold(13.0)));
-            fields(ui, "Height", "fh", x.h, "h", "shape.resize", 72.0);
-            fields(ui, "Width", "fw", x.w, "w", "shape.resize", 72.0);
-            fields(ui, "Rotation", "fr", x.rot, "deg", "shape.rotate", 1.0);
+            fields(ui, "Height", "fh", x.h, "h", "shape.resize", false);
+            fields(ui, "Width", "fw", x.w, "w", "shape.resize", false);
+            fields(ui, "Rotation", "fr", x.rot, "deg", "shape.rotate", true);
             if ui.checkbox(&mut lock, "Lock aspect ratio").changed() {
                 ui.data_mut(|d| d.insert_temp(lock_id, lock));
             }
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Position").font(theme::bold(13.0)));
-            fields(ui, "Horizontal", "fx", x.x, "x", "shape.move", 72.0);
-            fields(ui, "Vertical", "fy", x.y, "y", "shape.move", 72.0);
+            fields(ui, "Horizontal", "fx", x.x, "x", "shape.move", false);
+            fields(ui, "Vertical", "fy", x.y, "y", "shape.move", false);
             ui.add_space(6.0);
             ui.label(egui::RichText::new("Alt Text").font(theme::bold(13.0)));
             let id = ui.scope_id().with(("alt", uid, sh.id.0));

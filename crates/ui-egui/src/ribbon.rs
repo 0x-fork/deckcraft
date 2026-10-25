@@ -2707,16 +2707,20 @@ fn size_group(app: &mut SlideApp, ui: &mut Ui) {
                 ui.label("Width:");
                 return;
             };
+            let len = app.session.prefs.units;
+            let (ppu, suffix) = (len.points_per_unit(), len.suffix());
+            // " cm" needs more room than the inch mark.
+            let width = if len == deckcraft_geom::Unit::Inches { 54.0 } else { 66.0 };
             ui.horizontal(|ui| {
                 ui.label("Height:");
-                if let Some(v) = widgets::spinner(ui, "sh", "Height", x.h / 72.0, 0.1, "\"", 54.0) {
-                    run(app, "shape.resize", json!({"h": v.max(0.0) * 72.0}));
+                if let Some(v) = widgets::spinner(ui, "sh", "Height", x.h / ppu, 0.1, suffix, width) {
+                    run(app, "shape.resize", json!({"h": v.max(0.0) * ppu}));
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Width: ");
-                if let Some(v) = widgets::spinner(ui, "sw", "Width", x.w / 72.0, 0.1, "\"", 54.0) {
-                    run(app, "shape.resize", json!({"w": v.max(0.0) * 72.0}));
+                if let Some(v) = widgets::spinner(ui, "sw", "Width", x.w / ppu, 0.1, suffix, width) {
+                    run(app, "shape.resize", json!({"w": v.max(0.0) * ppu}));
                 }
             });
         });

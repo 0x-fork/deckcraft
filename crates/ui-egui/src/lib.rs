@@ -3558,6 +3558,8 @@ mod split_button_tests;
 mod texture_limit_tests;
 #[cfg(test)]
 mod ui_soak_tests;
+#[cfg(test)]
+mod units_tests;
 
 #[cfg(test)]
 #[path = "datetime_tests.rs"]

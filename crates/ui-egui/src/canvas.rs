@@ -363,7 +363,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         draw_guides(app, &painter, xf, slide_rect, &t);
     }
     if app.ui.ruler {
-        ruler(&painter, avail, slide_rect, scale, &t);
+        ruler(&painter, avail, slide_rect, scale, app.session.prefs.units, &t);
         ruler_markers(app, ui, &painter, avail, xf, &t);
     }
     pointer(app, ui, &resp, xf);
@@ -579,44 +579,52 @@ fn master_tex(
     Some((crate::textures::upload_editor(ctx, "master-canvas", crate::textures::to_color_image(&img, false)), region))
 }
 
-fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
+/// The ruler's numbered step in points and the ticks per step: quarter inches, or half
+/// centimetres. Any other unit (only a hand-edited `prefs.json` gives one) keeps inches, since a
+/// tick per point or pixel would be a solid bar.
+pub(crate) fn ruler_steps(unit: deckcraft_geom::Unit) -> (f64, u32) {
+    match unit {
+        deckcraft_geom::Unit::Centimeters => (unit.points_per_unit(), 2),
+        _ => (72.0, 4),
+    }
+}
+
+fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, unit: deckcraft_geom::Unit, t: &Tokens) {
     let top = Rect::from_min_max(avail.min, pos2(avail.max.x, avail.min.y + 16.0));
     let left = Rect::from_min_max(avail.min, pos2(avail.min.x + 16.0, avail.max.y));
     p.rect_filled(top, CornerRadius::ZERO, t.card);
     p.rect_filled(left, CornerRadius::ZERO, t.card);
-    let inch = 72.0 * scale;
-    let mut k = 0;
-    loop {
-        let x = slide.min.x + k as f32 * inch / 4.0;
-        if x > slide.max.x {
-            break;
-        }
-        let h = if k % 4 == 0 {
+    let (step, sub) = ruler_steps(unit);
+    let tick = step as f32 * scale / sub as f32;
+    let len = |k: u32| {
+        if k.is_multiple_of(sub) {
             8.0
-        } else if k % 2 == 0 {
+        } else if k.is_multiple_of(2) {
             5.0
         } else {
             3.0
-        };
+        }
+    };
+    let mut k = 0;
+    loop {
+        let x = slide.min.x + k as f32 * tick;
+        if x > slide.max.x {
+            break;
+        }
+        let h = len(k);
         p.line_segment([pos2(x, top.max.y - h), pos2(x, top.max.y)], Stroke::new(1.0, t.text_faint));
-        if k % 4 == 0 {
-            p.text(pos2(x + 2.0, top.min.y + 1.0), Align2::LEFT_TOP, format!("{}", k / 4), theme::font(8.0), t.text_dim);
+        if k.is_multiple_of(sub) {
+            p.text(pos2(x + 2.0, top.min.y + 1.0), Align2::LEFT_TOP, format!("{}", k / sub), theme::font(8.0), t.text_dim);
         }
         k += 1;
     }
     let mut k = 0;
     loop {
-        let y = slide.min.y + k as f32 * inch / 4.0;
+        let y = slide.min.y + k as f32 * tick;
         if y > slide.max.y {
             break;
         }
-        let w = if k % 4 == 0 {
-            8.0
-        } else if k % 2 == 0 {
-            5.0
-        } else {
-            3.0
-        };
+        let w = len(k);
         p.line_segment([pos2(left.max.x - w, y), pos2(left.max.x, y)], Stroke::new(1.0, t.text_faint));
         k += 1;
     }
