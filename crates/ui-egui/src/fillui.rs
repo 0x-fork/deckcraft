@@ -381,6 +381,64 @@ const PATTERN_LABELS: [(&str, &str); 54] = [
     ("zigZag", "Zig zag"),
 ];
 
+/// The presets the gallery offers, in its 6 rows of 8. `horz`, `vert`, `cross`, `dnDiag`, `upDiag`
+/// and `diagCross` are left out, as in PowerPoint's gallery; a fill using one still draws.
+const PATTERN_GALLERY: [&str; 48] = [
+    "pct5",
+    "pct10",
+    "pct20",
+    "pct25",
+    "pct30",
+    "pct40",
+    "pct50",
+    "pct60",
+    "pct70",
+    "pct75",
+    "pct80",
+    "pct90",
+    "ltDnDiag",
+    "ltUpDiag",
+    "dkDnDiag",
+    "dkUpDiag",
+    "wdDnDiag",
+    "wdUpDiag",
+    "ltVert",
+    "ltHorz",
+    "narVert",
+    "narHorz",
+    "dkVert",
+    "dkHorz",
+    "dashDnDiag",
+    "dashUpDiag",
+    "dashHorz",
+    "dashVert",
+    "smConfetti",
+    "lgConfetti",
+    "zigZag",
+    "wave",
+    "diagBrick",
+    "horzBrick",
+    "weave",
+    "plaid",
+    "divot",
+    "dotGrid",
+    "dotDmnd",
+    "shingle",
+    "trellis",
+    "sphere",
+    "smGrid",
+    "lgGrid",
+    "smCheck",
+    "lgCheck",
+    "openDmnd",
+    "solidDmnd",
+];
+
+/// The presets the pattern gallery offers, in gallery order.
+pub fn pattern_gallery() -> impl Iterator<Item = &'static str> {
+    PATTERN_GALLERY.into_iter()
+}
+
 /// The name the gallery shows for preset `name` (the preset itself when it has none).
 pub fn pattern_label(name: &str) -> &str {
     PATTERN_LABELS.iter().find(|(n, _)| *n == name).map_or(name, |(_, l)| l)
@@ -407,7 +465,7 @@ fn paint_pattern(p: &egui::Painter, r: Rect, name: &str, fg: Color32, bg: Color3
     }
 }
 
-/// The editor for `pt`: a gallery of every preset drawn in the current colors, then Foreground and
+/// The editor for `pt`: a gallery of the presets drawn in the current colors, then Foreground and
 /// Background color menus. Returns the new pattern when the user changed something.
 pub fn pattern_editor(ui: &mut Ui, pt: &PatternFill, sc: &ColorScheme) -> Option<PatternFill> {
     let t = Tokens::get(ui.ctx());
@@ -416,7 +474,7 @@ pub fn pattern_editor(ui: &mut Ui, pt: &PatternFill, sc: &ColorScheme) -> Option
     ui.label("Pattern");
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
-        for name in deckcraft_render::pattern_presets() {
+        for name in pattern_gallery() {
             let on = pt.preset == name;
             let (r, resp) = ui.allocate_exact_size(vec2(22.0, 22.0), Sense::click());
             paint_pattern(ui.painter(), r.shrink(2.0), name, fg, bg);

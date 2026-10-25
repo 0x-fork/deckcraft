@@ -80,9 +80,13 @@ fn shape_pattern_fill_picks_a_preset_from_the_gallery() {
     let mut h = harness(SlideApp::new(s, Services::default()), "format");
     let _ = h.get_by_label("Pattern fill");
     assert!(h.query_by_label("Transparency").is_none(), "a pattern has no solid-fill transparency");
-    assert_eq!(deckcraft_render::pattern_presets().count(), 54);
-    for name in deckcraft_render::pattern_presets() {
+    assert_eq!(crate::fillui::pattern_gallery().count(), 48);
+    for name in crate::fillui::pattern_gallery() {
+        assert!(deckcraft_render::pattern_presets().any(|p| p == name), "{name}");
         let _ = h.get_by_label(crate::fillui::pattern_label(name));
+    }
+    for label in ["Horizontal", "Vertical", "Cross", "Downward diagonal", "Upward diagonal", "Diagonal cross"] {
+        assert!(h.query_by_label(label).is_none(), "{label} is not in the gallery");
     }
     let undo = h.state().session.active().unwrap().history.undo.len();
     h.get_by_label("Dark downward diagonal").click();
