@@ -308,7 +308,10 @@ fn decode_text(raw: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&collapse_space(&rest[..at]));
         rest = &rest[at..];
-        let search_window = rest.len().min(32);
+        let mut search_window = rest.len().min(32);
+        while !rest.is_char_boundary(search_window) {
+            search_window -= 1;
+        }
         let Some(end) = rest[..search_window].find(';') else {
             out.push('&');
             rest = &rest[1..];
@@ -364,6 +367,14 @@ fn fold(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multibyte_after_ampersand_is_kept() {
+        let text = "é".repeat(20);
+        assert_eq!(decode_text(&format!("R&D {text}")), format!("R&D {text}"));
+        let cjk = "漢".repeat(20);
+        assert_eq!(decode_text(&format!("&{cjk}")), format!("&{cjk}"));
+    }
 
     #[test]
     fn signed_numeric_entities_are_kept_as_typed() {
