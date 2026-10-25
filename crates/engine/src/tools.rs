@@ -554,11 +554,15 @@ impl Session {
         if let Some(st) = self.active_mut()
             && st.interaction.as_ref().is_some_and(|i| i.label == "Edit Points")
             && let Some(i) = st.interaction.take()
-            && !Arc::ptr_eq(&i.doc, &st.doc)
         {
-            st.doc = i.doc;
-            st.selection = i.selection;
-            st.revision += 1;
+            // A modifier held during the drag may have set a point type; the drag is undone, so is that.
+            let kind = i.vertex_kind;
+            if !Arc::ptr_eq(&i.doc, &st.doc) {
+                st.doc = i.doc;
+                st.selection = i.selection;
+                st.revision += 1;
+            }
+            self.tool.vertex_kind = kind;
         }
         true
     }

@@ -2469,6 +2469,47 @@ fn edit_points_handle_drag_modifiers_set_the_point_type() {
     assert_eq!(s.execute("shape.points", &json!({})).unwrap()["types"][0][0], "straight");
 }
 
+/// Esc during a handle drag with Shift also takes back the point type the modifier chose, so the
+/// next plain drag still treats the point as a corner.
+#[test]
+fn edit_points_escape_takes_back_the_point_type_of_a_modifier_drag() {
+    use crate::tools::{Mods, PointerEvent, PointerKind};
+    use deckcraft_geom::Vec2;
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    s.execute("shape.insert", &json!({"preset": "ellipse", "rect": [100, 100, 200, 100]})).unwrap();
+    s.execute("shape.editPoints", &json!({"on": true})).unwrap();
+    let id = deckcraft_model::ShapeId(s.execute("shape.points", &json!({})).unwrap()["id"].as_u64().unwrap() as u32);
+    let handles = |s: &Session| {
+        let st = s.doc().unwrap();
+        let (hi, ho, v) = crate::cmd::points::slide_handles(&st.doc, &st.selection, st.shape(id).unwrap(), 0, 0).unwrap();
+        (hi.unwrap(), ho.unwrap(), v)
+    };
+    let ev = |kind, p: deckcraft_geom::Point, mods: Mods| PointerEvent { kind, x: p.x, y: p.y, mods, ..Default::default() };
+    let alt = Mods { alt: true, ..Default::default() };
+    let (_, ho, v) = handles(&s);
+    s.pointer(ev(PointerKind::Down, v, Mods::default())).unwrap();
+    s.pointer(ev(PointerKind::Up, v, Mods::default())).unwrap();
+    // Alt makes it a corner point.
+    let to = ho + Vec2::new(10.0, -25.0);
+    s.pointer(ev(PointerKind::Down, ho, Mods::default())).unwrap();
+    s.pointer(ev(PointerKind::Drag, to, alt)).unwrap();
+    s.pointer(ev(PointerKind::Up, to, alt)).unwrap();
+    let (hi1, ho1, _) = handles(&s);
+    let kind = s.tool.vertex_kind.clone();
+    // Shift would make it smooth; Esc cancels that drag.
+    s.pointer(ev(PointerKind::Down, ho1, Mods::default())).unwrap();
+    s.pointer(ev(PointerKind::Drag, v + Vec2::new(0.0, 40.0), Mods { shift: true, ..Default::default() })).unwrap();
+    s.key("Escape", Mods::default()).unwrap();
+    s.pointer(ev(PointerKind::Up, v + Vec2::new(0.0, 40.0), Mods::default())).unwrap();
+    assert_eq!(s.tool.vertex_kind, kind);
+    // A plain drag leaves the other handle where it is.
+    s.pointer(ev(PointerKind::Down, ho1, Mods::default())).unwrap();
+    s.pointer(ev(PointerKind::Drag, ho1 + Vec2::new(5.0, 5.0), Mods::default())).unwrap();
+    s.pointer(ev(PointerKind::Up, ho1 + Vec2::new(5.0, 5.0), Mods::default())).unwrap();
+    assert!((handles(&s).0 - hi1).hypot() < 1e-3, "the other handle stays: {:?} {hi1:?}", handles(&s).0);
+}
+
 /// A handle drag without a modifier follows the point type remembered with the document that
 /// Undo or Redo restores, and only on the shape the type was chosen on.
 #[test]
