@@ -162,9 +162,8 @@ fn opening_a_file_with_missing_fonts_shows_a_toast_once() {
 /// #115: Change Picture replaced nothing — it inserted a second picture.
 #[test]
 fn change_picture_replaces_the_selected_picture() {
-    let svg = |c: &str| {
-        format!("<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='4' fill='{c}'/></svg>").into_bytes()
-    };
+    let svg =
+        |c: &str| format!("<svg xmlns='http://www.w3.org/2000/svg' width='4' height='4'><rect width='4' height='4' fill='{c}'/></svg>").into_bytes();
     let media = |app: &SlideApp| {
         let d = app.session.active().unwrap();
         let pics: Vec<_> = d.doc.slides[0]
@@ -176,10 +175,9 @@ fn change_picture_replaces_the_selected_picture() {
         pics[0]
     };
     let insert = |app: &mut SlideApp| {
-        let id =
-            app.session.execute("insert.picture", &json!({"name": "a.svg", "data": deckcraft_engine::cmd::base64_encode(&svg("red"))})).unwrap()
-                ["id"]
-                .clone();
+        let id = app.session.execute("insert.picture", &json!({"name": "a.svg", "data": deckcraft_engine::cmd::base64_encode(&svg("red"))})).unwrap()
+            ["id"]
+            .clone();
         app.session.execute("edit.select", &json!({"ids": [id]})).unwrap();
         media(app)
     };
@@ -200,11 +198,8 @@ fn change_picture_replaces_the_selected_picture() {
     let inbox = Inbox::default();
     let started = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = started.clone();
-    let services = Services {
-        open_async: Some(Box::new(move |_: &str, id| record.lock().unwrap().push(id))),
-        inbox: Some(inbox.clone()),
-        ..Default::default()
-    };
+    let services =
+        Services { open_async: Some(Box::new(move |_: &str, id| record.lock().unwrap().push(id))), inbox: Some(inbox.clone()), ..Default::default() };
     let mut app = SlideApp::new(Session::with_new(), services);
     let before = insert(&mut app);
     app.run("app.changePictureDialog", json!({})).unwrap();
@@ -438,9 +433,8 @@ fn typing_goes_on_after_tab_in_a_text_box() {
     harness.event(egui::Event::Text("d".into()));
     harness.run_steps(2);
     assert_eq!(title_text(harness.state()), "ab\t\nd");
-    let level = |h: &egui_kittest::Harness<SlideApp>| {
-        h.state().session.active().unwrap().doc.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[1].level
-    };
+    let level =
+        |h: &egui_kittest::Harness<SlideApp>| h.state().session.active().unwrap().doc.slides[0].shapes[0].text.as_ref().unwrap().paragraphs[1].level;
     assert_eq!(level(&harness), 1);
 }
 
@@ -524,8 +518,7 @@ fn new_window_shows_the_same_document_on_its_own_slide() {
 fn grid_options_sets_spacing_and_display_or_opens_the_dialog() {
     let mut app = SlideApp::new(Session::with_new(), Services::default());
     assert!((app.session.prefs.grid_spacing - 6.0).abs() < 1e-9);
-    let v =
-        app.run("view.gridOptions", json!({"spacing": 72.0, "snap": false, "smartGuides": false, "gridlines": true, "guides": true})).unwrap();
+    let v = app.run("view.gridOptions", json!({"spacing": 72.0, "snap": false, "smartGuides": false, "gridlines": true, "guides": true})).unwrap();
     assert_eq!(v["spacing"], 72.0);
     assert_eq!(v["snap"], false);
     assert_eq!(v["smartGuides"], false);
@@ -644,11 +637,7 @@ fn preferences_cancel_restores_the_settings_done_keeps_them() {
     unchanged(&harness, "Esc");
 
     change(&mut harness);
-    harness
-        .query_all_by_role_and_label(egui::accesskit::Role::Button, "Done")
-        .next()
-        .unwrap_or_else(|| panic!("no Done button"))
-        .click_accesskit();
+    harness.query_all_by_role_and_label(egui::accesskit::Role::Button, "Done").next().unwrap_or_else(|| panic!("no Done button")).click_accesskit();
     harness.run_steps(2);
     let s = harness.state();
     assert!(s.dialog.is_none(), "Done closes Preferences");
@@ -724,10 +713,9 @@ fn shape_x(app: &SlideApp, id: u64) -> f64 {
 fn off_slide_objects_show_on_the_pasteboard_and_can_be_selected_and_moved() {
     let _gpu = crate::gpu_lock::gpu_lock();
     let mut harness = canvas_harness();
-    let off =
-        harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [1000.0, 100.0, 120.0, 80.0]})).unwrap()["id"]
-            .as_u64()
-            .unwrap();
+    let off = harness.state_mut().session.execute("shape.insert", &json!({"preset": "rect", "rect": [1000.0, 100.0, 120.0, 80.0]})).unwrap()["id"]
+        .as_u64()
+        .unwrap();
     harness.state_mut().session.execute("edit.select", &json!({"ids": []})).unwrap();
     harness.run_steps(3);
 
@@ -1134,10 +1122,7 @@ fn editing_notes_in_the_pane_keeps_their_formatting() {
     harness.ctx.memory_mut(|m| m.surrender_focus(id));
     harness.run_steps(2);
     let check = |n: &TextBody| {
-        assert_eq!(
-            n.text(),
-            "Metodický prehľad hodiny\nŽiaci pracujú vo dvojiciach.\nCieľ: vysvetliť cyklus\nNový bod\nReflexia\nPomôcky: počítač"
-        );
+        assert_eq!(n.text(), "Metodický prehľad hodiny\nŽiaci pracujú vo dvojiciach.\nCieľ: vysvetliť cyklus\nNový bod\nReflexia\nPomôcky: počítač");
         assert_eq!(n.paragraphs[0].runs.len(), 1, "{n:?}");
         assert_eq!(n.paragraphs[0].runs[0].props.bold, Some(true));
         assert_eq!(n.paragraphs[1].props, ParaProps::default());
@@ -1626,8 +1611,7 @@ fn interface_size_applies_when_the_slider_is_let_go() {
     harness.state_mut().run("app.preferences", json!({})).unwrap();
     harness.run_steps(4);
     let before = harness.state().ui.ui_scale;
-    let rect =
-        harness.query_all_by_role_and_label(egui::accesskit::Role::Slider, "Interface size").next().expect("the Interface size slider").rect();
+    let rect = harness.query_all_by_role_and_label(egui::accesskit::Role::Slider, "Interface size").next().expect("the Interface size slider").rect();
     let (from, to) = (rect.left_center() + egui::vec2(4.0, 0.0), rect.right_center() - egui::vec2(4.0, 0.0));
     harness.hover_at(from);
     harness.run_steps(1);
@@ -1843,12 +1827,7 @@ fn a_control_click_on_the_first_font_discard_is_requeued_and_lands() {
     app.styled = false;
     app.fonts_ready = false;
     app.queue_input(egui::Event::PointerMoved(point));
-    app.queue_input(egui::Event::PointerButton {
-        pos: point,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: egui::Modifiers::NONE,
-    });
+    app.queue_input(egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
     app.queue_input(egui::Event::PointerButton {
         pos: point,
         button: egui::PointerButton::Primary,
@@ -1926,12 +1905,7 @@ fn synthetic_click_is_consumed_on_its_old_target_before_logic_changes_the_docume
     // selection in the old document.
     let point = egui::pos2(slide.min.x + slide.width() * 0.8, slide.min.y + slide.height() * 0.8);
     app.queue_input(egui::Event::PointerMoved(point));
-    app.queue_input(egui::Event::PointerButton {
-        pos: point,
-        button: egui::PointerButton::Primary,
-        pressed: true,
-        modifiers: egui::Modifiers::NONE,
-    });
+    app.queue_input(egui::Event::PointerButton { pos: point, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
     app.queue_input(egui::Event::PointerButton {
         pos: point,
         button: egui::PointerButton::Primary,
@@ -2216,13 +2190,7 @@ fn hidden_full_pass_receives_synthetic_ui_input() {
     app.fonts_ready = true;
     app.styled = true;
     app.dialog = Some(crate::dialogs::Dialog::new("replaceFonts"));
-    app.queue_input(egui::Event::Key {
-        key: egui::Key::Escape,
-        physical_key: None,
-        pressed: true,
-        repeat: false,
-        modifiers: egui::Modifiers::NONE,
-    });
+    app.queue_input(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
     let ctx = egui::Context::default();
     let mut hidden = egui::RawInput { time: Some(4.0), ..Default::default() };
     hidden.viewports.insert(
