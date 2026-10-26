@@ -1491,6 +1491,7 @@ pub(crate) fn text_transparency_slider(app: &mut SlideApp, ui: &mut Ui, sh: &dec
     });
 }
 
+pub mod selpane;
 #[cfg(test)]
 #[path = "smartart_tests.rs"]
 mod smartart_tests;
