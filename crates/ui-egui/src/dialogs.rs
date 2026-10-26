@@ -3540,21 +3540,17 @@ fn find_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
 
 pub mod credits;
 #[cfg(test)]
-#[path = "font_dialog_tests.rs"]
 mod font_dialog_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) mod updates_ui;
 
 #[cfg(test)]
-#[path = "size_position_tests.rs"]
 mod size_position_tests;
 
 #[cfg(test)]
-#[path = "columns_dialog_tests.rs"]
 mod columns_dialog_tests;
 
 #[cfg(test)]
-#[path = "photo_album_tests.rs"]
 mod photo_album_tests;
 
 /// The export dialog's Animated GIF options (size, seconds per slide, loop, slide range, hidden
@@ -3617,11 +3613,9 @@ fn gif_options(app: &SlideApp, ui: &mut Ui, d: &mut Dialog) -> Result<Value, Str
 }
 
 #[cfg(test)]
-#[path = "theme_colors_tests.rs"]
 mod theme_colors_tests;
 
 #[cfg(test)]
-#[path = "theme_fonts_tests.rs"]
 mod theme_fonts_tests;
 
 #[cfg(test)]
@@ -3711,11 +3705,9 @@ mod trim_media_tests {
 }
 
 #[cfg(test)]
-#[path = "spelling_tests.rs"]
 mod spelling_tests;
 
 #[cfg(test)]
-#[path = "paragraph_dialog_tests.rs"]
 mod paragraph_dialog_tests;
 
 #[cfg(test)]
@@ -3775,5 +3767,4 @@ mod about_credits_tests {
 }
 
 #[cfg(test)]
-#[path = "preferences_tests.rs"]
 mod preferences_tests;
