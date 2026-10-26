@@ -1494,6 +1494,7 @@ pub(crate) fn text_transparency_slider(app: &mut SlideApp, ui: &mut Ui, sh: &dec
 #[cfg(test)]
 #[path = "smartart_tests.rs"]
 mod smartart_tests;
+pub mod thumbs;
 
 #[cfg(test)]
 #[path = "background_tests.rs"]

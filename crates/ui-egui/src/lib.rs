@@ -32,7 +32,6 @@ pub mod squiggles;
 pub mod status;
 pub mod textures;
 pub mod theme;
-pub mod thumbs;
 pub mod toast;
 pub mod uifonts;
 #[cfg(not(target_arch = "wasm32"))]
@@ -62,6 +61,7 @@ use app::{OBJECTS_MARKER, system_clipboard_text, web_image_files};
 pub use clock::{monotonic_secs, now_ms};
 pub use ime_hooks::install_ime_pass_hooks;
 pub use panels as panes;
+pub use panels::thumbs;
 pub use services::{DownloadFn, Inbox, InboxEvent, InboxFile, OpenAsyncFn, PickFn, ReadFn, Services, WriteFn};
 use state::{FilePlace, FilePurpose, ImeDescriptorKey, ImeDestination, ImeTerminalStamp};
 pub use state::{RECENT_MAX, UiState, ViewMode, ZOOM_RANGE};
