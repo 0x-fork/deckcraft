@@ -3622,20 +3622,16 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "effects_tests.rs"]
 mod effects_tests;
 pub mod qat;
 
 #[cfg(test)]
-#[path = "master_layout_tests.rs"]
 mod master_layout_tests;
 
 #[cfg(test)]
-#[path = "icons_popup_tests.rs"]
 mod icons_popup_tests;
 
 #[cfg(test)]
-#[path = "align_tests.rs"]
 mod align_tests;
 
 #[cfg(test)]
@@ -3658,11 +3654,9 @@ mod title_bar_tests {
 }
 
 #[cfg(test)]
-#[path = "drawtable_tests.rs"]
 mod drawtable_tests;
 
 #[cfg(test)]
-#[path = "inktoshape_tests.rs"]
 mod inktoshape_tests;
 
 /// Edit Shape ▸ Smooth Corners (#286): a slider that smooths a rectangle's corners into a
