@@ -1616,9 +1616,7 @@ pub mod squiggles;
 mod tests;
 
 #[cfg(test)]
-#[path = "ruler_tests.rs"]
 mod ruler_tests;
 
 #[cfg(test)]
-#[path = "guides_tests.rs"]
 mod guides_tests;
