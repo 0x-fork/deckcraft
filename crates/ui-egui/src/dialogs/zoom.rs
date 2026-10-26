@@ -60,3 +60,25 @@ pub(super) fn zoom_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bo
     }
     ok || cancel
 }
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::parse_zoom_percent;
+
+    fn near(v: f32, want: f32) -> bool {
+        (v - want).abs() < 1.0e-4
+    }
+
+    #[test]
+    fn zoom_percent_accepts_a_number_and_clamps() {
+        assert!(parse_zoom_percent("150").is_some_and(|v| near(v, 1.5)));
+        assert!(parse_zoom_percent("150%").is_some_and(|v| near(v, 1.5)));
+        assert!(parse_zoom_percent("  100 ").is_some_and(|v| near(v, 1.0)));
+        assert!(parse_zoom_percent("1").is_some_and(|v| near(v, 0.1)));
+        assert!(parse_zoom_percent("900").is_some_and(|v| near(v, 4.0)));
+        assert!(parse_zoom_percent("").is_none());
+        assert!(parse_zoom_percent("fit").is_none());
+        assert!(parse_zoom_percent("nan").is_none());
+        assert!(parse_zoom_percent("inf").is_none());
+    }
+}

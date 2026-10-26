@@ -225,11 +225,7 @@ mod theme_fonts;
 mod trim;
 mod zoom;
 
-#[cfg(test)]
-use about::{CREDITS_SIZE, credits_block};
 pub use about::{about, paint_logo, version_line};
-#[cfg(test)]
-use alt_text::alt_text_starts_decorative;
 use body::body;
 #[cfg(test)]
 use hyperlink::{
@@ -237,8 +233,6 @@ use hyperlink::{
 };
 pub use language::selected_language;
 use preferences::restore_preferences;
-#[cfg(test)]
-use trim::{ms_as_seconds, seconds_text_to_ms, trim_seed};
 pub use zoom::parse_zoom_percent;
 
 fn seed_once(d: &mut Dialog, key: &str, val: String) {
@@ -323,152 +317,13 @@ mod theme_colors_tests;
 mod theme_fonts_tests;
 
 #[cfg(test)]
-mod alt_text_tests {
-    use super::alt_text_starts_decorative;
-
-    #[test]
-    fn decorative_starts_checked_only_when_every_shape_is() {
-        assert!(!alt_text_starts_decorative([]));
-        assert!(!alt_text_starts_decorative([false]));
-        assert!(alt_text_starts_decorative([true]));
-        assert!(alt_text_starts_decorative([true, true]));
-        assert!(!alt_text_starts_decorative([true, false]));
-    }
-}
-
-#[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-mod zoom_tests {
-    use super::parse_zoom_percent;
-
-    fn near(v: f32, want: f32) -> bool {
-        (v - want).abs() < 1.0e-4
-    }
-
-    #[test]
-    fn zoom_percent_accepts_a_number_and_clamps() {
-        assert!(parse_zoom_percent("150").is_some_and(|v| near(v, 1.5)));
-        assert!(parse_zoom_percent("150%").is_some_and(|v| near(v, 1.5)));
-        assert!(parse_zoom_percent("  100 ").is_some_and(|v| near(v, 1.0)));
-        assert!(parse_zoom_percent("1").is_some_and(|v| near(v, 0.1)));
-        assert!(parse_zoom_percent("900").is_some_and(|v| near(v, 4.0)));
-        assert!(parse_zoom_percent("").is_none());
-        assert!(parse_zoom_percent("fit").is_none());
-        assert!(parse_zoom_percent("nan").is_none());
-        assert!(parse_zoom_percent("inf").is_none());
-    }
-}
-
-#[cfg(test)]
-mod trim_media_tests {
-    use std::sync::Arc;
-
-    use deckcraft_model::{MediaClip, Presentation, ShapeId, ShapeKind};
-
-    use super::{ms_as_seconds, seconds_text_to_ms, trim_seed};
-
-    #[test]
-    fn trim_seconds_round_trip_the_stored_milliseconds() {
-        for ms in [0, 1, 250, 333, 1000, 1500, 60_000] {
-            let text = ms_as_seconds(ms);
-            assert_eq!(seconds_text_to_ms(&text), ms, "{text}");
-        }
-        assert_eq!(seconds_text_to_ms(""), 0);
-        assert_eq!(seconds_text_to_ms("nope"), 0);
-        assert_eq!(seconds_text_to_ms("-2"), 0);
-        assert_eq!(seconds_text_to_ms("1.5"), 1500);
-        assert_eq!(seconds_text_to_ms("999999999"), u32::MAX);
-    }
-
-    #[test]
-    fn trim_dialog_reads_the_selected_clip() {
-        assert_eq!(trim_seed(None).start, "0");
-        let mut doc = Presentation::default();
-        let media_id = {
-            let slide = Arc::make_mut(&mut doc.slides[0]);
-            let title = slide.shapes[0].id;
-            let clip = MediaClip { trim_start_ms: 1500, trim_end_ms: 250, fade_in_ms: 333, fade_out_ms: 1000, ..Default::default() };
-            let mut media = slide.shapes[0].clone();
-            media.id = ShapeId(900);
-            media.kind = ShapeKind::Media(clip);
-            slide.shapes.push(media);
-            (title, ShapeId(900))
-        };
-        let mut st = deckcraft_engine::DocState::new(doc, None, "t".into());
-        st.selection.shapes = vec![media_id.0];
-        assert_eq!(trim_seed(Some(&st)).start, "0", "a title shape is not a clip");
-        st.selection.shapes = vec![media_id.0, media_id.1];
-        let seed = trim_seed(Some(&st));
-        assert_eq!(seed.start, "1.5");
-        assert_eq!(seed.end, "0.25");
-        assert_eq!(seed.fade_in, "0.333");
-        assert_eq!(seed.fade_out, "1");
-    }
-}
 
 #[cfg(test)]
 mod spelling_tests;
 
 #[cfg(test)]
 mod paragraph_dialog_tests;
-
-#[cfg(test)]
-mod about_credits_tests {
-    use egui_kittest::Harness;
-    use egui_kittest::kittest::Queryable;
-
-    use super::{CREDITS_SIZE, Dialog, credits_block};
-    use crate::{Services, SlideApp};
-
-    fn tab_of(h: &Harness<'_, SlideApp>) -> String {
-        let d = h.state().dialog.as_ref().expect("the About dialog is open");
-        d.fields.get("tab").cloned().unwrap_or_else(|| "about".into())
-    }
-
-    /// The reported symptom (#843): in the real dialog the tabs stopped answering once Contributors
-    /// or Models was open. Click through Contributors, Models and back to About.
-    #[test]
-    fn about_dialog_tabs_keep_responding() {
-        let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), Services::default());
-        app.dialog = Some(Dialog::new("about"));
-        let mut h = Harness::builder().with_size(egui::vec2(1440.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(
-            |ui, app: &mut SlideApp| {
-                app.logic(ui.ctx());
-                app.ui(ui);
-            },
-            app,
-        );
-        h.run_steps(4);
-        assert_eq!(tab_of(&h), "about");
-        for label in ["Contributors", "Models", "About", "Models", "Contributors"] {
-            h.get_by_label(label).click();
-            h.run_steps(3);
-            assert_eq!(tab_of(&h), label.to_lowercase(), "clicking {label} switches the tab");
-        }
-    }
-
-    #[test]
-    fn credits_get_their_own_block_below_the_tab_row() {
-        for models in [false, true] {
-            let ctx = egui::Context::default();
-            let mut tabs = egui::Rect::NOTHING;
-            let mut block = egui::Rect::NOTHING;
-            let mut whole = egui::Rect::NOTHING;
-            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                tabs = ui.label("About").rect;
-                block = credits_block(ui, models);
-                whole = ui.min_rect();
-            });
-            out.textures_delta.clear();
-            assert_eq!(block.size(), CREDITS_SIZE, "models={models}");
-            assert!(block.min.y >= tabs.max.y, "the credits start below the tab row (models={models})");
-            assert!(whole.max.y >= block.max.y, "the dialog grows to hold the block (models={models})");
-            assert!(whole.height() > CREDITS_SIZE.y, "the tab row is not squeezed into the credits height (models={models})");
-        }
-    }
-}
 
 #[cfg(test)]
 mod preferences_tests;

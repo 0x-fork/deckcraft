@@ -48,3 +48,50 @@ pub(super) fn trim_seed(st: Option<&deckcraft_engine::DocState>) -> TrimSeed {
         })
         .unwrap_or_else(TrimSeed::zeros)
 }
+
+#[cfg(test)]
+mod trim_media_tests {
+    use std::sync::Arc;
+
+    use deckcraft_model::{MediaClip, Presentation, ShapeId, ShapeKind};
+
+    use super::{ms_as_seconds, seconds_text_to_ms, trim_seed};
+
+    #[test]
+    fn trim_seconds_round_trip_the_stored_milliseconds() {
+        for ms in [0, 1, 250, 333, 1000, 1500, 60_000] {
+            let text = ms_as_seconds(ms);
+            assert_eq!(seconds_text_to_ms(&text), ms, "{text}");
+        }
+        assert_eq!(seconds_text_to_ms(""), 0);
+        assert_eq!(seconds_text_to_ms("nope"), 0);
+        assert_eq!(seconds_text_to_ms("-2"), 0);
+        assert_eq!(seconds_text_to_ms("1.5"), 1500);
+        assert_eq!(seconds_text_to_ms("999999999"), u32::MAX);
+    }
+
+    #[test]
+    fn trim_dialog_reads_the_selected_clip() {
+        assert_eq!(trim_seed(None).start, "0");
+        let mut doc = Presentation::default();
+        let media_id = {
+            let slide = Arc::make_mut(&mut doc.slides[0]);
+            let title = slide.shapes[0].id;
+            let clip = MediaClip { trim_start_ms: 1500, trim_end_ms: 250, fade_in_ms: 333, fade_out_ms: 1000, ..Default::default() };
+            let mut media = slide.shapes[0].clone();
+            media.id = ShapeId(900);
+            media.kind = ShapeKind::Media(clip);
+            slide.shapes.push(media);
+            (title, ShapeId(900))
+        };
+        let mut st = deckcraft_engine::DocState::new(doc, None, "t".into());
+        st.selection.shapes = vec![media_id.0];
+        assert_eq!(trim_seed(Some(&st)).start, "0", "a title shape is not a clip");
+        st.selection.shapes = vec![media_id.0, media_id.1];
+        let seed = trim_seed(Some(&st));
+        assert_eq!(seed.start, "1.5");
+        assert_eq!(seed.end, "0.25");
+        assert_eq!(seed.fade_in, "0.333");
+        assert_eq!(seed.fade_out, "1");
+    }
+}
