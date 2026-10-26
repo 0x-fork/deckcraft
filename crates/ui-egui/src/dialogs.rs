@@ -3538,6 +3538,7 @@ fn find_dialog(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     close
 }
 
+pub mod credits;
 #[cfg(test)]
 #[path = "font_dialog_tests.rs"]
 mod font_dialog_tests;
