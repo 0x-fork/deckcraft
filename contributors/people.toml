@@ -65,3 +65,6 @@ sync_github_name = true
 
 [people.Katacc]
 sync_github_name = true
+
+[people.SofiaAFigueredo]
+real_name = "Sofia Alves Figueredo"
