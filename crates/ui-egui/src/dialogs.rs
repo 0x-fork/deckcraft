@@ -3542,6 +3542,8 @@ pub mod credits;
 #[cfg(test)]
 #[path = "font_dialog_tests.rs"]
 mod font_dialog_tests;
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) mod updates_ui;
 
 #[cfg(test)]
 #[path = "size_position_tests.rs"]
