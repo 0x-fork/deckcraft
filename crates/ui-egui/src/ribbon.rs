@@ -3624,6 +3624,7 @@ mod tests {
 #[cfg(test)]
 #[path = "effects_tests.rs"]
 mod effects_tests;
+pub mod qat;
 
 #[cfg(test)]
 #[path = "master_layout_tests.rs"]
