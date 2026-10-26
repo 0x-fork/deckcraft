@@ -1417,5 +1417,4 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 #[cfg(test)]
-#[path = "backstage_tests.rs"]
 mod tests;
