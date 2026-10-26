@@ -1494,17 +1494,14 @@ pub mod fillui;
 pub mod notes;
 pub mod selpane;
 #[cfg(test)]
-#[path = "smartart_tests.rs"]
 mod smartart_tests;
 pub mod thumbs;
 pub mod animtimeline;
 
 #[cfg(test)]
-#[path = "background_tests.rs"]
 mod background_tests;
 
 #[cfg(test)]
-#[path = "pattern_fill_tests.rs"]
 mod pattern_fill_tests;
 
 #[cfg(test)]
@@ -1721,5 +1718,4 @@ fn thesaurus(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 #[cfg(test)]
-#[path = "thesaurus_tests.rs"]
 mod thesaurus_tests;
