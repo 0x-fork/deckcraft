@@ -1491,6 +1491,7 @@ pub(crate) fn text_transparency_slider(app: &mut SlideApp, ui: &mut Ui, sh: &dec
     });
 }
 
+pub mod fillui;
 pub mod notes;
 pub mod selpane;
 #[cfg(test)]
