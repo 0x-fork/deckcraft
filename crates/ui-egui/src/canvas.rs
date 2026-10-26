@@ -1611,6 +1611,7 @@ fn resize_cursor(session: &deckcraft_engine::Session, id: deckcraft_model::Shape
 }
 
 pub(super) mod preview;
+pub mod squiggles;
 #[cfg(test)]
 mod tests;
 
