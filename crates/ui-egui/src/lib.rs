@@ -6,7 +6,6 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-pub mod animtimeline;
 pub mod backstage;
 pub mod canvas;
 pub mod capture;
@@ -58,6 +57,7 @@ use app::{OBJECTS_MARKER, system_clipboard_text, web_image_files};
 pub use clock::{monotonic_secs, now_ms};
 pub use ime_hooks::install_ime_pass_hooks;
 pub use panels as panes;
+pub use panels::animtimeline;
 pub use panels::fillui;
 pub use panels::notes;
 pub use panels::selpane;

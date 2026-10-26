@@ -5,7 +5,6 @@ use deckcraft_model::{AnimClass, AnimStart, Fill, ShapeKind};
 use egui::{Align2, Color32, CornerRadius, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::{Value, json};
 
-use crate::animtimeline;
 use crate::icons::{self, Icon};
 use crate::ribbon::{cref_param, paint_anim_tile};
 use crate::theme::{self, Tokens};
@@ -1498,6 +1497,7 @@ pub mod selpane;
 #[path = "smartart_tests.rs"]
 mod smartart_tests;
 pub mod thumbs;
+pub mod animtimeline;
 
 #[cfg(test)]
 #[path = "background_tests.rs"]
