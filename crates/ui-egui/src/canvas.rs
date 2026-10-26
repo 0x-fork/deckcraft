@@ -1610,6 +1610,7 @@ fn resize_cursor(session: &deckcraft_engine::Session, id: deckcraft_model::Shape
     }
 }
 
+pub(super) mod preview;
 #[cfg(test)]
 mod tests;
 

@@ -18,7 +18,6 @@ pub mod icons;
 pub mod media;
 pub mod menus;
 pub mod opening;
-mod preview;
 pub mod qat;
 pub mod ribbon;
 pub mod settings;
@@ -54,6 +53,7 @@ mod state;
 pub use app::key_name;
 #[cfg(test)]
 use app::{OBJECTS_MARKER, system_clipboard_text, web_image_files};
+use canvas::preview;
 pub use clock::{monotonic_secs, now_ms};
 pub use ime_hooks::install_ime_pass_hooks;
 pub use panels as panes;
